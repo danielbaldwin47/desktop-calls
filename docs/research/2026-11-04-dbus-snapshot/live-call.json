@@ -1,0 +1,588 @@
+{
+  "captured": "2026-11-04T18:12:42-0500",
+  "phone": "Pixel 9a",
+  "objects": [
+    {
+      "bus": "user",
+      "service": "org.pipewire.Telephony",
+      "path": "/org/pipewire/Telephony",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node> <interface name='org.ofono.Manager'>  <method name='GetModems'>   <arg name='objects' direction='out' type='a{oa{sv}}'/>  </method>  <signal name='ModemAdded'>   <arg name='path' type='o'/>   <arg name='properties' type='a{sv}'/>  </signal>  <signal name='ModemRemoved'>   <arg name='path' type='o'/>  </signal> </interface> <interface name='org.freedesktop.DBus.ObjectManager'>  <method name='GetManagedObjects'>   <arg name='objects' direction='out' type='a{oa{sa{sv}}}'/>  </method>  <signal name='InterfacesAdded'>   <arg name='object' type='o'/>   <arg name='interfaces' type='a{sa{sv}}'/>  </signal>  <signal name='InterfacesRemoved'>   <arg name='object' type='o'/>   <arg name='interfaces' type='as'/>  </signal> </interface> <interface name='org.freedesktop.DBus.Introspectable'>  <method name='Introspect'>   <arg name='xml' type='s' direction='out'/>  </method> </interface></node>",
+      "properties": {}
+    },
+    {
+      "bus": "user",
+      "service": "org.pipewire.Telephony",
+      "path": "/org/pipewire/Telephony/ag1",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node> <interface name='org.pipewire.Telephony.AudioGateway1'>  <method name='Dial'>   <arg name='number' direction='in' type='s'/>  </method>  <method name='SwapCalls'>  </method>  <method name='ReleaseAndAnswer'>  </method>  <method name='ReleaseAndSwap'>  </method>  <method name='HoldAndAnswer'>  </method>  <method name='HangupAll'>  </method>  <method name='CreateMultiparty'>  </method>  <method name='SendTones'>   <arg name='tones' direction='in' type='s'/>  </method>  <property name='Address' type='s' access='read'>    <annotation name='org.freedesktop.DBus.Property.EmitsChangedSignal' value='const'/>  </property>  <property name='SpeakerVolume' type='y' access='readwrite'/>  <property name='MicrophoneVolume' type='y' access='readwrite'/> </interface> <interface name='org.pipewire.Telephony.AudioGatewayTransport1'>  <property name='State' type='s' access='read'/>  <property name='Codec' type='y' access='read'/>  <property name='RejectSCO' type='b' access='readwrite'/>  <method name='Activate'/> </interface> <interface name='org.ofono.VoiceCallManager'>  <method name='Dial'>   <arg name='number' direction='in' type='s'/>  </method>  <method name='SwapCalls'>  </method>  <method name='ReleaseAndAnswer'>  </method>  <method name='ReleaseAndSwap'>  </method>  <method name='HoldAndAnswer'>  </method>  <method name='HangupAll'>  </method>  <method name='CreateMultiparty'>  </method>  <method name='SendTones'>   <arg name='tones' direction='in' type='s'/>  </method>  <method name='GetCalls'>   <arg name='objects' direction='out' type='a{oa{sv}}'/>  </method>  <signal name='CallAdded'>   <arg name='path' type='o'/>   <arg name='properties' type='a{sv}'/>  </signal>  <signal name='CallRemoved'>   <arg name='path' type='o'/>  </signal> </interface> <interface name='org.freedesktop.DBus.ObjectManager'>  <method name='GetManagedObjects'>   <arg name='objects' direction='out' type='a{oa{sa{sv}}}'/>  </method>  <signal name='InterfacesAdded'>   <arg name='object' type='o'/>   <arg name='interfaces' type='a{sa{sv}}'/>  </signal>  <signal name='InterfacesRemoved'>   <arg name='object' type='o'/>   <arg name='interfaces' type='as'/>  </signal> </interface> <interface name='org.freedesktop.DBus.Properties'>  <method name='Get'>   <arg name='interface' type='s' direction='in' />   <arg name='name' type='s' direction='in' />   <arg name='value' type='v' direction='out' />  </method>  <method name='Set'>   <arg name='interface' type='s' direction='in' />   <arg name='name' type='s' direction='in' />   <arg name='value' type='v' direction='in' />  </method>  <method name='GetAll'>   <arg name='interface' type='s' direction='in' />   <arg name='properties' type='a{sv}' direction='out' />  </method>  <signal name='PropertiesChanged'>   <arg name='interface' type='s' />   <arg name='changed_properties' type='a{sv}' />   <arg name='invalidated_properties' type='as' />  </signal> </interface> <interface name='org.freedesktop.DBus.Introspectable'>  <method name='Introspect'>   <arg name='xml' type='s' direction='out'/>  </method> </interface></node>",
+      "properties": {
+        "org.pipewire.Telephony.AudioGateway1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Address": {
+                "type": "s",
+                "data": "AA:BB:CC:DD:EE:FF"
+              },
+              "SpeakerVolume": {
+                "type": "y",
+                "data": 12
+              },
+              "MicrophoneVolume": {
+                "type": "y",
+                "data": 15
+              }
+            }
+          ]
+        },
+        "org.pipewire.Telephony.AudioGatewayTransport1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Codec": {
+                "type": "y",
+                "data": 3
+              },
+              "State": {
+                "type": "s",
+                "data": "active"
+              },
+              "RejectSCO": {
+                "type": "b",
+                "data": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bus": "user",
+      "service": "org.pipewire.Telephony",
+      "path": "/org/pipewire/Telephony/ag1/call1",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node> <interface name='org.pipewire.Telephony.Call1'>  <method name='Answer'>  </method>  <method name='Hangup'>  </method>  <property name='LineIdentification' type='s' access='read'/>  <property name='IncomingLine' type='s' access='read'/>  <property name='Name' type='s' access='read'/>  <property name='Multiparty' type='b' access='read'/>  <property name='State' type='s' access='read'/> </interface> <interface name='org.ofono.VoiceCall'>  <method name='Answer'>  </method>  <method name='Hangup'>  </method>  <method name='GetProperties'>   <arg name='properties' type='a{sv}' direction='out' />  </method>  <signal name='PropertyChanged'>   <arg name='property' type='s' />   <arg name='value' type='v' />  </signal> </interface> <interface name='org.freedesktop.DBus.Properties'>  <method name='Get'>   <arg name='interface' type='s' direction='in' />   <arg name='name' type='s' direction='in' />   <arg name='value' type='v' direction='out' />  </method>  <method name='Set'>   <arg name='interface' type='s' direction='in' />   <arg name='name' type='s' direction='in' />   <arg name='value' type='v' direction='in' />  </method>  <method name='GetAll'>   <arg name='interface' type='s' direction='in' />   <arg name='properties' type='a{sv}' direction='out' />  </method>  <signal name='PropertiesChanged'>   <arg name='interface' type='s' />   <arg name='changed_properties' type='a{sv}' />   <arg name='invalidated_properties' type='as' />  </signal> </interface> <interface name='org.freedesktop.DBus.Introspectable'>  <method name='Introspect'>   <arg name='xml' type='s' direction='out'/>  </method> </interface></node>",
+      "properties": {
+        "org.pipewire.Telephony.Call1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "LineIdentification": {
+                "type": "s",
+                "data": "<TEST_NUMBER>"
+              },
+              "IncomingLine": {
+                "type": "s",
+                "data": ""
+              },
+              "Name": {
+                "type": "s",
+                "data": ""
+              },
+              "Multiparty": {
+                "type": "b",
+                "data": false
+              },
+              "State": {
+                "type": "s",
+                "data": "active"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bus": "system",
+      "service": "org.bluez",
+      "path": "/org/bluez/hci0",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.Adapter1\"><method name=\"StartDiscovery\"></method><method name=\"SetDiscoveryFilter\"><arg name=\"properties\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"StopDiscovery\"></method><method name=\"RemoveDevice\"><arg name=\"device\" type=\"o\" direction=\"in\"/>\n</method><method name=\"GetDiscoveryFilters\"><arg name=\"filters\" type=\"as\" direction=\"out\"/>\n</method><property name=\"Address\" type=\"s\" access=\"read\"></property><property name=\"AddressType\" type=\"s\" access=\"read\"></property><property name=\"Name\" type=\"s\" access=\"read\"></property><property name=\"Alias\" type=\"s\" access=\"readwrite\"></property><property name=\"Class\" type=\"u\" access=\"read\"></property><property name=\"Connectable\" type=\"b\" access=\"readwrite\"></property><property name=\"Powered\" type=\"b\" access=\"readwrite\"></property><property name=\"PowerState\" type=\"s\" access=\"read\"></property><property name=\"Discoverable\" type=\"b\" access=\"readwrite\"></property><property name=\"DiscoverableTimeout\" type=\"u\" access=\"readwrite\"></property><property name=\"Pairable\" type=\"b\" access=\"readwrite\"></property><property name=\"PairableTimeout\" type=\"u\" access=\"readwrite\"></property><property name=\"Discovering\" type=\"b\" access=\"read\"></property><property name=\"UUIDs\" type=\"as\" access=\"read\"></property><property name=\"Modalias\" type=\"s\" access=\"read\"></property><property name=\"Roles\" type=\"as\" access=\"read\"></property><property name=\"ExperimentalFeatures\" type=\"as\" access=\"read\"></property><property name=\"Manufacturer\" type=\"q\" access=\"read\"></property><property name=\"Version\" type=\"y\" access=\"read\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface><interface name=\"org.bluez.BatteryProviderManager1\"><method name=\"RegisterBatteryProvider\"><arg name=\"provider\" type=\"o\" direction=\"in\"/>\n</method><method name=\"UnregisterBatteryProvider\"><arg name=\"provider\" type=\"o\" direction=\"in\"/>\n</method></interface><interface name=\"org.bluez.GattManager1\"><method name=\"RegisterApplication\"><arg name=\"application\" type=\"o\" direction=\"in\"/>\n<arg name=\"options\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"UnregisterApplication\"><arg name=\"application\" type=\"o\" direction=\"in\"/>\n</method></interface><interface name=\"org.bluez.Media1\"><method name=\"RegisterEndpoint\"><arg name=\"endpoint\" type=\"o\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"UnregisterEndpoint\"><arg name=\"endpoint\" type=\"o\" direction=\"in\"/>\n</method><method name=\"RegisterPlayer\"><arg name=\"player\" type=\"o\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"UnregisterPlayer\"><arg name=\"player\" type=\"o\" direction=\"in\"/>\n</method><method name=\"RegisterApplication\"><arg name=\"application\" type=\"o\" direction=\"in\"/>\n<arg name=\"options\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"UnregisterApplication\"><arg name=\"application\" type=\"o\" direction=\"in\"/>\n</method><property name=\"SupportedUUIDs\" type=\"as\" access=\"read\"></property><property name=\"SupportedFeatures\" type=\"as\" access=\"read\"></property></interface><interface name=\"org.bluez.NetworkServer1\"><method name=\"Register\"><arg name=\"uuid\" type=\"s\" direction=\"in\"/>\n<arg name=\"bridge\" type=\"s\" direction=\"in\"/>\n</method><method name=\"Unregister\"><arg name=\"uuid\" type=\"s\" direction=\"in\"/>\n</method></interface><interface name=\"org.bluez.LEAdvertisingManager1\"><method name=\"RegisterAdvertisement\"><arg name=\"advertisement\" type=\"o\" direction=\"in\"/>\n<arg name=\"options\" type=\"a{sv}\" direction=\"in\"/>\n</method><method name=\"UnregisterAdvertisement\"><arg name=\"service\" type=\"o\" direction=\"in\"/>\n</method><property name=\"ActiveInstances\" type=\"y\" access=\"read\"></property><property name=\"SupportedInstances\" type=\"y\" access=\"read\"></property><property name=\"SupportedIncludes\" type=\"as\" access=\"read\"></property><property name=\"SupportedSecondaryChannels\" type=\"as\" access=\"read\"></property><property name=\"SupportedFeatures\" type=\"as\" access=\"read\"></property><property name=\"SupportedCapabilities\" type=\"a{sv}\" access=\"read\"></property></interface><node name=\"dev_AA_BB_CC_00_00_03\"/><node name=\"dev_AA_BB_CC_00_00_02\"/><node name=\"dev_AA_BB_CC_00_00_01\"/><node name=\"dev_AA_BB_CC_DD_EE_FF\"/></node>",
+      "properties": {
+        "org.bluez.Adapter1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Address": {
+                "type": "s",
+                "data": "11:22:33:44:55:66"
+              },
+              "AddressType": {
+                "type": "s",
+                "data": "public"
+              },
+              "Name": {
+                "type": "s",
+                "data": "desktop"
+              },
+              "Alias": {
+                "type": "s",
+                "data": "desktop"
+              },
+              "Class": {
+                "type": "u",
+                "data": 8126724
+              },
+              "Connectable": {
+                "type": "b",
+                "data": false
+              },
+              "Powered": {
+                "type": "b",
+                "data": true
+              },
+              "PowerState": {
+                "type": "s",
+                "data": "on"
+              },
+              "Discoverable": {
+                "type": "b",
+                "data": false
+              },
+              "DiscoverableTimeout": {
+                "type": "u",
+                "data": 180
+              },
+              "Pairable": {
+                "type": "b",
+                "data": true
+              },
+              "PairableTimeout": {
+                "type": "u",
+                "data": 0
+              },
+              "Discovering": {
+                "type": "b",
+                "data": false
+              },
+              "UUIDs": {
+                "type": "as",
+                "data": [
+                  "00001133-0000-1000-8000-00805f9b34fb",
+                  "0000110e-0000-1000-8000-00805f9b34fb",
+                  "03b80e5a-ede8-4b33-a751-6ce34ec4c700",
+                  "00001105-0000-1000-8000-00805f9b34fb",
+                  "00001132-0000-1000-8000-00805f9b34fb",
+                  "00001200-0000-1000-8000-00805f9b34fb",
+                  "00001104-0000-1000-8000-00805f9b34fb",
+                  "00005005-0000-1000-8000-0002ee000001",
+                  "0000110c-0000-1000-8000-00805f9b34fb",
+                  "00001801-0000-1000-8000-00805f9b34fb",
+                  "0000112f-0000-1000-8000-00805f9b34fb",
+                  "0000110b-0000-1000-8000-00805f9b34fb",
+                  "0000180a-0000-1000-8000-00805f9b34fb",
+                  "00001800-0000-1000-8000-00805f9b34fb",
+                  "0000112e-0000-1000-8000-00805f9b34fb",
+                  "0000111f-0000-1000-8000-00805f9b34fb",
+                  "0000110a-0000-1000-8000-00805f9b34fb",
+                  "00001106-0000-1000-8000-00805f9b34fb",
+                  "0000111e-0000-1000-8000-00805f9b34fb"
+                ]
+              },
+              "Modalias": {
+                "type": "s",
+                "data": "usb:v1D6Bp0246d0557"
+              },
+              "Roles": {
+                "type": "as",
+                "data": [
+                  "central",
+                  "peripheral"
+                ]
+              },
+              "Manufacturer": {
+                "type": "q",
+                "data": 2
+              },
+              "Version": {
+                "type": "y",
+                "data": 11
+              }
+            }
+          ]
+        },
+        "org.bluez.Media1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "SupportedUUIDs": {
+                "type": "as",
+                "data": [
+                  "0000110a-0000-1000-8000-00805f9b34fb",
+                  "0000110b-0000-1000-8000-00805f9b34fb"
+                ]
+              },
+              "SupportedFeatures": {
+                "type": "as",
+                "data": [
+                  "tx-timestamping"
+                ]
+              }
+            }
+          ]
+        },
+        "org.bluez.LEAdvertisingManager1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "ActiveInstances": {
+                "type": "y",
+                "data": 0
+              },
+              "SupportedInstances": {
+                "type": "y",
+                "data": 12
+              },
+              "SupportedIncludes": {
+                "type": "as",
+                "data": [
+                  "tx-power",
+                  "appearance",
+                  "local-name"
+                ]
+              },
+              "SupportedSecondaryChannels": {
+                "type": "as",
+                "data": [
+                  "1M",
+                  "2M",
+                  "Coded"
+                ]
+              },
+              "SupportedFeatures": {
+                "type": "as",
+                "data": [
+                  "CanSetTxPower",
+                  "HardwareOffload"
+                ]
+              },
+              "SupportedCapabilities": {
+                "type": "a{sv}",
+                "data": {
+                  "MinTxPower": {
+                    "type": "n",
+                    "data": -34
+                  },
+                  "MaxTxPower": {
+                    "type": "n",
+                    "data": 7
+                  },
+                  "MaxAdvLen": {
+                    "type": "y",
+                    "data": 251
+                  },
+                  "MaxScnRspLen": {
+                    "type": "y",
+                    "data": 251
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bus": "system",
+      "service": "org.bluez",
+      "path": "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.Device1\"><method name=\"Disconnect\"></method><method name=\"Connect\"></method><method name=\"ConnectProfile\"><arg name=\"UUID\" type=\"s\" direction=\"in\"/>\n</method><method name=\"DisconnectProfile\"><arg name=\"UUID\" type=\"s\" direction=\"in\"/>\n</method><method name=\"Pair\"></method><method name=\"CancelPairing\"></method><signal name=\"Disconnected\"><arg name=\"name\" type=\"s\"/>\n<arg name=\"message\" type=\"s\"/>\n</signal>\n<property name=\"Address\" type=\"s\" access=\"read\"></property><property name=\"AddressType\" type=\"s\" access=\"read\"></property><property name=\"Name\" type=\"s\" access=\"read\"></property><property name=\"Alias\" type=\"s\" access=\"readwrite\"></property><property name=\"Class\" type=\"u\" access=\"read\"></property><property name=\"Appearance\" type=\"q\" access=\"read\"></property><property name=\"Icon\" type=\"s\" access=\"read\"></property><property name=\"Paired\" type=\"b\" access=\"read\"></property><property name=\"Bonded\" type=\"b\" access=\"read\"></property><property name=\"Trusted\" type=\"b\" access=\"readwrite\"></property><property name=\"Blocked\" type=\"b\" access=\"readwrite\"></property><property name=\"LegacyPairing\" type=\"b\" access=\"read\"></property><property name=\"CablePairing\" type=\"b\" access=\"read\"></property><property name=\"RSSI\" type=\"n\" access=\"read\"></property><property name=\"Connected\" type=\"b\" access=\"read\"></property><property name=\"UUIDs\" type=\"as\" access=\"read\"></property><property name=\"Modalias\" type=\"s\" access=\"read\"></property><property name=\"Adapter\" type=\"o\" access=\"read\"></property><property name=\"ManufacturerData\" type=\"a{qv}\" access=\"read\"></property><property name=\"ServiceData\" type=\"a{sv}\" access=\"read\"></property><property name=\"TxPower\" type=\"n\" access=\"read\"></property><property name=\"ServicesResolved\" type=\"b\" access=\"read\"></property><property name=\"AdvertisingFlags\" type=\"ay\" access=\"read\"></property><property name=\"AdvertisingData\" type=\"a{yv}\" access=\"read\"></property><property name=\"WakeAllowed\" type=\"b\" access=\"readwrite\"></property><property name=\"Sets\" type=\"a{oa{sv}}\" access=\"read\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface><interface name=\"org.bluez.Bearer.BREDR1\"><signal name=\"Disconnected\"><arg name=\"name\" type=\"s\"/>\n<arg name=\"message\" type=\"s\"/>\n</signal>\n</interface><interface name=\"org.bluez.Network1\"><method name=\"Connect\"><arg name=\"uuid\" type=\"s\" direction=\"in\"/>\n<arg name=\"interface\" type=\"s\" direction=\"out\"/>\n</method><method name=\"Disconnect\"></method><property name=\"Connected\" type=\"b\" access=\"read\"></property><property name=\"Interface\" type=\"s\" access=\"read\"></property><property name=\"UUID\" type=\"s\" access=\"read\"></property></interface><interface name=\"org.bluez.MediaControl1\"><method name=\"Play\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"Pause\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"Stop\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"Next\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"Previous\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"VolumeUp\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"VolumeDown\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"FastForward\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><method name=\"Rewind\"><annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/></method><property name=\"Connected\" type=\"b\" access=\"read\"></property><property name=\"Player\" type=\"o\" access=\"read\"></property></interface><interface name=\"org.bluez.Battery1\"><property name=\"Percentage\" type=\"y\" access=\"read\"></property><property name=\"Source\" type=\"s\" access=\"read\"></property></interface><node name=\"avrcp\"/><node name=\"fd0\"/><node name=\"sep1\"/><node name=\"sep2\"/><node name=\"sep3\"/><node name=\"sep4\"/><node name=\"sep5\"/><node name=\"sep6\"/><node name=\"sep7\"/></node>",
+      "properties": {
+        "org.bluez.Device1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Address": {
+                "type": "s",
+                "data": "AA:BB:CC:DD:EE:FF"
+              },
+              "AddressType": {
+                "type": "s",
+                "data": "public"
+              },
+              "Name": {
+                "type": "s",
+                "data": "My Pixel"
+              },
+              "Alias": {
+                "type": "s",
+                "data": "My Pixel"
+              },
+              "Class": {
+                "type": "u",
+                "data": 5915148
+              },
+              "Icon": {
+                "type": "s",
+                "data": "phone"
+              },
+              "Paired": {
+                "type": "b",
+                "data": true
+              },
+              "Bonded": {
+                "type": "b",
+                "data": true
+              },
+              "Trusted": {
+                "type": "b",
+                "data": true
+              },
+              "Blocked": {
+                "type": "b",
+                "data": false
+              },
+              "LegacyPairing": {
+                "type": "b",
+                "data": false
+              },
+              "CablePairing": {
+                "type": "b",
+                "data": false
+              },
+              "Connected": {
+                "type": "b",
+                "data": true
+              },
+              "UUIDs": {
+                "type": "as",
+                "data": [
+                  "00001105-0000-1000-8000-00805f9b34fb",
+                  "0000110a-0000-1000-8000-00805f9b34fb",
+                  "0000110c-0000-1000-8000-00805f9b34fb",
+                  "0000110d-0000-1000-8000-00805f9b34fb",
+                  "0000110e-0000-1000-8000-00805f9b34fb",
+                  "00001112-0000-1000-8000-00805f9b34fb",
+                  "00001115-0000-1000-8000-00805f9b34fb",
+                  "00001116-0000-1000-8000-00805f9b34fb",
+                  "0000111f-0000-1000-8000-00805f9b34fb",
+                  "0000112d-0000-1000-8000-00805f9b34fb",
+                  "0000112f-0000-1000-8000-00805f9b34fb",
+                  "00001132-0000-1000-8000-00805f9b34fb",
+                  "00001200-0000-1000-8000-00805f9b34fb",
+                  "00001800-0000-1000-8000-00805f9b34fb",
+                  "00001801-0000-1000-8000-00805f9b34fb",
+                  "00001855-0000-1000-8000-00805f9b34fb",
+                  "00001858-0000-1000-8000-00805f9b34fb",
+                  "0000185f-0000-1000-8000-00805f9b34fb",
+                  "16bcfd00-253f-c348-e831-0db3e334d580",
+                  "3e1d50cd-7e3e-427d-8e1c-b78aa87fe624",
+                  "a82efa21-ae5c-3dde-9bbc-f16da7b16c5a",
+                  "abbafc00-e56a-484c-b832-8b17cf6cbfe8"
+                ]
+              },
+              "Modalias": {
+                "type": "s",
+                "data": "bluetooth:v00E0p4114d0000"
+              },
+              "Adapter": {
+                "type": "o",
+                "data": "/org/bluez/hci0"
+              },
+              "ServicesResolved": {
+                "type": "b",
+                "data": true
+              }
+            }
+          ]
+        },
+        "org.bluez.Network1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Connected": {
+                "type": "b",
+                "data": false
+              }
+            }
+          ]
+        },
+        "org.bluez.MediaControl1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Connected": {
+                "type": "b",
+                "data": true
+              },
+              "Player": {
+                "type": "o",
+                "data": "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/avrcp/player0"
+              }
+            }
+          ]
+        },
+        "org.bluez.Battery1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Percentage": {
+                "type": "y",
+                "data": 40
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bus": "system",
+      "service": "org.bluez",
+      "path": "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/fd0",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.MediaTransport1\"><method name=\"Acquire\"><arg name=\"fd\" type=\"h\" direction=\"out\"/>\n<arg name=\"mtu_r\" type=\"q\" direction=\"out\"/>\n<arg name=\"mtu_w\" type=\"q\" direction=\"out\"/>\n</method><method name=\"TryAcquire\"><arg name=\"fd\" type=\"h\" direction=\"out\"/>\n<arg name=\"mtu_r\" type=\"q\" direction=\"out\"/>\n<arg name=\"mtu_w\" type=\"q\" direction=\"out\"/>\n</method><method name=\"Release\"></method><method name=\"Select\"></method><method name=\"Unselect\"></method><property name=\"Device\" type=\"o\" access=\"read\"></property><property name=\"UUID\" type=\"s\" access=\"read\"></property><property name=\"Codec\" type=\"y\" access=\"read\"></property><property name=\"Configuration\" type=\"ay\" access=\"read\"></property><property name=\"State\" type=\"s\" access=\"read\"></property><property name=\"Delay\" type=\"q\" access=\"readwrite\"></property><property name=\"Volume\" type=\"q\" access=\"readwrite\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface></node>",
+      "properties": {
+        "org.bluez.MediaTransport1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Device": {
+                "type": "o",
+                "data": "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
+              },
+              "UUID": {
+                "type": "s",
+                "data": "0000110b-0000-1000-8000-00805f9b34fb"
+              },
+              "Codec": {
+                "type": "y",
+                "data": 255
+              },
+              "Configuration": {
+                "type": "ay",
+                "data": [
+                  215,
+                  0,
+                  0,
+                  0,
+                  36,
+                  0,
+                  18,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "State": {
+                "type": "s",
+                "data": "idle"
+              },
+              "Delay": {
+                "type": "q",
+                "data": 0
+              },
+              "Volume": {
+                "type": "q",
+                "data": 61
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "method_results": {
+    "GetManagedObjects(/org/pipewire/Telephony)": {
+      "type": "a{oa{sa{sv}}}",
+      "data": [
+        {
+          "/org/pipewire/Telephony/ag1": {
+            "org.pipewire.Telephony.AudioGateway1": {
+              "Address": {
+                "type": "s",
+                "data": "AA:BB:CC:DD:EE:FF"
+              },
+              "SpeakerVolume": {
+                "type": "y",
+                "data": 12
+              },
+              "MicrophoneVolume": {
+                "type": "y",
+                "data": 15
+              }
+            },
+            "org.pipewire.Telephony.AudioGatewayTransport1": {
+              "Codec": {
+                "type": "y",
+                "data": 3
+              },
+              "State": {
+                "type": "s",
+                "data": "active"
+              },
+              "RejectSCO": {
+                "type": "b",
+                "data": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "GetManagedObjects(/org/pipewire/Telephony/ag1)": {
+      "type": "a{oa{sa{sv}}}",
+      "data": [
+        {
+          "/org/pipewire/Telephony/ag1/call1": {
+            "org.pipewire.Telephony.Call1": {
+              "LineIdentification": {
+                "type": "s",
+                "data": "<TEST_NUMBER>"
+              },
+              "IncomingLine": {
+                "type": "s",
+                "data": ""
+              },
+              "Name": {
+                "type": "s",
+                "data": ""
+              },
+              "Multiparty": {
+                "type": "b",
+                "data": false
+              },
+              "State": {
+                "type": "s",
+                "data": "active"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "GetModems(/org/pipewire/Telephony)": {
+      "type": "a{oa{sv}}",
+      "data": [
+        {
+          "/org/pipewire/Telephony/ag1": {}
+        }
+      ]
+    },
+    "GetCalls(/org/pipewire/Telephony/ag1)": {
+      "type": "a{oa{sv}}",
+      "data": [
+        {
+          "/org/pipewire/Telephony/ag1/call1": {
+            "LineIdentification": {
+              "type": "s",
+              "data": "<TEST_NUMBER>"
+            },
+            "IncomingLine": {
+              "type": "s",
+              "data": ""
+            },
+            "Name": {
+              "type": "s",
+              "data": ""
+            },
+            "Multiparty": {
+              "type": "b",
+              "data": false
+            },
+            "State": {
+              "type": "s",
+              "data": "active"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

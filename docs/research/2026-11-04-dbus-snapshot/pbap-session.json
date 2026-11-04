@@ -1,0 +1,118 @@
+{
+  "captured": "2026-11-04T18:07:06-0500",
+  "objects": {
+    "after CreateSession": {
+      "bus": "user",
+      "service": "org.bluez.obex",
+      "path": "/org/bluez/obex/client/session0",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.obex.Session1\"><method name=\"GetCapabilities\"><arg name=\"capabilities\" type=\"s\" direction=\"out\"/>\n</method><property name=\"Source\" type=\"s\" access=\"read\"></property><property name=\"Destination\" type=\"s\" access=\"read\"></property><property name=\"Channel\" type=\"y\" access=\"read\"></property><property name=\"PSM\" type=\"q\" access=\"read\"></property><property name=\"Target\" type=\"s\" access=\"read\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface><interface name=\"org.bluez.obex.PhonebookAccess1\"><method name=\"Select\"><arg name=\"location\" type=\"s\" direction=\"in\"/>\n<arg name=\"phonebook\" type=\"s\" direction=\"in\"/>\n</method><method name=\"PullAll\"><arg name=\"targetfile\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"transfer\" type=\"o\" direction=\"out\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><method name=\"Pull\"><arg name=\"vcard\" type=\"s\" direction=\"in\"/>\n<arg name=\"targetfile\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"transfer\" type=\"o\" direction=\"out\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><method name=\"List\"><arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"vcard_listing\" type=\"a(ss)\" direction=\"out\"/>\n</method><method name=\"Search\"><arg name=\"field\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"vcard_listing\" type=\"a(ss)\" direction=\"out\"/>\n</method><method name=\"GetSize\"><arg name=\"size\" type=\"q\" direction=\"out\"/>\n</method><method name=\"ListFilterFields\"><arg name=\"fields\" type=\"as\" direction=\"out\"/>\n</method><method name=\"UpdateVersion\"></method><property name=\"Folder\" type=\"s\" access=\"read\"></property><property name=\"DatabaseIdentifier\" type=\"s\" access=\"read\"></property><property name=\"PrimaryCounter\" type=\"s\" access=\"read\"></property><property name=\"SecondaryCounter\" type=\"s\" access=\"read\"></property><property name=\"FixedImageSize\" type=\"b\" access=\"read\"></property></interface></node>",
+      "properties": {
+        "org.bluez.obex.Session1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Destination": {
+                "type": "s",
+                "data": "AA:BB:CC:DD:EE:FF"
+              },
+              "Channel": {
+                "type": "y",
+                "data": 0
+              },
+              "PSM": {
+                "type": "q",
+                "data": 0
+              },
+              "Target": {
+                "type": "s",
+                "data": "0000112f-0000-1000-8000-00805f9b34fb"
+              }
+            }
+          ]
+        },
+        "org.bluez.obex.PhonebookAccess1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "DatabaseIdentifier": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "PrimaryCounter": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "SecondaryCounter": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "FixedImageSize": {
+                "type": "b",
+                "data": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    "after Select(int, pb)": {
+      "bus": "user",
+      "service": "org.bluez.obex",
+      "path": "/org/bluez/obex/client/session0",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.obex.Session1\"><method name=\"GetCapabilities\"><arg name=\"capabilities\" type=\"s\" direction=\"out\"/>\n</method><property name=\"Source\" type=\"s\" access=\"read\"></property><property name=\"Destination\" type=\"s\" access=\"read\"></property><property name=\"Channel\" type=\"y\" access=\"read\"></property><property name=\"PSM\" type=\"q\" access=\"read\"></property><property name=\"Target\" type=\"s\" access=\"read\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface><interface name=\"org.bluez.obex.PhonebookAccess1\"><method name=\"Select\"><arg name=\"location\" type=\"s\" direction=\"in\"/>\n<arg name=\"phonebook\" type=\"s\" direction=\"in\"/>\n</method><method name=\"PullAll\"><arg name=\"targetfile\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"transfer\" type=\"o\" direction=\"out\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><method name=\"Pull\"><arg name=\"vcard\" type=\"s\" direction=\"in\"/>\n<arg name=\"targetfile\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"transfer\" type=\"o\" direction=\"out\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><method name=\"List\"><arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"vcard_listing\" type=\"a(ss)\" direction=\"out\"/>\n</method><method name=\"Search\"><arg name=\"field\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"s\" direction=\"in\"/>\n<arg name=\"filters\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"vcard_listing\" type=\"a(ss)\" direction=\"out\"/>\n</method><method name=\"GetSize\"><arg name=\"size\" type=\"q\" direction=\"out\"/>\n</method><method name=\"ListFilterFields\"><arg name=\"fields\" type=\"as\" direction=\"out\"/>\n</method><method name=\"UpdateVersion\"></method><property name=\"Folder\" type=\"s\" access=\"read\"></property><property name=\"DatabaseIdentifier\" type=\"s\" access=\"read\"></property><property name=\"PrimaryCounter\" type=\"s\" access=\"read\"></property><property name=\"SecondaryCounter\" type=\"s\" access=\"read\"></property><property name=\"FixedImageSize\" type=\"b\" access=\"read\"></property></interface></node>",
+      "properties": {
+        "org.bluez.obex.Session1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Destination": {
+                "type": "s",
+                "data": "AA:BB:CC:DD:EE:FF"
+              },
+              "Channel": {
+                "type": "y",
+                "data": 0
+              },
+              "PSM": {
+                "type": "q",
+                "data": 0
+              },
+              "Target": {
+                "type": "s",
+                "data": "0000112f-0000-1000-8000-00805f9b34fb"
+              }
+            }
+          ]
+        },
+        "org.bluez.obex.PhonebookAccess1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Folder": {
+                "type": "s",
+                "data": "/telecom/pb"
+              },
+              "DatabaseIdentifier": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "PrimaryCounter": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "SecondaryCounter": {
+                "type": "s",
+                "data": "00000000000000000000000000000000"
+              },
+              "FixedImageSize": {
+                "type": "b",
+                "data": true
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "GetSize(pb)": "redacted (count of the user's contacts)"
+}

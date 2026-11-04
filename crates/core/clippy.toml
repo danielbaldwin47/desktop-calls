@@ -2,6 +2,8 @@
 # Clippy reads the nearest clippy.toml only, so the workspace settings are repeated here.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+# Proper names that docs use as words, not code. `..` keeps clippy's defaults.
+doc-valid-idents = ["PipeWire", "BlueZ", "GLib", "GVariant", "AudioGateway", "AudioGateways", ".."]
 
 disallowed-methods = [
     { path = "std::time::Instant::now", reason = "the core is pure; time arrives as a timer-tick input" },

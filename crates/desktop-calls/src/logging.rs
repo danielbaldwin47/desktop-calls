@@ -49,6 +49,17 @@ pub const REDACTED: &str = "[redacted]";
 pub enum EventKind {
     ServiceStarted,
     ServiceStopped,
+    ServiceFailed,
+    ConnectionStateChanged,
+    PhonePaired,
+    PhoneUnpaired,
+    AudioGatewayAdded,
+    AudioGatewayRemoved,
+    ServiceOwnerChanged,
+    ServiceUnavailable,
+    MalformedSignal,
+    WatchFailed,
+    PublishFailed,
 }
 
 impl EventKind {
@@ -56,6 +67,17 @@ impl EventKind {
         match self {
             Self::ServiceStarted => "service-started",
             Self::ServiceStopped => "service-stopped",
+            Self::ServiceFailed => "service-failed",
+            Self::ConnectionStateChanged => "connection-state-changed",
+            Self::PhonePaired => "phone-paired",
+            Self::PhoneUnpaired => "phone-unpaired",
+            Self::AudioGatewayAdded => "audio-gateway-added",
+            Self::AudioGatewayRemoved => "audio-gateway-removed",
+            Self::ServiceOwnerChanged => "service-owner-changed",
+            Self::ServiceUnavailable => "service-unavailable",
+            Self::MalformedSignal => "malformed-signal",
+            Self::WatchFailed => "watch-failed",
+            Self::PublishFailed => "publish-failed",
         }
     }
 }

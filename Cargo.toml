@@ -22,6 +22,14 @@ clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "env-filter"] }
+# zbus's own `tracing` feature stays off: its events would carry no `event_kind`.
+zbus = { version = "6.2.1", default-features = false, features = ["proxy", "service", "object-manager"] }
+glib = { version = "0.22", default-features = false, features = ["futures"] }
+glib-unix = "0.22"
+socket2 = "0.6"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-channel = "0.3"
+tempfile = "3"
 
 # Every crate opts in with `[lints] workspace = true`. See CODING_STANDARDS.md.
 [workspace.lints.rust]

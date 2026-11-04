@@ -6,3 +6,4 @@
 - 2026-11-04: Agents mostly test against a Simulated Phone. Steps that need the real Phone are grouped into a Real-Phone Checklist for the user. Agents may Call one Test Number on their own (number not yet chosen). See [product-shape](product-shape.md).
 - 2026-11-04 (Q28): Agents may commit to feature branches, push them, open pull requests and merge to `main` once checks pass, without per-PR review. The user reviews through Real-Phone Checklists and the [polish-scorecard](polish-scorecard.md).
 - 2026-11-04 (Q29): The user declined a recurring wiki/issue checkup "yet". Don't schedule one; offer again later if the wiki drifts.
+- 2026-11-04: The user supplied the Test Number. It is stored **outside the repo** at `~/.config/desktop-calls/test-number` (mode 600), because the repo will be published later. Agents read it from there and never commit it.

@@ -1,0 +1,3 @@
+# Rust with GTK4, libadwaita and gtk4-layer-shell
+
+On 2026-11-04 Claude chose Rust (gtk4-rs, libadwaita, gtk4-layer-shell, zbus) over Python/PyGObject and over web-tech shells such as Tauri or Electron. The deciding factors were these. Call state is a concurrency-heavy state machine where Rust's type system and `clippy` catch whole classes of agent mistakes at compile time. zbus makes both the real D-Bus client and the Simulated Phone server first-class. A single native binary packages cleanly for the AUR. GTK4 with layer-shell is the native way to draw an always-on-top banner on Wayland/Hyprland. Python would iterate faster but would surface those mistakes only at runtime, mid-Call.

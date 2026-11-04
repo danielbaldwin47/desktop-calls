@@ -1,0 +1,67 @@
+# Desktop Calls
+
+Lets the user take and place their Android Phone's cellular Calls on their Linux Desktop, the way an iPhone's calls ring on a Mac.
+
+## Devices
+
+**Phone**:
+The user's Android handset that owns the cellular line.
+_Avoid_: device, handset, mobile, AG
+
+**Desktop**:
+The Linux computer running Desktop Calls.
+_Avoid_: PC, host, computer, HF
+
+**Companion App**:
+A planned Android app on the Phone that adds what Bluetooth alone cannot provide. Not part of v1.
+_Avoid_: phone app, Android client
+
+## Calls
+
+**Call**:
+One cellular voice call on the Phone's line, incoming or outgoing.
+_Avoid_: session, line
+
+**Audio Location**:
+Where a Call's audio is currently heard and spoken: on the Phone or on the Desktop.
+_Avoid_: audio route, output
+
+**Handoff**:
+Moving a live Call's Audio Location from Phone to Desktop or back. The Call itself stays on the Phone's line.
+_Avoid_: transfer (in telephony, that means sending the call to another number)
+
+**Contacts**:
+The Phone's address book, as visible from the Desktop.
+_Avoid_: phonebook, address book
+
+**Call History**:
+The Phone's record of recent incoming, outgoing and missed Calls.
+_Avoid_: call log, recents
+
+## Desktop surfaces
+
+**Incoming Call Banner**:
+The transient on-screen notice for a ringing Call, with Answer and Decline.
+_Avoid_: popup, toast, notification
+
+**Dialer**:
+The search-as-you-type window for starting a Call from a name or number.
+_Avoid_: launcher, call picker
+
+**Call Window**:
+The small window shown during a live Call: timer, mute, keypad, Handoff, hang up.
+_Avoid_: in-call screen, call UI
+
+## Testing
+
+**Simulated Phone**:
+A stand-in for the Phone that the Desktop cannot tell apart from a real one, so Calls can be exercised without real hardware.
+_Avoid_: mock phone, fake AG
+
+**Test Number**:
+The single phone number, chosen in advance by the user, that agents may Call on their own during testing.
+_Avoid_: echo number, test line
+
+**Real-Phone Checklist**:
+A short, grouped list of steps only the user can perform with the real Phone, such as receiving a Call from another person.
+_Avoid_: manual test, QA script

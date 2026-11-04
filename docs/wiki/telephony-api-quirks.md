@@ -1,0 +1,12 @@
+# Telephony API quirks
+
+Known misbehaviour of `org.pipewire.Telephony` and obexd PBAP. Each one should become a Simulated Phone scenario. Terms are as in [GLOSSARY.md](../../GLOSSARY.md).
+
+- 2026-11-04, from Foner at `AminBlg/kaller@fc25b13`: `Call1.Hangup` returned "Method doesn't exist" on Foner's handset, while `org.ofono.VoiceCall.Hangup` on the same object worked. The PipeWire 1.6.9 source appears correct ([HFP research](../research/2026-11-04-hfp-stack.md) §1.3). Treat it as a handset quirk that needs a fallback.
+- 2026-11-04, same source: `GetManagedObjects` does not list Calls, and `GetCalls` briefly returns an empty list during dialling. Track Calls through `InterfacesAdded`/`InterfacesRemoved` signals, not polling.
+- 2026-11-04, same source: withheld (private) numbers arrive as an empty line identification. Foner silently drops those missed Calls; we must not.
+- 2026-11-04, same source: obexd PBAP allows one session at a time, and Call History timestamps carry no timezone.
+- 2026-11-04, from [HFP research](../research/2026-11-04-hfp-stack.md): there is no `Deactivate()`, so Handoff to the Phone needs a workaround. The Phone's contacts permission prompt times out after 30 s.
+
+Full detail: [Foner evaluation](../research/2026-11-04-foner-evaluation.md).
+- 2026-11-04, verified on the real Pixel 9a ([first connection](../research/2026-11-04-first-phone-connection.md)): the Phone's AudioGateway object exists only once the hands-free link is fully set up, and it was `ag1`, not `ag0`. PipeWire's `Introspect` lists no child nodes, so `busctl --user tree` **never** shows it. This supersedes the "next step" in [HFP research](../research/2026-11-04-hfp-stack.md), which suggested `busctl tree`. Discover Phones with `GetManagedObjects` plus `InterfacesAdded`/`InterfacesRemoved`, and match on `Address`. `GetModems` returns an empty property list.

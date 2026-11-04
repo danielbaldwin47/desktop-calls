@@ -34,6 +34,10 @@ _Avoid_: transfer (in telephony, that means sending the call to another number)
 The Phone's address book, as visible from the Desktop.
 _Avoid_: phonebook, address book
 
+**Missed Call**:
+An incoming Call that stopped ringing without being answered on either device and without being declined.
+_Avoid_: unanswered call
+
 **Call History**:
 The Phone's record of recent incoming, outgoing and missed Calls.
 _Avoid_: call log, recents
@@ -51,6 +55,18 @@ _Avoid_: launcher, call picker
 **Call Window**:
 The small window shown during a live Call: timer, mute, keypad, Handoff, hang up.
 _Avoid_: in-call screen, call UI
+
+**Indicator**:
+The icon in the Desktop's top bar that shows whether the Phone is connected or in a Call.
+_Avoid_: tray icon, status icon
+
+**Setup Window**:
+The guided window that pairs the Phone with the Desktop and walks through granting access to Contacts and Call History.
+_Avoid_: first-run wizard, onboarding, "Connect your phone" window
+
+**Do Not Disturb**:
+The Desktop's system-wide setting for silencing notifications, which Desktop Calls also obeys.
+_Avoid_: DND, quiet mode
 
 ## Testing
 

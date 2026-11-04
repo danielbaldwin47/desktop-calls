@@ -1,3 +1,7 @@
+---
+status: amended by ADR-0004
+---
+
 # PipeWire Telephony and obexd are the only way the app reaches the Phone
 
 On 2026-11-04 we decided Desktop Calls never speaks Bluetooth directly. Call control and call state go through PipeWire's `org.pipewire.Telephony` D-Bus API (PipeWire ≥ 1.4, native `hfp_hf` role), Call audio is routed by WirePlumber, and Contacts and Call History come from BlueZ obexd's `org.bluez.obex.PhonebookAccess1`. Both are D-Bus interfaces, so the Simulated Phone is a fake implementation of those same interfaces on a private bus, and almost all behaviour can be tested without hardware.

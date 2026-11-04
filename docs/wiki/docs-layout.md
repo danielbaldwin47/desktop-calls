@@ -7,3 +7,4 @@ Decided 2026-11-04 by Claude, after the user asked for the mattpocock-skills app
 - `docs/wiki/`: chief-of-staff memory, meaning dated history, preferences, environment facts and process. Pages cite ADRs, research and commits rather than restating them.
 - `docs/research/`: raw subagent research reports, dated and never edited after filing.
 - GitHub Issues on `danielbaldwin47/desktop-calls`: specs and tickets (see `docs/agents/issue-tracker.md`).
+- 2026-11-04: Integration branch is `main`. Ticket branches merge via PR once checks pass (user Q28). Every implementer follows [`docs/agents/implementer-brief.md`](../agents/implementer-brief.md).

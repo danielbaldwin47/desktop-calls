@@ -1,5 +1,5 @@
 ---
-status: draft (ticket #3)
+status: accepted 2026-11-04 (chief of staff)
 ---
 
 # Handoff to the Phone bounces the hands-free profile through BlueZ

@@ -16,6 +16,7 @@ The standing instructions for any agent implementing a ticket in this repo. The 
 - **No workarounds.** If a convention, lint or the harness is in your way, fix it properly in your branch, or stop and report. Never suppress a lint without a comment that justifies it.
 - If your work contradicts an ADR, say so explicitly in the PR instead of overriding it silently.
 - Real Phone: the user's Pixel 9a is paired. You may place Calls **only** to the Test Number in `~/.config/desktop-calls/test-number`. Never write that number into the repo, issues, PRs or logs. Never Call any other number, and never answer or decline real incoming Calls.
+- Probing the real Phone's D-Bus objects: use typed clients or `busctl` with exact signatures. On 2026-11-04 a malformed `Properties.Set` crashed WirePlumber mid-Call (ticket #3). Introspect first, and never guess a signature.
 - Don't run `sudo`. Don't edit `/etc`. Don't unpair the Phone.
 
 ## Finishing

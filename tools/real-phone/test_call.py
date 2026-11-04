@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Place one real Call to the Test Number, run a hook during it, hang up.
+
+Usage (through just):
+  just test-call                          # dial, hold 2 s once active, hang up
+  just test-call 'busctl --user ...'      # run the hook once the Call is active
+  just test-call --hold 10                # hold 10 s instead of 2
+  just test-call --max-seconds 120 HOOK   # let the hook run up to 120 s (default 60)
+
+The Test Number is read from $XDG_CONFIG_HOME/desktop-calls/test-number and
+never printed: all output, the hook's included, is redacted.
+
+The hook runs as `bash -c HOOK` in its own process group, with standard
+input from /dev/null and these variables set:
+  DESKTOP_CALLS_AUDIO_GATEWAY  the Phone's AudioGateway object path
+  DESKTOP_CALLS_CALL           the Call's object path (it can change if
+                               WirePlumber restarts; re-find it by State)
+  DESKTOP_CALLS_PHONE_ADDRESS  the Phone's Bluetooth address
+The Call is hung up whatever happens: when the hook exits or is killed, on
+a D-Bus error, on Ctrl-C, SIGTERM or SIGHUP, and, through a separate guard
+process, even if this process is killed outright.
+
+Refuses to start if any Call already exists, and only ever hangs up the
+Call to the Test Number.
+
+Exit status: 0 the Call was placed, the hook succeeded, and GetCalls is
+empty afterwards; 1 something failed but no Call remains; 2 a Call may
+still be live on the Phone (go and hang it up); 130 interrupted, no Call
+remains.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+import dbus
+
+import real_phone as rp
+from real_phone import log
+
+EXIT_OK, EXIT_FAILED, EXIT_CALL_REMAINS, EXIT_INTERRUPTED = 0, 1, 2, 130
+
+
+class TestCallFailed(Exception):
+    """The Call could not be placed or did not become active."""
+
+
+# ------------------------------------------------------------------ guard
+#
+# A separate process, in its own session so Ctrl-C and a closed terminal do
+# not reach it. It reads lines from a pipe: "dialled", "call <path>",
+# "hook <process group>", "done". If the pipe closes without "done", the
+# parent died without hanging up, so the guard stops the hook and hangs up
+# the Call to the Test Number itself.
+
+
+class Guard:
+    def __init__(self) -> None:
+        self._proc = subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--guard"],
+            stdin=subprocess.PIPE,
+            start_new_session=True,
+            text=True,
+        )
+
+    def tell(self, line: str) -> None:
+        try:
+            assert self._proc.stdin is not None
+            self._proc.stdin.write(line + "\n")
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            log("GUARD", "the guard process is gone")
+
+    def done(self) -> None:
+        self.tell("done")
+        try:
+            assert self._proc.stdin is not None
+            self._proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self._proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+
+
+def guard_main() -> int:
+    for s in (signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, signal.SIG_IGN)
+    number = rp.read_test_number()
+    rp.install_redaction(number)
+    dialled, call_path, hook_group = False, None, None
+    for line in sys.stdin:
+        word, _, rest = line.strip().partition(" ")
+        if word == "done":
+            return EXIT_OK
+        if word == "dialled":
+            dialled = True
+        elif word == "call":
+            call_path = rest
+        elif word == "hook":
+            hook_group = int(rest)
+    if hook_group is not None:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(hook_group, signal.SIGKILL)
+    if not dialled:
+        return EXIT_OK
+    log("GUARD", "test-call stopped without hanging up; the guard is hanging up")
+    tel = rp.Telephony(number)
+    tel.dialled = True
+    tel.test_call_path = call_path
+    tel.hang_up_test_call()
+    return EXIT_OK if rp.report_remaining(tel.remaining_calls()) else EXIT_CALL_REMAINS
+
+
+# ------------------------------------------------------------------ hook
+
+
+class Hook:
+    def __init__(self, command: str, env: dict[str, str]) -> None:
+        log("HOOK", f"starting: {command}")
+        self.started = time.monotonic()
+        self.proc = subprocess.Popen(
+            ["bash", "-c", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env={**os.environ, **env},
+            text=True,
+            errors="replace",
+        )
+        self._reader = threading.Thread(target=self._copy_output, daemon=True)
+        self._reader.start()
+
+    def _copy_output(self) -> None:
+        assert self.proc.stdout is not None
+        for line in self.proc.stdout:
+            print(f"           hook | {line.rstrip()}", flush=True)
+
+    def wait(self, max_seconds: float) -> int | None:
+        """The hook's exit status, or None if it ran past `max_seconds`."""
+        try:
+            return self.proc.wait(timeout=max_seconds)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def stop(self) -> None:
+        """Stop the hook and everything it started."""
+        if self.proc.poll() is None:
+            log("HOOK", "stopping the hook")
+            for sig, grace in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 2.0)):
+                try:
+                    os.killpg(self.proc.pid, sig)
+                except ProcessLookupError:
+                    break
+                try:
+                    self.proc.wait(timeout=grace)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        self._reader.join(timeout=1)
+
+
+def describe_status(status: int) -> str:
+    if status < 0:
+        return f"killed by {signal.Signals(-status).name}"
+    return f"exited with status {status}"
+
+
+# ------------------------------------------------------------------ main
+
+
+def place_test_call(tel: rp.Telephony, gateway: str, guard: Guard) -> str:
+    """Dial the Test Number and wait until the Call is active. Returns its path."""
+    log("DIAL", "AudioGateway1.Dial(<TEST_NUMBER>)")
+    guard.tell("dialled")
+    tel.dial_test_number(gateway)
+    if not tel.wait_for(lambda: tel.find_test_call() is not None, 15, "the Call appeared"):
+        raise TestCallFailed("no Call appeared within 15 s of dialling")
+    assert tel.test_call_path is not None
+    guard.tell(f"call {tel.test_call_path}")
+    state = {"last": ""}
+
+    def active() -> bool:
+        found = tel.find_test_call()
+        current = found[1].get("State", "") if found else "gone"
+        if current != state["last"]:
+            state["last"] = current
+            log("STATE", f"Call {current}")
+        if current == "gone":
+            raise TestCallFailed("the Call ended before it became active")
+        return current == "active"
+
+    if not tel.wait_for(active, 45, "the Call is active"):
+        raise TestCallFailed("the Call did not become active within 45 s")
+    return tel.test_call_path
+
+
+def run(args: argparse.Namespace) -> int:
+    number = rp.read_test_number()
+    rp.install_redaction(number)
+    rp.raise_on_interrupt()
+    tel = rp.Telephony(number, args.phone_address)
+
+    try:
+        gateways = tel.audio_gateways()
+        gateway = tel.audio_gateway()
+        existing = tel.all_calls()
+    except dbus.DBusException as e:
+        log("ERROR", f"cannot reach {rp.TELEPHONY}: {e.get_dbus_name()}. Is WirePlumber running?")
+        return EXIT_FAILED
+    if gateway is None:
+        if not gateways:
+            log("ERROR", "no AudioGateway: the Phone's hands-free link is not connected.")
+        else:
+            log("ERROR", f"{len(gateways)} AudioGateways; choose one with --phone-address.")
+        return EXIT_FAILED
+    if existing:
+        log("ERROR", f"refusing: {len(existing)} Call(s) already on the Phone. "
+                     "test-call never touches real Calls; try again once they end.")
+        return EXIT_FAILED
+    log("PHONE", f"{tel.phone_address}, AudioGateway {gateway}, no Calls")
+
+    guard = Guard()
+    hook: Hook | None = None
+    outcome = EXIT_FAILED
+    try:
+        call_path = place_test_call(tel, gateway, guard)
+        if args.hook:
+            hook = Hook(args.hook, {
+                "DESKTOP_CALLS_AUDIO_GATEWAY": gateway,
+                "DESKTOP_CALLS_CALL": call_path,
+                "DESKTOP_CALLS_PHONE_ADDRESS": tel.phone_address or "",
+            })
+            guard.tell(f"hook {hook.proc.pid}")
+            status = hook.wait(args.max_seconds)
+            if status is None:
+                log("HOOK", f"still running after {args.max_seconds:g} s; stopping it")
+            else:
+                log("HOOK", describe_status(status))
+                outcome = EXIT_OK if status == 0 else EXIT_FAILED
+        else:
+            time.sleep(args.hold)
+            outcome = EXIT_OK
+    except rp.Interrupted as e:
+        log("STOP", f"{e}: hanging up")
+        outcome = EXIT_INTERRUPTED
+    except TestCallFailed as e:
+        log("ERROR", str(e))
+    except dbus.DBusException as e:
+        log("ERROR", f"{e.get_dbus_name()}: {e.get_dbus_message()}")
+    finally:
+        with rp.interrupts_deferred():
+            if hook is not None:
+                hook.stop()
+            tel.hang_up_test_call()
+            no_call_remains = rp.report_remaining(tel.remaining_calls())
+            guard.done()
+    if not no_call_remains:
+        return EXIT_CALL_REMAINS
+    return outcome
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--guard"]:
+        return guard_main()
+    parser = argparse.ArgumentParser(
+        prog="just test-call",
+        description="Place one real Call to the Test Number, run HOOK during it, hang up.",
+    )
+    parser.add_argument("hook", nargs="?", help="shell command to run once the Call is active")
+    parser.add_argument("--hold", type=float, default=2.0,
+                        help="seconds to stay in the Call when there is no hook (default 2)")
+    parser.add_argument("--max-seconds", type=float, default=60.0,
+                        help="stop the hook after this many seconds (default 60)")
+    parser.add_argument("--phone-address", help="the Phone's Bluetooth address, if several")
+    args = parser.parse_args()
+    try:
+        return run(args)
+    except rp.Interrupted:
+        # Arrived before anything was dialled: nothing to hang up.
+        return EXIT_INTERRUPTED
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -7,7 +7,7 @@ default:
     @just --list
 
 # Check formatting, lints, the build and dependencies. CI runs this.
-check: && _core-is-pure
+check: && _core-is-pure _dbus-set-is-signed
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo build --workspace --all-targets --locked
@@ -33,6 +33,13 @@ scorecard:
 demo:
     @echo "just demo: not available yet (lands with ticket #5)." >&2; exit 1
 
+# Place one real Call to the Test Number, run HOOK during it, always hang up.
+# `just test-call --help` for options. Exits 2 if a Call may still be live.
+[positional-arguments]
+[no-exit-message]
+test-call *args:
+    @python3 tools/real-phone/test_call.py "$@"
+
 # Walk through the Real-Phone Checklist one step at a time.
 [no-exit-message]
 real-phone-checklist:
@@ -56,3 +63,35 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# A D-Bus property Set without an explicit signature lets the library guess
+# one. On 2026-11-04 a guessed `ssb` crashed WirePlumber mid-Call (ticket #3).
+# So every `Set(` call under tools/ must carry `signature=` inside its
+# parentheses. Use `set_property` in tools/real-phone/real_phone.py.
+[private]
+[no-exit-message]
+_dbus-set-is-signed:
+    #!/usr/bin/env python3
+    import pathlib, re, sys
+    unsigned = []
+    for path in sorted(pathlib.Path("tools").rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            continue
+        for match in re.finditer(r"\bSet\s*\(", text):
+            depth, end = 1, match.end()
+            while end < len(text) and depth:
+                depth += {"(": 1, ")": -1}.get(text[end], 0)
+                end += 1
+            if not re.search(r"\bsignature\s*=", text[match.end():end]):
+                line = text.count("\n", 0, match.start()) + 1
+                unsigned.append(f"{path}:{line}")
+    if unsigned:
+        print("D-Bus Set( without an explicit signature= (use set_property in", file=sys.stderr)
+        print("tools/real-phone/real_phone.py, or pass signature=\"ssv\"):", file=sys.stderr)
+        for where in unsigned:
+            print(f"  {where}", file=sys.stderr)
+        sys.exit(1)

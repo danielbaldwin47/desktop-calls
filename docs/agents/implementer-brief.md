@@ -16,7 +16,9 @@ The standing instructions for any agent implementing a ticket in this repo. The 
 - **No workarounds.** If a convention, lint or the harness is in your way, fix it properly in your branch, or stop and report. Never suppress a lint without a comment that justifies it.
 - If your work contradicts an ADR, say so explicitly in the PR instead of overriding it silently.
 - Real Phone: the user's Pixel 9a is paired. You may place Calls **only** to the Test Number in `~/.config/desktop-calls/test-number`. Never write that number into the repo, issues, PRs or logs. Never Call any other number, and never answer or decline real incoming Calls.
-- Probing the real Phone's D-Bus objects: use typed clients or `busctl` with exact signatures. On 2026-11-04 a malformed `Properties.Set` crashed WirePlumber mid-Call (ticket #3). Introspect first, and never guess a signature.
+- Real-Phone D-Bus work goes through `just test-call` and `tools/real-phone/`, never ad-hoc scripts. `just test-call 'HOOK'` dials the Test Number, runs your hook once the Call is active, and always hangs up: when the hook exits or is killed, on Ctrl-C, and through a guard process even if `test-call` itself is killed. It exits 2 if a Call may still be live; if it does, tell the user at once. New probes import `tools/real-phone/real_phone.py`: `call()` for methods with an explicit signature, `set_property()` for writes, `Telephony.hang_up_test_call()` and `remaining_calls()` before exiting. Read-only `busctl` with exact signatures is fine.
+- Introspect first, and never guess a signature. On 2026-11-04 a malformed `Properties.Set` crashed WirePlumber mid-Call (ticket #3). `just check` rejects any `Set(` under `tools/` without `signature=`.
+- Try any write method that is new to you (a property `Set`, or a method that changes state) once with **no Call active** before using it during one.
 - Keep Bash commands literal: no `$(...)` and no loop variables, because the worktree sandbox refuses them. Write a script to your scratchpad instead.
 - Don't run `sudo`. Don't edit `/etc`. Don't unpair the Phone.
 

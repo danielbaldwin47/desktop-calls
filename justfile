@@ -13,10 +13,10 @@ check: && _core-is-pure _dbus-set-is-signed
     cargo build --workspace --all-targets --locked
     cargo deny --locked check
 
-# Run the full Simulated Phone suite.
-[no-exit-message]
-test:
-    @echo "just test: not available yet (lands with ticket #4)." >&2; exit 1
+# Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
+test *args:
+    cargo build --workspace --bins --locked
+    cargo test --workspace --locked {{args}}
 
 # Render every surface in every state into the screenshot gallery.
 [no-exit-message]

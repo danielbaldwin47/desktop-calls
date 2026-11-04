@@ -34,3 +34,22 @@ jobs:
 
       - name: just check
         run: just check
+
+      # Records whether unprivileged user and mount namespaces work here. The
+      # harness uses them only to hide a reachable systemd journal from the
+      # app, so its log lands in the scenario directory.
+      - name: Probe unshare -rm
+        run: |
+          ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
+          if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
+
+      - name: just test
+        run: just test
+
+      - name: Keep the logs of failed scenarios
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-scenario-logs
+          path: /tmp/desktop-calls-test-*
+          if-no-files-found: ignore

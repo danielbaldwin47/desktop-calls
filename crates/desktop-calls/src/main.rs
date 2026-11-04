@@ -1,6 +1,12 @@
 //! `desktop-calls`: the long-running per-user process and its CLI.
 
+mod bluez;
+mod cli;
+mod control;
+mod glib_runtime;
 mod logging;
+mod object_manager;
+mod phone_link;
 mod service;
 
 use std::process::ExitCode;
@@ -17,6 +23,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Say whether the Phone is connected.
+    Status {
+        /// Print JSON: `connection_state` and `phone` (`name`, `address`, or null).
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
     Service,
@@ -24,6 +36,7 @@ enum Command {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
+        Some(Command::Status { json }) => cli::status(json),
         Some(Command::Service) => service::run(),
         None => {
             eprintln!("Desktop Calls can't open the Dialer yet (ticket #11).");

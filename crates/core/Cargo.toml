@@ -1,0 +1,15 @@
+[package]
+name = "desktop-calls-core"
+description = "The pure core of Desktop Calls: Call state machine, matching and messages. No I/O, no GTK."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Keep this list empty of I/O, GTK, D-Bus and logging crates; deny.toml enforces it.
+[dependencies]
+
+[lints]
+workspace = true

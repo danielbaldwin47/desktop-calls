@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: just check
+    runs-on: ubuntu-latest
+    # Arch Linux, to match the user's Desktop (Omarchy).
+    container: archlinux:latest
+    steps:
+      - name: Install system packages
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel git rustup just cargo-deny
+          gtk4 gtk4-layer-shell libadwaita dbus
+
+      - uses: actions/checkout@v5
+
+      - name: Install the pinned Rust toolchain
+        # rustup reads rust-toolchain.toml.
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: just check
+        run: just check

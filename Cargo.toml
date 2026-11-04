@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/desktop-calls",
+    "crates/core",
+    "crates/simulated-phone",
+    "crates/test-harness",
+    "crates/automation",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/danielbaldwin47/desktop-calls"
+publish = false
+
+[workspace.dependencies]
+desktop-calls-core = { path = "crates/core" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "env-filter"] }
+
+# Every crate opts in with `[lints] workspace = true`. See CODING_STANDARDS.md.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Allowed inside #[cfg(test)] and #[test] code by clippy.toml.
+unwrap_used = "deny"
+expect_used = "deny"
+# Suppress a lint only with `#[expect(lint, reason = "...")]`.
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"

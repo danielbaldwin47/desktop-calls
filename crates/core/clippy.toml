@@ -1,0 +1,27 @@
+# The core is pure: no I/O, no clocks, no environment (CODING_STANDARDS.md).
+# Clippy reads the nearest clippy.toml only, so the workspace settings are repeated here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "the core is pure; time arrives as a timer-tick input" },
+    { path = "std::time::SystemTime::now", reason = "the core is pure; time arrives as a timer-tick input" },
+    { path = "std::env::var", reason = "the core is pure; configuration arrives as input" },
+    { path = "std::env::var_os", reason = "the core is pure; configuration arrives as input" },
+    { path = "std::env::vars", reason = "the core is pure; configuration arrives as input" },
+    { path = "std::thread::spawn", reason = "the core is pure and single-threaded" },
+    { path = "std::thread::sleep", reason = "the core is pure; waiting is a shell concern" },
+    { path = "std::fs::read", reason = "the core is pure; files are read by shell adapters" },
+    { path = "std::fs::read_to_string", reason = "the core is pure; files are read by shell adapters" },
+    { path = "std::fs::write", reason = "the core is pure; files are written by shell adapters" },
+]
+
+disallowed-types = [
+    { path = "std::fs::File", reason = "the core is pure; files belong to shell adapters" },
+    { path = "std::fs::OpenOptions", reason = "the core is pure; files belong to shell adapters" },
+    { path = "std::process::Command", reason = "the core is pure; processes belong to shell adapters" },
+    { path = "std::net::TcpStream", reason = "the core is pure; sockets belong to shell adapters" },
+    { path = "std::net::UdpSocket", reason = "the core is pure; sockets belong to shell adapters" },
+    { path = "std::os::unix::net::UnixStream", reason = "the core is pure; sockets belong to shell adapters" },
+    { path = "std::os::unix::net::UnixDatagram", reason = "the core is pure; sockets belong to shell adapters" },
+]

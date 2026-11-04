@@ -1,3 +1,7 @@
+---
+status: amended by ADR-0005 (draft)
+---
+
 # BlueZ's device API is allowed for presence and pairing, but never for hands-free
 
 On 2026-11-04 we amended [ADR-0002](0002-pipewire-telephony-and-obexd-are-the-only-phone-seam.md). The Setup Window, automatic reconnection and suspend/resume handling need BlueZ's `org.bluez` Adapter, Device and Agent interfaces (scan, pair, confirm passkey, connect, battery), so Desktop Calls may use those. Everything about Calls and their audio still goes only through `org.pipewire.Telephony` and WirePlumber, and Contacts and Call History only through obexd. Desktop Calls never registers a Bluetooth profile and never speaks AT commands. The Simulated Phone implements the `org.bluez` subset the app uses, too. Source: spec issue #1.

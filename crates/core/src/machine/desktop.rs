@@ -152,14 +152,19 @@ impl State {
             problems,
             fixing: self.desktop.fixing,
             notice: self.desktop.notice,
-            // Only while choosing a Phone, and only for what stops pairing:
-            // later steps keep Enter for themselves.
-            takes_focus: self.desktop.bluetooth_off()
-                && self
-                    .setup
-                    .as_ref()
-                    .is_some_and(super::setup::Setup::choosing),
+            takes_focus: self.problem_takes_focus(),
         })
+    }
+
+    /// Whether a Problem's button takes keyboard focus in the Setup Window,
+    /// so Enter presses it. Only while choosing a Phone, and only for what
+    /// stops pairing: later steps keep Enter for themselves.
+    pub(super) fn problem_takes_focus(&self) -> bool {
+        self.desktop.bluetooth_off()
+            && self
+                .setup
+                .as_ref()
+                .is_some_and(super::setup::Setup::choosing)
     }
 }
 

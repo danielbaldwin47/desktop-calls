@@ -183,6 +183,9 @@ pub struct SetupWindowView {
     pub notice: Option<SetupNotice>,
     /// Different each time the window opens.
     pub opened: u32,
+    /// A Problem's button has keyboard focus, so Enter presses it instead
+    /// of the step's default button.
+    pub problem_has_focus: bool,
 }
 
 /// Why the Setup Window's last attempt didn't work.
@@ -353,6 +356,7 @@ impl State {
             desktop_name: setup.desktop_name.clone(),
             notice: setup.notice,
             opened: setup.opened,
+            problem_has_focus: self.problem_takes_focus(),
         })
     }
 

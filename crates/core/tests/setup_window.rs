@@ -499,6 +499,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         desktop_name: Some("desktop".to_owned()),
         notice: None,
         opened: 1,
+        problem_has_focus: false,
     };
     let choose = messages::setup_window(
         &view(SetupStep::Choose {

@@ -166,6 +166,14 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
         BEFORE_CONSENT,
         |recorded| !sets_powered(recorded),
     );
+    // Enter presses Turn on, so the key hint no longer says Enter pairs.
+    let state = harness.wait_for_app("the Setup Window's key hint", DEADLINE, |state| {
+        window_field(state, "keys").is_some()
+    });
+    assert_eq!(
+        window_field(&state, "keys"),
+        Some("Enter presses the highlighted button; Tab moves between buttons; Escape closes")
+    );
 
     harness.keyboard().press(Key::Return);
 
@@ -310,7 +318,11 @@ fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
     harness.wait_for_app("the Contacts support Problem shows", STARTUP, |state| {
         field(state, "problems") == Some("contacts-support-missing")
     });
-    wait_for_phone_listed(&harness);
+    let state = wait_for_phone_listed(&harness);
+    assert_eq!(
+        window_field(&state, "keys"),
+        Some("Up and Down choose a phone, Enter pairs it; Escape closes")
+    );
 
     harness.keyboard().press(Key::Return);
 

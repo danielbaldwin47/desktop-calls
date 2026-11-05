@@ -6,6 +6,7 @@
 //! user manager, which starts it from the installed unit file as systemd
 //! does. The user's real systemd is never touched.
 
+use std::fs;
 use std::time::Duration;
 
 use test_harness::{AppEvent, AppState, Harness};
@@ -107,5 +108,32 @@ fn the_installed_service_picks_up_its_own_calls_after_a_crash() {
     assert_eq!(
         state.calls[0].active_since_ms, active_since_ms,
         "the restarted service timed the Call from its start"
+    );
+}
+
+#[test]
+fn the_installed_service_ignores_what_an_older_build_left_in_the_old_place() {
+    let mut harness = Harness::builder().phone_connected().installed().start();
+    // A dev run killed mid-Call leaves its record. Builds from before
+    // ticket #123 kept it in $XDG_RUNTIME_DIR/desktop-calls, a directory
+    // systemd reuses as it is rather than making it afresh.
+    harness.start_app_by_hand();
+    live_call(&harness);
+    harness.kill_app_by_hand();
+    let runtime = harness.directory().join("runtime");
+    let old_place = runtime.join("desktop-calls");
+    fs::create_dir_all(&old_place).expect("make the old directory");
+    fs::rename(
+        runtime.join("desktop-calls-dev/earlier-run.json"),
+        old_place.join("earlier-run.json"),
+    )
+    .expect("move the record to where older builds kept it");
+
+    let before_service = harness.app_log().len();
+    harness.start_service();
+    harness.wait_for_app("the installed service shows the Call", DEADLINE, is_live);
+    assert!(
+        !picked_up_since(&harness, before_service),
+        "the installed service picked up an older build's Calls"
     );
 }

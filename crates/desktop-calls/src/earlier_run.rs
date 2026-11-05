@@ -6,7 +6,7 @@
 //!
 //! - The installed service keeps it in the directory systemd makes for it,
 //!   which systemd passes as `$RUNTIME_DIRECTORY` (`RuntimeDirectory=` in
-//!   the unit, `$XDG_RUNTIME_DIR/desktop-calls`). It outlives a crash and
+//!   the unit, `$XDG_RUNTIME_DIR/desktop-calls-service`). It outlives a crash and
 //!   a restart, and goes when the service stops, as do the Calls it
 //!   describes.
 //! - A run systemd didn't start, such as a developer's `cargo run`, keeps

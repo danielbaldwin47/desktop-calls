@@ -18,8 +18,11 @@ that the rules learnt on ticket #3 hold everywhere:
 * Only the Call to the Test Number is ever hung up. Other Calls on the
   Phone are reported, never touched.
 * The app never runs beside the user's installed `desktop-calls.service`
-  (ADR-0006): `InstalledService` stops it for a Real-Phone run and starts
-  it again afterwards.
+  (ADR-0006): `ServiceHold` keeps it stopped while any Real-Phone run needs
+  it stopped, and the last run to end starts it again.
+* Nothing asks the app's bus name for anything before `app_on_bus` says a
+  copy owns it: a call to an unowned name would start the installed service
+  through D-Bus activation.
 
 This is a tool for agents, not part of the product. The names of the
 external APIs (AudioGateway, Call1, Device1) are used as they are.
@@ -28,6 +31,7 @@ external APIs (AudioGateway, Call1, Device1) are used as they are.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import os
 import re
@@ -63,6 +67,9 @@ BUS_PATH = "/org/freedesktop/DBus"
 # The unit `just install` installs, and the bus name the app claims.
 INSTALLED_UNIT = "desktop-calls.service"
 APP_BUS_NAME = "io.github.danielbaldwin47.DesktopCalls"
+# Under $XDG_RUNTIME_DIR: one file per Real-Phone run holding the installed
+# service stopped, and the lock that orders changes to them (ADR-0006).
+SERVICE_HOLDS = "desktop-calls-service-holds"
 
 # States in which a Call may be the one we dialled. "incoming" and "waiting"
 # are someone calling the Phone: never ours, never touched.
@@ -523,6 +530,13 @@ class ServiceError(Exception):
     """The installed service could not be stopped or started."""
 
 
+def app_on_bus(session: dbus.Bus) -> bool:
+    """Whether a copy of the app owns its bus name now. Asks the bus, never
+    the name, so it never starts the installed service through D-Bus
+    activation."""
+    return bool(call(session, BUS, BUS_PATH, BUS, "NameHasOwner", APP_BUS_NAME, signature="s"))
+
+
 class InstalledService:
     """The user's installed `desktop-calls.service`, through the systemd
     user manager on the session bus.
@@ -565,8 +579,7 @@ class InstalledService:
 
     def app_on_bus(self) -> bool:
         """Whether any copy of the app owns the control interface now."""
-        return bool(call(self.session, BUS, BUS_PATH, BUS, "NameHasOwner", APP_BUS_NAME,
-                         signature="s"))
+        return app_on_bus(self.session)
 
     def stop(self, timeout: float = 30.0) -> None:
         """Stop the service and wait until it has left the bus."""
@@ -583,15 +596,19 @@ class InstalledService:
         """Start the service again, once no other copy of the app is on the
         bus. True once it is active and on the bus."""
         try:
-            wait_for(lambda: not self.app_on_bus(), 10, "no other copy of the app on the bus",
-                     quiet=True)
-            log("SERVICE", f"starting {INSTALLED_UNIT} again")
-            call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
-                 INSTALLED_UNIT, "replace", signature="ss")
-            started = wait_for(
-                lambda: self.active_state() == "active" and self.app_on_bus(),
-                timeout, f"{INSTALLED_UNIT} running again",
-            )
+            if not wait_for(lambda: not self.app_on_bus(), 10,
+                            "no other copy of the app on the bus", quiet=True):
+                log("SERVICE", f"another copy of the app is still on the bus; not starting "
+                               f"{INSTALLED_UNIT} beside it")
+                started = False
+            else:
+                log("SERVICE", f"starting {INSTALLED_UNIT} again")
+                call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
+                     INSTALLED_UNIT, "replace", signature="ss")
+                started = wait_for(
+                    lambda: self.active_state() == "active" and self.app_on_bus(),
+                    timeout, f"{INSTALLED_UNIT} running again",
+                )
         except dbus.DBusException as e:
             log("SERVICE", f"could not start {INSTALLED_UNIT}: {e.get_dbus_name()}")
             started = False
@@ -599,3 +616,115 @@ class InstalledService:
             log("ALERT", f"{INSTALLED_UNIT} is not running. Start it with "
                          f"`systemctl --user start {INSTALLED_UNIT}`.")
         return started
+
+
+def _process_start(pid: int) -> str | None:
+    """When process `pid` started, in clock ticks since boot, so a PID the
+    kernel has reused isn't taken for the run that had it. None if there is
+    no such process, or it has exited and only waits to be reaped."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    fields = stat.rpartition(")")[2].split()
+    if len(fields) < 20 or fields[0] == "Z":
+        return None
+    return fields[19]
+
+
+class ServiceHold:
+    """One Real-Phone run's hold on the installed service: while any run
+    holds it, it stays stopped, and the last run to let go starts it again
+    (ADR-0006).
+
+    Each run that holds it has a file in $XDG_RUNTIME_DIR/desktop-calls-
+    service-holds, named by its process ID; the directory itself says the
+    service was running before the first hold and must be started again. A
+    lock beside it orders every change, so two runs at once stop the service
+    once and start it once. A run that dies, with its guard, leaves its file
+    behind; the next run finds the process gone and starts the service
+    (`recover`).
+    """
+
+    def __init__(self, service: InstalledService, holder: int | None = None) -> None:
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if not os.path.isabs(runtime):
+            raise ServiceError("XDG_RUNTIME_DIR isn't set, so runs can't share the service")
+        self.service = service
+        self.directory = Path(runtime) / SERVICE_HOLDS
+        self.lock = Path(runtime) / (SERVICE_HOLDS + ".lock")
+        self.holder = holder if holder is not None else os.getpid()
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        descriptor = os.open(self.lock, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(descriptor)
+
+    def _live_holders(self) -> list[Path]:
+        """The holds of runs still running. Forgets the others."""
+        if not self.directory.is_dir():
+            return []
+        live = []
+        for path in self.directory.iterdir():
+            try:
+                started = path.read_text().strip()
+                alive = _process_start(int(path.name)) == started
+            except (OSError, ValueError):
+                alive = False
+            if alive:
+                live.append(path)
+            else:
+                path.unlink(missing_ok=True)
+        return live
+
+    def _restore(self) -> bool:
+        """Start the service again, now that nothing holds it."""
+        if not self.service.start():
+            return False
+        with contextlib.suppress(OSError):
+            self.directory.rmdir()
+        return True
+
+    def recover(self) -> bool:
+        """Start the service if an earlier run stopped it and died, guard and
+        all, without starting it again. False if it can't be started."""
+        with self._locked():
+            if not self.directory.is_dir() or self._live_holders():
+                return True
+            log("SERVICE", f"an earlier run left {INSTALLED_UNIT} stopped")
+            return self._restore()
+
+    def take(self) -> None:
+        """Hold the service stopped for this run: stop it if it runs. If it
+        doesn't run and no other run holds it, there is nothing to hold."""
+        with self._locked():
+            running = self.service.running()
+            if not running and not self._live_holders():
+                return
+            started = _process_start(self.holder)
+            if started is None:
+                raise ServiceError(f"process {self.holder} has gone; nothing to hold for")
+            self.directory.mkdir(mode=0o700, exist_ok=True)
+            (self.directory / str(self.holder)).write_text(started)
+            if running:
+                self.service.stop()
+            else:
+                log("SERVICE", f"{INSTALLED_UNIT} is already stopped for another run")
+
+    def give_back(self) -> bool:
+        """End this run's hold. If no other run holds the service, start it
+        again. Safe whether or not this run took a hold. False if the
+        service should run and can't be started."""
+        with self._locked():
+            (self.directory / str(self.holder)).unlink(missing_ok=True)
+            if not self.directory.is_dir():
+                return True
+            if self._live_holders():
+                log("SERVICE", f"another run still needs {INSTALLED_UNIT} stopped; "
+                               "it starts it again when it ends")
+                return True
+            return self._restore()

@@ -44,6 +44,8 @@ enum Failure {
     SystemBusUnreachable,
     /// Another copy of Desktop Calls owns the control interface's name.
     AlreadyRunning,
+    /// The control interface couldn't be served for any other reason.
+    ControlInterfaceUnavailable,
 }
 
 impl Failure {
@@ -52,6 +54,7 @@ impl Failure {
             Self::SessionBusUnreachable => "session-bus-unreachable",
             Self::SystemBusUnreachable => "system-bus-unreachable",
             Self::AlreadyRunning => "already-running",
+            Self::ControlInterfaceUnavailable => "control-interface-unavailable",
         }
     }
 }
@@ -125,7 +128,13 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     // touches anything.
     let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
         .await
-        .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
+        .map_err(|error| {
+            let failure = match error {
+                zbus::Error::NameTaken => Failure::AlreadyRunning,
+                _ => Failure::ControlInterfaceUnavailable,
+            };
+            raw_failure(failure, &error)
+        })?;
     // Before anything the Phone reports, so its Calls are known for what
     // they were before a crash.
     if let Some(earlier) = earlier_run::load() {

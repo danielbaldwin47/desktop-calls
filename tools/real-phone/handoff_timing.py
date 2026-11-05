@@ -117,7 +117,12 @@ class Watch:
 
 
 def app_property(bus: dbus.Bus, name: str) -> Any:
+    """One of the app's properties; None while no copy of the app owns its
+    name, which is asked first so the installed service is never started
+    through D-Bus activation."""
     try:
+        if not rp.app_on_bus(bus):
+            return None
         return rp.call(bus, APP_NAME, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
                        signature="ss", timeout=1.0)
     except dbus.DBusException:
@@ -153,7 +158,7 @@ def stop(app: subprocess.Popen[bytes]) -> None:
 def time_handoff(audio_gateway: str, settle: float) -> int:
     bus = dbus.SessionBus()
     watch = Watch()
-    if app_property(bus, "AudioLocation") is not None:
+    if rp.app_on_bus(bus):
         print("another desktop-calls already owns the bus name; not starting one")
         return 1
     app = subprocess.Popen([str(APP), "service"], stdin=subprocess.DEVNULL,

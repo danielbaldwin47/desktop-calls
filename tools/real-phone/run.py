@@ -11,10 +11,13 @@ press Ctrl-C. The app never runs beside the installed desktop-calls.service
 (ADR-0006): if the service is running, it is stopped first, and started
 again when the run ends: when the app exits, on Ctrl-C, SIGTERM or SIGHUP,
 and, through test_call.py's guard process, even if this process is killed
-outright. A service that wasn't running stays stopped.
+outright. A `just test-call` running at the same time shares the stop: the
+last of them to end starts the service. A service that wasn't running stays
+stopped. If an earlier run and its guard were both killed while the service
+was stopped, this run starts it first.
 
-It refuses to start while the Phone has a Call, so it never takes a Call
-away from the installed service. The dev run keeps its own runtime state
+It refuses to start without the Phone's hands-free link, or while the Phone
+has a Call, so it never takes a Call away from the installed service. The dev run keeps its own runtime state
 ($XDG_RUNTIME_DIR/desktop-calls-dev), apart from the service's, and logs to
 the journal like the service.
 
@@ -38,7 +41,7 @@ import dbus
 
 import real_phone as rp
 from real_phone import log
-from test_call import EXIT_FAILED, EXIT_INTERRUPTED, EXIT_SERVICE_STOPPED, Guard
+from test_call import EXIT_FAILED, EXIT_INTERRUPTED, EXIT_SERVICE_STOPPED, Guard, give_back
 
 USAGE = "usage: just run (or /usr/bin/python3 tools/real-phone/run.py BINARY)"
 
@@ -62,25 +65,30 @@ def stop_app(app: subprocess.Popen[bytes]) -> None:
 
 def run(binary: Path) -> int:
     rp.raise_on_interrupt()
+    tel = rp.Telephony(None)
     try:
-        calls = rp.Telephony(None).all_calls()
+        gateway = tel.audio_gateway()
+        calls = tel.all_calls()
     except dbus.DBusException as e:
         log("ERROR", f"cannot reach {rp.TELEPHONY}: {e.get_dbus_name()}. Is WirePlumber running?")
+        return EXIT_FAILED
+    if gateway is None:
+        log("ERROR", "refusing: no AudioGateway, so the Phone's hands-free link is not "
+                     "connected, or there is more than one.")
         return EXIT_FAILED
     if calls:
         log("ERROR", f"refusing: {len(calls)} Call(s) on the Phone. Try again once they end.")
         return EXIT_FAILED
 
-    service = rp.InstalledService()
+    hold = rp.ServiceHold(rp.InstalledService(tel.session))
+    if not hold.recover():
+        return EXIT_SERVICE_STOPPED
     guard = Guard()
     app: subprocess.Popen[bytes] | None = None
-    service_stopped = False
     outcome = EXIT_FAILED
     try:
-        if service.running():
-            guard.tell("service-stopped")
-            service_stopped = True
-            service.stop()
+        guard.tell(f"service-hold {hold.holder}")
+        hold.take()
         log("APP", f"starting a dev run: {binary} service (Ctrl-C to stop)")
         app = subprocess.Popen([str(binary), "service"], start_new_session=True)
         guard.tell(f"hook {app.pid}")
@@ -95,7 +103,7 @@ def run(binary: Path) -> int:
         with rp.interrupts_deferred():
             if app is not None:
                 stop_app(app)
-            service_started = not service_stopped or service.start()
+            service_started = give_back(hold)
             guard.done()
     return outcome if service_started else EXIT_SERVICE_STOPPED
 

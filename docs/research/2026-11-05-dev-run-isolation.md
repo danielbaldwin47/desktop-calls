@@ -13,18 +13,24 @@ Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
 
 ## Where the state lives
 
-- systemd's `RuntimeDirectory=desktop-calls` makes `$XDG_RUNTIME_DIR/desktop-calls` (mode from `RuntimeDirectoryMode=0700`) before `ExecStart` and passes it as `$RUNTIME_DIRECTORY`. With `RuntimeDirectoryPreserve=restart` it survives an automatic restart after a crash and is removed on a stop. **[I]** from `systemd.exec(5)`; the stand-in implements the same rules and the tests run against it.
+- systemd's `RuntimeDirectory=desktop-calls-service` makes `$XDG_RUNTIME_DIR/desktop-calls-service` (mode from `RuntimeDirectoryMode=0700`) before `ExecStart` and passes it as `$RUNTIME_DIRECTORY`. With `RuntimeDirectoryPreserve=restart` it survives an automatic restart after a crash and is removed on a stop. **[I]** from `systemd.exec(5)`; the stand-in implements the same rules and the tests run against it.
+- The name is new because systemd reuses an existing directory, and builds before #123 kept their earlier-run file (and pulled vCards) in `$XDG_RUNTIME_DIR/desktop-calls`. **[V]** `the_installed_service_ignores_what_an_older_build_left_in_the_old_place`: red with `RuntimeDirectory=desktop-calls`, green with the new name.
 - A run without `RUNTIME_DIRECTORY` uses `$XDG_RUNTIME_DIR/desktop-calls-dev`. **[V]** `a_dev_run_stopped_mid_call_leaves_nothing_for_the_installed_service`: a dev run killed mid-Call leaves a file that the service never loads, and the next dev run does.
 - The service still picks up its own Calls after a crash. **[V]** `the_installed_service_picks_up_its_own_calls_after_a_crash` (same `active_since_ms`); it fails when `RuntimeDirectoryPreserve=restart` is removed from the unit.
 
 ## The tools
 
 - `test_call.py` and `run.py` read `ActiveState` through `Manager.GetUnit`, then call `Manager.StopUnit("desktop-calls.service", "replace")` and later `StartUnit` with the same arguments. Signatures were introspected read-only on the real user manager: `GetUnit(s)->o`, `StartUnit(ss)->o`, `StopUnit(ss)->o`. **[V]** (introspection). `StopUnit` and `StartUnit` were never called on the real manager. **[V]** they work against the stand-in (`real_phone_tools.rs`, 6 scenarios); **[I]** that the real manager behaves the same.
-- The guard process gains a `service-stopped` line. When the tool dies without saying `done`, the guard stops the hook or dev run, hangs up the Test Call if one was dialled, and starts the service. **[V]** with SIGKILL for both tools.
+- The guard process gains a `service-hold <process ID>` line. When the tool dies without saying `done`, the guard stops the hook or dev run, hangs up the Test Call if one was dialled, and, in a `finally`, gives back the run's hold. **[V]** with SIGKILL for both tools, and SIGTERM and Ctrl-C. **[I]** that a missing Test Number file or a lost bus during the guard's hang-up still restarts the service: the `finally` is read, not tested.
+- Holds are files in `$XDG_RUNTIME_DIR/desktop-calls-service-holds/` under an `flock`. **[V]** two runs at once (`just run`, then a test-call that ends first) stop the service once and start it once, after the last; with the count broken, the test-call exits 3. **[V]** a run killed with its guard and its dev run leaves the service stopped, and the next `just run` starts it; with recovery broken, the test fails.
+- The stand-in now counts the service active only once its own process owns the bus name (`GetConnectionUnixProcessID`), so a copy of the app left on the bus can't pass for a started service.
+- `run.py` refuses without an AudioGateway. **[V]** `just_run_refuses_without_the_phones_hands_free_link`.
+- `handoff_timing.py` and `handoff_to_phone.py` ask `NameHasOwner` before any call to the app's name, so they never start the service through D-Bus activation. **[I]**: read, not run.
+- The app maps only `NameTaken` to `already-running`; any other failure to serve the control interface is `control-interface-unavailable`. **[I]**: no test makes that other failure happen.
 - A Call that ended while the app was down is now logged when it's forgotten (`earlier-run-forgotten`), and the startup line says the Calls *may* be continuing. **[V]** `crash_restart.rs`.
 
 ## Follow-ups
 
 - The user reruns `just install` to get the new unit file and binary.
-- The Real-Phone Checklist still tells the user to start the app with `cargo run`; with the service installed it should say the service is already running, or point at `just run` (#120/#125 own the checklist).
+- The Real-Phone Checklist still tells the user to start the app with `cargo run`; #144 fixes it.
 - "Dev run" and "installed service" are used as the ticket uses them, not as glossary terms.

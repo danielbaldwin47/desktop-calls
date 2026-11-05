@@ -164,7 +164,12 @@ def bounce_only() -> int:
 
 
 def app_property(bus: dbus.Bus, name: str) -> Any:
+    """One of the app's properties; None while no copy of the app owns its
+    name, which is asked first so the installed service is never started
+    through D-Bus activation."""
     try:
+        if not rp.app_on_bus(bus):
+            return None
         return rp.call(bus, APP_NAME, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
                        signature="ss", timeout=1.0)
     except dbus.DBusException:
@@ -239,7 +244,7 @@ def during_call() -> int:
     tel = rp.Telephony(rp.read_test_number(), os.environ.get("DESKTOP_CALLS_PHONE_ADDRESS"))
     bus = dbus.SessionBus()
     system = dbus.SystemBus()
-    if app_property(bus, "AudioLocation") is not None:
+    if rp.app_on_bus(bus):
         print("another desktop-calls already owns the bus name; not starting one")
         return 1
     path = device_path(system, tel.phone_address or "")

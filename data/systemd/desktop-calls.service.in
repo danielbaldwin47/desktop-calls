@@ -16,11 +16,13 @@ ExecStart=@BINDIR@/desktop-calls service
 Restart=on-failure
 RestartSec=1s
 # What a run after a crash needs (the Calls in progress) is kept in
-# $XDG_RUNTIME_DIR/desktop-calls, which systemd passes as RUNTIME_DIRECTORY.
+# $XDG_RUNTIME_DIR/desktop-calls-service, which systemd passes as
+# RUNTIME_DIRECTORY. No build before ADR-0006 used that path, so nothing
+# an older build left there can be picked up.
 # It survives a crash restart and goes when the service stops. A run
 # systemd didn't start keeps its own elsewhere, so the two never pick up
 # each other's Calls (ADR-0006).
-RuntimeDirectory=desktop-calls
+RuntimeDirectory=desktop-calls-service
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=restart
 

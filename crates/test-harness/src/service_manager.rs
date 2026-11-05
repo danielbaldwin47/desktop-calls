@@ -8,7 +8,7 @@
 //! (`RuntimeDirectoryMode=`), passes it as `RUNTIME_DIRECTORY`, and removes
 //! it when the service stops, or also when it restarts, as
 //! `RuntimeDirectoryPreserve=` says; with `Type=dbus` the service is active
-//! once it owns `BusName=`; with `Restart=on-failure` it starts the service
+//! once its own process owns `BusName=`; with `Restart=on-failure` it starts the service
 //! again `RestartSec=` after it dies of a signal or fails.
 //!
 //! Over D-Bus it answers what the Real-Phone tools ask the real one:
@@ -361,8 +361,9 @@ impl Unit {
                 return;
             }
             if running.active_state == "activating" {
+                let pid = running.child.as_ref().map(Child::id);
                 drop(running);
-                if self.owns_bus_name(file) {
+                if pid.is_some_and(|pid| self.owns_bus_name(file, pid)) {
                     let mut running = self.running();
                     if running.generation == generation && running.child.is_some() {
                         running.set("active");
@@ -372,18 +373,22 @@ impl Unit {
         }
     }
 
-    fn owns_bus_name(&self, file: &UnitFile) -> bool {
+    /// Whether the service's own process, `pid`, owns `BusName=`. Another
+    /// process owning the name doesn't make the service active: systemd
+    /// waits for the name to pass to the service, so a copy of the app left
+    /// on the bus can't pass for a started service.
+    fn owns_bus_name(&self, file: &UnitFile, pid: u32) -> bool {
         let Some(name) = &file.bus_name else {
             return true;
         };
         zbus::block_on(async {
             DBusProxy::new(&self.session)
                 .await?
-                .name_has_owner(BusName::try_from(name.as_str())?)
+                .get_connection_unix_process_id(BusName::try_from(name.as_str())?)
                 .await
                 .map_err(zbus::Error::from)
         })
-        .unwrap_or(false)
+        .is_ok_and(|owner| owner == pid)
     }
 
     /// Stops the service: SIGTERM, then SIGKILL after [`STOP_TIMEOUT`].

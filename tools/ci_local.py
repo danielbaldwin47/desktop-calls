@@ -24,7 +24,14 @@ What it does, in order:
   5. Checks out HEAD into a scratch directory and runs each job in the
      image, under nice, with a private /tmp. The jobs that run tests have
      no network, and nothing reaches the host's D-Bus, PipeWire, Bluetooth
-     or home, so a run can't touch the real Phone.
+     or home, so a run can't touch the real Phone. Before each job that runs
+     tests in parallel it measures how much of the Desktop other programs
+     (agents' builds) are using, and runs that many tests at a time and no
+     more: all the CPUs on a quiet Desktop, down to MIN_THREADS on a busy one
+     (CI's runners have two CPUs). The first-frame timings run at normal
+     priority, since under nice they wait behind every build. Each job's last
+     line says how much others used while it ran, and a failure says whether
+     that was enough to blame (ticket #167).
   6. If every job passed and HEAD is still the commit tested, pushes the
      branch if GitHub doesn't have the commit yet (a status needs a commit
      to sit on), and posts the commit status "CI passed" (state success).
@@ -46,6 +53,7 @@ import fcntl
 import json
 import os
 import pathlib
+import resource
 import shutil
 import signal
 import subprocess
@@ -92,16 +100,31 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 #   test       CI job "check": the tests but the harness's scenarios, and the
 #              scorecard (the gallery test renders the gallery on the way)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
-#              four shards, then the first-frame timings one at a time
+#              four shards
+#   timings    the rest of CI job "scenarios": the first-frame timings one at
+#              a time, so that no other scenario's app slows a first paint
 JOBS: dict[str, str] = {
     "lint": "just lint",
     "test": "just test --exclude test-harness && just scorecard",
-    "scenarios": "just ci-scenarios && just ci-first-frame-timings",
+    "scenarios": "just ci-scenarios",
+    "timings": "just ci-first-frame-timings",
 }
+# Jobs that run tests in parallel, so are held to the Desktop's spare CPUs.
+PARALLEL_JOBS = {"test", "scenarios"}
+# Jobs whose timings are the test: they run at normal priority, one at a time.
+UNHURRIED_JOBS = {"timings"}
 # Lint's `cargo deny` fetches the advisory database, and its ticket check asks
 # GitHub, anonymously (the repository is public). The others build with the crates fetched beforehand, and run
 # scenarios that must not see the host's network.
 JOBS_WITH_NETWORK = {"lint"}
+# Never fewer tests at a time than this, which is twice what a CI runner runs
+# (it has two CPUs): the least that still finishes in a few minutes.
+MIN_THREADS = 4
+# How long to watch what others are using before a job.
+SAMPLE_SECONDS = 3
+# Others using at least this share of the CPUs while a job ran make a timing
+# failure likely to be theirs.
+BUSY_SHARE = 0.4
 # Before any job, with the network: the pinned toolchain (rust-toolchain.toml)
 # and the crates.
 PREPARE = "rustup toolchain install && cargo fetch --locked"
@@ -282,10 +305,11 @@ def pull_base_layers(destination: pathlib.Path, log: Log) -> None:
                 shutil.copyfileobj(response, out)
 
 
-def userns(*flags: str) -> list[str]:
-    """`nice`, then `unshare` with a user namespace mapped onto the subuid range."""
+def userns(*flags: str, polite: bool = True) -> list[str]:
+    """`nice` (unless not `polite`), then `unshare` with a user namespace
+    mapped onto the subuid range."""
     return [
-        "nice", "-n", "19", "ionice", "-c3",
+        *(["nice", "-n", "19", "ionice", "-c3"] if polite else []),
         "unshare", "--map-auto", "--map-root-user", "--mount", "--pid", "--fork", "--kill-child",
         *flags, "--",
     ]
@@ -343,14 +367,88 @@ def checkout(sha: str, scratch: pathlib.Path) -> None:
 
 
 def run_in_image(
-    log: Log, scratch: pathlib.Path, tmp: pathlib.Path, command: str, network: bool
+    log: Log,
+    scratch: pathlib.Path,
+    tmp: pathlib.Path,
+    command: str,
+    network: bool,
+    threads: int | None = None,
+    polite: bool = True,
 ) -> int:
+    """Runs `command` in the image. With `threads`, the test runners (cargo
+    test, nextest, the gallery) run that many tests at a time."""
     flags = [] if network else ["--net"]
+    if threads is not None:
+        command = f"export RUST_TEST_THREADS={threads} NEXTEST_TEST_THREADS={threads} && {command}"
     CACHE.mkdir(parents=True, exist_ok=True)
     return log.stream(
-        userns(*flags)
+        userns(*flags, polite=polite)
         + [str(LOCAL_CI / "enter.sh"), str(ROOTFS), str(CACHE), str(scratch), str(tmp), command],
     )
+
+
+# -- What the Desktop has to spare --------------------------------------------
+
+
+def cpu_seconds() -> tuple[float, float]:
+    """The CPU time every CPU has spent working, and in all, since boot
+    (/proc/stat's first line: user nice system idle iowait irq softirq steal)."""
+    fields = [int(field) for field in pathlib.Path("/proc/stat").read_text().split()[1:9]]
+    ticks = os.sysconf("SC_CLK_TCK")
+    total = sum(fields)
+    return (total - fields[3] - fields[4]) / ticks, total / ticks
+
+
+def children_cpu_seconds() -> float:
+    """The CPU time this run's finished jobs spent."""
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def watch_others(seconds: float = SAMPLE_SECONDS) -> float:
+    """How many CPUs' worth other programs use, over `seconds`. Run it
+    between jobs, when this run uses none."""
+    busy, total = cpu_seconds()
+    time.sleep(seconds)
+    busy_after, total_after = cpu_seconds()
+    return (busy_after - busy) / (total_after - total) * (os.cpu_count() or 1)
+
+
+def threads_for(others: float, cpus: int) -> int:
+    """How many tests to run at a time: the CPUs left once others have what
+    they use and the same again as headroom, at least MIN_THREADS and at
+    most one per CPU. A quiet Desktop gets all its CPUs, as before; a build
+    using half of them gets MIN_THREADS."""
+    return min(cpus, max(MIN_THREADS, int(cpus - 2 * others)))
+
+
+class Usage:
+    """The CPU time spent by everything on the machine and by this run's
+    jobs from its creation: what is left over is what others used."""
+
+    def __init__(self) -> None:
+        self.busy, _ = cpu_seconds()
+        self.ours = children_cpu_seconds()
+        self.started = time.monotonic()
+
+    def others_cpus(self) -> float:
+        """How many CPUs' worth others used, on average, since creation."""
+        busy, _ = cpu_seconds()
+        elapsed = max(time.monotonic() - self.started, 0.001)
+        return max(0.0, busy - self.busy - (children_cpu_seconds() - self.ours)) / elapsed
+
+
+def blame(others: float, cpus: int, failed: bool) -> str:
+    """What a job's last line says about the load it ran under."""
+    used = f"other programs used about {others:.0f} of {cpus} CPUs while it ran"
+    if not failed:
+        return used
+    if others >= BUSY_SHARE * cpus:
+        return (
+            f"{used}: a timeout or a late reply may be the machine's, not the change's. "
+            "Read the failing test's log first; rerunning until it passes would hide a real flake"
+        )
+    return f"{used}: not enough to blame, so treat the failure as the change's"
 
 
 def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Path]:
@@ -371,14 +469,31 @@ def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Pa
                 "Next: check the network, then just ci-local"
             )
         log.line(f"== prepare: {time.monotonic() - started:.0f} s")
+        cpus = os.cpu_count() or 1
         for job in jobs:
-            started = time.monotonic()
+            threads = None
+            if job in PARALLEL_JOBS:
+                others = watch_others()
+                threads = threads_for(others, cpus)
             log.line(f"== {job}: {JOBS[job]}")
-            status = run_in_image(log, scratch, tmp, JOBS[job], network=job in JOBS_WITH_NETWORK)
+            if threads is not None:
+                log.line(
+                    f"   {threads} at a time: other programs are using about {others:.0f} of "
+                    f"{cpus} CPUs"
+                )
+            started = time.monotonic()
+            usage = Usage()
+            status = run_in_image(
+                log, scratch, tmp, JOBS[job],
+                network=job in JOBS_WITH_NETWORK,
+                threads=threads,
+                polite=job not in UNHURRIED_JOBS,
+            )
             if status != 0:
                 failed.append(job)
             verdict = "passed" if status == 0 else f"FAILED (exit {status})"
             log.line(f"== {job}: {verdict}, {time.monotonic() - started:.0f} s")
+            log.line(f"   {blame(usage.others_cpus(), cpus, status != 0)}")
     finally:
         remove_tree(scratch)
     return failed, tmp

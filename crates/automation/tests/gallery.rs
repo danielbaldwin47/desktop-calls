@@ -16,10 +16,18 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         .expect("the binary is in target/<profile>/")
         .join("screenshots/gallery");
 
-    let rendered = Command::new(binary)
-        .arg("screenshot")
-        .output()
-        .expect("run automation screenshot");
+    let mut command = Command::new(binary);
+    command.arg("screenshot");
+    // The gallery is one test, so the test runner's limit on how many run at
+    // once doesn't reach it. `just ci-local` sets that limit to what the
+    // Desktop has to spare, and each state here is a compositor and an app.
+    if let Some(threads) = std::env::var("RUST_TEST_THREADS")
+        .ok()
+        .filter(|threads| threads.parse::<u32>().is_ok_and(|threads| threads > 0))
+    {
+        command.args(["--workers", &threads]);
+    }
+    let rendered = command.output().expect("run automation screenshot");
 
     assert!(
         rendered.status.success(),

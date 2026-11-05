@@ -63,6 +63,11 @@ enum Command {
         #[arg(long, value_name = "N", default_value_t = 1,
               value_parser = clap::value_parser!(u32).range(1..))]
         repeat: u32,
+        /// Render this many states at a time. Default: one per CPU. Each
+        /// has its own compositor and app, so on a busy machine fewer are
+        /// more reliable.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        workers: Option<u32>,
     },
     /// Run the app against the Simulated Phone in a nested compositor window.
     Demo {
@@ -91,10 +96,12 @@ fn main() -> ExitCode {
             output,
             only,
             repeat,
+            workers,
         } => gallery::run(&gallery::Options {
             output,
             only,
             repeat,
+            workers,
         }),
         Command::Demo { scenario } => demo::run(&scenario),
     }

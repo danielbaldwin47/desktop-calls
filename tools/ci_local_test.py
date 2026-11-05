@@ -202,14 +202,16 @@ class Load(unittest.TestCase):
         log = mock.Mock()
         with mock.patch.object(ci_local, "watch_others", return_value=1.0) as watch:
             ci_local.wait_for_calm(log, 20)
-        watch.assert_called_once()
+        self.assertEqual(watch.call_count, ci_local.CALM_LOOKS)
         log.line.assert_not_called()
 
     def test_the_timings_wait_for_a_build_to_end_and_say_so(self):
         log = mock.Mock()
-        with mock.patch.object(ci_local, "watch_others", side_effect=[15.0, 12.0, 3.0]) as watch:
+        # A quiet look between two bursts doesn't count: three in a row do.
+        looks = [15.0, 3.0, 12.0, 3.0, 2.0, 1.0]
+        with mock.patch.object(ci_local, "watch_others", side_effect=looks) as watch:
             ci_local.wait_for_calm(log, 20)
-        self.assertEqual(watch.call_count, 3)
+        self.assertEqual(watch.call_count, 6)
         said = [call.args[0] for call in log.line.call_args_list]
         self.assertIn("waiting for others to use at most 4 of 20 CPUs (now about 15)", said[0])
         self.assertTrue(said[1].startswith("   calm after"))

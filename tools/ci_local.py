@@ -132,6 +132,10 @@ BUSY_SHARE = 0.4
 # or after this long, if the Desktop doesn't calm down before.
 CALM_SHARE = 0.2
 CALM_WAIT_SECONDS = 120
+# A build comes in bursts with quiet between: calm is this many looks in a row,
+# each CALM_LOOK_SECONDS long.
+CALM_LOOKS = 3
+CALM_LOOK_SECONDS = 2
 # Before any job, with the network: the pinned toolchain (rust-toolchain.toml)
 # and the crates.
 PREPARE = "rustup toolchain install && cargo fetch --locked"
@@ -446,16 +450,20 @@ class Usage:
 
 
 def wait_for_calm(log: Log, cpus: int, give_up_after: float = CALM_WAIT_SECONDS) -> None:
-    """Returns once others use at most CALM_SHARE of the CPUs, or after
-    `give_up_after` seconds, saying which."""
+    """Returns once others have used at most CALM_SHARE of the CPUs for
+    CALM_LOOKS looks in a row, or after `give_up_after` seconds, saying which."""
     started = time.monotonic()
     announced = False
+    calm_looks = 0
     while True:
-        others = watch_others()
-        if others <= CALM_SHARE * cpus:
+        others = watch_others(CALM_LOOK_SECONDS)
+        calm_looks = calm_looks + 1 if others <= CALM_SHARE * cpus else 0
+        if calm_looks == CALM_LOOKS:
             if announced:
                 log.line(f"   calm after {time.monotonic() - started:.0f} s")
             return
+        if calm_looks:
+            continue
         if time.monotonic() - started >= give_up_after:
             log.line(
                 f"   not calm after {give_up_after:.0f} s (others use about {others:.0f} of "

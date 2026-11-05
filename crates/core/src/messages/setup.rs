@@ -126,7 +126,11 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
                 keybinding,
             } => done(&mut text, phone, *connected, *contacts, keybinding, &desktop),
         };
-    text.keys = keys(&view.step, &buttons);
+    text.keys = if view.problem_has_focus {
+        "Enter presses the highlighted button; Tab moves between buttons; Escape closes".to_owned()
+    } else {
+        keys(&view.step, &buttons)
+    };
     text.heading = heading;
     text.instructions = instructions;
     text.buttons = buttons;

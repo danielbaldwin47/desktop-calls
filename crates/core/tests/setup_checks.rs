@@ -6,7 +6,7 @@
 use desktop_calls_core::messages::{self, NextAction, ProblemKind};
 use desktop_calls_core::{
     BluetoothPower, DesktopCheck, DesktopFix, Effect, FixFailure, IndicatorEntry, IndicatorLook,
-    Input, Phone, PhoneCommand, State, Timer, step,
+    Input, Phone, PhoneCommand, State, Timer, Timestamp, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -188,6 +188,55 @@ fn the_setup_window_shows_the_desktop_problems_only_while_it_is_open() {
     assert_eq!(shown.problems, [ProblemKind::BluetoothOff]);
     assert_eq!(shown.fixing, None);
     assert_eq!(shown.notice, None);
+}
+
+/// The keys hint at the foot of the Setup Window, while it is open.
+fn key_hint(state: &State) -> Option<String> {
+    let window = state.surfaces().setup_window?;
+    Some(messages::setup_window(&window, Timestamp(0)).keys)
+}
+
+#[test]
+fn the_key_hint_does_not_promise_enter_pairs_while_a_problem_button_has_focus() {
+    let state = setup_open(run(
+        all_well(connected()),
+        [checked(DesktopCheck::Bluetooth(BluetoothPower::Off))],
+    ));
+    assert!(
+        state
+            .surfaces()
+            .setup_problems
+            .is_some_and(|problems| problems.takes_focus),
+        "Turn on has keyboard focus"
+    );
+    let hint = key_hint(&state).expect("the window is open");
+    assert!(!hint.contains("pairs"), "{hint}");
+    assert_eq!(
+        hint,
+        "Enter presses the highlighted button; Tab moves between buttons; Escape closes"
+    );
+
+    let state = run(
+        state,
+        [checked(DesktopCheck::Bluetooth(BluetoothPower::On))],
+    );
+    assert_eq!(
+        key_hint(&state).as_deref(),
+        Some("Up and Down choose a phone, Enter pairs it; Escape closes"),
+        "with Bluetooth on, Enter pairs again"
+    );
+}
+
+#[test]
+fn the_key_hint_keeps_enter_pairs_when_a_problem_takes_no_focus() {
+    let state = setup_open(run(
+        all_well(connected()),
+        [checked(DesktopCheck::ContactsSupport(false))],
+    ));
+    assert_eq!(
+        key_hint(&state).as_deref(),
+        Some("Up and Down choose a phone, Enter pairs it; Escape closes")
+    );
 }
 
 #[test]

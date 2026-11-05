@@ -108,7 +108,7 @@ fn checklist_result(checklist: &ResultFile) -> Score {
 
 /// `automation scorecard`: prints the table.
 pub fn run(results: Option<PathBuf>) -> ExitCode {
-    let directory = results.unwrap_or_else(|| PathBuf::from(results::DEFAULT_DIRECTORY));
+    let directory = results.unwrap_or_else(results::default_directory);
     let checklist = ResultFile::latest(&directory, Mode::Real);
     let scores: Vec<Score> = (1..=ITEMS.len())
         .map(|item| score(item, checklist.as_ref()))

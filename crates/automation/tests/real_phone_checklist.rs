@@ -431,3 +431,74 @@ fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
         "{dialer:#}"
     );
 }
+
+/// What the runner listed under "Before you start", in order.
+fn needs_listed(runner: &Runner) -> Vec<String> {
+    runner
+        .transcript
+        .iter()
+        .skip_while(|line| !line.starts_with("Before you start"))
+        .skip(1)
+        .map_while(|line| line.strip_prefix("  - ").map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn before_a_group_starts_the_runner_lists_only_what_the_steps_about_to_run_need() {
+    let results = tempfile::tempdir().expect("a results directory");
+    // 3.2 needs a helper and 3.3 a number with a keypad menu. The demo
+    // can't place a Call from the Phone's side, so 3.3 is skipped.
+    let mut first = Runner::start(&["3"], results.path());
+    first.play(|_| "y".to_owned());
+    let listed = needs_listed(&first);
+    assert!(
+        listed.iter().any(|need| need.contains("helper"))
+            && listed.iter().any(|need| need.contains("keypad menu")),
+        "{}",
+        first.transcript.join("\n")
+    );
+    assert_eq!(step(&result_file(results.path()), "3.2")["result"], "pass");
+
+    // The rerun runs only 3.3, so no helper is asked for.
+    let mut second = Runner::start(&["3"], results.path());
+    second.play(|_| "y".to_owned());
+    assert_eq!(second.steps_started(), ["3.3"]);
+    let listed = needs_listed(&second);
+    assert!(
+        listed.iter().any(|need| need.contains("keypad menu"))
+            && !listed.iter().any(|need| need.contains("helper")),
+        "{}",
+        second.transcript.join("\n")
+    );
+}
+
+#[test]
+fn real_phone_results_live_in_the_users_state_directory_not_the_repository() {
+    // Results come from the real Phone and can hold real data, so they stay
+    // out of the repository: under $XDG_STATE_HOME (ticket #120).
+    let home = tempfile::tempdir().expect("a temporary home");
+    let results = home.path().join("state/desktop-calls/real-phone-checklist");
+    std::fs::create_dir_all(&results).expect("the results directory");
+    std::fs::write(
+        results.join("2026-11-05T13-25-50Z.json"),
+        r#"{"mode": "real", "started": "2026-11-05T13:25:50Z", "phone": "Pixel",
+            "steps": [{"id": "2.1", "title": "Answer on the Desktop", "result": "pass",
+                       "evidence": [], "measurements": {"codec": "msbc", "wideband": true}}]}"#,
+    )
+    .expect("a result file");
+
+    let printed = Command::new(env!("CARGO_BIN_EXE_automation"))
+        .arg("scorecard")
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("XDG_STATE_HOME", home.path().join("state"))
+        .output()
+        .expect("run automation scorecard");
+    assert!(printed.status.success(), "{printed:?}");
+    let scorecard = String::from_utf8(printed.stdout).expect("the scorecard is text");
+    let codec = row(&scorecard, 3);
+    assert!(
+        codec.contains("PASS") && codec.contains("msbc"),
+        "{scorecard}"
+    );
+}

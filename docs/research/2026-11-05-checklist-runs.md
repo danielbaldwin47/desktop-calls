@@ -1,0 +1,14 @@
+# Real-Phone Checklist runs: terminal, results and needs
+
+Date: 2026-11-05. Ticket #120, runner part. Only the Simulated Phone and a run with no terminal were used. Nothing ran against the real Pixel.
+Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
+
+**Bottom line:** against the real Phone, `just real-phone-checklist` now refuses to start without an interactive terminal. It writes its results under `~/.local/state/desktop-calls/real-phone-checklist/`, outside the repository. "Before you start" lists only what the steps about to run need.
+
+## Findings
+
+1. **No terminal, one line.** Claude Code's `!` prefix gives the runner no terminal on standard input. The runner used to print "Press Enter…", read end-of-file and stop with "Stopped." and no reason. It now checks standard input before anything else, prints one line naming the command to run in the user's own terminal, exits 1, and writes nothing. **[V]** (`tests/real_phone_checklist_needs_a_terminal.rs`). `--demo` is exempt, because agents and tests play it through a pipe.
+2. **Results location.** Real-Phone results default to `$XDG_STATE_HOME/desktop-calls/real-phone-checklist/`, or `~/.local/state/…` when `XDG_STATE_HOME` is unset. The scorecard reads them from there. `/docs/real-phone-checklist/` is in `.gitignore`, so files an older runner left there can't be committed by accident. **[V]** (scorecard test with a temporary `XDG_STATE_HOME`)
+3. **Earlier results stay where they were.** The runner doesn't move files left in `docs/real-phone-checklist/` by older runs. So a rerun doesn't resume them; it starts a new file. To keep resuming, move them once: `mkdir -p ~/.local/state/desktop-calls/real-phone-checklist && mv docs/real-phone-checklist/*.json ~/.local/state/desktop-calls/real-phone-checklist/`. **[I]**
+4. **Needs per step.** Each step lists its own needs, such as a helper, the Test Number, the keybinding or the earbuds. The runner lists their union over the steps that will run, after "The Pixel charged, nearby and connected." A rerun that only retries 3.3 asks for a number with a keypad menu, not a helper. **[V]** (`before_a_group_starts_the_runner_lists_only_what_the_steps_about_to_run_need`). Step 7.3 still needs a helper: it checks the Indicator's ringing icon during the helper's Call.
+5. **Lands-with tickets.** 1.1 now lands with #22, because forgetting the pairing leaves the Phone unpaired until 1.2's Setup Window pairs it again. 1.2 drops #21 and #10, and group 4 drops #10, since those tickets are closed. The other steps that wait on closed tickets get scripts in the second part of #120.

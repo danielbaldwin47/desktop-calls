@@ -28,9 +28,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
-/// Where the result files of runs against the real Phone go by default,
-/// relative to the repository, where `just` runs.
-pub const DEFAULT_DIRECTORY: &str = "docs/real-phone-checklist";
+/// Where the result files of runs against the real Phone go by default:
+/// `$XDG_STATE_HOME/desktop-calls/real-phone-checklist`, or under
+/// `~/.local/state`. They come from the real Phone and can hold real data,
+/// so they stay out of the repository, which is published (ticket #120).
+pub fn default_directory() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .filter(|state| !state.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .unwrap_or_default()
+        .join("desktop-calls/real-phone-checklist")
+}
 
 /// Whether a run was against the real Phone or the Simulated Phone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

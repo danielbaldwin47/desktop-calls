@@ -83,7 +83,8 @@ ci-wait *args:
     @python3 tools/ci_wait.py "$@"
 
 # Walk through the Real-Phone Checklist one step at a time: all groups, or
-# one (`just real-phone-checklist 2`). Results go to docs/real-phone-checklist/;
+# one (`just real-phone-checklist 2`). Run it in your own terminal: it asks
+# questions. Results go to ~/.local/state/desktop-calls/real-phone-checklist/;
 # a rerun resumes at the first step that didn't pass. `--demo` runs it
 # against the Simulated Phone instead. `just real-phone-checklist --help`.
 [positional-arguments]

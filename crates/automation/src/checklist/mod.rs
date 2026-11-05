@@ -14,6 +14,7 @@ mod sitting;
 mod steps;
 mod watch;
 
+use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -48,19 +49,8 @@ const DEMO_CONNECT_DEADLINE: Duration = Duration::from_secs(10);
 
 /// `automation real-phone-checklist`.
 pub fn run(options: &Options) -> ExitCode {
-    let groups: Vec<&Group> = match options.group {
-        None => GROUPS.iter().collect(),
-        Some(number) => {
-            if let Some(group) = GROUPS.iter().find(|group| group.number == number) {
-                vec![group]
-            } else {
-                eprintln!(
-                    "There is no group {number}. The groups are 1 to {}.",
-                    GROUPS.len()
-                );
-                return ExitCode::FAILURE;
-            }
-        }
+    let Some(groups) = groups_to_run(options) else {
+        return ExitCode::FAILURE;
     };
     let interrupted = Arc::new(AtomicBool::new(false));
     // Ctrl-C stops the run between waits, so the results are kept and, under
@@ -157,6 +147,36 @@ pub fn run(options: &Options) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The groups asked for, or `None`, having said why, if the run can't start.
+fn groups_to_run(options: &Options) -> Option<Vec<&'static Group>> {
+    let groups: Vec<&Group> = match options.group {
+        None => GROUPS.iter().collect(),
+        Some(number) => {
+            if let Some(group) = GROUPS.iter().find(|group| group.number == number) {
+                vec![group]
+            } else {
+                eprintln!(
+                    "There is no group {number}. The groups are 1 to {}.",
+                    GROUPS.len()
+                );
+                return None;
+            }
+        }
+    };
+    // Against the real Phone the runner asks the user questions. Without a
+    // terminal (Claude Code's `!` prefix, a pipe) it would read nothing and
+    // stop with no reason, so it says why before it touches anything. The
+    // demo is played through a pipe on purpose.
+    if !options.demo && !std::io::stdin().is_terminal() {
+        eprintln!(
+            "The Real-Phone Checklist needs an interactive terminal to ask you questions, so run `{}` in your own terminal.",
+            resume_command(options)
+        );
+        return None;
+    }
+    Some(groups)
+}
+
 /// The Phone and app the runner observes.
 struct World {
     mode: Mode,
@@ -214,7 +234,7 @@ impl World {
 
     fn default_results(&self) -> PathBuf {
         match self.mode {
-            Mode::Real => PathBuf::from(results::DEFAULT_DIRECTORY),
+            Mode::Real => results::default_directory(),
             Mode::Demo => super::target_directory()
                 .unwrap_or_default()
                 .join("real-phone-checklist-demo"),
@@ -319,8 +339,15 @@ fn run_group(
         flush();
         return Ok(());
     }
+    // Only what the steps about to run need, each once.
+    let mut needs: Vec<&str> = vec!["The Pixel charged, nearby and connected."];
+    for need in to_run.iter().flat_map(|step| step.needs) {
+        if !needs.contains(need) {
+            needs.push(need);
+        }
+    }
     println!("Before you start:");
-    for need in group.before {
+    for need in needs {
         println!("  - {need}");
     }
     let ready = sitting.ready(&format!(

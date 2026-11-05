@@ -31,13 +31,14 @@ pub type Script = fn(&mut Sitting) -> Result<(), Stop>;
 pub struct Group {
     pub number: u8,
     pub title: &'static str,
-    /// What the user needs before the group starts.
-    pub before: &'static [&'static str],
     pub steps: &'static [Step],
 }
 
 pub struct Step {
     pub id: &'static str,
+    /// What the user needs for this step, beyond the Pixel connected. Before
+    /// a group starts, the runner lists what the steps about to run need.
+    pub needs: &'static [&'static str],
     pub title: &'static str,
     pub script: Option<Script>,
     /// The tickets whose features the step waits on, while it has no script.
@@ -64,36 +65,48 @@ const APP_DEADLINE: Duration = Duration::from_secs(10);
 /// How long the audio must stay on the Phone after answering there.
 const STAYS_ON_PHONE: Duration = Duration::from_secs(3);
 
+/// What steps need, as the runner lists it before a group starts.
+const HELPER: &str = "A helper with a second phone who can call you.";
+const TEST_NUMBER: &str = "The Test Number already given to the agent.";
+const PIXEL_IN_HAND: &str =
+    "The Pixel unlocked and in hand: it may ask to allow access to contacts and call history.";
+const NOTIFICATIONS: &str = "Omarchy's notifications showing: Do Not Disturb off.";
+const KEYBINDING: &str = "A Hyprland keybinding that runs `desktop-calls`.";
+const KEYPAD_MENU: &str =
+    "A number with a keypad menu you can call from the Pixel, such as your voicemail.";
+const EARBUDS: &str = "The earbuds paired to the Pixel.";
+const NO_OTHER_AUDIO: &str = "No other audio playing, because 6.3 restarts WirePlumber.";
+
 pub const GROUPS: &[Group] = &[
     Group {
         number: 1,
         title: "Fresh first run, timed to the first Call",
-        before: &[
-            "The Pixel charged and nearby.",
-            "The Test Number already given to the agent.",
-            "The Pixel unlocked and in hand for 1.4: it may ask to allow access to contacts and call history.",
-        ],
         steps: &[
             Step {
                 id: "1.1",
+                needs: &[],
                 title: "Forget the pairing on both the Pixel and the Desktop, then install and start Desktop Calls",
                 script: None,
-                lands_with: &[20, 21],
+                // It leaves the Phone unpaired, so it runs only with 1.2.
+                lands_with: &[22],
             },
             Step {
                 id: "1.2",
+                needs: &[TEST_NUMBER, PIXEL_IN_HAND],
                 title: "Pair through the Setup Window, allow Contacts access, add the keybinding, and place a first Call to the Test Number (timed)",
                 script: None,
-                lands_with: &[21, 22, 10],
+                lands_with: &[22],
             },
             Step {
                 id: "1.3",
+                needs: &[PIXEL_IN_HAND],
                 title: "Turn Contacts access off on the Pixel, use Try again and let the prompt time out once, then allow it",
                 script: None,
                 lands_with: &[22],
             },
             Step {
                 id: "1.4",
+                needs: &[PIXEL_IN_HAND],
                 title: "Read a second page of Call History: the Pixel honours paging",
                 script: Some(call_history_paging),
                 lands_with: &[],
@@ -103,58 +116,59 @@ pub const GROUPS: &[Group] = &[
     Group {
         number: 2,
         title: "Incoming Calls",
-        before: &[
-            "The Pixel charged, nearby and paired with this Desktop.",
-            "Desktop Calls running, with the Pixel connected.",
-            "A helper with a second phone who can call you several times.",
-            "A Hyprland keybinding that runs `desktop-calls` (the Setup Window offers one once #22 lands).",
-            "Omarchy's Do Not Disturb off. Step 2.7 has you turn it on, then off again.",
-        ],
         steps: &[
             Step {
                 id: "2.1",
+                needs: &[HELPER],
                 title: "Answer on the Desktop",
                 script: Some(answer_on_the_desktop),
                 lands_with: &[],
             },
             Step {
                 id: "2.2",
+                needs: &[HELPER],
                 title: "Answer on the Pixel: the Banner closes and the audio stays on the Pixel",
                 script: Some(answer_on_the_pixel),
                 lands_with: &[],
             },
             Step {
                 id: "2.3",
+                needs: &[HELPER],
                 title: "Decline on the Desktop",
                 script: Some(decline_on_the_desktop),
                 lands_with: &[],
             },
             Step {
                 id: "2.4",
+                needs: &[HELPER],
                 title: "Decline on the Pixel: the Banner closes",
                 script: Some(decline_on_the_pixel),
                 lands_with: &[],
             },
             Step {
                 id: "2.5",
+                needs: &[HELPER, NOTIFICATIONS],
                 title: "Let it ring out: the Missed Call notification appears; click it, then press Enter to call back",
                 script: Some(ring_out),
                 lands_with: &[],
             },
             Step {
                 id: "2.6",
+                needs: &[HELPER, NOTIFICATIONS],
                 title: "The helper calls with their number withheld (for example #31#), and you let it ring out",
                 script: Some(withheld_ring_out),
                 lands_with: &[],
             },
             Step {
                 id: "2.7",
+                needs: &[HELPER, NOTIFICATIONS],
                 title: "Turn Do Not Disturb on and receive two Calls: the Banner shows and the Desktop stays silent; decline the first on the Desktop and answer the second on the Pixel",
                 script: Some(do_not_disturb),
                 lands_with: &[],
             },
             Step {
                 id: "2.8",
+                needs: &[HELPER, KEYBINDING],
                 title: "The keybinding focuses the Banner, Escape gives focus back, A answers and D declines",
                 script: Some(keybinding),
                 lands_with: &[],
@@ -164,26 +178,24 @@ pub const GROUPS: &[Group] = &[
     Group {
         number: 3,
         title: "During a Call",
-        before: &[
-            "The Pixel charged, nearby and connected.",
-            "A helper with a second phone who can call you.",
-            "A number with a keypad menu you can call from the Pixel, such as your voicemail.",
-        ],
         steps: &[
             Step {
                 id: "3.1",
+                needs: &[HELPER],
                 title: "Handoff to the Phone and back, twice: confirm by ear that the audio lands on the earpiece",
                 script: None,
                 lands_with: &[13, 14],
             },
             Step {
                 id: "3.2",
+                needs: &[HELPER],
                 title: "Mute and unmute: the helper hears silence while muted",
                 script: Some(mute),
                 lands_with: &[],
             },
             Step {
                 id: "3.3",
+                needs: &[KEYPAD_MENU],
                 title: "Send keypad tones to a voicemail menu",
                 script: Some(keypad_tones),
                 lands_with: &[],
@@ -193,47 +205,44 @@ pub const GROUPS: &[Group] = &[
     Group {
         number: 4,
         title: "Call waiting",
-        before: &[
-            "A helper with a second phone who can call you.",
-            "The Test Number already given to the agent.",
-        ],
         steps: &[
             Step {
                 id: "4.1",
+                needs: &[HELPER, TEST_NUMBER],
                 title: "Call the Test Number from the Desktop while the helper calls you: Hold & answer, then Swap, then hang up one",
                 script: None,
-                lands_with: &[10, 16],
+                lands_with: &[16],
             },
             Step {
                 id: "4.2",
+                needs: &[HELPER, TEST_NUMBER],
                 title: "Repeat with End & answer",
                 script: None,
-                lands_with: &[10, 16],
+                lands_with: &[16],
             },
             Step {
                 id: "4.3",
+                needs: &[HELPER, TEST_NUMBER],
                 title: "Repeat with Decline",
                 script: None,
-                lands_with: &[10, 16],
+                lands_with: &[16],
             },
         ],
     },
     Group {
         number: 5,
         title: "Earbuds",
-        before: &[
-            "The earbuds paired to the Pixel.",
-            "A helper with a second phone who can call you.",
-        ],
         steps: &[
             Step {
                 id: "5.1",
+                needs: &[HELPER, EARBUDS],
                 title: "With the earbuds connected to the Pixel, answer on the Desktop and note where the audio goes",
                 script: None,
                 lands_with: &[13],
             },
             Step {
                 id: "5.2",
+                needs: &[HELPER, EARBUDS],
                 title: "Repeat, answering on the earbuds",
                 script: None,
                 lands_with: &[13],
@@ -243,25 +252,24 @@ pub const GROUPS: &[Group] = &[
     Group {
         number: 6,
         title: "Range and power",
-        before: &[
-            "The Pixel charged and nearby. No helper needed.",
-            "No other audio playing, because 6.3 restarts WirePlumber.",
-        ],
         steps: &[
             Step {
                 id: "6.1",
+                needs: &[],
                 title: "Take the Pixel out of range (or turn its Bluetooth off), then back: the runner times the reconnect",
                 script: None,
                 lands_with: &[19],
             },
             Step {
                 id: "6.2",
+                needs: &[],
                 title: "Suspend the Desktop for a minute, then resume",
                 script: None,
                 lands_with: &[19],
             },
             Step {
                 id: "6.3",
+                needs: &[NO_OTHER_AUDIO],
                 title: "Restart WirePlumber while idle",
                 script: None,
                 lands_with: &[20],
@@ -271,31 +279,31 @@ pub const GROUPS: &[Group] = &[
     Group {
         number: 7,
         title: "Keyboard and look",
-        before: &[
-            "A helper with a second phone who can call you.",
-            "Omarchy notifications showing: Do Not Disturb off.",
-        ],
         steps: &[
             Step {
                 id: "7.1",
+                needs: &[KEYBINDING, TEST_NUMBER],
                 title: "Place and end a Call using only the keyboard",
                 script: None,
                 lands_with: &[10, 11],
             },
             Step {
                 id: "7.2",
+                needs: &[HELPER, NOTIFICATIONS],
                 title: "The Banner beside a real notification: neither covers the other",
                 script: Some(banner_beside_a_notification),
                 lands_with: &[],
             },
             Step {
                 id: "7.3",
+                needs: &[HELPER],
                 title: "The Indicator in Omarchy's bar: pinned, it opens the Dialer and its menu runs a Call",
                 script: Some(indicator_in_the_bar),
                 lands_with: &[],
             },
             Step {
                 id: "7.4",
+                needs: &[KEYBINDING],
                 title: "The Dialer draws its first frame within 150 ms of the keybinding",
                 script: Some(dialer_first_frame),
                 lands_with: &[],

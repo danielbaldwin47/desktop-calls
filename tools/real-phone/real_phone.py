@@ -17,6 +17,9 @@ that the rules learnt on ticket #3 hold everywhere:
   "No Call left" counts only while the Phone's AudioGateway is present.
 * Only the Call to the Test Number is ever hung up. Other Calls on the
   Phone are reported, never touched.
+* The app never runs beside the user's installed `desktop-calls.service`
+  (ADR-0006): `InstalledService` stops it for a Real-Phone run and starts
+  it again afterwards.
 
 This is a tool for agents, not part of the product. The names of the
 external APIs (AudioGateway, Call1, Device1) are used as they are.
@@ -50,6 +53,16 @@ PROPERTIES_IF = "org.freedesktop.DBus.Properties"
 INTROSPECTABLE_IF = "org.freedesktop.DBus.Introspectable"
 BLUEZ = "org.bluez"
 DEVICE1_IF = "org.bluez.Device1"
+SYSTEMD = "org.freedesktop.systemd1"
+SYSTEMD_PATH = "/org/freedesktop/systemd1"
+SYSTEMD_MANAGER_IF = SYSTEMD + ".Manager"
+SYSTEMD_UNIT_IF = SYSTEMD + ".Unit"
+BUS = "org.freedesktop.DBus"
+BUS_PATH = "/org/freedesktop/DBus"
+
+# The unit `just install` installs, and the bus name the app claims.
+INSTALLED_UNIT = "desktop-calls.service"
+APP_BUS_NAME = "io.github.danielbaldwin47.DesktopCalls"
 
 # States in which a Call may be the one we dialled. "incoming" and "waiting"
 # are someone calling the Phone: never ours, never touched.
@@ -277,6 +290,30 @@ def set_property(
     props.Set(interface, name, value, signature="ssv")
 
 
+def wait_for(
+    predicate: Callable[[], bool], timeout: float, what: str, quiet: bool = False
+) -> bool:
+    """Poll `predicate` until it holds or `timeout` passes. D-Bus errors
+    (e.g. WirePlumber restarting) count as "not yet"."""
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while True:
+        try:
+            if predicate():
+                if not quiet:
+                    log("OK", what)
+                return True
+        except dbus.DBusException as e:
+            if e.get_dbus_name() != last_error:
+                last_error = e.get_dbus_name() or ""
+                log("RETRY", f"{what}: {last_error}")
+        if time.monotonic() >= deadline:
+            if not quiet:
+                log("TIMEOUT", f"{what} (after {timeout:g} s)")
+            return False
+        time.sleep(0.1)
+
+
 # ------------------------------------------------------------------ Telephony
 
 
@@ -287,10 +324,11 @@ class Telephony:
     WirePlumber restart or a hands-free reconnect cannot leave it stale.
     """
 
-    def __init__(self, test_number: str, phone_address: str | None = None) -> None:
+    def __init__(self, test_number: str | None, phone_address: str | None = None) -> None:
+        """Without a Test Number it only reads: no Call is ever its own."""
         self.session = dbus.SessionBus()
         self.test_number = test_number
-        self.redact = Redactor(test_number)
+        self.redact = Redactor(test_number) if test_number else None
         self.phone_address = phone_address
         # The Call path we dialled, once known. Trusted only while that
         # path still holds an outgoing Call to the Test Number.
@@ -343,7 +381,7 @@ class Telephony:
 
     def is_test_call(self, path: str, props: dict[str, Any]) -> bool:
         """Is this the Call we dialled? Never true for an incoming Call."""
-        if props.get("State") not in OUTGOING_STATES:
+        if self.redact is None or props.get("State") not in OUTGOING_STATES:
             return False
         line = props.get("LineIdentification", "")
         if line:
@@ -370,6 +408,8 @@ class Telephony:
     # -- actions
 
     def dial_test_number(self, audio_gateway: str) -> None:
+        if self.test_number is None:
+            raise ValueError("no Test Number to dial")
         self.dialled = True
         call(
             self.session,
@@ -384,25 +424,7 @@ class Telephony:
     def wait_for(
         self, predicate: Callable[[], bool], timeout: float, what: str, quiet: bool = False
     ) -> bool:
-        """Poll `predicate` until it holds or `timeout` passes. D-Bus errors
-        (e.g. WirePlumber restarting) count as "not yet"."""
-        deadline = time.monotonic() + timeout
-        last_error = ""
-        while True:
-            try:
-                if predicate():
-                    if not quiet:
-                        log("OK", what)
-                    return True
-            except dbus.DBusException as e:
-                if e.get_dbus_name() != last_error:
-                    last_error = e.get_dbus_name() or ""
-                    log("RETRY", f"{what}: {last_error}")
-            if time.monotonic() >= deadline:
-                if not quiet:
-                    log("TIMEOUT", f"{what} (after {timeout:g} s)")
-                return False
-            time.sleep(0.1)
+        return wait_for(predicate, timeout, what, quiet)
 
     def hang_up_test_call(self, timeout: float = 30.0) -> bool:
         """Hang up the Call to the Test Number. True once it is confirmed gone.
@@ -492,3 +514,88 @@ def report_remaining(remaining: dict[str, dict[str, Any]] | None) -> bool:
         log("ALERT", f"a Call remains: {path} State={props.get('State')}")
     log("ALERT", "Look at the Phone now and hang up any Call to the Test Number there.")
     return False
+
+
+# ------------------------------------------------------------------ the installed service
+
+
+class ServiceError(Exception):
+    """The installed service could not be stopped or started."""
+
+
+class InstalledService:
+    """The user's installed `desktop-calls.service`, through the systemd
+    user manager on the session bus.
+
+    A Real-Phone run never runs the app beside it (ADR-0006): two apps would
+    both react to Calls, both move audio, and fight over the control
+    interface. So the run stops the service first, if it runs, and starts it
+    again afterwards; a guard process starts it again even if the run is
+    killed. Where there is no systemd on the bus, or the unit isn't
+    installed, there is nothing to stop.
+    """
+
+    _ABSENT = (
+        SYSTEMD + ".NoSuchUnit",
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+    )
+
+    def __init__(self, session: dbus.Bus | None = None) -> None:
+        self.session = session if session is not None else dbus.SessionBus()
+
+    def active_state(self) -> str:
+        """The unit's ActiveState; "inactive" if it isn't installed."""
+        try:
+            path = call(
+                self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "GetUnit",
+                INSTALLED_UNIT, signature="s",
+            )
+        except dbus.DBusException as e:
+            if e.get_dbus_name() in self._ABSENT:
+                return "inactive"
+            raise
+        return call(
+            self.session, SYSTEMD, path, PROPERTIES_IF, "Get", SYSTEMD_UNIT_IF, "ActiveState",
+            signature="ss",
+        )
+
+    def running(self) -> bool:
+        return self.active_state() in ("active", "activating", "reloading")
+
+    def app_on_bus(self) -> bool:
+        """Whether any copy of the app owns the control interface now."""
+        return bool(call(self.session, BUS, BUS_PATH, BUS, "NameHasOwner", APP_BUS_NAME,
+                         signature="s"))
+
+    def stop(self, timeout: float = 30.0) -> None:
+        """Stop the service and wait until it has left the bus."""
+        log("SERVICE", f"stopping {INSTALLED_UNIT} for this run; it starts again afterwards")
+        call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StopUnit",
+             INSTALLED_UNIT, "replace", signature="ss")
+        if not wait_for(
+            lambda: self.active_state() in ("inactive", "failed") and not self.app_on_bus(),
+            timeout, f"{INSTALLED_UNIT} stopped",
+        ):
+            raise ServiceError(f"{INSTALLED_UNIT} did not stop within {timeout:g} s")
+
+    def start(self, timeout: float = 30.0) -> bool:
+        """Start the service again, once no other copy of the app is on the
+        bus. True once it is active and on the bus."""
+        try:
+            wait_for(lambda: not self.app_on_bus(), 10, "no other copy of the app on the bus",
+                     quiet=True)
+            log("SERVICE", f"starting {INSTALLED_UNIT} again")
+            call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
+                 INSTALLED_UNIT, "replace", signature="ss")
+            started = wait_for(
+                lambda: self.active_state() == "active" and self.app_on_bus(),
+                timeout, f"{INSTALLED_UNIT} running again",
+            )
+        except dbus.DBusException as e:
+            log("SERVICE", f"could not start {INSTALLED_UNIT}: {e.get_dbus_name()}")
+            started = False
+        if not started:
+            log("ALERT", f"{INSTALLED_UNIT} is not running. Start it with "
+                         f"`systemctl --user start {INSTALLED_UNIT}`.")
+        return started

@@ -21,6 +21,12 @@ The Call is hung up whatever happens: when the hook exits or is killed, on
 a D-Bus error, on Ctrl-C, SIGTERM or SIGHUP, and, through a separate guard
 process, even if this process is killed outright.
 
+The installed desktop-calls.service never runs beside the run (ADR-0006):
+if it is running, it is stopped before dialling, so the hook has the Phone
+to itself and may start a dev run of the app. It is started again after
+hanging up, in all the cases above, the guard's included. A service that
+wasn't running stays stopped.
+
 With --desktop-audio it sets RejectSCO=false before dialling, as the app
 does for a Call placed on the Desktop, logs every change of the
 transport's State and Codec until the Call is active, and sets RejectSCO
@@ -31,7 +37,9 @@ Call to the Test Number.
 
 Exit status: 0 the Call was placed, the hook succeeded, and GetCalls is
 empty afterwards; 1 something failed but no Call remains; 2 a Call may
-still be live on the Phone (go and hang it up); 130 interrupted, no Call
+still be live on the Phone (go and hang it up); 3 no Call remains but the
+installed service could not be started again (start it with
+`systemctl --user start desktop-calls.service`); 130 interrupted, no Call
 remains.
 """
 
@@ -51,7 +59,7 @@ import dbus
 import real_phone as rp
 from real_phone import log
 
-EXIT_OK, EXIT_FAILED, EXIT_CALL_REMAINS, EXIT_INTERRUPTED = 0, 1, 2, 130
+EXIT_OK, EXIT_FAILED, EXIT_CALL_REMAINS, EXIT_SERVICE_STOPPED, EXIT_INTERRUPTED = 0, 1, 2, 3, 130
 
 
 class TestCallFailed(Exception):
@@ -61,10 +69,11 @@ class TestCallFailed(Exception):
 # ------------------------------------------------------------------ guard
 #
 # A separate process, in its own session so Ctrl-C and a closed terminal do
-# not reach it. It reads lines from a pipe: "dialled", "call <path>",
-# "hook <process group>", "done". If the pipe closes without "done", the
-# parent died without hanging up, so the guard stops the hook and hangs up
-# the Call to the Test Number itself.
+# not reach it. It reads lines from a pipe: "service-stopped", "dialled",
+# "call <path>", "hook <process group>", "done". If the pipe closes without
+# "done", the parent died without finishing, so the guard stops the hook,
+# hangs up the Call to the Test Number itself, and starts the installed
+# service again if the parent had stopped it. `just run` uses it too.
 
 
 class Guard:
@@ -100,14 +109,15 @@ class Guard:
 def guard_main() -> int:
     for s in (signal.SIGINT, signal.SIGHUP):
         signal.signal(s, signal.SIG_IGN)
-    number = rp.read_test_number()
-    rp.install_redaction(number)
     dialled, call_path, hook_group, desktop_audio = False, None, None, False
+    service_stopped = False
     for line in sys.stdin:
         word, _, rest = line.strip().partition(" ")
         if word == "done":
             return EXIT_OK
-        if word == "dialled":
+        if word == "service-stopped":
+            service_stopped = True
+        elif word == "dialled":
             dialled = True
         elif word == "call":
             call_path = rest
@@ -118,8 +128,23 @@ def guard_main() -> int:
     if hook_group is not None:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(hook_group, signal.SIGKILL)
-    if not dialled:
-        return EXIT_OK
+    outcome = EXIT_OK
+    try:
+        if dialled:
+            outcome = guard_hang_up(call_path, desktop_audio)
+        if service_stopped:
+            log("GUARD", "the run stopped without starting the installed service again")
+            if not rp.InstalledService().start():
+                outcome = max(outcome, EXIT_SERVICE_STOPPED)
+    except dbus.DBusException as e:
+        log("GUARD", f"lost the session bus: {e.get_dbus_name()}")
+        return EXIT_CALL_REMAINS
+    return outcome
+
+
+def guard_hang_up(call_path: str | None, desktop_audio: bool) -> int:
+    number = rp.read_test_number()
+    rp.install_redaction(number)
     log("GUARD", "test-call stopped without hanging up; the guard is hanging up")
     tel = rp.Telephony(number)
     tel.dialled = True
@@ -289,11 +314,17 @@ def run(args: argparse.Namespace) -> int:
         return EXIT_FAILED
     log("PHONE", f"{tel.phone_address}, AudioGateway {gateway}, no Calls")
 
+    service = rp.InstalledService(tel.session)
     guard = Guard()
     hook: Hook | None = None
     outcome = EXIT_FAILED
+    service_stopped = False
     transport = TransportLog(tel, gateway) if args.desktop_audio else None
     try:
+        if service.running():
+            guard.tell("service-stopped")
+            service_stopped = True
+            service.stop()
         if transport is not None:
             guard.tell("desktop-audio")
             transport.poll()
@@ -328,6 +359,8 @@ def run(args: argparse.Namespace) -> int:
         log("ERROR", str(e))
     except dbus.DBusException as e:
         log("ERROR", f"{e.get_dbus_name()}: {e.get_dbus_message()}")
+    except rp.ServiceError as e:
+        log("ERROR", str(e))
     finally:
         with rp.interrupts_deferred():
             if hook is not None:
@@ -336,9 +369,12 @@ def run(args: argparse.Namespace) -> int:
             if transport is not None:
                 reject_desktop_audio(tel)
             no_call_remains = rp.report_remaining(tel.remaining_calls())
+            service_started = not service_stopped or service.start()
             guard.done()
     if not no_call_remains:
         return EXIT_CALL_REMAINS
+    if not service_started:
+        return EXIT_SERVICE_STOPPED
     return outcome
 
 

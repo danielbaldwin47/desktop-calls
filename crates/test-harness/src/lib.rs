@@ -116,6 +116,14 @@ const FRAMES_AHEAD: usize = 8;
 /// loaded runner many times over.
 const REDRAW_DEADLINE: Duration = Duration::from_secs(10);
 
+/// The Real-Phone tools, which `just test-call` and `just run` run.
+const REAL_PHONE_TOOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/real-phone");
+/// The Python with dbus-python, which the Real-Phone tools need (#54).
+const SYSTEM_PYTHON: &str = "/usr/bin/python3";
+/// The Test Number in a scenario that runs a Real-Phone tool: a made-up
+/// number from Ofcom's drama range.
+pub const TEST_NUMBER: &str = "+447700900456";
+
 /// The script `just install` runs.
 const INSTALL_SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/install.py");
 
@@ -215,6 +223,36 @@ impl Harness {
 }
 
 impl Harness {
+    /// A command that runs the Real-Phone tool `tools/real-phone/<script>`
+    /// against this scenario, as `just` runs it: under the system Python,
+    /// with the scenario's buses and home, and [`TEST_NUMBER`] as the Test
+    /// Number. It runs where the journal can't be reached, so an app it
+    /// starts logs to the scenario's log as the harness's own app does.
+    ///
+    /// # Panics
+    ///
+    /// If the Test Number can't be written.
+    #[must_use]
+    pub fn real_phone_tool(&self, script: &str) -> Command {
+        let config = self.directory.join("config/desktop-calls");
+        fs::create_dir_all(&config).expect("create the scenario's config directory");
+        fs::write(config.join("test-number"), TEST_NUMBER).expect("write the Test Number");
+        let mut command = without_journal(Path::new(SYSTEM_PYTHON));
+        self.group
+            .adopt(&mut command)
+            .env_clear()
+            .envs(self.environment.iter().cloned())
+            .arg(Path::new(REAL_PHONE_TOOLS).join(script));
+        command
+    }
+
+    /// The path of one of the workspace's binaries, such as
+    /// `"desktop-calls"`, for a command a test hands to a tool.
+    #[must_use]
+    pub fn binary(&self, name: &str) -> PathBuf {
+        self.bin_directory.join(name)
+    }
+
     /// This scenario's directory: the temporary home, the XDG directories,
     /// the buses and every log.
     #[must_use]

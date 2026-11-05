@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use test_harness::{AppState, Harness, MenuEntry, RecordedMethodCall};
+use test_harness::{AppState, Harness, Key, MenuEntry, RecordedMethodCall, Region, Screenshot};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -22,6 +22,11 @@ const LOST_WINDOW_DEADLINE: Duration = Duration::from_secs(14);
 const RECONNECT_DEADLINE: Duration = Duration::from_secs(10);
 /// How long something that must not happen is watched for.
 const HOLD: Duration = Duration::from_millis(500);
+
+/// A little longer than the Phone link waits for a vanished Call to come
+/// back as the same Call (2 s), and well within the time the lost Call
+/// Window stays.
+const PHONE_LINK_GIVES_UP: Duration = Duration::from_secs(4);
 
 const PHONE_NAME: &str = "My Pixel";
 /// Bob, the first caller.
@@ -235,22 +240,64 @@ fn assert_lost_menu(menu: &[MenuEntry], status: &str) {
     assert!(!hang_up.enabled, "{hang_up:#?}");
 }
 
-#[test]
-fn with_hands_free_lost_the_call_window_offers_neither_hang_up_nor_mute() {
-    let harness = connected();
-    let (_, bob) = on_a_call(&harness);
-    assert_offers_tones(&harness.app_state());
-    // With the keypad open and a tone typed, none of it shows once lost.
+/// Gives the Call Window the keyboard and waits until it has it.
+fn focus_call_window(harness: &Harness) {
     harness.activate();
     harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
         call_window(state, "focused").as_deref() == Some("true")
     });
+}
+
+/// Types the tones "12" and opens the keypad, and waits until the Call
+/// Window shows both.
+fn open_keypad_with_tones(harness: &Harness) {
+    assert_offers_tones(&harness.app_state());
+    focus_call_window(harness);
     harness.keyboard().type_text("12");
     harness.keyboard().type_text("k");
     harness.wait_for_app("the keypad shows with the tones typed", DEADLINE, |state| {
         call_window(state, "keypad").as_deref() == Some("shown")
             && call_window(state, "tones").as_deref() == Some("12")
     });
+}
+
+/// Checks the tone entry works: with the keyboard, a digit typed lands in
+/// it, after `before`, and Backspace takes it out again, which only the
+/// focused tone entry does.
+fn assert_tones_usable(harness: &Harness, before: Option<&str>) {
+    focus_call_window(harness);
+    let tones = |state: &AppState| call_window(state, "tones");
+    let typed = format!("{}5", before.unwrap_or_default());
+    harness.keyboard().type_text("5");
+    harness.wait_for_app("the digit is in the tone entry", DEADLINE, |state| {
+        tones(state).as_deref() == Some(typed.as_str())
+    });
+    harness.keyboard().press(Key::Backspace);
+    harness.wait_for_app("Backspace takes it out again", DEADLINE, |state| {
+        tones(state).as_deref() == before
+    });
+}
+
+/// Waits until contact is back: the lost message has gone and the Call is
+/// live again. Returns the Call's id as the Call Window shows it.
+fn wait_contact_back(harness: &Harness) -> (AppState, u32) {
+    let state = harness.wait_for_app("contact is back", RECONNECT_DEADLINE, |state| {
+        state.connection_state == "connected"
+            && call_window(state, "notice").is_none()
+            && call_window(state, "hang-up-shortcut").is_some()
+    });
+    let call = call_window(&state, "call")
+        .and_then(|call| call.parse().ok())
+        .unwrap_or_else(|| panic!("no Call in the Call Window: {state:#?}"));
+    (state, call)
+}
+
+#[test]
+fn with_hands_free_lost_the_call_window_offers_neither_hang_up_mute_nor_tones() {
+    let harness = connected();
+    let (_, bob) = on_a_call(&harness);
+    // With the keypad open and a tone typed, none of it shows once lost.
+    open_keypad_with_tones(&harness);
     lose_hands_free(&harness);
 
     let state = wait_lost(&harness);
@@ -465,4 +512,169 @@ fn when_contact_comes_back_hang_up_works_again_and_the_refused_one_is_not_kept()
                 .iter()
                 .any(|call| call.member == "Hangup" && call.path == *bob_path)
         });
+}
+
+/// With the keypad open and "12" typed when the Phone goes out of range,
+/// and the same Call back when it returns, the Call Window has the toggle,
+/// the entry, the keypad and "12" again, and the entry takes tones.
+#[test]
+fn when_the_phone_comes_back_the_open_keypad_and_typed_tones_are_as_they_were() {
+    let harness = connected();
+    let (_, bob) = on_a_call(&harness);
+    open_keypad_with_tones(&harness);
+    harness.simulated_phone().disconnect();
+    assert_offers_nothing(&wait_lost(&harness));
+
+    harness.simulated_phone().return_to_range();
+
+    let (state, call) = wait_contact_back(&harness);
+    assert_eq!(call, bob, "the same Call came back");
+    assert_offers_tones(&state);
+    assert_eq!(call_window(&state, "keypad").as_deref(), Some("shown"));
+    assert_eq!(call_window(&state, "tones").as_deref(), Some("12"));
+    assert_tones_usable(&harness, Some("12"));
+}
+
+/// With the keypad open and "12" typed when the Phone goes out of range, and
+/// the Call back under a new id because the Phone took longer than the Phone
+/// link waits for it, the Call Window starts afresh as for any new Call: the
+/// keypad closed and no tones, but the toggle and the entry offered, and the
+/// entry takes tones.
+#[test]
+fn when_the_call_comes_back_under_a_new_id_the_keypad_and_tones_start_afresh() {
+    let harness = connected();
+    let (_, bob) = on_a_call(&harness);
+    open_keypad_with_tones(&harness);
+    harness.simulated_phone().disconnect();
+    assert_offers_nothing(&wait_lost(&harness));
+    harness
+        .simulated_phone()
+        .return_to_range_after(PHONE_LINK_GIVES_UP);
+
+    let (state, call) = wait_contact_back(&harness);
+    assert_ne!(call, bob, "the Call came back under a new id");
+    assert_offers_tones(&state);
+    assert_eq!(call_window(&state, "keypad"), None, "{state:#?}");
+    assert_eq!(call_window(&state, "tones"), None, "{state:#?}");
+    assert_tones_usable(&harness, None);
+}
+
+const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
+/// Hang up's colour while it works.
+const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
+/// The gap between the Call Window's rows.
+const ROW_GAP: f64 = 8.0;
+/// The most a control may move or change size and still be where it was.
+const SAME_PLACE: f64 = 2.0;
+/// How far below a button's top the rows are read: below its rounded corner,
+/// above its label.
+const EDGE_INSET: f64 = 3.0;
+/// The space between Mute and the keypad toggle.
+const MUTE_ROW_GAP: f64 = 12.0;
+
+/// Where Hang up is, if the screen shows it working.
+fn working_hang_up(screenshot: &Screenshot) -> Option<Region> {
+    screenshot.region_where(|pixel| {
+        pixel
+            .iter()
+            .zip(RED)
+            .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
+    })
+}
+
+/// Where the controls are along the rows of Mute and Hang up, as left and
+/// right edges, left to right, inside the Call Window.
+struct Rows {
+    controls: Vec<(f64, f64)>,
+    hang_up: Vec<(f64, f64)>,
+}
+
+impl Rows {
+    /// Reads the rows from `screenshot`, given where Hang up was and the
+    /// Call Window's background colour. The window is anchored at the right
+    /// of the screen and narrows when its shortcut hints go, so its left
+    /// edge moves; its right edge doesn't.
+    fn of(screenshot: &Screenshot, hang_up: Region, background: [u8; 3]) -> Self {
+        let height = hang_up.bottom - hang_up.top;
+        // Near the top of each button, above its label.
+        let controls_y = hang_up.top - ROW_GAP - height + EDGE_INSET;
+        let hang_up_y = hang_up.top + EDGE_INSET;
+        // Not the screen to the left of the window, nor to its right.
+        let in_window = |runs: Vec<(f64, f64)>| {
+            runs.into_iter()
+                .filter(|(left, right)| *left > hang_up.left - 100.0 && *right <= hang_up.right + 1.0)
+                .collect()
+        };
+        Self {
+            controls: in_window(screenshot.runs_along_row(controls_y, background, 6.0)),
+            hang_up: in_window(screenshot.runs_along_row(hang_up_y, background, 6.0)),
+        }
+    }
+
+    /// Checks Hang up's button ends where it did, at the window's right
+    /// edge, and Mute is still half of it, as the keypad toggle's place in
+    /// the row is kept: Mute neither stretches nor moves.
+    fn assert_mute_and_hang_up_in_place(&self, hang_up_right: f64, when: &str) {
+        let [(hang_left, hang_right)] = self.hang_up[..] else {
+            panic!("expected one button in Hang up's row {when}: {self:?}");
+        };
+        assert!(
+            (hang_right - hang_up_right).abs() <= SAME_PLACE,
+            "Hang up's right edge moved {when}, from {hang_up_right} to {hang_right}: {self:?}"
+        );
+        let Some((mute_left, mute_right)) = self.controls.first().copied() else {
+            panic!("no Mute {when}: {self:?}");
+        };
+        let half = (hang_right - hang_left - MUTE_ROW_GAP) / 2.0;
+        assert!(
+            (mute_left - hang_left).abs() <= SAME_PLACE
+                && ((mute_right - mute_left) - half).abs() <= SAME_PLACE,
+            "Mute is not half of Hang up's width {when}: {self:?}"
+        );
+    }
+}
+
+impl std::fmt::Debug for Rows {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "controls {:?}, Hang up {:?}",
+            self.controls, self.hang_up
+        )
+    }
+}
+
+/// Nothing above Hang up resizes or moves when contact is lost or comes
+/// back: Hang up stays on its row at the window's right edge, and Mute
+/// stays half the row, as the keypad toggle's place in Mute's row is kept
+/// while the toggle is hidden.
+#[test]
+fn losing_contact_and_getting_it_back_moves_neither_mute_nor_hang_up() {
+    let harness = connected();
+    on_a_call(&harness);
+    let live = harness.screenshot_when("call-window-live", SCREEN_DEADLINE, |screenshot| {
+        working_hang_up(screenshot).is_some()
+    });
+    let hang_up = working_hang_up(&live).expect("Hang up on screen");
+    let background = live.colour_at(hang_up.left - 3.0, hang_up.top - ROW_GAP / 2.0);
+    let before = Rows::of(&live, hang_up, background);
+    assert_eq!(before.controls.len(), 2, "Mute and the toggle: {before:?}");
+    before.assert_mute_and_hang_up_in_place(hang_up.right, "with contact");
+
+    harness.simulated_phone().disconnect();
+    wait_lost(&harness);
+    let lost = harness.screenshot_when("call-window-lost", SCREEN_DEADLINE, |screenshot| {
+        working_hang_up(screenshot).is_none()
+    });
+    Rows::of(&lost, hang_up, background)
+        .assert_mute_and_hang_up_in_place(hang_up.right, "while contact is lost");
+
+    harness.simulated_phone().return_to_range();
+    wait_contact_back(&harness);
+    let back = harness.screenshot_when("call-window-back", SCREEN_DEADLINE, |screenshot| {
+        working_hang_up(screenshot).is_some()
+    });
+    let after = Rows::of(&back, hang_up, background);
+    assert_eq!(after.controls.len(), 2, "Mute and the toggle: {after:?}");
+    after.assert_mute_and_hang_up_in_place(hang_up.right, "once contact is back");
 }

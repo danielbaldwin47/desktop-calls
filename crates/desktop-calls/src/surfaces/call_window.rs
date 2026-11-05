@@ -608,7 +608,7 @@ impl CallWindow {
         }
         for (key, shown) in [
             ("tone-entry", WidgetExt::is_visible(&self.tones)),
-            ("keypad-toggle", WidgetExt::is_visible(&self.keypad_shown)),
+            ("keypad-toggle", !view.connection_lost),
         ] {
             if shown {
                 content.insert(key.to_owned(), "shown".to_owned());
@@ -691,9 +691,10 @@ impl CallWindow {
 
     /// Brings Mute, its notices and the keypad up to date with `mute`, which
     /// is `None` with no live Call, and returns Mute's label. While the
-    /// Desktop has lost contact with the Call, the tone entry, the keypad
-    /// toggle and the keypad are hidden: no tone can be sent, and they sit
-    /// below Hang up, so nothing the user holds moves.
+    /// Desktop has lost contact with the Call, the tone entry and the keypad
+    /// are hidden, and so is the keypad toggle: no tone can be sent. The
+    /// entry and the keypad sit below Hang up. The toggle shares Mute's row,
+    /// above it, so it keeps its place, invisible, and Mute doesn't stretch.
     fn show_controls(&self, mute: Option<Mute>, connection_lost: bool) -> &'static str {
         let live = mute.is_some();
         let mute_text = messages::label(if mute == Some(Mute::On) {
@@ -713,7 +714,12 @@ impl CallWindow {
         self.mute_unavailable
             .set_visible(mute == Some(Mute::Unavailable));
         let contact_back = !connection_lost && !WidgetExt::is_visible(&self.tones);
-        self.keypad_shown.set_visible(!connection_lost);
+        self.keypad_shown
+            .set_opacity(if connection_lost { 0.0 } else { 1.0 });
+        self.keypad_shown.set_can_target(!connection_lost);
+        self.keypad_shown.set_can_focus(!connection_lost);
+        self.keypad_shown
+            .update_state(&[gtk::accessible::State::Hidden(connection_lost)]);
         self.tones.set_visible(!connection_lost);
         self.keypad
             .set_visible(!connection_lost && self.keypad_shown.is_active());
@@ -722,8 +728,9 @@ impl CallWindow {
         self.keypad.set_sensitive(live);
         if live && contact_back {
             // Once enabled, as when the Call went live: the keyboard
-            // returns to the tone entry.
-            self.tones.grab_focus();
+            // returns to the tone entry, without selecting the tones typed
+            // so far, which the next one would replace.
+            self.tones.grab_focus_without_selecting();
         }
         mute_text
     }

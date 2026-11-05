@@ -20,6 +20,8 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## Process
 
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first.
+
 - [retros](retros.md): subagent-session retros and the improvements pursued.
 
 - [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).

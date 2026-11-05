@@ -3,8 +3,8 @@
 //! One thread runs one GLib main context (a short-lived second one prepares
 //! number formatting at startup). zbus and GTK run on it, zbus
 //! through [`GlibRuntime`]; the BlueZ client, the Phone link, the control
-//! interface and the surfaces turn what happens into inputs; the Call state
-//! machine decides; this module carries out its effects, renders the
+//! interface, the Contacts sync and the surfaces turn what happens into
+//! inputs; the Call state machine decides; this module carries out its effects, renders the
 //! surfaces and publishes the state on the control interface.
 
 use std::process::ExitCode;
@@ -23,7 +23,7 @@ use crate::logging::{self, EventKind};
 use crate::phone_link::Command;
 use crate::ringer::Ringer;
 use crate::surfaces::Surfaces;
-use crate::{bluez, phone_link};
+use crate::{bluez, contacts, phone_link};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -113,10 +113,16 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
 
     let (command_sender, commands) = unbounded();
+    let (contacts_sender, contacts_commands) = unbounded();
     let (report_sender, reports) = unbounded();
     let surfaces = has_display.then(|| Surfaces::new(&input_sender, report_sender));
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system, input_sender.clone()));
+    context.spawn_local(contacts::run(
+        session.clone(),
+        contacts_commands,
+        input_sender.clone(),
+    ));
     context.spawn_local(follow_phone(session, commands, input_sender.clone()));
     context.spawn_local(publish_surfaces(reports, publisher.clone()));
     context.spawn_local(decide(
@@ -124,6 +130,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         Shell {
             inputs: input_sender,
             commands: command_sender,
+            contacts: contacts_sender,
             publisher,
             surfaces,
             ringer: Ringer::default(),
@@ -197,6 +204,7 @@ struct Shell {
     /// Where timers report back.
     inputs: UnboundedSender<Input>,
     commands: UnboundedSender<Command>,
+    contacts: UnboundedSender<contacts::Command>,
     publisher: Publisher,
     surfaces: Option<Surfaces>,
     ringer: Ringer,
@@ -207,8 +215,21 @@ impl Shell {
         let mut phone_commands = Vec::new();
         for effect in effects {
             match effect {
-                Effect::AttachPhone { address } => self.command(Command::Attach { address }),
-                Effect::DetachPhone => self.command(Command::Detach),
+                Effect::AttachPhone { address } => {
+                    self.contacts_command(contacts::Command::Attach {
+                        address: address.clone(),
+                    });
+                    self.command(Command::Attach { address });
+                }
+                Effect::DetachPhone => {
+                    self.contacts_command(contacts::Command::Detach);
+                    self.command(Command::Detach);
+                }
+                Effect::SyncContacts => self.contacts_command(contacts::Command::Sync),
+                Effect::RefreshCallHistory => {
+                    self.contacts_command(contacts::Command::RefreshCallHistory);
+                }
+                Effect::ForgetContacts => self.contacts_command(contacts::Command::Forget),
                 Effect::Phone(command) => phone_commands.push(command),
                 Effect::StartRinging => self.ringer.start(),
                 Effect::StopRinging => self.ringer.stop(),
@@ -236,6 +257,11 @@ impl Shell {
         if !phone_commands.is_empty() {
             self.command(Command::Run(phone_commands));
         }
+    }
+
+    fn contacts_command(&self, command: contacts::Command) {
+        // As for the Phone link: the sync stops only with the bus.
+        let _ = self.contacts.unbounded_send(command);
     }
 
     fn command(&self, command: Command) {

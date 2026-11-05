@@ -9,7 +9,9 @@
 
 mod call;
 mod connection;
+mod contacts;
 mod machine;
+mod matching;
 pub mod messages;
 mod number;
 
@@ -17,7 +19,12 @@ pub use call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,
 };
 pub use connection::{ConnectionState, Phone, UnknownConnectionState};
+pub use contacts::{
+    CallHistory, CallHistoryEntry, CallHistoryKind, Contact, ContactNumber, Contacts,
+    ContactsState, NumberLabel, SyncFailure, Unavailable,
+};
 pub use machine::{
-    BannerView, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand, State,
+    BannerView, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand, Problem, State,
     Surfaces, Timer, keypad_tones, step,
 };
+pub use matching::{ContactMatch, Directory};

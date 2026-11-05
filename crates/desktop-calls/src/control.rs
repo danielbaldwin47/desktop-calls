@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use desktop_calls_core::messages::{self, Failure};
-use desktop_calls_core::{CallId, Caller, Input, State};
+use desktop_calls_core::{CallId, Caller, ContactsState, Input, State};
 use futures_channel::mpsc::UnboundedSender;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, DBusError, interface};
@@ -74,8 +74,8 @@ impl ControlInterface {
     /// The Phone's Calls, oldest first: id, direction (`"incoming"`,
     /// `"outgoing"`, `"unknown"`), state (`"ringing"`, `"waiting"`,
     /// `"dialing"`, `"alerting"`, `"active"`, `"held"`), number (empty if
-    /// withheld), display name (empty until Contacts), and when the Call
-    /// connected in milliseconds since the Unix epoch (0 until then).
+    /// withheld), display name (the Contact's name, or empty), and when the
+    /// Call connected in milliseconds since the Unix epoch (0 until then).
     #[zbus(property)]
     fn calls(&self) -> Vec<(u32, String, String, String, String, u64)> {
         self.state
@@ -90,7 +90,10 @@ impl ControlInterface {
                         Caller::Number(number) => number.clone(),
                         Caller::Withheld => String::new(),
                     },
-                    String::new(),
+                    self.state
+                        .contact(call.caller())
+                        .map(|contact| contact.name)
+                        .unwrap_or_default(),
                     call.active_since().map_or(0, |since| since.0),
                 )
             })
@@ -133,6 +136,59 @@ impl ControlInterface {
         self.surfaces.clone()
     }
 
+    /// How far Contacts and Call History are synced from the Phone: the
+    /// state (`"syncing"`, `"ready"`, `"permission-needed"`, `"denied"`,
+    /// `"unavailable"`), how many Contacts and Call History entries the
+    /// Desktop holds, while permission is needed when the Phone's prompt
+    /// times out in milliseconds since the Unix epoch (otherwise 0), and
+    /// while unavailable why (`"not-synced"`, `"no-contacts-service"`,
+    /// `"prompt-timed-out"`, `"failed"`; otherwise empty).
+    #[zbus(property)]
+    fn contacts_state(&self) -> (String, u32, u32, u64, String) {
+        contacts_state(&self.state)
+    }
+
+    /// What is wrong that the user can put right: kind (such as
+    /// `"contacts-denied"`), the sentence to show, and the next action, or
+    /// empty.
+    #[zbus(property)]
+    fn problems(&self) -> Vec<(String, String, String)> {
+        problems(&self.state)
+    }
+
+    /// The Call History, newest first: kind (`"incoming"`, `"outgoing"`,
+    /// `"missed"`), number (empty if withheld), the Contact's name or the
+    /// name the Phone gave (or empty), the number's label (or empty), and
+    /// when in milliseconds since the Unix epoch (0 if the Phone didn't
+    /// say).
+    fn get_call_history(&self) -> Vec<(String, String, String, String, u64)> {
+        self.state
+            .call_history()
+            .entries()
+            .iter()
+            .map(|entry| {
+                let contact = self.state.contact(&entry.caller);
+                let name = contact
+                    .as_ref()
+                    .map(|contact| contact.name.clone())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| entry.name.clone());
+                (
+                    entry.kind.as_str().to_owned(),
+                    match &entry.caller {
+                        Caller::Number(number) => number.clone(),
+                        Caller::Withheld => String::new(),
+                    },
+                    name,
+                    contact.map_or_else(String::new, |contact| {
+                        messages::number_label(&contact.label)
+                    }),
+                    entry.at.map_or(0, |at| at.0),
+                )
+            })
+            .collect()
+    }
+
     /// Answers the ringing Call with this id on the Desktop.
     fn answer(&self, call: u32) {
         let _ = self.intents.unbounded_send(Input::Answer(CallId(call)));
@@ -172,6 +228,42 @@ impl ControlInterface {
     /// sentence to show.
     #[zbus(signal)]
     async fn error(emitter: &SignalEmitter<'_>, kind: &str, message: &str) -> zbus::Result<()>;
+}
+
+fn contacts_state(state: &State) -> (String, u32, u32, u64, String) {
+    let contacts_state = state.contacts_state();
+    let count = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
+    (
+        contacts_state.as_str().to_owned(),
+        count(state.contacts().directory().len()),
+        count(state.call_history().entries().len()),
+        match contacts_state {
+            ContactsState::PermissionNeeded { deadline } => deadline.0,
+            _ => 0,
+        },
+        match contacts_state {
+            ContactsState::Unavailable(reason) => reason.as_str().to_owned(),
+            _ => String::new(),
+        },
+    )
+}
+
+fn problems(state: &State) -> Vec<(String, String, String)> {
+    state
+        .problems()
+        .into_iter()
+        .map(|problem| {
+            let message = messages::problem(problem.kind);
+            (
+                problem.kind.as_str().to_owned(),
+                message.text.to_owned(),
+                match message.next_action {
+                    Some(messages::NextAction::Command(command)) => command.to_owned(),
+                    None => String::new(),
+                },
+            )
+        })
+        .collect()
 }
 
 impl ControlInterface {
@@ -222,7 +314,8 @@ impl Publisher {
         if old.phone() != state.phone() {
             published.phone_changed(emitter).await?;
         }
-        if old.calls() != state.calls() {
+        // A Call's display name changes when Contacts do.
+        if old.calls() != state.calls() || old.contacts() != state.contacts() {
             published.calls_changed(emitter).await?;
         }
         if old.audio_location() != state.audio_location() {
@@ -236,6 +329,12 @@ impl Publisher {
         }
         if old.codec() != state.codec() {
             published.codec_changed(emitter).await?;
+        }
+        if contacts_state(&old) != contacts_state(state) {
+            published.contacts_state_changed(emitter).await?;
+        }
+        if old.problems() != state.problems() {
+            published.problems_changed(emitter).await?;
         }
         Ok(())
     }

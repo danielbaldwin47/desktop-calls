@@ -45,6 +45,11 @@ pub struct ObjectTree {
     captured_introspection: BTreeMap<String, &'static str>,
     /// Whether `Introspect` lists child nodes. BlueZ does; PipeWire doesn't.
     introspect_lists_children: bool,
+    /// Whether `GetManagedObjects` lists every interface of each object,
+    /// `Introspectable` and `Properties` too, as obexd does. Objects with
+    /// nothing but `Introspectable` are then path components, not objects,
+    /// and aren't listed.
+    lists_every_interface: bool,
 }
 
 /// What a method call asked for, as the Simulated Phone records it.
@@ -152,7 +157,13 @@ impl ObjectTree {
             extra_interfaces: BTreeMap::new(),
             captured_introspection: BTreeMap::new(),
             introspect_lists_children,
+            lists_every_interface: false,
         }
+    }
+
+    /// Makes `GetManagedObjects` list every interface, as obexd does.
+    pub fn list_every_interface(&mut self) {
+        self.lists_every_interface = true;
     }
 
     /// Adds an object, or replaces it.
@@ -296,7 +307,24 @@ impl ObjectTree {
                     .iter()
                     .any(|manager| child.as_str().starts_with(manager.as_str()))
             })
-            .map(|(child, interfaces)| (child, interfaces_added_body(interfaces)))
+            .filter_map(|(child, interfaces)| {
+                if !self.lists_every_interface {
+                    return Some((child, interfaces_added_body(interfaces)));
+                }
+                let extra = self
+                    .extra_interfaces
+                    .get(child.as_str())
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                if interfaces.is_empty() && extra.iter().all(|name| *name == INTROSPECTABLE) {
+                    return None;
+                }
+                let mut listed = interfaces_added_body(interfaces);
+                for name in extra {
+                    listed.entry((*name).to_owned()).or_default();
+                }
+                Some((child, listed))
+            })
             .collect()
     }
 

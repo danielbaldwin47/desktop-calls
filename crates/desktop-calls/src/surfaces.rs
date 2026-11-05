@@ -33,8 +33,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    AudioLocation, BannerView, CallId, CallWindowPhase, CallWindowView, Input, Mute, Timestamp,
-    keypad_tones,
+    AudioLocation, BannerView, CallId, CallWindowPhase, CallWindowView, Caller, ContactMatch,
+    Input, Mute, Timestamp, keypad_tones,
 };
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib::{self, SourceId};
@@ -385,6 +385,57 @@ impl Surface {
     }
 }
 
+/// What the surfaces show about the other party: the Contact's name or the
+/// number, and, for a Contact, a line with the number's label and the
+/// number. The content they report gets `caller`, and for a Contact
+/// `number-label` and `number`.
+struct Who {
+    caller: String,
+    detail: Option<(String, String)>,
+}
+
+impl Who {
+    fn of(caller: &Caller, contact: Option<&ContactMatch>) -> Self {
+        let named = contact.filter(|contact| !contact.name.trim().is_empty());
+        Self {
+            caller: messages::caller_name(caller, named),
+            detail: named.map(|contact| {
+                (
+                    messages::number_label(&contact.label),
+                    messages::caller(caller),
+                )
+            }),
+        }
+    }
+
+    /// Shows the detail line on `label`, or hides it.
+    fn show_detail(&self, label: &gtk::Label) {
+        match &self.detail {
+            Some((number_label, number)) => {
+                label.set_text(&messages::caller_detail(number_label, number));
+                label.set_visible(true);
+            }
+            None => label.set_visible(false),
+        }
+    }
+
+    fn report(&self, content: &mut BTreeMap<String, String>) {
+        content.insert("caller".to_owned(), self.caller.clone());
+        if let Some((number_label, number)) = &self.detail {
+            content.insert("number-label".to_owned(), number_label.clone());
+            content.insert("number".to_owned(), number.clone());
+        }
+    }
+}
+
+fn detail_label() -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.add_css_class("dim-label");
+    label.set_xalign(0.0);
+    label.set_visible(false);
+    label
+}
+
 /// Whether a key press holds Control, Alt or Super, so it is a shortcut of
 /// something else and not a plain letter.
 fn has_command_modifier(modifiers: gtk::gdk::ModifierType) -> bool {
@@ -400,6 +451,7 @@ struct Banner {
     surface: Surface,
     heading: gtk::Label,
     caller: gtk::Label,
+    detail: gtk::Label,
     answer: gtk::Button,
 }
 
@@ -418,6 +470,7 @@ impl Banner {
         let caller = gtk::Label::new(None);
         caller.add_css_class("caller");
         caller.set_xalign(0.0);
+        let detail = detail_label();
         let decline = surface.button(Label::Decline, "decline", intents, Input::Decline);
         let answer = surface.button(Label::Answer, "answer", intents, Input::Answer);
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -426,12 +479,14 @@ impl Banner {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.append(&heading);
         content.append(&caller);
+        content.append(&detail);
         content.append(&buttons);
         surface.window.set_child(Some(&content));
         let banner = Self {
             surface,
             heading,
             caller,
+            detail,
             answer,
         };
         banner.on_letters(intents);
@@ -465,8 +520,9 @@ impl Banner {
             self.surface.hide();
             return;
         };
-        let caller = messages::caller(&view.caller);
-        self.caller.set_text(&caller);
+        let who = Who::of(&view.caller, view.contact.as_ref());
+        self.caller.set_text(&who.caller);
+        who.show_detail(&self.detail);
         // While focused, the heading says which keys do what.
         let heading = messages::label(if view.focused {
             Label::BannerKeys
@@ -475,11 +531,12 @@ impl Banner {
         });
         self.heading.set_text(heading);
         self.surface.call.set(Some(view.call));
-        self.surface.show(BTreeMap::from([
+        let mut content = BTreeMap::from([
             ("call".to_owned(), view.call.to_string()),
             ("heading".to_owned(), heading.to_owned()),
-            ("caller".to_owned(), caller),
-        ]));
+        ]);
+        who.report(&mut content);
+        self.surface.show(content);
         self.surface.focus(view.focused);
         if view.focused {
             // Enter and Space then answer, never decline.
@@ -493,6 +550,7 @@ struct CallWindow {
     surface: Surface,
     intents: UnboundedSender<Input>,
     caller: gtk::Label,
+    detail: gtk::Label,
     status: gtk::Label,
     audio_location: gtk::Label,
     hd: gtk::Label,
@@ -534,6 +592,7 @@ impl CallWindow {
         let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         heading.append(&caller);
         heading.append(&hd);
+        let detail = detail_label();
         let status = gtk::Label::new(None);
         status.add_css_class("numeric");
         status.set_xalign(0.0);
@@ -577,6 +636,7 @@ impl CallWindow {
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.append(&heading);
+        content.append(&detail);
         content.append(&status);
         content.append(&audio_location);
         // Everything that comes and goes sits below Hang up, so Hang up
@@ -601,6 +661,7 @@ impl CallWindow {
             surface,
             intents: intents.clone(),
             caller,
+            detail,
             status,
             audio_location,
             hd,
@@ -826,8 +887,9 @@ impl CallWindow {
         let Some(view) = self.view.borrow().clone() else {
             return;
         };
-        let caller = messages::caller(&view.caller);
-        self.caller.set_text(&caller);
+        let who = Who::of(&view.caller, view.contact.as_ref());
+        self.caller.set_text(&who.caller);
+        who.show_detail(&self.detail);
         let (status, audio_location, wideband, mute) = match view.phase {
             CallWindowPhase::Connecting => (
                 messages::label(Label::Connecting).to_owned(),
@@ -887,9 +949,9 @@ impl CallWindow {
 
         let mut content = BTreeMap::from([
             ("call".to_owned(), view.call.to_string()),
-            ("caller".to_owned(), caller),
             ("status".to_owned(), status),
         ]);
+        who.report(&mut content);
         content.extend(self.shortcuts.clone());
         if let Some(audio_location) = audio_location {
             content.insert("audio-location".to_owned(), audio_location.to_owned());

@@ -1,0 +1,52 @@
+{
+  "captured": "2026-11-05T00:03:39-0500",
+  "note": "obexd from BlueZ 5.87 pulling the Pixel 9a's pb with PullAll, captured by tools/real-phone/pbap_probe.py. The transfer is as GetAll returned it while queued; the target file name is redacted. 'PullAll reply properties' lists what PullAll's reply carried.",
+  "objects": {
+    "during PullAll(pb)": {
+      "bus": "user",
+      "service": "org.bluez.obex",
+      "path": "/org/bluez/obex/client/session1/transfer2",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.obex.Transfer1\"><method name=\"Suspend\"></method><method name=\"Resume\"></method><method name=\"Cancel\"></method><property name=\"Status\" type=\"s\" access=\"read\"></property><property name=\"Name\" type=\"s\" access=\"read\"></property><property name=\"Size\" type=\"t\" access=\"read\"></property><property name=\"Filename\" type=\"s\" access=\"read\"></property><property name=\"Transferred\" type=\"t\" access=\"read\"></property><property name=\"Session\" type=\"o\" access=\"read\"></property></interface><interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"out\"/>\n</method><method name=\"Set\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"name\" type=\"s\" direction=\"in\"/>\n<arg name=\"value\" type=\"v\" direction=\"in\"/>\n</method><method name=\"GetAll\"><arg name=\"interface\" type=\"s\" direction=\"in\"/>\n<arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n</method><signal name=\"PropertiesChanged\"><arg name=\"interface\" type=\"s\"/>\n<arg name=\"changed_properties\" type=\"a{sv}\"/>\n<arg name=\"invalidated_properties\" type=\"as\"/>\n</signal>\n</interface></node>",
+      "properties": {
+        "org.bluez.obex.Transfer1": {
+          "type": "a{sv}",
+          "data": [
+            {
+              "Status": {
+                "type": "s",
+                "data": "queued"
+              },
+              "Name": {
+                "type": "s",
+                "data": "telecom/pb.vcf"
+              },
+              "Size": {
+                "type": "t",
+                "data": 0
+              },
+              "Filename": {
+                "type": "s",
+                "data": "<targetfile pb.vcf>"
+              },
+              "Transferred": {
+                "type": "t",
+                "data": 0
+              },
+              "Session": {
+                "type": "o",
+                "data": "/org/bluez/obex/client/session1"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "PullAll reply properties": [
+    "Filename",
+    "Name",
+    "Session",
+    "Size",
+    "Status"
+  ]
+}

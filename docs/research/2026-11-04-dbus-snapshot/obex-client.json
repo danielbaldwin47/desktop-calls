@@ -1,0 +1,34 @@
+{
+  "captured": "2026-11-04T23:02:00-0500",
+  "note": "obexd 5.87 on the Desktop with no PBAP session open, captured read-only with busctl (ticket #9). Neither object has Properties.",
+  "objects": [
+    {
+      "bus": "user",
+      "service": "org.bluez.obex",
+      "path": "/",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.freedesktop.DBus.ObjectManager\"><method name=\"GetManagedObjects\"><arg name=\"objects\" type=\"a{oa{sa{sv}}}\" direction=\"out\"/>\n</method><signal name=\"InterfacesAdded\"><arg name=\"object\" type=\"o\"/>\n<arg name=\"interfaces\" type=\"a{sa{sv}}\"/>\n</signal>\n<signal name=\"InterfacesRemoved\"><arg name=\"object\" type=\"o\"/>\n<arg name=\"interfaces\" type=\"as\"/>\n</signal>\n</interface><node name=\"org\"/></node>",
+      "properties": {}
+    },
+    {
+      "bus": "user",
+      "service": "org.bluez.obex",
+      "path": "/org/bluez/obex",
+      "introspection_xml": "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node><interface name=\"org.freedesktop.DBus.Introspectable\"><method name=\"Introspect\"><arg name=\"xml\" type=\"s\" direction=\"out\"/>\n</method></interface><interface name=\"org.bluez.obex.AgentManager1\"><method name=\"RegisterAgent\"><arg name=\"agent\" type=\"o\" direction=\"in\"/>\n</method><method name=\"UnregisterAgent\"><arg name=\"agent\" type=\"o\" direction=\"in\"/>\n</method></interface><interface name=\"org.bluez.obex.Client1\"><method name=\"CreateSession\"><arg name=\"destination\" type=\"s\" direction=\"in\"/>\n<arg name=\"args\" type=\"a{sv}\" direction=\"in\"/>\n<arg name=\"session\" type=\"o\" direction=\"out\"/>\n</method><method name=\"RemoveSession\"><arg name=\"session\" type=\"o\" direction=\"in\"/>\n</method></interface></node>",
+      "properties": {}
+    }
+  ],
+  "method_results": {
+    "GetManagedObjects(/)": {
+      "type": "a{oa{sa{sv}}}",
+      "data": [
+        {
+          "/org/bluez/obex": {
+            "org.freedesktop.DBus.Introspectable": {},
+            "org.bluez.obex.AgentManager1": {},
+            "org.bluez.obex.Client1": {}
+          }
+        }
+      ]
+    }
+  }
+}

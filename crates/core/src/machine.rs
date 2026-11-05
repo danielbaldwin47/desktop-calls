@@ -5,7 +5,9 @@ use crate::call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Request, Timestamp, Transport,
 };
 use crate::connection::{ConnectionState, Phone};
-use crate::messages::Failure;
+use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
+use crate::matching::ContactMatch;
+use crate::messages::{Failure, ProblemKind};
 
 /// How long the Call Window shows "Call ended" before it closes.
 const CALL_ENDED_MS: u32 = 2_000;
@@ -69,6 +71,22 @@ pub enum Input {
     PhoneCommandFailed(PhoneCommand),
     /// A timer started by [`Effect::StartTimer`] ran out.
     TimerFired(Timer),
+    /// Contacts and Call History cached from an earlier sync were read.
+    ContactsLoaded {
+        contacts: Contacts,
+        call_history: CallHistory,
+    },
+    /// A sync finished with Contacts and Call History.
+    ContactsSynced {
+        contacts: Contacts,
+        call_history: CallHistory,
+    },
+    /// A refresh of the Call History finished.
+    CallHistoryRefreshed(CallHistory),
+    /// The Phone is asking whether to share Contacts, until `deadline`.
+    ContactsPermissionNeeded { deadline: Timestamp },
+    /// A sync, or a refresh, ended without Contacts.
+    ContactsSyncFailed(SyncFailure),
 }
 
 /// What the Phone link can be asked to do with Calls.
@@ -115,6 +133,13 @@ pub enum Effect {
     StartTimer { timer: Timer, after_ms: u32 },
     /// Tell the user something went wrong.
     ReportError(Failure),
+    /// Sync Contacts and Call History from the attached Phone.
+    SyncContacts,
+    /// Pull the Phone's Call History again.
+    RefreshCallHistory,
+    /// Delete the Contacts and Call History held for the attached Phone,
+    /// on disk too.
+    ForgetContacts,
 }
 
 /// What the Desktop surfaces show, worked out from the state.
@@ -131,6 +156,8 @@ pub struct BannerView {
     pub caller: Caller,
     /// The Banner has keyboard focus, so A answers and D declines.
     pub focused: bool,
+    /// The Contact the caller is, if Contacts say.
+    pub contact: Option<ContactMatch>,
 }
 
 /// The Call Window's content.
@@ -138,6 +165,8 @@ pub struct BannerView {
 pub struct CallWindowView {
     pub call: CallId,
     pub caller: Caller,
+    /// The Contact the other party is, if Contacts say.
+    pub contact: Option<ContactMatch>,
     pub phase: CallWindowPhase,
     /// The Call Window has keyboard focus.
     pub focused: bool,
@@ -213,6 +242,15 @@ pub struct State {
     microphone_volume: Option<u8>,
     muting: Muting,
     focus: Focus,
+    contacts_sync: ContactsState,
+    contacts: Contacts,
+    call_history: CallHistory,
+}
+
+/// Something wrong that the user can put right, shown until it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Problem {
+    pub kind: ProblemKind,
 }
 
 impl State {
@@ -261,6 +299,47 @@ impl State {
         self.codec
     }
 
+    /// How far Contacts and Call History are synced.
+    #[must_use]
+    pub fn contacts_state(&self) -> ContactsState {
+        self.contacts_sync
+    }
+
+    /// The Contacts the Desktop holds.
+    #[must_use]
+    pub fn contacts(&self) -> &Contacts {
+        &self.contacts
+    }
+
+    /// The Call History the Desktop holds, newest first.
+    #[must_use]
+    pub fn call_history(&self) -> &CallHistory {
+        &self.call_history
+    }
+
+    /// The Contact `caller` is, if Contacts say.
+    #[must_use]
+    pub fn contact(&self, caller: &Caller) -> Option<ContactMatch> {
+        match caller {
+            Caller::Number(number) => self.contacts.directory().lookup(number),
+            Caller::Withheld => None,
+        }
+    }
+
+    /// What is wrong that the user can put right.
+    #[must_use]
+    pub fn problems(&self) -> Vec<Problem> {
+        match self.contacts_sync {
+            ContactsState::Denied => vec![Problem {
+                kind: ProblemKind::ContactsDenied,
+            }],
+            ContactsState::Unavailable(Unavailable::PromptTimedOut) => vec![Problem {
+                kind: ProblemKind::ContactsPromptUnanswered,
+            }],
+            _ => Vec::new(),
+        }
+    }
+
     /// Whether the Desktop has muted its microphone for the Call.
     #[must_use]
     pub fn muted(&self) -> bool {
@@ -287,6 +366,7 @@ impl State {
                 call: call.id,
                 caller: call.caller.clone(),
                 focused: self.focus == Focus::Banner,
+                contact: self.contact(&call.caller),
             });
         let call_window = self
             .calls
@@ -295,6 +375,7 @@ impl State {
             .map(|call| CallWindowView {
                 call: call.id,
                 caller: call.caller.clone(),
+                contact: self.contact(&call.caller),
                 phase: match call.active_since {
                     Some(active_since) if call.state.is_connected() => CallWindowPhase::Live {
                         active_since,
@@ -310,6 +391,7 @@ impl State {
                 self.ended.as_ref().map(|ended| CallWindowView {
                     call: ended.id,
                     caller: ended.caller.clone(),
+                    contact: self.contact(&ended.caller),
                     phase: CallWindowPhase::Ended,
                     focused: self.focus == Focus::CallWindow,
                 })
@@ -318,6 +400,26 @@ impl State {
             banner,
             call_window,
         }
+    }
+
+    /// The Contacts state once the Phone leaves: a sync under way can't go
+    /// on, leaving ready if anything is held.
+    fn held_contacts_state(&self) -> ContactsState {
+        match self.contacts_sync {
+            ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
+                if self.contacts.directory().is_empty()
+                    && self.call_history.entries().is_empty() =>
+            {
+                ContactsState::Unavailable(Unavailable::NotSynced)
+            }
+            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => ContactsState::Ready,
+            other => other,
+        }
+    }
+
+    /// Whether the Phone is here and hasn't refused to share Contacts.
+    fn may_sync_contacts(&self) -> bool {
+        self.connection == ConnectionState::Connected && self.contacts_sync != ContactsState::Denied
     }
 
     /// Why the Desktop refuses `input` now, if it does. The control
@@ -388,6 +490,62 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     (state, effects)
 }
 
+/// What the Contacts sync reports.
+fn contacts_sync(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    match input {
+        Input::ContactsLoaded {
+            contacts,
+            call_history,
+        } => {
+            if state.contacts_sync == ContactsState::Unavailable(Unavailable::NotSynced) {
+                state.contacts_sync = ContactsState::Ready;
+            }
+            state.contacts = contacts;
+            state.call_history = call_history;
+        }
+        Input::ContactsSynced {
+            contacts,
+            call_history,
+        } => {
+            state.contacts_sync = ContactsState::Ready;
+            state.contacts = contacts;
+            state.call_history = call_history;
+        }
+        Input::CallHistoryRefreshed(call_history) => state.call_history = call_history,
+        Input::ContactsPermissionNeeded { deadline } => {
+            state.contacts_sync = ContactsState::PermissionNeeded { deadline };
+        }
+        Input::ContactsSyncFailed(SyncFailure::Denied) => {
+            // The person said no: keep nothing of theirs.
+            state.contacts_sync = ContactsState::Denied;
+            state.contacts = Contacts::default();
+            state.call_history = CallHistory::default();
+            effects.push(Effect::ForgetContacts);
+        }
+        // A sync cut short by the Phone leaving isn't a failure to report;
+        // what was synced before still names callers.
+        Input::ContactsSyncFailed(SyncFailure::Unavailable(reason))
+            if state.connection == ConnectionState::Connected =>
+        {
+            state.contacts_sync = ContactsState::Unavailable(reason);
+        }
+        _ => {}
+    }
+}
+
+fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
+    state.connection = ConnectionState::Connected;
+    // Every connect syncs, so the Desktop catches up with changes made on
+    // the Phone while apart.
+    state.contacts_sync = ContactsState::Syncing;
+    effects.push(Effect::SyncContacts);
+    // A crash or a dropped link mid-Call must never leave the next Call's
+    // audio jumping to the Desktop.
+    if !state.has_desktop_audio() {
+        effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
     match input {
@@ -403,18 +561,14 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             return (State::default(), vec![Effect::DetachPhone]);
         }
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
-            state.connection = ConnectionState::Connected;
-            // A crash or a dropped link mid-Call must never leave the next
-            // Call's audio jumping to the Desktop.
-            if !state.has_desktop_audio() {
-                effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
-            }
+            phone_connected(&mut state, &mut effects);
         }
         Input::PhoneDisconnected { address }
             if state.is_our_phone(&address) && state.connection == ConnectionState::Connected =>
         {
             state.connection = ConnectionState::Disconnected;
             state.transport = Transport::Idle;
+            state.contacts_sync = state.held_contacts_state();
         }
         Input::CallAdded {
             call,
@@ -448,7 +602,19 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 }
             }
         }
-        Input::CallEnded { call } => end_call(&mut state, call, &mut effects),
+        Input::CallEnded { call } => {
+            let known = state.calls.iter().any(|known| known.id == call);
+            end_call(&mut state, call, &mut effects);
+            // The Call is now in the Phone's Call History.
+            if known && state.may_sync_contacts() {
+                effects.push(Effect::RefreshCallHistory);
+            }
+        }
+        input @ (Input::ContactsLoaded { .. }
+        | Input::ContactsSynced { .. }
+        | Input::CallHistoryRefreshed(_)
+        | Input::ContactsPermissionNeeded { .. }
+        | Input::ContactsSyncFailed(_)) => contacts_sync(&mut state, input, &mut effects),
         Input::TransportChanged(transport) => {
             state.transport = transport;
             if transport.is_up() && state.reported_codec.is_some() {

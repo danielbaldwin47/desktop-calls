@@ -215,15 +215,15 @@ async fn serve(
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
-        let (reply, added, signals) = {
+        let (reply, signals, later) = {
             let mut world = lock(&world);
             world.recorded.push((service.bus(), call.clone()));
             let world = &mut *world;
             match service {
                 Service::Bluez => (
                     bluez::answer(&world.bluez, &call, &message),
-                    None,
                     Vec::new(),
+                    None,
                 ),
                 Service::Telephony => {
                     let (reply, signals) = telephony::answer(
@@ -233,34 +233,49 @@ async fn serve(
                         &call,
                         &message,
                     );
-                    (reply, None, signals)
+                    (reply, signals, None)
                 }
                 Service::Obex => {
-                    let (reply, added) =
+                    let answer =
                         obex::answer(&mut world.obex, &world.phone_address, &call, &message);
-                    (reply, added, Vec::new())
+                    (answer.reply, answer.signals, answer.later)
                 }
             }
         };
-        if let Some((object, interfaces)) = added {
-            connection
-                .emit_signal(
-                    None::<&str>,
-                    "/",
-                    objects::OBJECT_MANAGER,
-                    "InterfacesAdded",
-                    &(object, interfaces_added_body(&interfaces)),
-                )
-                .await?;
-        }
         reply.send(&connection, &message.header()).await?;
         // As the real service, which replies once the Phone confirms, and
         // then reports the change the Phone makes.
         for signal in signals {
             signal.emit(&connection).await?;
         }
+        if let Some((after, later)) = later {
+            run_obex_later(world.clone(), connection.clone(), message, after, later);
+        }
     }
     Ok(())
+}
+
+/// Does what obexd does `after` a method call, on a thread of its own so
+/// the service keeps answering meanwhile: replies to `message` if a reply is
+/// still owed, and sends the signals.
+fn run_obex_later(
+    world: SharedWorld,
+    connection: Connection,
+    message: zbus::Message,
+    after: std::time::Duration,
+    later: obex::Later,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(after);
+        let (reply, signals) = obex::run_later(&mut lock(&world).obex, later);
+        zbus::block_on(async {
+            reply.send(&connection, &message.header()).await?;
+            for signal in signals {
+                signal.emit(&connection).await?;
+            }
+            Ok::<_, zbus::Error>(())
+        })
+    });
 }
 
 /// What tests use to act as the Phone.
@@ -463,6 +478,51 @@ impl Control {
         Ok(())
     }
 
+    /// Gives the Phone the PBAP folder `folder` (`pb`, `ich`, `och`,
+    /// `mch` or `cch`) with exactly this vCard text.
+    fn set_pbap_folder(&self, folder: &str, vcards: String) -> zbus::fdo::Result<()> {
+        if !PBAP_FOLDERS.contains(&folder) {
+            return Err(unknown_pbap_folder(folder));
+        }
+        lock(&self.world).obex.set_pbap_folder(folder, vcards);
+        Ok(())
+    }
+
+    /// Takes the PBAP folder `folder` away from the Phone, as some
+    /// Phones lack `cch`.
+    fn remove_pbap_folder(&self, folder: &str) -> zbus::fdo::Result<()> {
+        if !PBAP_FOLDERS.contains(&folder) {
+            return Err(unknown_pbap_folder(folder));
+        }
+        lock(&self.world).obex.remove_pbap_folder(folder);
+        Ok(())
+    }
+
+    /// How the person holding the Phone answers its prompt to share
+    /// Contacts, for each new PBAP session: `"grant"`, `"deny"` or
+    /// `"ignore"`.
+    fn set_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
+        let prompt = obex::Prompt::from_name(answer).ok_or_else(|| {
+            zbus::fdo::Error::InvalidArgs(format!(
+                "unknown answer {answer:?}; the answers are grant, deny and ignore"
+            ))
+        })?;
+        lock(&self.world).obex.prompt = prompt;
+        Ok(())
+    }
+
+    /// Makes every PBAP pull take `delay_ms` before it completes.
+    fn set_pull_delay(&self, delay_ms: u32) {
+        lock(&self.world).obex.pull_delay = std::time::Duration::from_millis(u64::from(delay_ms));
+    }
+
+    /// The most PBAP sessions open at once so far, counting each from its
+    /// `CreateSession` until it fails or is removed.
+    #[zbus(property)]
+    fn most_pbap_sessions_at_once(&self) -> u32 {
+        lock(&self.world).obex.most_sessions_at_once
+    }
+
     /// Answers the ringing Call at `call` on the Phone, as the person holding
     /// it does. The Phone then brings its audio link up, which lands on the
     /// Desktop only if `RejectSCO` is false. Returns once the Call is active.
@@ -514,6 +574,15 @@ impl Control {
             })
             .collect()
     }
+}
+
+/// The PBAP folders a test can give the Phone.
+const PBAP_FOLDERS: [&str; 5] = ["pb", "ich", "och", "mch", "cch"];
+
+fn unknown_pbap_folder(folder: &str) -> zbus::fdo::Error {
+    zbus::fdo::Error::InvalidArgs(format!(
+        "unknown folder {folder:?}; the folders are pb, ich, och, mch and cch"
+    ))
 }
 
 impl Control {

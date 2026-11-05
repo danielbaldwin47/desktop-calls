@@ -42,6 +42,7 @@ use zbus::{Message, OwnedObjectPath, OwnedVariant};
 const TELEPHONY: &str = "org.pipewire.Telephony";
 const BLUEZ: &str = "org.bluez";
 const OBEX: &str = "org.bluez.obex";
+const PHONEBOOK_ACCESS: &str = "org.bluez.obex.PhonebookAccess1";
 
 const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
@@ -123,6 +124,29 @@ fn bluez_objects_match_the_pixel() {
 }
 
 #[test]
+fn obex_client_matches_the_pixel() {
+    let snapshot = Snapshot::read("obex-client.json");
+    let harness = Harness::start();
+    let mut check = Check::new(&harness, Bus::Session, OBEX);
+
+    check.object("obexd's root", "/", &snapshot.object("/"));
+    check.object(
+        "obexd's client",
+        "/org/bluez/obex",
+        &snapshot.object("/org/bluez/obex"),
+    );
+    check.method_result(
+        OBJECT_MANAGER,
+        "GetManagedObjects",
+        "/",
+        &snapshot.object("/"),
+        snapshot.method_result("GetManagedObjects", "/"),
+    );
+
+    check.passes();
+}
+
+#[test]
 fn pbap_session_matches_the_pixel() {
     let snapshot = Snapshot::pbap_session();
     let harness = Harness::start();
@@ -165,6 +189,87 @@ fn pbap_session_matches_the_pixel() {
         "the PBAP session after Select(int, pb)",
         session.as_str(),
         &after_select,
+    );
+
+    check.passes();
+}
+
+#[test]
+fn pbap_pull_matches_the_pixel() {
+    let session_snapshot = Snapshot::pbap_session();
+    let snapshot = Snapshot::read("obex-transfer.json");
+    let harness = Harness::start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &test_harness::vcards::contacts(3, 0));
+    // Long enough to look at the transfer before it finishes.
+    phone.set_pull_delay(std::time::Duration::from_secs(30));
+    phone.connect();
+
+    let session: OwnedObjectPath = harness
+        .call_phone_method(
+            Bus::Session,
+            OBEX,
+            "/org/bluez/obex",
+            "org.bluez.obex.Client1",
+            "CreateSession",
+            &(
+                harness.phone().address.as_str(),
+                HashMap::from([("Target", zbus::Variant::from("pbap"))]),
+            ),
+        )
+        .body()
+        .deserialize()
+        .expect("CreateSession replies with the session's path");
+    let after_select = session_snapshot.labelled_object("after Select(int, pb)");
+    let mut check = Check::new(&harness, Bus::Session, OBEX);
+    check.call(
+        "the PBAP session",
+        session.as_str(),
+        &after_select,
+        PHONEBOOK_ACCESS,
+        "Select",
+        &("int", "pb"),
+    );
+    check.call(
+        "the PBAP session",
+        session.as_str(),
+        &after_select,
+        PHONEBOOK_ACCESS,
+        "GetSize",
+        &(),
+    );
+    let target = harness.directory().join("pb.vcf");
+    let reply = check.call(
+        "the PBAP session",
+        session.as_str(),
+        &after_select,
+        PHONEBOOK_ACCESS,
+        "PullAll",
+        &(
+            target.to_string_lossy().as_ref(),
+            HashMap::from([("Format", zbus::Variant::from("vcard30"))]),
+        ),
+    );
+    let (transfer, properties): (OwnedObjectPath, HashMap<String, OwnedVariant>) = reply
+        .body()
+        .deserialize()
+        .expect("PullAll replies with the transfer and its properties");
+    let mut replied: Vec<&str> = properties.keys().map(String::as_str).collect();
+    replied.sort_unstable();
+    let pixel_replied: Vec<&str> = snapshot.document["PullAll reply properties"]
+        .as_array()
+        .expect("the snapshot lists PullAll's reply properties")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        replied, pixel_replied,
+        "PullAll's reply lists the transfer's properties as the Pixel's did"
+    );
+    check.object(
+        "the transfer during PullAll(pb)",
+        transfer.as_str(),
+        &snapshot.labelled_object("during PullAll(pb)"),
     );
 
     check.passes();
@@ -527,7 +632,7 @@ impl<'harness> Check<'harness> {
             .map_or(path, |(simulated, _)| simulated.as_str())
             .to_owned();
         let reply = self.call(&what, &simulated_path, pixel, interface, method, &());
-        let signature = reply.body().signature().to_string();
+        let signature = reply.body().signature().to_string_no_parens();
         let pixel_type = json_type(result);
         if signature != pixel_type {
             self.differences.push(format!(
@@ -618,7 +723,9 @@ impl<'harness> Check<'harness> {
         let reply =
             self.harness
                 .call_phone_method(self.bus, self.service, path, interface, method, body);
-        let signature = reply.body().signature().to_string();
+        // zbus holds a body of several arguments as one structure; the wire,
+        // like the declared out arguments, has no parentheses around them.
+        let signature = reply.body().signature().to_string_no_parens();
         match pixel.reply_signature(interface, method) {
             Some(declared) if declared == signature => {}
             Some(declared) => self.differences.push(format!(

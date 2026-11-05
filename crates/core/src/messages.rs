@@ -5,6 +5,8 @@
 //! other code writes text for the user.
 
 use crate::call::Caller;
+use crate::contacts::NumberLabel;
+use crate::matching::ContactMatch;
 use crate::{ConnectionState, Phone};
 
 /// A failure the user can be told about.
@@ -133,6 +135,44 @@ pub fn failure(failure: Failure) -> Message {
     Message { text, next_action }
 }
 
+/// Something wrong that the user can put right, shown until it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProblemKind {
+    /// The Phone refuses to share Contacts and Call History.
+    ContactsDenied,
+    /// The Phone asked whether to share Contacts, and nobody answered.
+    ContactsPromptUnanswered,
+}
+
+impl ProblemKind {
+    /// The lower-case kind the control interface's `Problems` carries.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ContactsDenied => "contacts-denied",
+            Self::ContactsPromptUnanswered => "contacts-prompt-unanswered",
+        }
+    }
+}
+
+/// What to tell the user about `problem`: one line, saying how to put it
+/// right.
+#[must_use]
+pub fn problem(problem: ProblemKind) -> Message {
+    let text = match problem {
+        ProblemKind::ContactsDenied => {
+            "Your phone isn't sharing Contacts, so Calls show numbers instead of names; to allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer and turn on Contacts and call history."
+        }
+        ProblemKind::ContactsPromptUnanswered => {
+            "Your phone asked whether to share Contacts and nobody answered, so Calls show numbers instead of names; turn Bluetooth off and on again on your phone to be asked again."
+        }
+    };
+    Message {
+        text,
+        next_action: None,
+    }
+}
+
 /// What `desktop-calls mute` did.
 #[must_use]
 pub fn mute_toggled(muted: bool) -> &'static str {
@@ -210,6 +250,33 @@ pub fn label(label: Label) -> &'static str {
         Label::Keypad => "Keypad",
         Label::MicrophoneMuted => "Microphone muted",
         Label::KeypadPlaceholder => "Type or paste digits to send tones",
+    }
+}
+
+/// How the other party is shown: the Contact's name, if Contacts name them
+/// and the name isn't empty, otherwise as [`caller`] shows them.
+#[must_use]
+pub fn caller_name(caller: &Caller, contact: Option<&ContactMatch>) -> String {
+    match contact {
+        Some(contact) if !contact.name.trim().is_empty() => contact.name.clone(),
+        _ => self::caller(caller),
+    }
+}
+
+/// What kind of number a Contact's number is, as the surfaces show it.
+#[must_use]
+pub fn number_label(label: &NumberLabel) -> String {
+    label.as_str().to_lowercase()
+}
+
+/// The line under a Contact's name: the number's label and the number,
+/// such as `mobile · +44 7700 900123`.
+#[must_use]
+pub fn caller_detail(number_label: &str, number: &str) -> String {
+    if number_label.is_empty() {
+        number.to_owned()
+    } else {
+        format!("{number_label} · {number}")
     }
 }
 

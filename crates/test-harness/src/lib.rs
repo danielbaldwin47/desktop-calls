@@ -42,6 +42,7 @@ mod client;
 mod input;
 mod screen;
 mod stand_ins;
+pub mod vcards;
 
 pub use client::TestClient;
 pub use input::Key;
@@ -93,6 +94,14 @@ trait SimulatedPhone1 {
 
     fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
 
+    fn set_pbap_folder(&self, folder: &str, vcards: &str) -> zbus::Result<()>;
+
+    fn remove_pbap_folder(&self, folder: &str) -> zbus::Result<()>;
+
+    fn set_contacts_prompt(&self, answer: &str) -> zbus::Result<()>;
+
+    fn set_pull_delay(&self, delay_ms: u32) -> zbus::Result<()>;
+
     fn set_microphone_volume(&self, volume: u8) -> zbus::Result<()>;
 
     fn answer_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
@@ -103,6 +112,9 @@ trait SimulatedPhone1 {
 
     #[zbus(property)]
     fn audio_gateway(&self) -> zbus::Result<zbus::OwnedObjectPath>;
+
+    #[zbus(property)]
+    fn most_pbap_sessions_at_once(&self) -> zbus::Result<u32>;
 
     fn recorded_method_calls(&self) -> zbus::Result<Vec<(String, String, String, String, String)>>;
 }
@@ -150,6 +162,54 @@ pub struct AppState {
     /// `Surfaces`: each shown surface (`"banner"`, `"call-window"`) with its
     /// key content, as the surface shows it.
     pub surfaces: BTreeMap<String, BTreeMap<String, String>>,
+    /// `ContactsState`.
+    pub contacts: AppContactsState,
+    /// `Problems`, in the order the app lists them.
+    pub problems: Vec<AppProblem>,
+}
+
+/// The app's `ContactsState`: how far Contacts and Call History are synced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppContactsState {
+    /// `"syncing"`, `"ready"`, `"permission-needed"`, `"denied"` or
+    /// `"unavailable"`.
+    pub state: String,
+    /// How many Contacts the Desktop holds.
+    pub contacts: u32,
+    /// How many Call History entries the Desktop holds.
+    pub call_history: u32,
+    /// While `"permission-needed"`: when the Phone's prompt times out, in
+    /// milliseconds since the Unix epoch; otherwise 0.
+    pub deadline_ms: u64,
+    /// While `"unavailable"`: why, such as `"prompt-timed-out"`; otherwise
+    /// empty.
+    pub reason: String,
+}
+
+/// One entry of the app's `Problems`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppProblem {
+    /// The problem's kind, such as `"contacts-denied"`.
+    pub kind: String,
+    /// The sentence shown to the user.
+    pub message: String,
+    /// What the user can do, or empty.
+    pub action: String,
+}
+
+/// One entry of the app's Call History.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppCallHistoryEntry {
+    /// `"incoming"`, `"outgoing"` or `"missed"`.
+    pub kind: String,
+    /// The other party's number as the Phone reports it, or `""` if withheld.
+    pub number: String,
+    /// The Contact's name, or `""`.
+    pub display_name: String,
+    /// The number's label, such as `"mobile"`, or `""`.
+    pub number_label: String,
+    /// When, in milliseconds since the Unix epoch, or 0 if the Phone didn't say.
+    pub at_ms: u64,
 }
 
 impl AppState {
@@ -232,6 +292,7 @@ pub struct Builder {
     scenario: Option<PathBuf>,
     screenshot_directory: Option<PathBuf>,
     omarchy_bar: bool,
+    time_zone: Option<String>,
     phone_connected: bool,
     omarchy_theme: Option<OmarchyTheme>,
     hyprland: Option<HyprlandSettings>,
@@ -334,6 +395,14 @@ impl Builder {
         self
     }
 
+    /// Sets the Desktop's time zone through the standard `TZ` variable, as
+    /// an IANA name or a POSIX rule such as `"<+0530>-5:30"`. Without it the
+    /// app reads `/etc/localtime`.
+    pub fn time_zone(mut self, time_zone: &str) -> Self {
+        self.time_zone = Some(time_zone.to_owned());
+        self
+    }
+
     /// Brings the Simulated Phone's hands-free up before the app starts, so
     /// the app starts with the Phone's AudioGateway already there, as after a
     /// login or a restart with the Phone in range.
@@ -369,6 +438,9 @@ impl Builder {
         let system_bus = start_bus(&directory, "system", &mut processes);
         let session_bus = start_bus(&directory, "session", &mut processes);
         let mut environment = environment(&directory, &system_bus, &session_bus);
+        if let Some(time_zone) = self.time_zone {
+            environment.push(("TZ", time_zone));
+        }
         let hyprland = self
             .hyprland
             .map(|settings| settings.serve(&directory, &mut environment));
@@ -459,15 +531,7 @@ impl Builder {
             harness.simulated_phone().connect();
         }
 
-        let app = harness
-            .app_command()
-            .stdout(harness.log_file("desktop-calls.stdout"))
-            .stderr(harness.log_file("desktop-calls.stderr"))
-            .spawn()
-            .expect("start desktop-calls");
-        harness.processes.push(("desktop-calls", app));
-        harness.wait_for_bus_name(APP_BUS_NAME, "desktop-calls");
-
+        harness.start_app();
         harness
     }
 }
@@ -954,6 +1018,82 @@ impl Harness {
         .unwrap_or_else(|error| panic!("{member}({call}) on the app: {error}"));
     }
 
+    /// Every entry of the app's Call History, newest first, from its
+    /// `GetCallHistory` method.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface doesn't answer.
+    #[must_use]
+    pub fn call_history(&self) -> Vec<AppCallHistoryEntry> {
+        let reply = zbus::block_on(self.session.call_method(
+            Some(APP_BUS_NAME),
+            APP_PATH,
+            Some(APP_INTERFACE),
+            "GetCallHistory",
+            &(),
+        ))
+        .expect("GetCallHistory on the app");
+        reply
+            .body()
+            .deserialize::<Vec<(String, String, String, String, u64)>>()
+            .expect("GetCallHistory replies with a(ssssst)")
+            .into_iter()
+            .map(
+                |(kind, number, display_name, number_label, at_ms)| AppCallHistoryEntry {
+                    kind,
+                    number,
+                    display_name,
+                    number_label,
+                    at_ms,
+                },
+            )
+            .collect()
+    }
+
+    /// Stops the app as a crash would (SIGKILL), and starts it again in the
+    /// same world: the same buses, home and Simulated Phone.
+    ///
+    /// # Panics
+    ///
+    /// If the app doesn't start again.
+    pub fn restart_app(&mut self) {
+        if let Some(index) = self
+            .processes
+            .iter()
+            .position(|(name, _)| *name == "desktop-calls")
+        {
+            let (_, mut app) = self.processes.remove(index);
+            let _ = app.kill();
+            let _ = app.wait();
+        }
+        let left = zbus::block_on(within(STARTUP_DEADLINE, async {
+            let bus = DBusProxy::new(&self.session).await?;
+            let mut owner_changes = bus.receive_name_owner_changed().await?;
+            let name = BusName::try_from(APP_BUS_NAME)?;
+            while bus.name_has_owner(name.clone()).await? {
+                owner_changes.next().await;
+            }
+            Ok::<_, zbus::Error>(())
+        }));
+        assert!(
+            matches!(left, Some(Ok(()))),
+            "the stopped app stayed on the bus: {left:?}"
+        );
+        self.start_app();
+    }
+
+    fn start_app(&mut self) {
+        let app = self
+            .app_command()
+            .stdout(self.log_file("desktop-calls.stdout"))
+            .stderr(self.log_file("desktop-calls.stderr"))
+            .spawn()
+            .expect("start desktop-calls");
+        self.processes.push(("desktop-calls", app));
+        self.wait_for_bus_name(APP_BUS_NAME, "desktop-calls");
+    }
+
     /// Waits for the app's first `Error` signal, and returns it.
     ///
     /// # Panics
@@ -1358,6 +1498,65 @@ impl SimulatedPhone<'_> {
         .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
     }
 
+    /// Gives the Phone the PBAP folder `folder` (`"pb"` for Contacts;
+    /// `"cch"`, `"ich"`, `"och"` or `"mch"` for Call History) with exactly
+    /// this vCard text, which it serves whatever format is asked for. See
+    /// [`crate::vcards`] for builders.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_pbap_folder(&self, folder: &str, vcards: &str) {
+        zbus::block_on(async { self.proxy().await?.set_pbap_folder(folder, vcards).await })
+            .unwrap_or_else(|error| panic!("set the {folder} folder: {error}"));
+    }
+
+    /// Makes the Phone lack the folder `folder`, as some Phones lack
+    /// `cch`: selecting it fails.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn remove_pbap_folder(&self, folder: &str) {
+        zbus::block_on(async { self.proxy().await?.remove_pbap_folder(folder).await })
+            .unwrap_or_else(|error| panic!("remove the {folder} folder: {error}"));
+    }
+
+    /// How the person holding the Phone answers its "Allow access to
+    /// contacts and call history?" prompt for each new PBAP session:
+    /// `"grant"` (the default), `"deny"` or `"ignore"`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't know the answer.
+    pub fn set_contacts_prompt(&self, answer: &str) {
+        zbus::block_on(async { self.proxy().await?.set_contacts_prompt(answer).await })
+            .unwrap_or_else(|error| panic!("set the contacts prompt to {answer:?}: {error}"));
+    }
+
+    /// Makes every PBAP pull take `delay` before it completes.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_pull_delay(&self, delay: Duration) {
+        let delay_ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
+        zbus::block_on(async { self.proxy().await?.set_pull_delay(delay_ms).await })
+            .expect("set the Simulated Phone's pull delay");
+    }
+
+    /// The most PBAP sessions the Phone has had open at once, counting a
+    /// session from its `CreateSession` to its `RemoveSession`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't answer.
+    #[must_use]
+    pub fn most_pbap_sessions_at_once(&self) -> u32 {
+        zbus::block_on(async { self.proxy().await?.most_pbap_sessions_at_once().await })
+            .expect("read the Simulated Phone's PBAP session count")
+    }
+
     /// Makes the Phone report this hands-free microphone gain, as `+VGM`
     /// does: 0 to 15, or 255, which is how PipeWire sends its -1 ("the Phone
     /// hasn't said"). A later AudioGateway starts with it too.
@@ -1520,6 +1719,16 @@ async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
         .collect();
     let (codec, wideband) = <(String, bool)>::try_from(property("Codec")?)?;
     let surfaces = <BTreeMap<String, BTreeMap<String, String>>>::try_from(property("Surfaces")?)?;
+    let (state, contacts, call_history, deadline_ms, reason) =
+        <(String, u32, u32, u64, String)>::try_from(property("ContactsState")?)?;
+    let problems = <Vec<(String, String, String)>>::try_from(property("Problems")?)?
+        .into_iter()
+        .map(|(kind, message, action)| AppProblem {
+            kind,
+            message,
+            action,
+        })
+        .collect();
     Ok(AppState {
         connection_state,
         phone: (!address.is_empty()).then_some(PhoneIdentity { name, address }),
@@ -1530,6 +1739,14 @@ async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
         codec,
         wideband,
         surfaces,
+        contacts: AppContactsState {
+            state,
+            contacts,
+            call_history,
+            deadline_ms,
+            reason,
+        },
+        problems,
     })
 }
 

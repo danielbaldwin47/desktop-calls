@@ -2,6 +2,7 @@
 
 mod bluez;
 mod cli;
+mod contacts;
 mod control;
 mod glib_runtime;
 mod hyprland;

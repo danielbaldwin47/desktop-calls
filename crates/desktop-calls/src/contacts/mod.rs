@@ -15,11 +15,12 @@
 //!   each folder is read with `Offset` until `GetSize` is reached. After a
 //!   Call, only the newest page is pulled again, in front of the older
 //!   Calls held.
-//! - **Order.** The Call History comes first, newest page first, as it is
+//! - **Order.** The newest page of the Call History comes first, as it is
 //!   quick: the Pixel gave 200 Calls in under 2 s, but took 9.7 s over 319
-//!   Contacts (2026-11-05). The sync reports its progress as it goes, so the
-//!   Setup Window shows the Call History done, then how many Contacts are
-//!   being read, instead of looking stuck.
+//!   Contacts (2026-11-05). Contacts come next, then the older pages of the
+//!   Call History, so those can't hold Contacts up. The sync reports its
+//!   progress as it goes, so the Setup Window shows the recent Calls done,
+//!   then how many Contacts are being read, instead of looking stuck.
 //! - **vCards** (`vcard.rs`), asked for as 3.0, read as 3.0 or 2.1, and
 //!   Call History times without a time zone read as the Desktop's local time.
 //! - **The cache** (`cache.rs`), read when the Phone is attached, written
@@ -203,10 +204,11 @@ impl ContactsSync {
         }
     }
 
-    /// Pulls the Call History, newest page first, reporting each part as
-    /// it lands, so the Banner can name recent callers and the Dialer show
-    /// recent Calls at once; then Contacts, which take longest, and reports
-    /// them with the whole Call History.
+    /// Pulls the newest page of the Call History and reports it, so the
+    /// Banner can name recent callers and the Dialer show recent Calls at
+    /// once; then Contacts, which take longest, reported with that page;
+    /// then the older pages of the Call History, reported as they land.
+    /// Older pages the Phone can't give don't undo the Contacts.
     async fn sync_in(
         &self,
         session: &OwnedObjectPath,
@@ -214,17 +216,9 @@ impl ContactsSync {
         held: &mut Cached,
     ) -> Result<(), Stop> {
         let mut history = self.pull_call_history(session, 1).await?;
-        if let Some(folders) = &mut history {
+        if let Some(folders) = &history {
             held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
             self.report_call_history(address, held).await;
-            if folders.iter().any(|folder| !folder.complete) {
-                for folder in folders.iter_mut().filter(|folder| !folder.complete) {
-                    self.pull(session, folder, MOST_PAGES).await?;
-                }
-                held.call_history =
-                    call_history_from(folders, std::mem::take(&mut held.call_history));
-                self.report_call_history(address, held).await;
-            }
         }
 
         let mut contacts = Folder::new("pb", None);
@@ -243,7 +237,7 @@ impl ContactsSync {
         if has_contacts {
             held.contacts = contacts_from(contacts.cards);
         }
-        let (contacts, call_history) = self.index_and_save(address, held).await;
+        let (indexed, call_history) = self.index_and_save(address, held).await;
         tracing::info!(
             event_kind = %EventKind::ContactsSynced,
             contacts = held.contacts.len(),
@@ -253,10 +247,35 @@ impl ContactsSync {
             held.call_history.len()
         );
         self.report(Input::ContactsSynced {
-            contacts,
+            contacts: indexed,
             call_history,
         });
+
+        if let Some(folders) = &mut history
+            && folders.iter().any(|folder| !folder.complete)
+        {
+            let older = self.pull_older(session, folders).await;
+            if let Err(Stop::Denied) = older {
+                return Err(Stop::Denied);
+            }
+            held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
+            self.report_call_history(address, held).await;
+        }
         self.report(Input::ContactsSyncProgress(SyncProgress::Finished));
+        Ok(())
+    }
+
+    /// Pulls the rest of each Call History folder not yet complete. A stop
+    /// other than a refusal leaves the pages read so far: the sync already
+    /// has Contacts and the newest Calls.
+    async fn pull_older(
+        &self,
+        session: &OwnedObjectPath,
+        folders: &mut [Folder],
+    ) -> Result<(), Stop> {
+        for folder in folders.iter_mut().filter(|folder| !folder.complete) {
+            self.pull(session, folder, MOST_PAGES).await?;
+        }
         Ok(())
     }
 
@@ -265,7 +284,7 @@ impl ContactsSync {
     async fn report_call_history(&self, address: &str, held: &mut Cached) {
         let (_, call_history) = self.index_and_save(address, held).await;
         tracing::info!(
-            event_kind = %EventKind::ContactsSynced,
+            event_kind = %EventKind::CallHistoryRead,
             call_history = held.call_history.len(),
             "Read {} Call History entries",
             held.call_history.len()

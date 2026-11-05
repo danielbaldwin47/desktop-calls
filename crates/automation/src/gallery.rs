@@ -526,7 +526,7 @@ const STATES: &[State] = &[
         prepare: fresh_install,
         reach: |harness| {
             with_hyprland_config(harness);
-            with_phone_book(harness);
+            with_contacts(harness);
             pair_through_setup_window(harness);
             setup_window_at(harness, "done");
             harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
@@ -542,7 +542,7 @@ const STATES: &[State] = &[
         prepare: fresh_install,
         reach: |harness| {
             with_hyprland_config(harness);
-            with_phone_book(harness);
+            with_contacts(harness);
             pair_through_setup_window(harness);
             harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
                 setup_window_shows(state, "buttons", "Add keybinding\nDone")
@@ -572,7 +572,7 @@ fn with_hyprland_config(harness: &Harness) {
 
 /// Contacts and recent Calls on the Phone, so the finish page reports
 /// a sync the size of a real one.
-fn with_phone_book(harness: &Harness) {
+fn with_contacts(harness: &Harness) {
     let phone = harness.simulated_phone();
     phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
     phone.set_pbap_folder("cch", &vcards::call_history(200));

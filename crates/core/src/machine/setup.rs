@@ -23,6 +23,8 @@
 //!    counts down to the prompt's deadline; if nobody answers in time, Try
 //!    again asks once more. Once shared, it shows the Call History done as
 //!    soon as it is read, then the Contacts being read.
+//!    If the Phone leaves before Contacts are read, the window says so,
+//!    and offers to carry on once it is back.
 //! 9. Done: what was synced, or that Calls still work with numbers; an
 //!    invitation to place a first Call, and the Desktop Calls keybinding,
 //!    which it offers to add to the Hyprland config, writing nothing until
@@ -35,6 +37,7 @@ use super::{State, forget_phone_keeping_desktop, phone::phone_paired};
 use crate::call::Timestamp;
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{ContactsState, SyncProgress, Unavailable};
+use crate::keybinding::KeybindingCheck;
 
 /// How long a Phone that just paired may take to connect before the
 /// Desktop asks it for hands-free alone. A Phone sharing Calls had its
@@ -85,7 +88,31 @@ struct Progress {
     awaiting_finish: bool,
     shared: bool,
     call_history: bool,
-    reading: Option<ReadingContacts>,
+    contacts: ContactsProgress,
+}
+
+/// How far the sync has got with Contacts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ContactsProgress {
+    #[default]
+    NotStarted,
+    Reading(ReadingContacts),
+    /// Read, after reading as shown; older Calls may still be read.
+    Read(Option<ReadingContacts>),
+}
+
+impl ContactsProgress {
+    fn reading(self) -> Option<ReadingContacts> {
+        match self {
+            Self::NotStarted => None,
+            Self::Reading(reading) => Some(reading),
+            Self::Read(reading) => reading,
+        }
+    }
+
+    fn is_read(self) -> bool {
+        matches!(self, Self::Read(_))
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -103,6 +130,8 @@ enum Step {
     PhoneUnreachable(Phone),
     ContactsWarning(Phone),
     Contacts(Phone),
+    /// The Phone left before Contacts were read.
+    ContactsAway(Phone),
     Done(Phone),
 }
 
@@ -125,31 +154,6 @@ pub enum ContactsOutcome {
     /// Not shared, for another reason: nobody answered the Phone, or the
     /// sync failed.
     NotShared,
-}
-
-/// What the Desktop's Hyprland config can take for the Desktop Calls
-/// keybinding, which runs `desktop-calls`: the Dialer, or the ringing or
-/// live Call.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum KeybindingCheck {
-    /// `line`, added to the end of `file`, binds `keys`.
-    Available {
-        keys: String,
-        file: String,
-        line: String,
-    },
-    /// `file` already binds `keys` to Desktop Calls.
-    Added { keys: String, file: String },
-    /// `keys` already does something else in `file`; the user can bind
-    /// another key to `command`.
-    Taken {
-        keys: String,
-        file: String,
-        command: String,
-    },
-    /// No Hyprland config Desktop Calls knows how to add to; the user can
-    /// bind a key to `command`.
-    NoConfig { command: String },
 }
 
 /// Where the finish page is with the keybinding.
@@ -188,6 +192,9 @@ pub enum SetupNotice {
     PairingFailed,
     /// The keybinding couldn't be written to the Hyprland config.
     KeybindingNotAdded,
+    /// The Hyprland config changed after the line was shown, so nothing was
+    /// written; the page shows what it can take now.
+    KeybindingConfigChanged,
 }
 
 /// The Setup Window's step.
@@ -223,9 +230,14 @@ pub enum SetupStep {
         contacts: Option<ReadingContacts>,
         contacts_read: bool,
     },
-    /// Finished: what became of Contacts, and the keybinding.
+    /// The Phone left before Contacts were read; `back` once it is
+    /// connected again, to carry on.
+    ContactsPhoneAway { phone: Phone, back: bool },
+    /// Finished: what became of Contacts, and the keybinding. `connected`
+    /// while the Phone is.
     Done {
         phone: Phone,
+        connected: bool,
         contacts: ContactsOutcome,
         keybinding: KeybindingStage,
     },
@@ -255,6 +267,7 @@ impl SetupStep {
             Self::ContactsPrompt { .. } => "contacts-prompt",
             Self::ContactsPromptTimedOut { .. } => "contacts-prompt-timed-out",
             Self::ContactsSyncing { .. } => "contacts-syncing",
+            Self::ContactsPhoneAway { .. } => "contacts-phone-away",
             Self::Done { .. } => "done",
         }
     }
@@ -318,8 +331,13 @@ impl State {
                 phone: phone.clone(),
             },
             Step::Contacts(phone) => self.contacts_step(setup, phone.clone()),
+            Step::ContactsAway(phone) => SetupStep::ContactsPhoneAway {
+                phone: phone.clone(),
+                back: self.phone_is_here(),
+            },
             Step::Done(phone) => SetupStep::Done {
                 phone: phone.clone(),
+                connected: self.phone_is_here(),
                 contacts: self.contacts_outcome(),
                 keybinding: setup.keybinding.clone(),
             },
@@ -352,8 +370,8 @@ impl State {
                 SetupStep::ContactsSyncing {
                     phone,
                     call_history: setup.progress.call_history,
-                    contacts: setup.progress.reading,
-                    contacts_read: sync == ContactsState::Ready,
+                    contacts: setup.progress.contacts.reading(),
+                    contacts_read: setup.progress.contacts.is_read(),
                 }
             }
             // Until the Phone is known to ask, or to share, the warning
@@ -438,6 +456,15 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
                 && state.phone_is_here()
             {
                 start_sync(state, effects);
+            }
+        }
+        Input::ContinueContacts => {
+            if let Some(setup) = state.setup.as_mut()
+                && let Step::ContactsAway(phone) = &setup.step
+                && state.connection == ConnectionState::Connected
+            {
+                let phone = phone.clone();
+                begin_contacts(state, phone, effects);
             }
         }
         Input::SkipContacts => {
@@ -741,24 +768,36 @@ pub(super) fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
 
 /// After every step: the sync the window follows is over once the Phone
 /// refused, the sync failed, or it finished, and the window goes on to the
-/// finish page. An unanswered prompt waits for Try again or Skip.
+/// finish page. An unanswered prompt waits for Try again or Skip. If the
+/// Phone leaves before Contacts are read, the window says so instead; once
+/// they are, only older Calls are missing, and the window finishes.
 pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
     let here = state.phone_is_here();
     let sync = state.contacts_sync;
     let Some(setup) = state.setup.as_mut() else {
         return;
     };
-    let Step::Contacts(phone) = &setup.step else {
+    let phone = match &setup.step {
+        Step::ContactsWarning(phone) | Step::Contacts(phone) => phone.clone(),
+        _ => return,
+    };
+    let at_contacts = matches!(setup.step, Step::Contacts(_));
+    if !here {
+        if at_contacts && setup.progress.contacts.is_read() {
+            finish(setup, phone, effects);
+        } else {
+            setup.step = Step::ContactsAway(phone);
+        }
         return;
-    };
-    let over = match sync {
-        ContactsState::Denied => true,
-        ContactsState::Unavailable(reason) => reason != Unavailable::PromptTimedOut,
-        ContactsState::Ready => !setup.progress.awaiting_finish || !here,
-        ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => false,
-    };
+    }
+    let over = at_contacts
+        && match sync {
+            ContactsState::Denied => true,
+            ContactsState::Unavailable(reason) => reason != Unavailable::PromptTimedOut,
+            ContactsState::Ready => !setup.progress.awaiting_finish,
+            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => false,
+        };
     if over {
-        let phone = phone.clone();
         finish(setup, phone, effects);
     }
 }
@@ -774,21 +813,33 @@ fn keybinding_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) 
     let adding = setup.adding;
     let current = std::mem::take(&mut setup.keybinding);
     setup.keybinding = match (input, current) {
-        (Input::KeybindingChecked(check), _) => KeybindingStage::Checked(check),
+        (Input::KeybindingChecked(config), _) => {
+            KeybindingStage::Checked(KeybindingCheck::of(&config))
+        }
         (
             Input::AddKeybinding,
             KeybindingStage::Checked(check @ KeybindingCheck::Available { .. }),
-        ) => KeybindingStage::Confirming(check),
+        ) => {
+            setup.notice = None;
+            KeybindingStage::Confirming(check)
+        }
         (Input::CancelKeybinding, KeybindingStage::Confirming(check)) if !adding => {
             KeybindingStage::Checked(check)
         }
         (Input::ConfirmKeybinding, KeybindingStage::Confirming(check)) => {
-            if let (KeybindingCheck::Available { file, line, .. }, false) = (&check, adding) {
+            if let (
+                KeybindingCheck::Available {
+                    file, seen, added, ..
+                },
+                false,
+            ) = (&check, adding)
+            {
                 setup.adding = true;
                 setup.notice = None;
                 effects.push(Effect::AddKeybinding {
                     file: file.clone(),
-                    line: line.clone(),
+                    seen: seen.clone(),
+                    added: added.clone(),
                 });
             }
             KeybindingStage::Confirming(check)
@@ -804,6 +855,12 @@ fn keybinding_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) 
             setup.adding = false;
             setup.notice = Some(SetupNotice::KeybindingNotAdded);
             KeybindingStage::Checked(check)
+        }
+        // Offered afresh from what the file holds now.
+        (Input::KeybindingConfigChanged(config), KeybindingStage::Confirming(_)) if adding => {
+            setup.adding = false;
+            setup.notice = Some(SetupNotice::KeybindingConfigChanged);
+            KeybindingStage::Checked(KeybindingCheck::of(&config))
         }
         (_, unchanged) => unchanged,
     };
@@ -822,7 +879,7 @@ pub(super) fn sync_progress(state: &mut State, progress: &SyncProgress) {
         SyncProgress::Shared => seen.shared = true,
         SyncProgress::CallHistory(_) => seen.call_history = true,
         SyncProgress::ReadingContacts { count, at } => {
-            seen.reading = Some(ReadingContacts {
+            seen.contacts = ContactsProgress::Reading(ReadingContacts {
                 count: *count,
                 done_by: count.map(|count| Timestamp(at.0 + u64::from(count) * CONTACT_READ_MS)),
             });
@@ -831,19 +888,30 @@ pub(super) fn sync_progress(state: &mut State, progress: &SyncProgress) {
     }
 }
 
+/// The Contacts the window follows are read.
+pub(super) fn contacts_read(state: &mut State) {
+    if let Some(setup) = state.setup.as_mut()
+        && matches!(setup.step, Step::Contacts(_))
+    {
+        setup.progress.contacts = ContactsProgress::Read(setup.progress.contacts.reading());
+    }
+}
+
 /// The Phone the Setup Window is connecting is connected for Calls: its
 /// first sync waits until the window has warned that the Phone is about to
-/// ask whether to share Contacts. Whether it waits.
+/// ask whether to share Contacts. Back after leaving mid-Contacts, it waits
+/// for the user to carry on. Whether it waits.
 pub(super) fn hold_sync(state: &mut State) -> bool {
     let followed = state.phone.clone();
     let Some(setup) = state.setup.as_mut() else {
         return false;
     };
     let held = followed.is_some_and(|followed| {
-        setup
-            .step
-            .connecting()
-            .is_some_and(|phone| phone.address.eq_ignore_ascii_case(&followed.address))
+        let waiting = match &setup.step {
+            Step::ContactsAway(phone) => Some(phone),
+            step => step.connecting(),
+        };
+        waiting.is_some_and(|phone| phone.address.eq_ignore_ascii_case(&followed.address))
     });
     setup.sync_held |= held;
     held

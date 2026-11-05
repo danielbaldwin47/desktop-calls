@@ -62,8 +62,7 @@ trait SimulatedPhone1 {
 
     fn set_pull_delay(&self, delay_ms: u32) -> zbus::Result<()>;
 
-    fn set_pull_delay_per_vcard(&self, phonebook_ms: u32, call_history_ms: u32)
-    -> zbus::Result<()>;
+    fn set_pull_delay_per_vcard(&self, contacts_ms: u32, call_history_ms: u32) -> zbus::Result<()>;
 
     fn answer_contacts_prompt(&self, answer: &str) -> zbus::Result<()>;
 
@@ -488,19 +487,19 @@ impl SimulatedPhone<'_> {
             .expect("set the Simulated Phone's pull delay");
     }
 
-    /// Makes every PBAP pull take longer for each vCard it gives: `phonebook`
+    /// Makes every PBAP pull take longer for each vCard it gives: `contacts`
     /// from Contacts, `call_history` from a Call History folder.
     ///
     /// # Panics
     ///
     /// If the Simulated Phone refuses.
-    pub fn set_pull_delay_per_vcard(&self, phonebook: Duration, call_history: Duration) {
+    pub fn set_pull_delay_per_vcard(&self, contacts: Duration, call_history: Duration) {
         let millis = |delay: Duration| u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
-        let (phonebook_ms, call_history_ms) = (millis(phonebook), millis(call_history));
+        let (contacts_ms, call_history_ms) = (millis(contacts), millis(call_history));
         zbus::block_on(async {
             self.proxy()
                 .await?
-                .set_pull_delay_per_vcard(phonebook_ms, call_history_ms)
+                .set_pull_delay_per_vcard(contacts_ms, call_history_ms)
                 .await
         })
         .expect("set the Simulated Phone's pull delay for each vCard");

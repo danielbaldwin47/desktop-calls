@@ -3,9 +3,9 @@
 
 use crate::call::Timestamp;
 use crate::connection::Phone;
+use crate::keybinding::KeybindingCheck;
 use crate::machine::{
-    ContactsOutcome, KeybindingCheck, KeybindingStage, ReadingContacts, SetupNotice, SetupStep,
-    SetupWindowView,
+    ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
 
 /// The Setup Window's text for one step.
@@ -117,26 +117,14 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
                 contacts,
                 contacts_read,
                 ..
-            } => {
-                text.progress = vec![
-                    if *call_history {
-                        "✓ Recent Calls".to_owned()
-                    } else {
-                        "Recent Calls…".to_owned()
-                    },
-                    contacts_progress(*contacts, *contacts_read, now),
-                ];
-                (
-                    "Reading Contacts and recent Calls…".to_owned(),
-                    Vec::new(),
-                    vec!["Close"],
-                )
-            }
+            } => contacts_syncing(&mut text, *call_history, *contacts, *contacts_read, now),
+            SetupStep::ContactsPhoneAway { phone, back } => phone_away(&mut text, phone, *back),
             SetupStep::Done {
                 phone,
+                connected,
                 contacts,
                 keybinding,
-            } => done(&mut text, phone, *contacts, keybinding, &desktop),
+            } => done(&mut text, phone, *connected, *contacts, keybinding, &desktop),
         };
     text.keys = keys(&view.step, &buttons);
     text.heading = heading;
@@ -236,9 +224,11 @@ fn contacts_prompt_timed_out(text: &mut SetupWindowText) -> Page {
 }
 
 /// The finish page: what was synced, the first Call and the keybinding.
+/// It says the Phone is connected only while it is.
 fn done(
     text: &mut SetupWindowText,
     phone: &Phone,
+    connected: bool,
     contacts: ContactsOutcome,
     keybinding: &KeybindingStage,
     desktop: &str,
@@ -248,10 +238,61 @@ fn done(
         "Tip: in Omarchy, to keep Desktop Calls in the bar, right-click the arrow at the bar's tray and pin Desktop Calls.",
     );
     let (instructions, buttons) = finish(keybinding, &mut text.line);
+    let heading = if connected {
+        format!("{} is connected", phone.name)
+    } else {
+        format!("{} is set up", phone.name)
+    };
+    (heading, instructions, buttons)
+}
+
+/// The sync under way: recent Calls, then Contacts.
+fn contacts_syncing(
+    text: &mut SetupWindowText,
+    call_history: bool,
+    contacts: Option<ReadingContacts>,
+    contacts_read: bool,
+    now: Timestamp,
+) -> Page {
+    text.progress = vec![
+        if call_history {
+            "✓ Recent Calls".to_owned()
+        } else {
+            "Recent Calls…".to_owned()
+        },
+        contacts_progress(contacts, contacts_read, now),
+    ];
     (
-        format!("{} is connected", phone.name),
-        instructions,
-        buttons,
+        "Reading Contacts and recent Calls…".to_owned(),
+        Vec::new(),
+        vec!["Close"],
+    )
+}
+
+/// The Phone left before Contacts were read: wait for it, then carry on.
+fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
+    if back {
+        text.summary = Some("Contacts and recent Calls aren't read yet.".to_owned());
+        return (
+            format!("{} is back", phone.name),
+            vec![
+                "Choose Continue, and your phone asks again whether to share contacts and call history."
+                    .to_owned(),
+            ],
+            vec!["Continue", "Close"],
+        );
+    }
+    text.summary = Some(format!(
+        "{} disconnected before contacts and recent Calls were read.",
+        phone.name
+    ));
+    (
+        format!("{} disconnected", phone.name),
+        vec![
+            "On your phone: check that Bluetooth is on, and keep it near this computer.".to_owned(),
+            "Once it connects again, choose Continue here.".to_owned(),
+        ],
+        vec!["Close"],
     )
 }
 
@@ -313,30 +354,53 @@ fn finish(
     line: &mut Option<String>,
 ) -> (Vec<String>, Vec<&'static str>) {
     let from_the_bar = "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.".to_owned();
-    match keybinding {
-        KeybindingStage::Checking => (vec![from_the_bar], vec!["Done"]),
-        KeybindingStage::Checked(KeybindingCheck::Available { keys, .. }) => (
+    let check = match keybinding {
+        KeybindingStage::Checking => return (vec![from_the_bar], vec!["Done"]),
+        KeybindingStage::Confirming(KeybindingCheck::Available {
+            file,
+            line: shown,
+            before_return,
+            ..
+        }) => {
+            *line = Some(shown.clone());
+            let place = if *before_return {
+                format!("This line goes into {file}, just before its final return:")
+            } else {
+                format!("This line goes at the end of {file}:")
+            };
+            return (
+                vec![
+                    place,
+                    "Choose Confirm to add it, or Cancel to leave the file as it is.".to_owned(),
+                ],
+                vec!["Confirm", "Cancel"],
+            );
+        }
+        KeybindingStage::Checked(check) | KeybindingStage::Confirming(check) => check,
+    };
+    match check {
+        KeybindingCheck::Available { keys, file, .. } => (
             vec![
                 format!(
-                    "Add a keybinding, and {} opens the Dialer from anywhere.",
+                    "Add a keybinding, and {} opens the Dialer from anywhere: {file} doesn't use those keys yet.",
                     shown_keys(keys)
                 ),
                 from_the_bar,
             ],
             vec!["Add keybinding", "Done"],
         ),
-        KeybindingStage::Checked(KeybindingCheck::Added { keys, .. }) => (
+        KeybindingCheck::Added { keys, .. } => (
             vec![format!(
                 "Place your first Call: press {} to open the Dialer, type a name or number, then press Enter.",
                 shown_keys(keys)
             )],
             vec!["Done"],
         ),
-        KeybindingStage::Checked(KeybindingCheck::Taken {
+        KeybindingCheck::Taken {
             keys,
             file,
             command,
-        }) => (
+        } => (
             vec![
                 format!(
                     "{} already does something else in {file}; to open the Dialer from a key, bind another one to run {command}",
@@ -346,34 +410,22 @@ fn finish(
             ],
             vec!["Done"],
         ),
-        KeybindingStage::Checked(KeybindingCheck::NoConfig { command }) => (
+        KeybindingCheck::Unreadable { file, command } => (
+            vec![
+                format!(
+                    "{file} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}"
+                ),
+                from_the_bar,
+            ],
+            vec!["Done"],
+        ),
+        KeybindingCheck::NoConfig { command } => (
             vec![
                 format!("To open the Dialer from a key, bind one to run {command}"),
                 from_the_bar,
             ],
             vec!["Done"],
         ),
-        KeybindingStage::Confirming(check) => {
-            let file = match check {
-                KeybindingCheck::Available {
-                    file, line: added, ..
-                } => {
-                    *line = Some(added.clone());
-                    file.as_str()
-                }
-                KeybindingCheck::Added { file, .. } | KeybindingCheck::Taken { file, .. } => {
-                    file.as_str()
-                }
-                KeybindingCheck::NoConfig { .. } => "",
-            };
-            (
-                vec![
-                    format!("This line goes at the end of {file}:"),
-                    "Choose Confirm to add it, or Cancel to leave the file as it is.".to_owned(),
-                ],
-                vec!["Confirm", "Cancel"],
-            )
-        }
     }
 }
 
@@ -408,6 +460,9 @@ fn notice(notice: SetupNotice) -> &'static str {
         SetupNotice::PairingFailed => "Pairing didn't finish; choose your phone to try again.",
         SetupNotice::KeybindingNotAdded => {
             "The keybinding couldn't be added to the Hyprland config; choose Add keybinding to try again."
+        }
+        SetupNotice::KeybindingConfigChanged => {
+            "The Hyprland config changed after the line was shown, so nothing was written; this is what it can take now."
         }
     }
 }

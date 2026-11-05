@@ -540,6 +540,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
 
     let done = messages::setup_window(
         &view(SetupStep::Done {
+            connected: true,
             phone: pixel(),
             contacts: ContactsOutcome::Synced {
                 contacts: 1,

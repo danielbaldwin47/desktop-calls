@@ -599,6 +599,9 @@ fn button_intents(step: &SetupStep) -> Vec<Input> {
         SetupStep::ContactsPromptTimedOut { .. } => {
             vec![Input::RetryContacts, Input::SkipContacts]
         }
+        SetupStep::ContactsPhoneAway { back: true, .. } => {
+            vec![Input::ContinueContacts, Input::CloseSetupWindow]
+        }
         SetupStep::Done {
             keybinding: KeybindingStage::Checked(KeybindingCheck::Available { .. }),
             ..
@@ -614,6 +617,7 @@ fn button_intents(step: &SetupStep) -> Vec<Input> {
         | SetupStep::ContactsWarning { .. }
         | SetupStep::ContactsPrompt { .. }
         | SetupStep::ContactsSyncing { .. }
+        | SetupStep::ContactsPhoneAway { back: false, .. }
         | SetupStep::Done { .. } => vec![Input::CloseSetupWindow],
     }
 }
@@ -650,6 +654,10 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     }
     if let Some(countdown) = &text.countdown {
         content.insert("countdown".to_owned(), countdown.clone());
+    }
+    // What the countdown counts to, in ms since the epoch.
+    if let SetupStep::ContactsPrompt { deadline, .. } = &view.step {
+        content.insert("deadline".to_owned(), deadline.0.to_string());
     }
     if !text.progress.is_empty() {
         content.insert("progress".to_owned(), text.progress.join("\n"));

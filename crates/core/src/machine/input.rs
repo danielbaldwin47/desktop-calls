@@ -10,7 +10,7 @@ use crate::messages::Failure;
 use crate::messages::ProblemKind;
 use crate::missed::MissedCallNotice;
 
-use super::setup::KeybindingCheck;
+use crate::keybinding::HyprlandConfig;
 
 /// Something that happened, as the shell adapters report it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -207,9 +207,12 @@ pub enum Input {
     FixDone(DesktopFix),
     /// What [`Effect::Fix`] asked didn't work.
     FixFailed(FixFailure),
-    /// What the Desktop's Hyprland config can take for the Desktop Calls
-    /// keybinding, as [`Effect::CheckKeybinding`] asked.
-    KeybindingChecked(KeybindingCheck),
+    /// What the Desktop's Hyprland config holds, as
+    /// [`Effect::CheckKeybinding`] asked.
+    KeybindingChecked(HyprlandConfig),
+    /// The Phone is back after leaving during the Setup Window's Contacts
+    /// step: the user asked to carry on.
+    ContinueContacts,
     /// The user asked to add the Desktop Calls keybinding: show the line
     /// first.
     AddKeybinding,
@@ -221,6 +224,9 @@ pub enum Input {
     KeybindingAdded,
     /// The line couldn't be written.
     KeybindingNotAdded,
+    /// Nothing was written: the file changed since the line was offered,
+    /// and holds this now.
+    KeybindingConfigChanged(HyprlandConfig),
 }
 
 /// Why pairing with a Phone didn't happen.
@@ -424,8 +430,14 @@ pub enum Effect {
     /// Find what the Desktop's Hyprland config can take for the Desktop
     /// Calls keybinding. Answered by [`Input::KeybindingChecked`].
     CheckKeybinding,
-    /// Add `line` to the end of the Hyprland config `file`, exactly as the
-    /// user saw and confirmed it. Answered by [`Input::KeybindingAdded`] or
-    /// [`Input::KeybindingNotAdded`].
-    AddKeybinding { file: String, line: String },
+    /// Write `added` to the Hyprland config `file`, which held `seen` when
+    /// the user saw and confirmed the line: `added` is `seen` with that
+    /// line. Only if `file` still holds `seen`. Answered by
+    /// [`Input::KeybindingAdded`], [`Input::KeybindingNotAdded`] or
+    /// [`Input::KeybindingConfigChanged`].
+    AddKeybinding {
+        file: String,
+        seen: String,
+        added: String,
+    },
 }

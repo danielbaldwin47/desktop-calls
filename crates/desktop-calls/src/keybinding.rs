@@ -1,31 +1,27 @@
 //! The Desktop Calls keybinding in the Hyprland config, which the Setup
 //! Window's finish page offers to add.
 //!
-//! Only Omarchy's own place for personal keybindings is supported:
-//! `$XDG_CONFIG_HOME/hypr/bindings.lua` (`~/.config` by default), whose
-//! lines read `o.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh …")`.
-//! The binding runs this very binary with no arguments: the Dialer, or the
-//! ringing or live Call. Nothing is written until the user confirmed the
-//! exact line, and then only that line, appended to the end of the file.
+//! This reads and writes files, and decides nothing: it reports what
+//! Omarchy's `$XDG_CONFIG_HOME/hypr/bindings.lua` (`~/.config` by default)
+//! and the files it requires hold, and the core decides whether the keys
+//! are free and what the file holds with the line added
+//! (`desktop_calls_core::keybinding`). Nothing is written until the user
+//! confirmed the exact line, and then only if the file still holds what it
+//! held when the line was offered.
 
-use std::fs::OpenOptions;
-use std::io::{self, Read as _, Write as _};
-use std::path::PathBuf;
+use std::io::{self, Read as _};
+use std::path::{Path, PathBuf};
 
-use desktop_calls_core::{Input, KeybindingCheck};
+use desktop_calls_core::keybinding::required;
+use desktop_calls_core::{ConfigFile, HyprlandConfig, Input, RequiredFile};
 
 use crate::logging::EventKind;
-
-/// Free in Omarchy's own bindings (4.5): C for Calls.
-const KEYS: &str = "SUPER + ALT + C";
-/// What Omarchy's keybinding menu lists the binding as.
-const DESCRIPTION: &str = "Desktop Calls";
 
 /// Why the keybinding couldn't be added.
 #[derive(Debug)]
 enum KeybindingError {
     Io(io::Error),
-    /// The file changed since the line was offered: it binds the keys now.
+    /// The file changed since the line was offered.
     Changed,
 }
 
@@ -46,41 +42,71 @@ impl KeybindingError {
     }
 }
 
-/// What the Hyprland config can take for the keybinding. Reads a file:
-/// call it off the main thread.
-pub fn check() -> KeybindingCheck {
-    let command = command();
-    let Some(file) = bindings_file().filter(|file| file.is_file()) else {
-        return KeybindingCheck::NoConfig { command };
-    };
-    let shown = file.display().to_string();
-    let line = line(&command);
-    match read(&file) {
-        Ok(config) => match binds_keys(&config, &line) {
-            Some(true) => KeybindingCheck::Added {
-                keys: KEYS.to_owned(),
-                file: shown,
-            },
-            Some(false) => KeybindingCheck::Taken {
-                keys: KEYS.to_owned(),
-                file: shown,
-                command,
-            },
-            None => KeybindingCheck::Available {
-                keys: KEYS.to_owned(),
-                file: shown,
-                line,
-            },
-        },
-        Err(_) => KeybindingCheck::NoConfig { command },
+/// What the Hyprland config holds. Reads files: call it off the main
+/// thread.
+pub fn check() -> HyprlandConfig {
+    check_in(config_home().as_deref(), command())
+}
+
+/// What the Hyprland config under `config_home` holds, for a keybinding
+/// that runs `command`.
+fn check_in(config_home: Option<&Path>, command: String) -> HyprlandConfig {
+    let bindings = config_home.and_then(|home| {
+        let file = home.join("hypr").join("bindings.lua");
+        // A directory, or a file that can't be read, is there all the same.
+        file.exists().then(|| config_file(&file, home))
+    });
+    HyprlandConfig { command, bindings }
+}
+
+fn config_file(file: &Path, config_home: &Path) -> ConfigFile {
+    let text = read(file).ok();
+    let required = text
+        .as_deref()
+        .map(required)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|name| {
+            let path = resolve(&name, config_home)?;
+            let text = read(&path).ok()?;
+            Some(RequiredFile {
+                name,
+                path: path.display().to_string(),
+                text,
+            })
+        })
+        .collect();
+    ConfigFile {
+        path: file.display().to_string(),
+        text,
+        required,
     }
 }
 
-/// Appends `line`, and nothing else, to the end of `file`, keeping what is
-/// there; what became of it, for the Call state machine. Writes a file:
-/// call it off the main thread.
-pub fn add(file: &str, line: &str) -> Input {
-    match append(file, line) {
+/// The file a `require` or `dofile` names: a path, or a Lua module under
+/// the config directory or Omarchy's own, as Omarchy's `package.path` has
+/// them.
+fn resolve(name: &str, config_home: &Path) -> Option<PathBuf> {
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_owned());
+    }
+    let module = format!(
+        "{}.lua",
+        name.strip_suffix(".lua").unwrap_or(name).replace('.', "/")
+    );
+    let omarchy = std::env::var_os("OMARCHY_PATH")
+        .map_or_else(|| PathBuf::from("/usr/share/omarchy"), PathBuf::from);
+    [config_home.to_owned(), omarchy]
+        .into_iter()
+        .map(|base| base.join(&module))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Writes `added` to `file` if it still holds `seen`: what became of it,
+/// for the Call state machine. Writes a file: call it off the main thread.
+pub fn add(file: &str, seen: &str, added: &str) -> Input {
+    match write(Path::new(file), seen, added) {
         Ok(()) => {
             tracing::info!(
                 event_kind = %EventKind::KeybindingAdded,
@@ -97,75 +123,32 @@ pub fn add(file: &str, line: &str) -> Input {
                 file,
                 "Couldn't add the Desktop Calls keybinding to {file}"
             );
-            Input::KeybindingNotAdded
+            match error {
+                // What the same config holds now: `file` is
+                // `<config home>/hypr/bindings.lua`.
+                KeybindingError::Changed => Input::KeybindingConfigChanged(check_in(
+                    Path::new(file).parent().and_then(Path::parent),
+                    command(),
+                )),
+                KeybindingError::Io(_) => Input::KeybindingNotAdded,
+            }
         }
     }
 }
 
-fn append(file: &str, line: &str) -> Result<(), KeybindingError> {
-    let config = read(std::path::Path::new(file)).map_err(KeybindingError::Io)?;
-    match binds_keys(&config, line) {
-        Some(true) => return Ok(()),
-        Some(false) => return Err(KeybindingError::Changed),
-        None => {}
+fn write(file: &Path, seen: &str, added: &str) -> Result<(), KeybindingError> {
+    if read(file).map_err(KeybindingError::Io)? != seen {
+        return Err(KeybindingError::Changed);
     }
-    let mut added = String::new();
-    if !config.is_empty() && !config.ends_with('\n') {
-        added.push('\n');
-    }
-    added.push_str(line);
-    added.push('\n');
-    // Appending writes through a symlink, as dotfile managers keep them.
-    OpenOptions::new()
-        .append(true)
-        .open(file)
-        .and_then(|mut opened| opened.write_all(added.as_bytes()))
-        .map_err(KeybindingError::Io)
+    // Written in place, so a symlink, as dotfile managers keep them, and
+    // the file's permissions stay.
+    std::fs::write(file, added).map_err(KeybindingError::Io)
 }
 
-fn read(file: &std::path::Path) -> io::Result<String> {
+fn read(file: &Path) -> io::Result<String> {
     let mut config = String::new();
     std::fs::File::open(file)?.read_to_string(&mut config)?;
     Ok(config)
-}
-
-/// Whether `config` binds the keys: `Some(true)` with exactly `line`,
-/// `Some(false)` to something else, `None` not at all. Comments don't
-/// count.
-fn binds_keys(config: &str, line: &str) -> Option<bool> {
-    let keys = squashed(&format!("\"{KEYS}\""));
-    let mut taken = None;
-    for candidate in config.lines().map(str::trim) {
-        if candidate.starts_with("--") {
-            continue;
-        }
-        if candidate == line {
-            return Some(true);
-        }
-        if squashed(candidate).contains(&keys) {
-            taken = Some(false);
-        }
-    }
-    taken
-}
-
-/// Lower case, without spaces: `"SUPER + ALT + C"` and `"super+alt+c"` are
-/// the same keys.
-fn squashed(text: &str) -> String {
-    text.chars()
-        .filter(|character| !character.is_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-/// The line that binds the keys to `command`.
-fn line(command: &str) -> String {
-    format!(
-        "o.bind({}, {}, {})",
-        lua_string(KEYS),
-        lua_string(DESCRIPTION),
-        lua_string(command)
-    )
 }
 
 /// The command the keybinding runs: this binary, by its full path, as the
@@ -192,13 +175,8 @@ fn shell_word(word: &str) -> String {
     }
 }
 
-fn lua_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', r"\\").replace('"', "\\\""))
-}
-
-/// `$XDG_CONFIG_HOME/hypr/bindings.lua`, with the XDG default of
-/// `~/.config`.
-fn bindings_file() -> Option<PathBuf> {
+/// `$XDG_CONFIG_HOME`, with the XDG default of `~/.config`.
+fn config_home() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -208,5 +186,156 @@ fn bindings_file() -> Option<PathBuf> {
                 .filter(|home| home.is_absolute())
                 .map(|home| home.join(".config"))
         })
-        .map(|config| config.join("hypr").join("bindings.lua"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use desktop_calls_core::KeybindingCheck;
+
+    const COMMAND: &str = "/usr/bin/desktop-calls";
+
+    fn bindings(home: &Path) -> PathBuf {
+        home.join("hypr").join("bindings.lua")
+    }
+
+    fn with_bindings(text: &str) -> tempfile::TempDir {
+        let home = tempfile::tempdir().expect("a temporary config directory");
+        std::fs::create_dir_all(home.path().join("hypr")).expect("the hypr directory");
+        std::fs::write(bindings(home.path()), text).expect("write bindings.lua");
+        home
+    }
+
+    fn checked(home: &Path) -> KeybindingCheck {
+        KeybindingCheck::of(&check_in(Some(home), COMMAND.to_owned()))
+    }
+
+    /// Offers the line, and confirms it: what `add` reports.
+    fn confirm(home: &Path) -> (KeybindingCheck, Input) {
+        let check = checked(home);
+        let KeybindingCheck::Available {
+            file, seen, added, ..
+        } = &check
+        else {
+            panic!("the line isn't offered: {check:?}");
+        };
+        let input = add(file, seen, added);
+        (check, input)
+    }
+
+    #[test]
+    fn with_no_bindings_file_there_is_no_config_to_add_to() {
+        let home = tempfile::tempdir().expect("a temporary config directory");
+        assert_eq!(
+            checked(home.path()),
+            KeybindingCheck::NoConfig {
+                command: COMMAND.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn a_bindings_file_that_cant_be_read_is_named_and_left_alone() {
+        let home = tempfile::tempdir().expect("a temporary config directory");
+        // A directory where the file should be: no reading it, as root too.
+        std::fs::create_dir_all(bindings(home.path())).expect("the directory");
+        assert_eq!(
+            checked(home.path()),
+            KeybindingCheck::Unreadable {
+                file: bindings(home.path()).display().to_string(),
+                command: COMMAND.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_final_newline_gets_the_line_on_a_line_of_its_own() {
+        let home = with_bindings("-- mine\no.bind(\"SUPER + B\", \"Browser\", \"firefox\")");
+        let (check, input) = confirm(home.path());
+        assert_eq!(input, Input::KeybindingAdded);
+        let KeybindingCheck::Available { line, .. } = check else {
+            unreachable!()
+        };
+        assert_eq!(
+            read(&bindings(home.path())).expect("read bindings.lua"),
+            format!("-- mine\no.bind(\"SUPER + B\", \"Browser\", \"firefox\")\n{line}\n")
+        );
+    }
+
+    #[test]
+    fn adding_twice_writes_the_line_once_and_then_finds_it_added() {
+        let home = with_bindings("-- mine\n");
+        let (check, first) = confirm(home.path());
+        assert_eq!(first, Input::KeybindingAdded);
+        let KeybindingCheck::Available {
+            file, seen, added, ..
+        } = &check
+        else {
+            unreachable!()
+        };
+        let second = add(file, seen, added);
+        let Input::KeybindingConfigChanged(config) = second else {
+            panic!("written twice: {second:?}");
+        };
+        assert!(matches!(
+            KeybindingCheck::of(&config),
+            KeybindingCheck::Added { .. }
+        ));
+        assert_eq!(read(Path::new(file)).expect("read bindings.lua"), *added);
+    }
+
+    #[test]
+    fn a_file_changed_between_the_offer_and_confirm_is_left_as_it_is_now() {
+        let home = with_bindings("-- mine\n");
+        let check = checked(home.path());
+        let KeybindingCheck::Available {
+            file, seen, added, ..
+        } = &check
+        else {
+            panic!("the line isn't offered: {check:?}");
+        };
+        let now = "-- mine\no.bind(\"SUPER + ALT + C\", \"Calculator\", \"gnome-calculator\")\n";
+        std::fs::write(file, now).expect("change bindings.lua");
+        let input = add(file, seen, added);
+        let Input::KeybindingConfigChanged(config) = input else {
+            panic!("written over a change: {input:?}");
+        };
+        assert!(matches!(
+            KeybindingCheck::of(&config),
+            KeybindingCheck::Taken { .. }
+        ));
+        assert_eq!(read(Path::new(file)).expect("read bindings.lua"), now);
+    }
+
+    #[test]
+    fn a_trailing_return_keeps_the_line_before_it() {
+        let home = with_bindings("o.bind(\"SUPER + B\", \"Browser\", \"firefox\")\nreturn M\n");
+        let (check, input) = confirm(home.path());
+        assert_eq!(input, Input::KeybindingAdded);
+        let KeybindingCheck::Available { line, .. } = check else {
+            unreachable!()
+        };
+        assert_eq!(
+            read(&bindings(home.path())).expect("read bindings.lua"),
+            format!("o.bind(\"SUPER + B\", \"Browser\", \"firefox\")\n{line}\nreturn M\n")
+        );
+    }
+
+    #[test]
+    fn keys_bound_in_a_required_file_are_taken_there() {
+        let home = with_bindings("require(\"hypr.more\")\n");
+        std::fs::write(
+            home.path().join("hypr").join("more.lua"),
+            "o.bind(\"ALT + SUPER + c\", \"Calculator\", \"gnome-calculator\")\n",
+        )
+        .expect("write more.lua");
+        assert!(
+            matches!(
+                checked(home.path()),
+                KeybindingCheck::Taken { ref file, .. } if file.ends_with("more.lua")
+            ),
+            "{:?}",
+            checked(home.path())
+        );
+    }
 }

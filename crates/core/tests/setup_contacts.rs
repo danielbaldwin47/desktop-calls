@@ -1,20 +1,23 @@
 //! The Setup Window's later steps at the Call state machine's public
 //! interface: once the Phone is connected for Calls, the warning that its
 //! Contacts prompt is about to appear, the countdown to the prompt's
-//! deadline, Try again, the sync's progress, and the finish page with the
-//! Dialer keybinding (ticket #22).
+//! deadline, Try again, the sync's progress, the Phone leaving part way,
+//! and the finish page with the Dialer keybinding (ticket #22).
 
 use desktop_calls_core::{
-    CallHistory, CallHistoryEntry, CallHistoryKind, Caller, Contact, ContactNumber, Contacts,
-    ContactsOutcome, Directory, Effect, Input, KeybindingCheck, KeybindingStage, NumberLabel,
-    Phone, PhoneCommand, ReadingContacts, SetupNotice, SetupStep, State, SyncFailure, SyncProgress,
-    Timer, Timestamp, Unavailable, messages, step,
+    CallHistory, CallHistoryEntry, CallHistoryKind, Caller, ConfigFile, Contact, ContactNumber,
+    Contacts, ContactsOutcome, ContactsState, Directory, Effect, HyprlandConfig, Input,
+    KeybindingCheck, KeybindingStage, NumberLabel, Phone, PhoneCommand, ReadingContacts,
+    SetupNotice, SetupStep, State, SyncFailure, SyncProgress, Timer, Timestamp, Unavailable,
+    messages, step,
 };
 
 const PHONE: &str = "AA:BB:CC:DD:EE:FF";
 const KEYS: &str = "SUPER + ALT + C";
 const FILE: &str = "/home/user/.config/hypr/bindings.lua";
 const LINE: &str = r#"o.bind("SUPER + ALT + C", "Desktop Calls", "/usr/bin/desktop-calls")"#;
+const COMMAND: &str = "/usr/bin/desktop-calls";
+const BINDINGS: &str = "-- Keep only your personal keybinding overrides here.\n";
 
 fn run(state: State, inputs: impl IntoIterator<Item = Input>) -> (State, Vec<Effect>) {
     let mut state = state;
@@ -127,25 +130,39 @@ fn call_history(count: usize) -> CallHistory {
     CallHistory::new(entries, &Directory::default())
 }
 
-/// Syncing, and the Phone shared everything: 312 Contacts and 200 Calls.
+/// Syncing, and the Phone shared everything, in the sync's order: the
+/// newest 50 Calls, then 312 Contacts, then the older Calls, 200 in all.
 fn synced() -> State {
     run(
         syncing(),
         [
             Input::ContactsSyncProgress(SyncProgress::Shared),
             Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(50))),
+            Input::ContactsSyncProgress(SyncProgress::ReadingContacts {
+                count: Some(312),
+                at: Timestamp(10_000),
+            }),
             Input::ContactsSynced {
                 contacts: contacts(312),
                 call_history: call_history(50),
             },
-            Input::ContactsSynced {
-                contacts: contacts(312),
-                call_history: call_history(200),
-            },
+            Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(200))),
             Input::ContactsSyncProgress(SyncProgress::Finished),
         ],
     )
     .0
+}
+
+/// What the shell finds: Omarchy's `bindings.lua`, holding `text`.
+fn config(text: &str) -> HyprlandConfig {
+    HyprlandConfig {
+        command: COMMAND.to_owned(),
+        bindings: Some(ConfigFile {
+            path: FILE.to_owned(),
+            text: Some(text.to_owned()),
+            required: Vec::new(),
+        }),
+    }
 }
 
 fn available() -> KeybindingCheck {
@@ -153,15 +170,45 @@ fn available() -> KeybindingCheck {
         keys: KEYS.to_owned(),
         file: FILE.to_owned(),
         line: LINE.to_owned(),
+        before_return: false,
+        seen: BINDINGS.to_owned(),
+        added: format!("{BINDINGS}{LINE}\n"),
     }
 }
 
 fn done(contacts: ContactsOutcome, keybinding: KeybindingStage) -> SetupStep {
     SetupStep::Done {
         phone: pixel(),
+        connected: true,
         contacts,
         keybinding,
     }
+}
+
+fn disconnected() -> Input {
+    Input::PhoneDisconnected {
+        address: PHONE.to_owned(),
+    }
+}
+
+/// The Phone connects for Calls again.
+fn reconnected(state: State) -> (State, Vec<Effect>) {
+    run(
+        state,
+        [
+            Input::PhoneConnected {
+                address: PHONE.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    )
+}
+
+fn text(state: &State) -> messages::SetupWindowText {
+    let Some(view) = state.surfaces().setup_window else {
+        panic!("the window is open");
+    };
+    messages::setup_window(&view, Timestamp(0))
 }
 
 fn synced_312_and_200() -> ContactsOutcome {
@@ -366,6 +413,7 @@ fn once_the_whole_sync_is_done_the_finish_page_reports_what_was_synced() {
         syncing(),
         [
             Input::ContactsSyncProgress(SyncProgress::Shared),
+            Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(50))),
             Input::ContactsSynced {
                 contacts: contacts(312),
                 call_history: call_history(50),
@@ -385,10 +433,7 @@ fn once_the_whole_sync_is_done_the_finish_page_reports_what_was_synced() {
     let (state, effects) = run(
         state,
         [
-            Input::ContactsSynced {
-                contacts: contacts(312),
-                call_history: call_history(200),
-            },
+            Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(200))),
             Input::ContactsSyncProgress(SyncProgress::Finished),
         ],
     );
@@ -398,13 +443,135 @@ fn once_the_whole_sync_is_done_the_finish_page_reports_what_was_synced() {
         Some(done(synced_312_and_200(), KeybindingStage::Checking))
     );
     assert!(effects.contains(&Effect::CheckKeybinding), "{effects:?}");
-    let view = state.surfaces().setup_window.expect("the window is open");
     assert_eq!(
-        messages::setup_window(&view, Timestamp(0))
-            .summary
-            .as_deref(),
+        text(&state).summary.as_deref(),
         Some("Synced 312 Contacts and 200 recent Calls.")
     );
+}
+
+/// Asserts the window says the Phone left, never that anything synced.
+fn says_the_phone_left(state: &State) {
+    assert_eq!(
+        setup_step(state),
+        Some(SetupStep::ContactsPhoneAway {
+            phone: pixel(),
+            back: false
+        })
+    );
+    let shown = text(state);
+    assert_eq!(shown.heading, "My Pixel disconnected");
+    assert_eq!(shown.buttons, ["Close"]);
+    assert!(
+        !format!("{shown:?}").contains("Synced"),
+        "nothing synced: {shown:?}"
+    );
+}
+
+#[test]
+fn a_phone_leaving_while_it_asks_is_waited_for_and_continuing_asks_again() {
+    let (state, _) = run(
+        syncing(),
+        [
+            Input::ContactsPermissionNeeded {
+                deadline: Timestamp(30_000),
+            },
+            disconnected(),
+        ],
+    );
+    says_the_phone_left(&state);
+    assert_eq!(
+        state.contacts_state(),
+        ContactsState::Unavailable(Unavailable::NotSynced)
+    );
+
+    // Back: the window offers to carry on, and syncs nothing until asked.
+    let (state, effects) = reconnected(state);
+    assert_eq!(syncs(&effects), 0, "{effects:?}");
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::ContactsPhoneAway {
+            phone: pixel(),
+            back: true
+        })
+    );
+    assert_eq!(text(&state).heading, "My Pixel is back");
+    assert_eq!(text(&state).buttons, ["Continue", "Close"]);
+
+    let (state, effects) = run(state, [Input::ContinueContacts]);
+    assert_eq!(syncs(&effects), 1);
+    let (state, _) = run(
+        state,
+        [
+            Input::ContactsSyncProgress(SyncProgress::Shared),
+            Input::ContactsSynced {
+                contacts: contacts(3),
+                call_history: call_history(2),
+            },
+            Input::ContactsSyncProgress(SyncProgress::Finished),
+        ],
+    );
+    assert_eq!(
+        text(&state).summary.as_deref(),
+        Some("Synced 3 Contacts and 2 recent Calls.")
+    );
+}
+
+#[test]
+fn a_first_sync_cut_short_after_the_recent_calls_leaves_contacts_not_synced() {
+    let (state, _) = run(
+        syncing(),
+        [
+            Input::ContactsSyncProgress(SyncProgress::Shared),
+            Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(50))),
+            Input::ContactsSyncProgress(SyncProgress::ReadingContacts {
+                count: Some(312),
+                at: Timestamp(10_000),
+            }),
+            disconnected(),
+        ],
+    );
+
+    says_the_phone_left(&state);
+    assert_eq!(
+        state.contacts_state(),
+        ContactsState::Unavailable(Unavailable::NotSynced)
+    );
+}
+
+#[test]
+fn a_phone_leaving_during_the_warning_is_waited_for_too() {
+    let (state, _) = warned();
+    let (state, _) = run(state, [disconnected()]);
+    says_the_phone_left(&state);
+}
+
+#[test]
+fn a_phone_leaving_once_contacts_are_read_finishes_without_saying_it_is_connected() {
+    let (state, _) = run(
+        syncing(),
+        [
+            Input::ContactsSyncProgress(SyncProgress::Shared),
+            Input::ContactsSyncProgress(SyncProgress::CallHistory(call_history(50))),
+            Input::ContactsSynced {
+                contacts: contacts(312),
+                call_history: call_history(50),
+            },
+            disconnected(),
+        ],
+    );
+
+    assert!(matches!(
+        setup_step(&state),
+        Some(SetupStep::Done {
+            connected: false,
+            contacts: ContactsOutcome::Synced {
+                contacts: 312,
+                calls: 50
+            },
+            ..
+        })
+    ));
+    assert_eq!(text(&state).heading, "My Pixel is set up");
 }
 
 #[test]
@@ -436,7 +603,7 @@ fn denied_the_finish_page_says_calls_still_work_and_how_to_allow_access_later() 
 
 #[test]
 fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
-    let (state, _) = run(synced(), [Input::KeybindingChecked(available())]);
+    let (state, _) = run(synced(), [Input::KeybindingChecked(config(BINDINGS))]);
     assert_eq!(
         setup_step(&state),
         Some(done(
@@ -479,7 +646,8 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
         effects,
         [Effect::AddKeybinding {
             file: FILE.to_owned(),
-            line: LINE.to_owned()
+            seen: BINDINGS.to_owned(),
+            added: format!("{BINDINGS}{LINE}\n"),
         }]
     );
     let (state, _) = run(state, [Input::KeybindingAdded]);
@@ -508,7 +676,7 @@ fn a_keybinding_that_could_not_be_written_is_offered_again_and_says_why() {
     let (state, _) = run(
         synced(),
         [
-            Input::KeybindingChecked(available()),
+            Input::KeybindingChecked(config(BINDINGS)),
             Input::AddKeybinding,
             Input::ConfirmKeybinding,
             Input::KeybindingNotAdded,
@@ -530,8 +698,9 @@ fn a_keybinding_that_could_not_be_written_is_offered_again_and_says_why() {
 fn without_a_hyprland_config_to_add_to_the_finish_page_says_what_to_bind() {
     let (state, _) = run(
         synced(),
-        [Input::KeybindingChecked(KeybindingCheck::NoConfig {
-            command: "/usr/bin/desktop-calls".to_owned(),
+        [Input::KeybindingChecked(HyprlandConfig {
+            command: COMMAND.to_owned(),
+            bindings: None,
         })],
     );
 
@@ -544,5 +713,44 @@ fn without_a_hyprland_config_to_add_to_the_finish_page_says_what_to_bind() {
             .any(|line| line.contains("/usr/bin/desktop-calls")),
         "{:?}",
         text.instructions
+    );
+}
+
+#[test]
+fn keys_taken_after_the_offer_refresh_the_offer_instead_of_asking_to_try_again() {
+    let (state, effects) = run(
+        synced(),
+        [
+            Input::KeybindingChecked(config(BINDINGS)),
+            Input::AddKeybinding,
+            Input::ConfirmKeybinding,
+        ],
+    );
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    let taken =
+        format!("{BINDINGS}o.bind(\"SUPER + ALT + C\", \"Calculator\", \"gnome-calculator\")\n");
+
+    let (state, _) = run(state, [Input::KeybindingConfigChanged(config(&taken))]);
+
+    assert_eq!(
+        setup_step(&state),
+        Some(done(
+            synced_312_and_200(),
+            KeybindingStage::Checked(KeybindingCheck::Taken {
+                keys: KEYS.to_owned(),
+                file: FILE.to_owned(),
+                command: COMMAND.to_owned(),
+            })
+        ))
+    );
+    let view = state.surfaces().setup_window.expect("the window is open");
+    assert_eq!(view.notice, Some(SetupNotice::KeybindingConfigChanged));
+    let shown = text(&state);
+    assert_eq!(shown.buttons, ["Done"]);
+    assert!(
+        shown
+            .notice
+            .is_some_and(|notice| !notice.contains("try again")),
+        "{shown:?}"
     );
 }

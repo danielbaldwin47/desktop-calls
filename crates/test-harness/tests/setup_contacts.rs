@@ -3,13 +3,14 @@
 //! The window warns that the Phone is about to ask whether to share
 //! Contacts, counts down with the Phone's 30 s prompt, offers Try again
 //! when nobody answers, goes on without Contacts when the Phone refuses,
-//! shows the sync's progress, and ends on the finish page with the Dialer
+//! shows the sync's progress, waits for a Phone that leaves part way and
+//! carries on once it is back, and ends on the finish page with the Dialer
 //! keybinding, which it adds to the Hyprland config only once the user
 //! confirms the exact line. Every step is taken with synthetic keys alone.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use test_harness::vcards;
 use test_harness::{AppState, Harness, Key};
@@ -30,8 +31,9 @@ const SYNC_DEADLINE: Duration = Duration::from_secs(25);
 /// How long an unanswered prompt takes to time out, and the app to say so:
 /// the Phone's 30 s.
 const PROMPT_TIMEOUT_DEADLINE: Duration = Duration::from_secs(40);
-/// How far the countdown may be from the Phone's own deadline: it shows
-/// whole seconds, rounded up.
+/// How far the window's deadline may be from the Phone's own: the app
+/// takes the Phone to be asking once `CreateSession` has waited 2 s, and
+/// counts 30 s from when the session was asked for.
 const COUNTDOWN_TOLERANCE_MS: u64 = 1_500;
 const PHONE_NAME: &str = "My Pixel";
 const SYNCED: &str = "Synced 312 Contacts and 200 recent Calls.";
@@ -89,14 +91,6 @@ fn pair_through_the_window(harness: &Harness) {
 fn wait_for_prompt(harness: &Harness) -> AppState {
     wait_for_step(harness, "contacts-warning", CONNECT_DEADLINE);
     wait_for_step(harness, "contacts-prompt", PROMPT_DEADLINE)
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 fn create_sessions(harness: &Harness) -> usize {
@@ -194,17 +188,18 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
     );
 
     let state = wait_for_step(&harness, "contacts-prompt", PROMPT_DEADLINE);
-    let seen_at = now_ms();
     let countdown: u64 = field(&state, "countdown")
         .and_then(|countdown| countdown.parse().ok())
         .unwrap_or_else(|| panic!("no countdown: {state:?}"));
+    let deadline: u64 = field(&state, "deadline")
+        .and_then(|deadline| deadline.parse().ok())
+        .unwrap_or_else(|| panic!("no deadline: {state:?}"));
     let prompts = harness.simulated_phone().contacts_prompts();
     assert_eq!(prompts.len(), 1, "{prompts:?}");
     assert_eq!(prompts[0].outcome, "waiting");
-    let shown_deadline = seen_at + countdown * 1_000;
     assert!(
-        shown_deadline.abs_diff(prompts[0].deadline) <= COUNTDOWN_TOLERANCE_MS,
-        "the countdown ends at {shown_deadline}, the Phone's prompt at {}",
+        deadline.abs_diff(prompts[0].deadline) <= COUNTDOWN_TOLERANCE_MS,
+        "the countdown ends at {deadline}, the Phone's prompt at {}",
         prompts[0].deadline
     );
     harness.wait_for_app("the countdown runs", DEADLINE, |state| {
@@ -264,6 +259,80 @@ fn an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again() {
     harness.simulated_phone().answer_contacts_prompt("grant");
     let state = wait_for_step(&harness, "done", SYNC_DEADLINE);
     assert_eq!(field(&state, "summary"), Some(SYNCED));
+}
+
+/// The Phone goes out of range: the window says so, never that anything
+/// synced, and Contacts stay not synced. Returns the app's state.
+fn phone_leaves(harness: &Harness) -> AppState {
+    harness.simulated_phone().disconnect();
+    let state = harness.wait_for_app(
+        "the Setup Window says the Phone disconnected",
+        DEADLINE,
+        |state| field(state, "step") == Some("contacts-phone-away"),
+    );
+    assert_eq!(
+        field(&state, "heading"),
+        Some(format!("{PHONE_NAME} disconnected").as_str())
+    );
+    assert_eq!(field(&state, "buttons"), Some("Close"));
+    let shown = format!("{:?}", setup_window(&state));
+    assert!(!shown.contains("Synced"), "nothing synced: {shown}");
+    assert_eq!(state.contacts.state, "unavailable");
+    assert_eq!(state.contacts.reason, "not-synced");
+    state
+}
+
+/// The Phone comes back: the window offers to carry on, and Continue has
+/// keyboard focus.
+fn phone_comes_back(harness: &Harness) {
+    harness.simulated_phone().connect();
+    let state = harness.wait_for_app(
+        "the Setup Window offers to carry on",
+        CONNECT_DEADLINE,
+        |state| {
+            field(state, "heading") == Some(format!("{PHONE_NAME} is back").as_str())
+                && field(state, "focused") == Some("true")
+        },
+    );
+    assert_eq!(field(&state, "buttons"), Some("Continue\nClose"));
+}
+
+#[test]
+fn a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again() {
+    let harness = fresh_install();
+    pair_through_the_window(&harness);
+    wait_for_prompt(&harness);
+
+    phone_leaves(&harness);
+    phone_comes_back(&harness);
+    let prompts_before = harness.simulated_phone().contacts_prompts().len();
+
+    harness.keyboard().press(Key::Return);
+
+    wait_for_step(&harness, "contacts-prompt", PROMPT_DEADLINE);
+    assert!(harness.simulated_phone().contacts_prompts().len() > prompts_before);
+    harness.simulated_phone().answer_contacts_prompt("grant");
+    let state = wait_for_step(&harness, "done", SYNC_DEADLINE);
+    assert_eq!(field(&state, "summary"), Some(SYNCED));
+    assert_eq!(state.contacts.state, "ready");
+}
+
+#[test]
+fn a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced() {
+    let harness = fresh_install();
+    pair_through_the_window(&harness);
+    wait_for_prompt(&harness);
+    harness.simulated_phone().answer_contacts_prompt("grant");
+    harness.wait_for_app(
+        "Recent Calls are done while Contacts are read",
+        PROMPT_DEADLINE,
+        |state| {
+            field(state, "progress")
+                .is_some_and(|progress| progress.starts_with("✓ Recent Calls\n312 Contacts…"))
+        },
+    );
+
+    phone_leaves(&harness);
 }
 
 #[test]

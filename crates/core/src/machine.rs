@@ -44,8 +44,7 @@ use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_e
 use presence::{Presence, forget_phone, presence_input};
 use setup::Setup;
 pub use setup::{
-    ContactsOutcome, KeybindingCheck, KeybindingStage, ReadingContacts, SetupNotice, SetupStep,
-    SetupWindowView,
+    ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute,
@@ -236,6 +235,10 @@ struct ConnectionLost {
 
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent fact about a different part of the Desktop, not a mode"
+)]
 pub struct State {
     phone: Option<Phone>,
     connection: ConnectionState,
@@ -284,6 +287,9 @@ pub struct State {
     waiting_notices: u32,
     focus: Focus,
     contacts_sync: ContactsState,
+    /// Contacts have been read for this Phone: from the cache, or by a sync
+    /// that finished.
+    contacts_held: bool,
     contacts: Contacts,
     call_history: CallHistory,
     dialer: Option<Dialer>,
@@ -512,16 +518,18 @@ impl State {
     }
 
     /// The Contacts state once the Phone leaves: a sync under way can't go
-    /// on, leaving ready if anything is held.
+    /// on, leaving ready only if Contacts were read before. Recent Calls a
+    /// first sync read before it was cut short don't make it ready.
     fn held_contacts_state(&self) -> ContactsState {
         match self.contacts_sync {
             ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
-                if self.contacts.directory().is_empty()
-                    && self.call_history.entries().is_empty() =>
+                if self.contacts_held =>
             {
+                ContactsState::Ready
+            }
+            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => {
                 ContactsState::Unavailable(Unavailable::NotSynced)
             }
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => ContactsState::Ready,
             other => other,
         }
     }
@@ -777,12 +785,14 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::RetryHandsFree
         | Input::RetryContacts
         | Input::SkipContacts
+        | Input::ContinueContacts
         | Input::KeybindingChecked(_)
         | Input::AddKeybinding
         | Input::ConfirmKeybinding
         | Input::CancelKeybinding
         | Input::KeybindingAdded
-        | Input::KeybindingNotAdded) => setup::setup_input(&mut state, input, &mut effects),
+        | Input::KeybindingNotAdded
+        | Input::KeybindingConfigChanged(_)) => setup::setup_input(&mut state, input, &mut effects),
         Input::DesktopChecked(check) => desktop::checked(&mut state, check, &mut effects),
         Input::Fix(problem) => desktop::fix(&mut state, problem, &mut effects),
         Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),

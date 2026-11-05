@@ -20,7 +20,10 @@
 //!   for the test to answer it as the person holding the Phone: each
 //!   `CreateSession` waits, up to obexd's 10 s, on the prompt showing, and
 //!   one after the prompt timed out shows a new prompt. Once answered, the
-//!   Phone remembers the answer and doesn't ask again.
+//!   Phone remembers the answer and doesn't ask again. If the Phone goes
+//!   out of range meanwhile, the prompt goes away unanswered and the
+//!   waiting `CreateSession` fails with `Failed`, as a dropped link fails
+//!   obexd's calls.
 //! - `Session1.Target` is the PBAP server's UUID, not `pbap`, and
 //!   `PhonebookAccess1.Folder` appears only after `Select`. Selecting a
 //!   folder the Phone lacks fails with `Failed` `Not Found`; selecting a
@@ -141,6 +144,9 @@ pub struct ShownPrompt {
     answer: Option<bool>,
 }
 
+/// What a `CreateSession` waiting on a dropped link fails with.
+const LINK_LOST: &str = "Connection reset by peer";
+
 impl ShownPrompt {
     /// `"waiting"`, `"granted"`, `"denied"` or `"timed-out"`.
     pub fn outcome(&self) -> &'static str {
@@ -169,6 +175,9 @@ pub struct Obex {
     /// How much longer a pull takes for each vCard: from `pb`, and from a
     /// Call History folder.
     pub pull_delay_per_vcard: (Duration, Duration),
+    /// How many times the Phone has gone out of range: a call waiting
+    /// since an earlier count fails.
+    links_lost: u32,
     /// Sessions from `CreateSession` until they fail or are removed.
     sessions_open: u32,
     pub most_sessions_at_once: u32,
@@ -178,8 +187,9 @@ pub struct Obex {
 pub enum Later {
     /// The Phone never answered `CreateSession`.
     SessionTimedOut,
-    /// `CreateSession` waits on the prompt showing, since `since`.
-    Asking { since: Instant },
+    /// `CreateSession` waits on the prompt showing, since `since`, over the
+    /// link as it was after `links_lost` losses.
+    Asking { since: Instant, links_lost: u32 },
     /// A pull finishes.
     Transfer {
         transfer: OwnedObjectPath,
@@ -243,6 +253,7 @@ pub fn new() -> zbus::Result<Obex> {
         remembered: None,
         pull_delay: Duration::ZERO,
         pull_delay_per_vcard: (Duration::ZERO, Duration::ZERO),
+        links_lost: 0,
         sessions_open: 0,
         most_sessions_at_once: 0,
     })
@@ -310,6 +321,20 @@ impl Obex {
         });
     }
 
+    /// The Phone went out of range: the prompt showing goes away
+    /// unanswered, and calls waiting on the Phone fail.
+    pub fn link_lost(&mut self) {
+        self.links_lost += 1;
+        let now = now();
+        if let Some(prompt) = self
+            .prompts
+            .last_mut()
+            .filter(|prompt| prompt.outcome() == "waiting")
+        {
+            prompt.deadline = now;
+        }
+    }
+
     fn session_opened(&mut self) {
         self.sessions_open += 1;
         self.most_sessions_at_once = self.most_sessions_at_once.max(self.sessions_open);
@@ -357,7 +382,11 @@ pub fn run_later(obex: &mut Obex, phone_address: &str, later: Later) -> Answer {
             obex.session_closed();
             Reply::Error(ERROR_FAILED, "Timed out waiting for response".to_owned()).into()
         }
-        Later::Asking { since } => match obex.remembered {
+        Later::Asking { links_lost, .. } if links_lost != obex.links_lost => {
+            obex.session_closed();
+            Reply::Error(ERROR_FAILED, LINK_LOST.to_owned()).into()
+        }
+        Later::Asking { since, links_lost } => match obex.remembered {
             Some(true) => {
                 obex.session_closed();
                 open_session(obex, phone_address)
@@ -372,7 +401,7 @@ pub fn run_later(obex: &mut Obex, phone_address: &str, later: Later) -> Answer {
             None => Answer {
                 reply: Reply::Unhandled,
                 signals: Vec::new(),
-                later: Some((PROMPT_POLL, Later::Asking { since })),
+                later: Some((PROMPT_POLL, Later::Asking { since, links_lost })),
             },
         },
         Later::Transfer {
@@ -426,6 +455,7 @@ fn create_session(obex: &mut Obex, phone_address: &str, message: &Message) -> An
                 phone_address,
                 Later::Asking {
                     since: Instant::now(),
+                    links_lost: obex.links_lost,
                 },
             );
         }
@@ -539,8 +569,8 @@ fn select(obex: &mut Obex, call: &MethodCall, message: &Message) -> Reply {
     }
 }
 
-/// How long pulling `count` vCards from `folder` takes: the phonebook
-/// reads at its own pace, slower than Call History.
+/// How long pulling `count` vCards from `folder` takes: Contacts come
+/// at their own pace, slower than Call History.
 fn pull_delay(obex: &Obex, folder: &str, count: usize) -> Duration {
     let per_vcard = if folder == "pb" {
         obex.pull_delay_per_vcard.0
@@ -777,11 +807,11 @@ fn finish_transfer(
     signals
 }
 
-/// The delays for each vCard pulled: `phonebook_ms` from `pb`,
+/// The delays for each vCard pulled: `contacts_ms` from `pb`,
 /// `call_history_ms` from a Call History folder.
-pub fn per_vcard(phonebook_ms: u32, call_history_ms: u32) -> (Duration, Duration) {
+pub fn per_vcard(contacts_ms: u32, call_history_ms: u32) -> (Duration, Duration) {
     let millis = |ms| Duration::from_millis(u64::from(ms));
-    (millis(phonebook_ms), millis(call_history_ms))
+    (millis(contacts_ms), millis(call_history_ms))
 }
 
 /// Milliseconds since the Unix epoch.

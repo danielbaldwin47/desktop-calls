@@ -460,6 +460,7 @@ impl Control {
         let change = {
             let mut world = lock(&self.world);
             world.range.reachable = false;
+            world.obex.link_lost();
             range::hands_free_down(&mut world)?
         };
         self.range_changed(change, &emitter).await
@@ -870,10 +871,9 @@ impl Control {
     }
 
     /// Makes every PBAP pull take longer for each vCard it gives:
-    /// `phonebook_ms` from `pb`, `call_history_ms` from a Call History folder.
-    fn set_pull_delay_per_vcard(&self, phonebook_ms: u32, call_history_ms: u32) {
-        lock(&self.world).obex.pull_delay_per_vcard =
-            obex::per_vcard(phonebook_ms, call_history_ms);
+    /// `contacts_ms` from `pb`, `call_history_ms` from a Call History folder.
+    fn set_pull_delay_per_vcard(&self, contacts_ms: u32, call_history_ms: u32) {
+        lock(&self.world).obex.pull_delay_per_vcard = obex::per_vcard(contacts_ms, call_history_ms);
     }
 
     /// Answers the prompt to share Contacts that the Phone shows, as the

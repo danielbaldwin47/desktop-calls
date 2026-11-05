@@ -364,10 +364,10 @@ impl Shell {
                             inputs.unbounded_send(Input::KeybindingChecked(keybinding::check()));
                     });
                 }
-                Effect::AddKeybinding { file, line } => {
+                Effect::AddKeybinding { file, seen, added } => {
                     let inputs = self.inputs.clone();
                     std::thread::spawn(move || {
-                        let _ = inputs.unbounded_send(keybinding::add(&file, &line));
+                        let _ = inputs.unbounded_send(keybinding::add(&file, &seen, &added));
                     });
                 }
                 // The decide loop passes these on to whoever asked to dial.

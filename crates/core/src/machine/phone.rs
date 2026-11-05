@@ -9,7 +9,7 @@ use super::presence::{
     hands_free_back, hands_free_connect_done, hands_free_connect_failed, pairing_found,
     wait_for_lost_call,
 };
-use super::setup::{hold_sync, sync_progress};
+use super::setup::{contacts_read, hold_sync, sync_progress};
 use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
 use crate::call::{AudioLocation, Request, Transport};
 use crate::connection::{ConnectionState, Phone};
@@ -44,6 +44,7 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             if state.contacts_sync == ContactsState::Unavailable(Unavailable::NotSynced) {
                 state.contacts_sync = ContactsState::Ready;
             }
+            state.contacts_held = true;
             state.contacts = contacts;
             state.call_history = call_history;
         }
@@ -52,8 +53,10 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             call_history,
         } => {
             state.contacts_sync = ContactsState::Ready;
+            state.contacts_held = true;
             state.contacts = contacts;
             state.call_history = call_history;
+            contacts_read(state);
         }
         Input::CallHistoryRefreshed(call_history) => state.call_history = call_history,
         Input::ContactsPermissionNeeded { deadline } => {
@@ -76,6 +79,7 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
         Input::ContactsSyncFailed(SyncFailure::Denied) => {
             // The person said no: keep nothing of theirs.
             state.contacts_sync = ContactsState::Denied;
+            state.contacts_held = false;
             state.contacts = Contacts::default();
             state.call_history = CallHistory::default();
             effects.push(Effect::ForgetContacts);

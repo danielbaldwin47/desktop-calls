@@ -12,15 +12,20 @@
 //! (`crates/test-harness/tests/conformance.rs`) holds it to the snapshot of
 //! the real objects.
 //!
+//! With `--scenario FILE` it also acts out a declarative scenario file once
+//! it is on the bus (see `scenario.rs`); `just demo` uses this.
+//!
 //! So far it can be a paired Phone whose hands-free link comes and goes, that
 //! rings, and that opens a PBAP session.
 
 mod bluez;
 mod obex;
 mod objects;
+mod scenario;
 mod telephony;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -30,6 +35,7 @@ use zbus::object_server::SignalEmitter;
 use zbus::{Connection, MessageStream, OwnedObjectPath, OwnedVariant, interface};
 
 use crate::objects::{MethodCall, ObjectTree, PROPERTIES, interfaces_added_body};
+use crate::scenario::Step;
 
 const CONTROL_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone";
 const CONTROL_PATH: &str = "/io/github/danielbaldwin47/DesktopCalls/SimulatedPhone";
@@ -48,6 +54,9 @@ struct Arguments {
     /// Each reconnect registers the next one.
     #[arg(long, default_value_t = 1)]
     first_audio_gateway_index: u32,
+    /// A scenario file to act out once on the bus.
+    #[arg(long)]
+    scenario: Option<PathBuf>,
 }
 
 /// Which bus a method call arrived on.
@@ -104,7 +113,15 @@ fn lock(world: &SharedWorld) -> MutexGuard<'_, World> {
 
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
-    match zbus::block_on(run(arguments)) {
+    let steps = match arguments.scenario.as_deref().map(read_scenario) {
+        None => Vec::new(),
+        Some(Ok(steps)) => steps,
+        Some(Err(error)) => {
+            eprintln!("simulated-phone: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match zbus::block_on(run(arguments, steps)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("simulated-phone: {error}");
@@ -113,7 +130,13 @@ fn main() -> ExitCode {
     }
 }
 
-async fn run(arguments: Arguments) -> zbus::Result<()> {
+fn read_scenario(path: &std::path::Path) -> Result<Vec<Step>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("read {}: {error}", path.display()))?;
+    scenario::parse(&text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let world = Arc::new(Mutex::new(World {
         bluez: bluez::new_tree(&arguments.name, &arguments.address)?,
         telephony: telephony::new_tree()?,
@@ -138,7 +161,7 @@ async fn run(arguments: Arguments) -> zbus::Result<()> {
     obex.request_name(obex::SERVICE).await?;
 
     // The control name comes last, so a test that sees it can rely on the rest.
-    let _control = zbus::connection::Builder::session()
+    let control = zbus::connection::Builder::session()
         .serve_at(
             CONTROL_PATH,
             Control {
@@ -151,12 +174,31 @@ async fn run(arguments: Arguments) -> zbus::Result<()> {
         .build()
         .await?;
 
-    futures_util::future::try_join3(
+    futures_util::future::try_join4(
         serve(system, system_calls, Service::Bluez, world.clone()),
         serve(session, session_calls, Service::Telephony, world.clone()),
         serve(obex, obex_calls, Service::Obex, world),
+        act_out(&control, steps),
     )
     .await?;
+    Ok(())
+}
+
+/// Runs a scenario's steps in order through the control interface, as a
+/// test would.
+async fn act_out(control: &Connection, steps: Vec<Step>) -> zbus::Result<()> {
+    let interface = control
+        .object_server()
+        .interface::<_, Control>(CONTROL_PATH)
+        .await?;
+    for step in steps {
+        let emitter = interface.signal_emitter().clone();
+        let control = interface.get().await;
+        match step {
+            Step::Connect => control.connect(emitter).await?,
+            Step::Disconnect => control.disconnect(emitter).await?,
+        }
+    }
     Ok(())
 }
 

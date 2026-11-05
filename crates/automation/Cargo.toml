@@ -9,6 +9,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+clap.workspace = true
+# The gallery and the demo run the app in the test harness's world.
+test-harness = { path = "../test-harness" }
+# `just demo` outlives Ctrl-C long enough to clean up its scenario.
+signal-hook = "0.4"
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

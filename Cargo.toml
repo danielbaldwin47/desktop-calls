@@ -31,6 +31,15 @@ socket2 = "0.6"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 futures-channel = "0.3"
 tempfile = "3"
+# The test harness's synthetic keyboard and pointer, and its test client.
+wayland-client = "0.31"
+# Only to route wayland-backend's error messages through `log`, which has no
+# logger here: by default it prints them, such as "Broken pipe" when `just demo`
+# stops, though the harness reports every error itself.
+wayland-backend = { version = "0.3", features = ["log"] }
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 # Every crate opts in with `[lints] workspace = true`. See CODING_STANDARDS.md.
 [workspace.lints.rust]

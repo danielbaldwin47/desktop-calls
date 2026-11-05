@@ -14,24 +14,28 @@ check: && _core-is-pure _dbus-set-is-signed
     cargo deny --locked check
 
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
+# Screen scenarios need sway and grim: sudo pacman -S --needed sway grim
 test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
-# Render every surface in every state into the screenshot gallery.
-[no-exit-message]
+# Render every surface in every state, light and dark, into the screenshot
+# gallery at target/screenshots/gallery. Needs sway and grim.
 screenshot:
-    @echo "just screenshot: not available yet (lands with ticket #26)." >&2; exit 1
+    cargo build --workspace --bins --locked
+    target/debug/automation screenshot
 
-# Report every polish-scorecard item with its evidence.
-[no-exit-message]
+# Report every polish-scorecard item with its status and evidence.
 scorecard:
-    @echo "just scorecard: not available yet (lands with tickets #5 and #27)." >&2; exit 1
+    @cargo build --quiet --workspace --bins --locked
+    @target/debug/automation scorecard
 
-# Run the app against the Simulated Phone in a visible nested compositor.
+# Run the app against the Simulated Phone in a nested compositor window,
+# acting out SCENARIO. Close the window or press Ctrl-C to stop. Needs sway.
 [no-exit-message]
-demo:
-    @echo "just demo: not available yet (lands with ticket #5)." >&2; exit 1
+demo scenario="crates/simulated-phone/scenarios/demo.scenario":
+    @cargo build --quiet --workspace --bins --locked
+    @target/debug/automation demo {{scenario}}
 
 # Place one real Call to the Test Number, run HOOK during it, always hang up.
 # `just test-call --help` for options. Exits 2 if a Call may still be live.

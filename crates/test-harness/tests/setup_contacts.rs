@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use test_harness::vcards;
 use test_harness::{AppState, Harness, Key};
@@ -35,6 +35,9 @@ const PROMPT_TIMEOUT_DEADLINE: Duration = Duration::from_secs(40);
 /// takes the Phone to be asking once `CreateSession` has waited 2 s, and
 /// counts 30 s from when the session was asked for.
 const COUNTDOWN_TOLERANCE_MS: u64 = 1_500;
+/// How long after reading its cache the app's state is watched: what was
+/// read reaches it within milliseconds.
+const CACHE_SETTLE: Duration = Duration::from_secs(1);
 const PHONE_NAME: &str = "My Pixel";
 const SYNCED: &str = "Synced 312 Contacts and 200 recent Calls.";
 
@@ -261,6 +264,19 @@ fn an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again() {
     assert_eq!(field(&state, "summary"), Some(SYNCED));
 }
 
+/// How many times the app has read its Contacts cache for the Phone, by
+/// its log: once each time it attaches to the Phone.
+fn cache_reads(harness: &Harness) -> usize {
+    harness
+        .app_log()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| {
+            event["event_kind"] == "contacts-loaded" || event["event_kind"] == "contacts-not-cached"
+        })
+        .count()
+}
+
 /// The Phone goes out of range: the window says so, never that anything
 /// synced, and Contacts stay not synced. Returns the app's state.
 fn phone_leaves(harness: &Harness) -> AppState {
@@ -318,7 +334,7 @@ fn a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again() {
 }
 
 #[test]
-fn a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced() {
+fn a_phone_leaving_during_the_contacts_pull_leaves_contacts_not_synced_across_a_restart() {
     let mut harness = fresh_install();
     pair_through_the_window(&harness);
     wait_for_prompt(&harness);
@@ -334,23 +350,39 @@ fn a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced() {
 
     phone_leaves(&harness);
 
-    // Nothing was cached: restarted, the app still has no Contacts.
+    // The pull under way fails with the link, once it would have ended;
+    // nothing was cached, and
+    // restarted, the app still has no Contacts.
+    harness.wait_for_app_log("contacts-sync-failed", SYNC_DEADLINE);
     let cache = harness.directory().join("cache/desktop-calls");
     let cached = std::fs::read_dir(&cache).map_or(0, Iterator::count);
     assert_eq!(cached, 0, "nothing cached in {}", cache.display());
+    let cache_reads_before = cache_reads(&harness);
     harness.restart_app();
-    let state = harness.wait_for_app("the app is back", STARTUP, |state| {
-        state.contacts.state != "syncing"
-    });
-    assert_eq!(
-        (
-            state.contacts.state.as_str(),
-            state.contacts.reason.as_str()
-        ),
-        ("unavailable", "not-synced"),
-        "{:?}",
-        state.contacts
-    );
+    let started = Instant::now();
+    while cache_reads(&harness) <= cache_reads_before {
+        assert!(
+            started.elapsed() < STARTUP,
+            "the restarted app didn't read its cache within {STARTUP:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // What the cache read gives reaches the app's state a moment after
+    // its log line: watch for a while that it never says ready.
+    let watched = Instant::now();
+    while watched.elapsed() < CACHE_SETTLE {
+        let state = harness.wait_for_app("the app answers", DEADLINE, |_| true);
+        assert_eq!(
+            (
+                state.contacts.state.as_str(),
+                state.contacts.reason.as_str()
+            ),
+            ("unavailable", "not-synced"),
+            "{:?}",
+            state.contacts
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]

@@ -104,6 +104,8 @@ pub enum EventKind {
     SurfacesUnavailable,
     ToastColumnUnknown,
     ContactsLoaded,
+    /// No Contacts are cached for the Phone attached.
+    ContactsNotCached,
     /// A sync read part of the Call History, before or after Contacts.
     CallHistoryRead,
     ContactsSyncStarted,
@@ -203,6 +205,7 @@ impl EventKind {
             Self::SurfacesUnavailable => "surfaces-unavailable",
             Self::ToastColumnUnknown => "toast-column-unknown",
             Self::ContactsLoaded => "contacts-loaded",
+            Self::ContactsNotCached => "contacts-not-cached",
             Self::CallHistoryRead => "call-history-read",
             Self::ContactsSyncStarted => "contacts-sync-started",
             Self::ContactsPermissionNeeded => "contacts-permission-needed",

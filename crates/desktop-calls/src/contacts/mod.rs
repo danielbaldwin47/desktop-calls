@@ -188,7 +188,13 @@ impl ContactsSync {
                 });
                 Some(cached)
             }
-            Ok(None) => None,
+            Ok(None) => {
+                tracing::info!(
+                    event_kind = %EventKind::ContactsNotCached,
+                    "No Contacts are cached for the Phone"
+                );
+                None
+            }
             Err(error) => {
                 cache_failed(&error);
                 None
@@ -238,6 +244,15 @@ impl ContactsSync {
                 at: Timestamp(now()),
             }));
             has_contacts = self.pull(session, &mut contacts, MOST_PAGES).await?;
+        }
+        // Contacts the Phone has but didn't give: with none held, the sync
+        // failed, and nothing is saved or reported as synced; with some
+        // held, they are kept.
+        if contacts.failed {
+            if held.contacts.is_empty() {
+                return Err(Stop::Unavailable(Unavailable::Failed));
+            }
+            has_contacts = false;
         }
         if !has_contacts && history.is_none() {
             return Err(Stop::Unavailable(Unavailable::Failed));
@@ -471,6 +486,7 @@ impl ContactsSync {
                 }
                 Err(error) => {
                     pull_failed(folder.name, &error)?;
+                    folder.failed = true;
                     if offset == 0 {
                         return Ok(false);
                     }
@@ -612,6 +628,8 @@ struct Folder {
     complete: bool,
     /// Selected just now, so the next pull needn't select it again.
     selected: bool,
+    /// A pull failed part way, or before its first page.
+    failed: bool,
 }
 
 impl Folder {
@@ -623,6 +641,7 @@ impl Folder {
             size: None,
             complete: false,
             selected: false,
+            failed: false,
         }
     }
 }

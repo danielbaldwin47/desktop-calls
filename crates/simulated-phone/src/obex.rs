@@ -193,11 +193,13 @@ pub enum Later {
     /// `CreateSession` waits on the prompt showing, since `since`, over the
     /// link as it was after `links_lost` losses.
     Asking { since: Instant, links_lost: u32 },
-    /// A pull finishes.
+    /// A pull finishes, over the link as it was after `links_lost` losses:
+    /// with an error if the link dropped since.
     Transfer {
         transfer: OwnedObjectPath,
         filename: PathBuf,
         vcards: String,
+        links_lost: u32,
     },
 }
 
@@ -326,7 +328,8 @@ impl Obex {
     }
 
     /// The Phone went out of range: the prompt showing goes away
-    /// unanswered, and calls waiting on the Phone fail.
+    /// unanswered, and calls waiting on the Phone and transfers under way
+    /// fail.
     pub fn link_lost(&mut self) {
         self.links_lost += 1;
         let now = now();
@@ -412,11 +415,15 @@ pub fn run_later(obex: &mut Obex, phone_address: &str, later: Later) -> Answer {
             transfer,
             filename,
             vcards,
-        } => Answer {
-            reply: Reply::Unhandled,
-            signals: finish_transfer(obex, &transfer, &filename, &vcards),
-            later: None,
-        },
+            links_lost,
+        } => {
+            let vcards = (links_lost == obex.links_lost).then_some(vcards.as_str());
+            Answer {
+                reply: Reply::Unhandled,
+                signals: finish_transfer(obex, &transfer, &filename, vcards),
+                later: None,
+            }
+        }
     }
 }
 
@@ -584,8 +591,6 @@ fn pull_delay(obex: &Obex, folder: &str, count: usize) -> Duration {
     obex.pull_delay + per_vcard * u32::try_from(count).unwrap_or(u32::MAX)
 }
 
-/// `PullAll(targetfile, filters)`: queues a transfer of the selected
-/// folder into `targetfile`.
 /// How many vCards a pull from `folder` at `offset` gives at most, as the
 /// Pixel caps Call History pulls; `None` if the Phone fails it.
 fn most_pulled(obex: &Obex, folder: &str, offset: usize, asked: Option<usize>) -> Option<usize> {
@@ -602,6 +607,8 @@ fn most_pulled(obex: &Obex, folder: &str, offset: usize, asked: Option<usize>) -
     Some(most.min(HISTORY_PULL_CAP))
 }
 
+/// `PullAll(targetfile, filters)`: queues a transfer of the selected
+/// folder into `targetfile`.
 fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
     let Ok((targetfile, filters)) = message
         .body()
@@ -701,6 +708,7 @@ fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
                 transfer,
                 filename,
                 vcards,
+                links_lost: obex.links_lost,
             },
         )),
     }
@@ -785,26 +793,31 @@ fn filters_are_valid(filters: &HashMap<String, OwnedVariant>) -> bool {
 /// Writes the pulled folder as obexd does, then reports the transfer
 /// complete and removes it. A transfer whose session has gone writes
 /// nothing.
+/// Ends a transfer: `vcards` written to `filename`, or, with `None`, the
+/// link dropped and it fails.
 fn finish_transfer(
     obex: &mut Obex,
     transfer: &OwnedObjectPath,
     filename: &PathBuf,
-    vcards: &str,
+    vcards: Option<&str>,
 ) -> Vec<Signal> {
     if obex.tree.remove(transfer).is_none() {
         return Vec::new();
     }
-    let written = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(filename)
-        .and_then(|mut file| file.write_all(vcards.as_bytes()));
-    let size = u64::try_from(vcards.len()).unwrap_or(u64::MAX);
-    let status = if written.is_ok() { "complete" } else { "error" };
+    let written = vcards.is_some_and(|vcards| {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(filename)
+            .and_then(|mut file| file.write_all(vcards.as_bytes()))
+            .is_ok()
+    });
+    let size = u64::try_from(vcards.map_or(0, str::len)).unwrap_or(u64::MAX);
+    let status = if written { "complete" } else { "error" };
     let mut signals = Vec::new();
-    if written.is_ok() {
+    if written {
         signals.push(Signal::PropertiesChanged {
             path: transfer.clone(),
             interface: TRANSFER,

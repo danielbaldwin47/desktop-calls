@@ -78,6 +78,10 @@ _Avoid_: mock phone, fake AG
 The single phone number, chosen in advance by the user, that agents may Call on their own during testing.
 _Avoid_: echo number, test line
 
+**Helper**:
+A person who calls the user's Phone from another phone, or takes the user's Call, while the user works through a Real-Phone Checklist.
+_Avoid_: caller, tester, assistant
+
 **Real-Phone Checklist**:
 A short, grouped list of steps only the user can perform with the real Phone, such as receiving a Call from another person.
 _Avoid_: manual test, QA script

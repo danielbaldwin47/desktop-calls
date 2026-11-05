@@ -250,18 +250,23 @@ impl Recorder {
             .file
             .read_exact_at(&mut pixels, 0)
             .map_err(|error| error.to_string())?;
-        let mut rgb = Vec::with_capacity(columns * rows * 3);
-        for row in 0..rows {
-            let row = if self.state.progress[slot].inverted {
-                rows - 1 - row
-            } else {
-                row
-            };
-            for pixel in pixels[row * stride..row * stride + columns * 4]
-                .as_chunks::<4>()
+        // Converted into place, pixel by pixel through zipped iterators,
+        // which stays fast at the harness's opt-level 1: pushing each pixel
+        // onto a Vec took 160 ms a frame there, and the recorder hands the
+        // compositor its next buffer only once this frame is written, so it
+        // missed a window shown for 200 ms (ticket #55).
+        let inverted = self.state.progress[slot].inverted;
+        let mut rgb = vec![0; columns * rows * 3];
+        for (row, converted) in rgb.chunks_exact_mut(columns * 3).enumerate() {
+            let row = if inverted { rows - 1 - row } else { row };
+            let line = &pixels[row * stride..row * stride + columns * 4];
+            for (converted, pixel) in converted
+                .as_chunks_mut::<3>()
                 .0
+                .iter_mut()
+                .zip(line.as_chunks::<4>().0)
             {
-                rgb.extend_from_slice(&[pixel[red], pixel[green], pixel[blue]]);
+                *converted = [pixel[red], pixel[green], pixel[blue]];
             }
         }
         let file = fs::File::create(path)

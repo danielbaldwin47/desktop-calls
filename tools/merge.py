@@ -16,10 +16,15 @@ refuses unless all of these hold, in this order:
      the head lacks may change docs/ and *.md files (the wiki and glossary
      move often), unless code, tests or CI name one of those files, as the
      scorecard test names docs/wiki/polish-scorecard.md. It prints one line
-     naming the commits it let through.
-  3. Every check on the PR head has passed. Pending checks are waited for
-     with `gh pr checks --watch`; a check that is still pending when the
-     wait ends counts as not passed.
+     naming the commits it let through. CI skips its Rust jobs by the same
+     rule, in tools/changes.py.
+  3. Every check on the PR head has passed, and every workflow run on it has
+     finished: a job gets its check only when it starts, so a run's later
+     jobs can be missing while every check listed has passed. Pending checks
+     and unfinished runs are waited for; one still pending when the wait ends
+     counts as not passed. A skipped check counts as passed only beside a
+     passed "CI passed", which fails unless each job passed or was skipped
+     because the change touched only docs.
   4. The head did not move while waiting, and still contains origin/<base>
      (with the same exception).
   5. GitHub reports the PR as mergeable, and it is not a draft.
@@ -41,6 +46,8 @@ import subprocess
 import sys
 import time
 
+import changes
+
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 
 # How long CI may take to report its first check after a push.
@@ -56,11 +63,9 @@ class Refused(Exception):
     what to run next."""
 
 
-# Missing commits the head may lack: those changing only files here.
-DOCS_DIRECTORY = "docs/"
-DOCS_SUFFIX = ".md"
-# How a file names a docs path it may read: docs/... or ....md.
-DOCS_REFERENCE = (r"docs/[A-Za-z0-9_.-][A-Za-z0-9_./-]*", r"[A-Za-z0-9_./-]+\.md")
+# CI's summary check. It fails unless every job passed, or was skipped
+# because the change touched only docs, so a skipped check passes with it.
+SUMMARY_CHECK = "CI passed"
 # The compare API lists at most this many files and commits.
 COMPARE_FILES_LIMIT, COMPARE_COMMITS_LIMIT = 300, 250
 
@@ -97,38 +102,14 @@ def require_open(pr: dict) -> None:
         raise Refused(f"PR #{pr['number']} is {pr['state'].lower()}, so there is nothing to merge.")
 
 
-def is_docs(path: str) -> bool:
-    return path.startswith(DOCS_DIRECTORY) or path.endswith(DOCS_SUFFIX)
-
-
 def docs_named_by_code(pr: dict, paths: list[str]) -> dict[str, str]:
-    """Which of `paths` a file outside docs/ and *.md names, in the base
-    branch or the PR head: maps each to the first file naming it. A path
-    counts as named if it, or a directory holding it, appears. Comments count
-    too, which can only refuse a merge that was safe."""
+    """Which of `paths` code names, in the base branch or the PR head: maps
+    each to the first file naming it. CI decides with the same rule, in
+    tools/changes.py."""
     base, number = pr["baseRefName"], pr["number"]
     git("fetch", "--quiet", "origin", base, f"refs/pull/{number}/head")
     trees = [git("rev-parse", f"origin/{base}").strip(), pr["headRefOid"]]
-    patterns = [argument for pattern in DOCS_REFERENCE for argument in ("-e", pattern)]
-    names: dict[str, str] = {}
-    for tree in trees:
-        # git grep exits 1 when nothing matches.
-        output = git(
-            "grep", "-o", "-I", "-E", *patterns, tree, "--",
-            ".", ":!docs", ":!*.md", ":!tools/merge.py",
-            allowed=(0, 1),
-        )
-        for line in output.splitlines():
-            _, file, name = line.split(":", 2)
-            start = name.find(DOCS_DIRECTORY)
-            name = name[start:] if start >= 0 else name.lstrip("./")
-            names.setdefault(name.rstrip("./"), file)
-    return {
-        path: file
-        for path in paths
-        for name, file in names.items()
-        if path == name or path.startswith(name + "/")
-    }
+    return changes.docs_named_by_code(git, trees, paths)
 
 
 def require_contains_base(pr: dict) -> str | None:
@@ -156,7 +137,7 @@ def require_contains_base(pr: dict) -> str | None:
     )
     listed = len(commits) == behind and len(commits) < COMPARE_COMMITS_LIMIT
     listed = listed and len(files) < COMPARE_FILES_LIMIT
-    code = [path for path in files if not is_docs(path)]
+    code = [path for path in files if not changes.is_docs(path)]
     if not listed:
         raise Refused(
             f"PR #{number} is {behind} {noun} behind origin/{base}, so its CI did not test "
@@ -190,9 +171,12 @@ def examples(paths: list[str]) -> str:
 
 
 def checks(pr: dict) -> list[dict]:
-    """The checks on the PR head. A workflow run that is still queued has no
-    check yet, so it appears as a pending check marked `queued`. Empty if CI
-    has reported nothing for the head."""
+    """The checks on the PR head, and a pending check marked `unfinished` for
+    every workflow run on the head that hasn't completed. A job gets its check
+    only when it starts, so while a run is unfinished every check listed may
+    have passed with more to come: CI's Rust jobs start after its `changes`
+    job, and its "CI passed" after them. Empty if CI has reported nothing for
+    the head."""
     number = str(pr["number"])
     # gh exits 8 while checks are pending, 1 if one failed or none exist, so
     # read its output whatever the exit status.
@@ -201,24 +185,23 @@ def checks(pr: dict) -> list[dict]:
         capture_output=True,
         text=True,
     )
-    if result.stdout.strip():
-        return json.loads(result.stdout)
-    if "no checks reported" not in result.stderr:
+    if not result.stdout.strip() and "no checks reported" not in result.stderr:
         raise Refused(
             f"`gh pr checks {number}` failed: {result.stderr.strip()}\n"
             "Next: check `gh auth status`, then run this again."
         )
+    found = json.loads(result.stdout) if result.stdout.strip() else []
     runs = json.loads(
         gh("run", "list", "--commit", pr["headRefOid"], "--json", "name,event,status,url")
     )
-    return [
+    return found + [
         {
-            "name": run["name"],
+            "name": f"{run['name']} (workflow run)",
             "event": run["event"],
             "bucket": "pending",
             "state": run["status"],
             "link": run["url"],
-            "queued": True,
+            "unfinished": True,
         }
         for run in runs
         if run["status"] != "completed"
@@ -235,12 +218,13 @@ def wait_for_checks(pr: dict, wait_seconds: float) -> None:
     number = str(pr["number"])
     started = time.monotonic()
     deadline = started + wait_seconds
-    announced = False
+    announced = set()
     while time.monotonic() < deadline:
         current = checks(pr)
         if current and all(check["bucket"] != "pending" for check in current):
             return
-        if current and not any(check.get("queued") for check in current):
+        unfinished = [check for check in current if check.get("unfinished")]
+        if current and not unfinished:
             remaining = deadline - time.monotonic()
             print(f"Waiting up to {remaining / 60:.0f} min for checks on PR #{number}:", flush=True)
             try:
@@ -252,13 +236,18 @@ def wait_for_checks(pr: dict, wait_seconds: float) -> None:
                     stdout=sys.stderr if sys.stderr.isatty() else subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired:
-                pass
-            return
+                return
+            # A run may have started more jobs meanwhile: look again.
+            continue
         if not current and time.monotonic() - started > CHECKS_APPEAR_SECONDS:
             return
-        if not announced:
+        if not current and "start" not in announced:
             print(f"Waiting for CI to start on {pr['headRefOid'][:7]}...", flush=True)
-            announced = True
+            announced.add("start")
+        for run in unfinished:
+            if run["link"] not in announced:
+                print(f"Waiting for {label(run)}: {run['state'].lower()}  {run['link']}", flush=True)
+                announced.add(run["link"])
         time.sleep(POLL_SECONDS)
 
 
@@ -273,7 +262,11 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
         )
     failed = [check for check in found if check["bucket"] in ("fail", "cancel")]
     pending = [check for check in found if check["bucket"] == "pending"]
-    other = [check for check in found if check["bucket"] not in ("pass", "fail", "cancel", "pending")]
+    # A skipped job passes only with the summary that judged it.
+    judged = ["pass", "fail", "cancel", "pending"]
+    if any(check["name"] == SUMMARY_CHECK and check["bucket"] == "pass" for check in found):
+        judged.append("skipping")
+    other = [check for check in found if check["bucket"] not in judged]
     if failed:
         lines = "\n".join(f"  {label(c)}: {c['state'].lower()}  {c['link']}" for c in failed)
         runs = [m.group(1) for c in failed if (m := re.search(r"/runs/(\d+)", c["link"] or ""))]

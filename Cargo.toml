@@ -98,8 +98,26 @@ opt-level = 3
 [profile.dev.package.simd-adler32]
 opt-level = 3
 
+# The harness and the gallery, where `region_where` scans the decoded pixels,
+# at opt-level 1, not 3. One decode and scan of a 3840x2160 screenshot took
+# 7 ms at opt-level 3, 32 ms at 1 and 117 ms at 0 on the Desktop. But opt-level
+# 3 applies to each of the harness's test binaries too, and rebuilding the
+# workspace on two CPUs took 49 s at opt-level 3 (or 2), 16 s at 1 and 7 s at 0:
+# about two minutes of every CI run (ticket #55).
 [profile.dev.package.test-harness]
-opt-level = 3
+opt-level = 1
 
 [profile.dev.package.automation]
-opt-level = 3
+opt-level = 1
+
+# Line tables only for our crates, enough for file and line in a backtrace,
+# and no debuginfo for dependencies. A cold build of every target on two CPUs
+# took 126 s with full debuginfo, 102 s with line tables only and 89 s with
+# none; relinking after a change to the harness took 73, 46 and 41 s; and the
+# target directory, which CI's cache restores and saves on every run, was 2.8,
+# 1.7 and 0.9 GB.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

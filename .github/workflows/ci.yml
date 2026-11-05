@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,70 +17,100 @@ concurrency:
   # verifies a merge (it did on 2026-11-05, for #41).
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# `changes` decides whether the change touches code. If it does, the suite
+# runs as two halves in parallel, on two runners: everything but the
+# harness's scenarios, with `just check`; and the harness's scenarios. If it
+# touches only docs that no code reads, both halves are skipped. "CI passed"
+# needs every job, so it appears only once they have all finished.
 jobs:
+  changes:
+    name: Code changed?
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Both ends of the change, to compare them.
+          fetch-depth: 0
+
+      # The rule is in tools/changes.py, which `just merge` uses too.
+      - name: Decide whether code changed
+        id: decide
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+
   check:
-    name: just check
+    name: just check, and every test but the harness's
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Arch Linux, to match the user's Desktop (Omarchy).
-    container:
+    container: &container
       image: archlinux:latest
       # Headless sway and grim keep each 3840x2160 frame (33 MB) in /dev/shm,
-      # and screen scenarios run four at a time. Docker's default 64 MB ran
+      # and screen scenarios run several at a time. Docker's default 64 MB ran
       # out: grim died of SIGBUS and sway failed to start.
       options: --shm-size=1g
     steps:
-      # sway is the screen harness's headless compositor, grim its screenshot
-      # tool, wl-clipboard its clipboard for pasting, and libnotify's
-      # notify-send a client of the notification stand-in. python-dbus and
-      # python-gobject let the Real-Phone Checklist's --demo run the PBAP
-      # probe (tools/real-phone) against the Simulated Phone.
-      - name: Install system packages
+      # gcc links, and pkgconf finds the system libraries; base-devel's other
+      # tools (make, gdb, guile, perl's autotools) aren't needed. sway is the
+      # screen harness's headless compositor, grim its screenshot tool,
+      # wl-clipboard its clipboard for pasting, and libnotify's notify-send a
+      # client of the notification stand-in. python-dbus and python-gobject
+      # let the Real-Phone Checklist's --demo run the PBAP probe
+      # (tools/real-phone) against the Simulated Phone. Both jobs run
+      # `just test`, so both install everything.
+      - &install
+        name: Install system packages
         run: >-
           pacman -Syu --noconfirm --needed
-          base-devel git rustup just cargo-deny
+          gcc pkgconf git rustup just cargo-deny
           gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject
           sway grim wl-clipboard libnotify
 
-      - uses: actions/checkout@v5
+      - &checkout
+        uses: actions/checkout@v5
 
-      - name: Install the pinned Rust toolchain
+      - &toolchain
+        name: Install the pinned Rust toolchain
         # rustup reads rust-toolchain.toml.
         run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2
+      # rust-cache keys on Cargo.lock and the crates' manifests, but not the
+      # workspace's Cargo.toml. A change to its build profiles then restored
+      # a cache that matched in name only: every dependency rebuilt, and the
+      # cache was never saved again. Its hash goes in the key.
+      - &cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
 
       - name: just check
         run: just check
 
-      # Records whether unprivileged user and mount namespaces work here. The
-      # harness uses them only to hide a reachable systemd journal from the
-      # app, so its log lands in the scenario directory.
-      - name: Probe unshare -rm
-        run: |
-          ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
-          if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
-
       # The package gives sway the file capability cap_sys_nice, which is
       # outside this container's bounding set, so exec fails with EPERM.
       # sway runs without it; only its realtime scheduling goes.
-      - name: Let sway run in the container
+      - &sway
+        name: Let sway run in the container
         run: setcap -r /usr/bin/sway
 
-      - name: just test
-        run: just test
-
-      - name: just screenshot
-        run: just screenshot
+      # The gallery test renders the gallery exactly as `just screenshot` does,
+      # into target/screenshots/gallery, so CI doesn't render it twice.
+      - name: just test, all but the harness's scenarios
+        run: just test --exclude test-harness
 
       - name: just scorecard
         run: just scorecard | tee scorecard.txt
 
-      # The gallery, and every screenshot a screen scenario took.
-      - name: Keep the screenshots
+      - name: Keep the gallery
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: gallery
           path: target/screenshots
           if-no-files-found: ignore
 
@@ -95,6 +126,77 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          name: failed-scenario-logs-check
+          path: /tmp/desktop-calls-test-*
+          if-no-files-found: ignore
+
+  scenarios:
+    name: just test, the harness's scenarios
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    container: *container
+    steps:
+      - *install
+      - *checkout
+      - *toolchain
+      - *cache
+      - *sway
+
+      # Records whether unprivileged user and mount namespaces work here. The
+      # harness uses them only to hide a reachable systemd journal from the
+      # app, so its log lands in the scenario directory.
+      - name: Probe unshare -rm
+        run: |
+          ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
+          if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
+
+      # Every crate but the harness is excluded by name, so a new crate runs
+      # in both halves rather than in neither.
+      - name: just test, the harness's scenarios
+        run: >-
+          just test
+          --exclude desktop-calls --exclude desktop-calls-core
+          --exclude simulated-phone --exclude automation
+
+      # Every screenshot a screen scenario took.
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/screenshots
+          if-no-files-found: ignore
+
+      - name: Keep the logs of failed scenarios
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
           name: failed-scenario-logs
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
+
+  # The one check that says CI passed. It fails unless `changes` succeeded and
+  # both halves succeeded, or were skipped because `changes` found only docs.
+  # `just merge` waits on every check and every unfinished run.
+  ci-passed:
+    name: CI passed
+    if: ${{ !cancelled() }}
+    needs: [changes, check, scenarios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed, or was skipped for a docs-only change
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          HALVES: ${{ needs.check.result }} ${{ needs.scenarios.result }}
+        run: |
+          echo "changes: $CHANGES, code changed: $CODE, halves: $HALVES"
+          [ "$CHANGES" = success ] || exit 1
+          for result in $HALVES; do
+            if [ "$CODE" = true ]; then
+              [ "$result" = success ] || exit 1
+            else
+              [ "$result" = skipped ] || exit 1
+            fi
+          done

@@ -82,18 +82,24 @@ fn the_tray_watcher_records_a_registration_with_its_status_and_icon() {
         .expect("the tray icon's connection has a name")
         .to_string();
 
+    // Desktop Calls' own Indicator registers too; this test's icon is the
+    // one on the test's connection.
+    let ours = |item: &TrayItem| item.bus_name == bus_name;
     let items = harness
         .tray()
         .wait_for("the tray icon is registered", DEADLINE, |items| {
-            !items.is_empty()
+            items.iter().any(ours)
         });
     assert_eq!(
-        items,
+        items.into_iter().filter(ours).collect::<Vec<_>>(),
         [TrayItem {
             bus_name: bus_name.clone(),
             path: "/StatusNotifierItem".to_owned(),
             status: Some("Active".to_owned()),
             icon_name: Some("call-start-symbolic".to_owned()),
+            // This minimal icon has neither.
+            icon_theme_path: None,
+            tooltip: None,
         }]
     );
 
@@ -112,7 +118,7 @@ fn the_tray_watcher_records_a_registration_with_its_status_and_icon() {
         .wait_for("the tray icon needs attention", DEADLINE, |items| {
             items
                 .iter()
-                .any(|item| item.status.as_deref() == Some("NeedsAttention"))
+                .any(|item| ours(item) && item.status.as_deref() == Some("NeedsAttention"))
         });
 }
 

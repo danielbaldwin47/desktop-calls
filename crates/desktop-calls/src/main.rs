@@ -7,6 +7,7 @@ mod control;
 mod earlier_run;
 mod glib_runtime;
 mod hyprland;
+mod indicator;
 mod logging;
 mod notifications;
 mod object_manager;

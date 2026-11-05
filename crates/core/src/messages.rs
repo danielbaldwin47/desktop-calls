@@ -7,6 +7,7 @@
 use crate::call::{AudioLocation, Caller, Timestamp};
 use crate::contacts::CallHistoryKind;
 use crate::contacts::NumberLabel;
+use crate::indicator::{IndicatorEntry, IndicatorStatus, IndicatorView};
 use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
@@ -250,6 +251,67 @@ pub fn problem(problem: ProblemKind) -> Message {
     Message {
         text,
         next_action: None,
+    }
+}
+
+/// A Problem in a few words, for a menu entry or a tooltip.
+#[must_use]
+pub fn problem_heading(problem: ProblemKind) -> &'static str {
+    match problem {
+        ProblemKind::ContactsDenied => "Contacts not shared",
+        ProblemKind::ContactsPromptUnanswered => "Contacts request unanswered",
+    }
+}
+
+/// The Indicator's status: its menu's first line, and its tooltip without
+/// the Problems.
+#[must_use]
+pub fn indicator_status(status: &IndicatorStatus) -> String {
+    match status {
+        IndicatorStatus::NoPhone => "No Phone set up".to_owned(),
+        IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
+        IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
+        IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),
+        IndicatorStatus::Ringing { caller, contact } => {
+            format!("Call from {}", caller_name(caller, contact.as_ref()))
+        }
+        IndicatorStatus::InCall { caller, contact } => {
+            format!("In a Call with {}", caller_name(caller, contact.as_ref()))
+        }
+    }
+}
+
+/// What the Indicator says on hover: its status, then each Problem.
+#[must_use]
+pub fn indicator_tooltip(view: &IndicatorView) -> String {
+    let mut tooltip = indicator_status(&view.status);
+    for problem in &view.problems {
+        tooltip.push_str(" · ");
+        tooltip.push_str(problem_heading(*problem));
+    }
+    tooltip
+}
+
+/// What an entry in the Indicator's menu says. The status line says
+/// [`indicator_status`]; a separator says nothing.
+#[must_use]
+pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
+    match entry {
+        IndicatorEntry::Status => indicator_status(&view.status),
+        IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
+        IndicatorEntry::Separator => String::new(),
+        IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
+        IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),
+        IndicatorEntry::MoveAudio { moving: true, .. } => label(Label::MovingAudioHere).to_owned(),
+        IndicatorEntry::MoveAudio {
+            to: AudioLocation::Desktop,
+            ..
+        } => "Move audio to this computer".to_owned(),
+        IndicatorEntry::MoveAudio {
+            to: AudioLocation::Phone,
+            ..
+        } => label(Label::MoveAudioToPhone).to_owned(),
+        IndicatorEntry::Problem(problem) => problem_heading(*problem).to_owned(),
     }
 }
 

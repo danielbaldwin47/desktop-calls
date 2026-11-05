@@ -2,7 +2,9 @@
 //! dark Desktop without Omarchy (stock Adwaita) and under a light and a dark
 //! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
-//! Each surface ticket adds its states to [`STATES`].
+//! Each surface ticket adds its states to [`STATES`]. The Indicator's
+//! states, in [`INDICATOR_STATES`], are drawn as Omarchy's bar draws its
+//! icon, light and dark.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -13,6 +15,7 @@ use std::time::Duration;
 use test_harness::vcards::{self, CallKind};
 use test_harness::{
     AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
+    draw_tray_icon,
 };
 
 /// How long the app may take to reach a state.
@@ -305,6 +308,106 @@ const STATES: &[State] = &[
     },
 ];
 
+/// One state of the Indicator the gallery shows.
+struct IndicatorState {
+    /// The file name stem, after `indicator-`.
+    name: &'static str,
+    /// The caption.
+    title: &'static str,
+    /// Brings the scenario into the state.
+    reach: fn(&Harness),
+    /// What the Indicator's tooltip says once it shows the state.
+    tooltip: &'static str,
+}
+
+/// The Indicator is drawn in Omarchy's light and dark themes.
+const INDICATOR_THEMES: [OmarchyTheme; 2] = [OmarchyTheme::Light, OmarchyTheme::Dark];
+
+const INDICATOR_STATES: &[IndicatorState] = &[
+    IndicatorState {
+        name: "connected",
+        title: "The Indicator, the Phone connected",
+        reach: |harness| harness.simulated_phone().connect(),
+        tooltip: "Simulated Pixel connected",
+    },
+    IndicatorState {
+        name: "disconnected",
+        title: "The Indicator, the Phone out of range",
+        reach: |harness| {
+            connect(harness);
+            harness.simulated_phone().disconnect();
+        },
+        tooltip: "Simulated Pixel out of range",
+    },
+    IndicatorState {
+        name: "ringing",
+        title: "The Indicator, a Call ringing",
+        reach: |harness| {
+            connect(harness);
+            let _path = harness.simulated_phone().ring(NUMBER);
+        },
+        tooltip: "Call from +44 7700 900123",
+    },
+    IndicatorState {
+        name: "in-call",
+        title: "The Indicator, in a Call",
+        reach: |harness| {
+            connect(harness);
+            let _path = harness.simulated_phone().ring(NUMBER);
+            let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+            harness.answer(state.calls.first().map_or(0, |call| call.id));
+        },
+        tooltip: "In a Call with +44 7700 900123",
+    },
+    IndicatorState {
+        name: "problem",
+        title: "The Indicator, a Problem: Contacts not shared",
+        reach: |harness| {
+            harness.simulated_phone().set_contacts_prompt("deny");
+            harness.simulated_phone().connect();
+        },
+        tooltip: "Simulated Pixel connected · Contacts not shared",
+    },
+];
+
+/// Where the Indicator in `state` under `theme` is drawn.
+fn indicator_path(
+    state: &IndicatorState,
+    theme: OmarchyTheme,
+    output: &std::path::Path,
+) -> PathBuf {
+    output.join(format!("indicator-{}-{}.png", state.name, theme.as_str()))
+}
+
+/// Brings a scenario under `theme` into `state` and draws the Indicator
+/// as Omarchy's bar shows it, in the theme's background and foreground,
+/// at its `indicator_path`.
+fn draw_indicator(
+    state: &IndicatorState,
+    theme: OmarchyTheme,
+    output: &std::path::Path,
+) -> Result<(), String> {
+    let harness = Look::Omarchy(theme).builder().start();
+    (state.reach)(&harness);
+    let items = harness.tray().wait_for(
+        &format!("the Indicator says {:?}", state.tooltip),
+        DEADLINE,
+        |items| {
+            items
+                .iter()
+                .any(|item| item.tooltip.as_deref() == Some(state.tooltip))
+        },
+    );
+    let path = indicator_path(state, theme, output);
+    let item = items.first().ok_or("no tray item")?;
+    draw_tray_icon(
+        item,
+        theme.colour("background"),
+        theme.colour("foreground"),
+        &path,
+    )
+}
+
 /// Syncs Contacts and a Call History with a Missed Call from the Phone,
 /// connected.
 fn sync(harness: &Harness) {
@@ -477,6 +580,19 @@ pub fn run(options: &Options) -> ExitCode {
         }
     }
 
+    // The Indicator is drawn with the whole gallery; redoing one state
+    // keeps it as an earlier run drew it.
+    if options.only.is_none() {
+        for state in INDICATOR_STATES {
+            for theme in INDICATOR_THEMES {
+                if let Err(error) = draw_indicator(state, theme, &output) {
+                    eprintln!("Can't draw the Indicator {}: {error}", state.name);
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    }
+
     // Every state rendered, now or by an earlier run.
     let shots: Vec<(&State, Look, PathBuf)> = STATES
         .iter()
@@ -487,17 +603,26 @@ pub fn run(options: &Options) -> ExitCode {
         })
         .filter(|(_, _, path)| path.exists())
         .collect();
+    let indicators: Vec<(&IndicatorState, OmarchyTheme, PathBuf)> = INDICATOR_STATES
+        .iter()
+        .flat_map(|state| INDICATOR_THEMES.map(|theme| (state, theme)))
+        .map(|(state, theme)| (state, theme, indicator_path(state, theme, &output)))
+        .filter(|(_, _, path)| path.exists())
+        .collect();
 
     let index = output.join("index.html");
-    if let Err(error) = fs::write(&index, index_html(&shots)) {
+    if let Err(error) = fs::write(&index, index_html(&shots, &indicators)) {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }
     let states = shots.len() / LOOKS.len();
+    let indicator_states = indicators.len() / INDICATOR_THEMES.len();
     println!(
-        "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy.",
+        "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy; \
+         the Indicator in {indicator_states} state{}, light and dark.",
         shots.len(),
-        if states == 1 { "" } else { "s" }
+        if states == 1 { "" } else { "s" },
+        if indicator_states == 1 { "" } else { "s" }
     );
     println!("{}", index.display());
     ExitCode::SUCCESS
@@ -509,8 +634,12 @@ fn file_stem(state: &State, look: Look) -> String {
 }
 
 /// The gallery page: one row per state, stock light and dark, then Omarchy
-/// light and dark.
-fn index_html(shots: &[(&State, Look, PathBuf)]) -> String {
+/// light and dark; then the Indicator, one row per state, Omarchy light and
+/// dark, enlarged without smoothing so each pixel shows.
+fn index_html(
+    shots: &[(&State, Look, PathBuf)],
+    indicators: &[(&IndicatorState, OmarchyTheme, PathBuf)],
+) -> String {
     let mut figures = String::new();
     for (state, look, path) in shots {
         let file = path
@@ -525,12 +654,33 @@ fn index_html(shots: &[(&State, Look, PathBuf)]) -> String {
             look = look.as_str(),
         );
     }
+    let mut icons = String::new();
+    for (state, theme, path) in indicators {
+        let file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let _ = writeln!(
+            icons,
+            "<figure><a href=\"{file}\"><img class=\"icon\" src=\"{file}\" \
+             alt=\"{title}, {look}\"></a><figcaption>{title} ({look})</figcaption></figure>",
+            title = state.title,
+            look = theme.as_str(),
+        );
+    }
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <title>Desktop Calls screenshot gallery</title>\n\
          <style>body{{font-family:sans-serif;margin:16px}}\
          main{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}}\
-         img{{width:100%;border:1px solid #888}}</style>\n</head>\n<body>\n\
-         <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n</body>\n</html>\n"
+         img{{width:100%;border:1px solid #888}}\
+         img.icon{{image-rendering:pixelated}}\
+         main.indicator{{grid-template-columns:repeat(2,minmax(0,384px))}}</style>\n\
+         </head>\n<body>\n\
+         <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n\
+         <h2>The Indicator in Omarchy's bar</h2>\n\
+         <p>Each icon as Omarchy's tray draws it: the SVG the app names, 12 logical pixels \
+         at 2× scale, painted in the bar's foreground through its alpha mask.</p>\n\
+         <main class=\"indicator\">\n{icons}</main>\n</body>\n</html>\n"
     )
 }

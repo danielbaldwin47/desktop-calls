@@ -584,6 +584,9 @@ impl Demo {
                 });
             }
             "escape" => harness.keyboard().press(Key::Escape),
+            "indicator-click" => harness.tray().activate(),
+            "indicator-mute" => harness.tray().click("Mute"),
+            "indicator-hang-up" => harness.tray().click("Hang up"),
             "a" | "d" => harness.keyboard().type_text(action),
             other => match other.strip_prefix("quirk ") {
                 Some(quirk) => phone.enable_quirk(quirk.trim()),
@@ -591,7 +594,8 @@ impl Demo {
                     "  demo: unknown action {other:?}. The actions: call, call-withheld, \
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
-                     click-notification, enter, phone-dials, quirk NAME; or skip, or quit."
+                     click-notification, enter, phone-dials, indicator-click, indicator-mute, \
+                     indicator-hang-up, quirk NAME; or skip, or quit."
                 ),
             },
         }

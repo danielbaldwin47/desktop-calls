@@ -50,12 +50,16 @@ mod screen;
 mod screencopy;
 mod stand_ins;
 mod timeline;
+mod tray_icon;
 pub mod vcards;
 
 pub use client::TestClient;
 pub use input::Key;
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
-pub use stand_ins::{BAR_COLOUR, BAR_HEIGHT, Notification, OmarchyTheme, Theme, TrayItem};
+pub use stand_ins::{
+    BAR_COLOUR, BAR_HEIGHT, MenuEntry, Notification, OmarchyTheme, Theme, TrayItem,
+};
+pub use tray_icon::draw_tray_icon;
 
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;
@@ -419,6 +423,7 @@ pub struct Builder {
     omarchy_bar: bool,
     time_zone: Option<String>,
     phone_connected: bool,
+    phone_name: Option<String>,
     omarchy_theme: Option<OmarchyTheme>,
     hyprland: Option<HyprlandSettings>,
     installed: bool,
@@ -537,6 +542,13 @@ impl Builder {
         self
     }
 
+    /// Names the Simulated Phone `name`, as the user's Phone is named in its
+    /// Bluetooth settings. "Simulated Pixel" by default.
+    pub fn phone_name(mut self, name: &str) -> Self {
+        self.phone_name = Some(name.to_owned());
+        self
+    }
+
     /// Installs Desktop Calls into the scenario's home as `just install`
     /// does, and leaves the service stopped: the session bus starts it
     /// through D-Bus activation once something calls it, as the user's
@@ -606,10 +618,7 @@ impl Builder {
                 .join(scenario_name())
         });
 
-        let phone = PhoneIdentity {
-            name: "Simulated Pixel".to_owned(),
-            address: random_address(),
-        };
+        let phone = simulated_phone_identity(self.phone_name);
         // Real PipeWire numbered the Pixel's AudioGateway `ag1`; any index
         // from 1 up is plausible, and the app must not care which.
         let audio_gateway_index = 1 + random_u32() % 99;
@@ -1894,6 +1903,48 @@ impl Tray<'_> {
                 )
             })
     }
+
+    /// Every status the registered items have reported so far, in order,
+    /// each change once, as the tray read them on each signal.
+    #[must_use]
+    pub fn statuses_seen(&self) -> Vec<String> {
+        self.stand_ins.tray_statuses()
+    }
+
+    /// Left-clicks the one registered item, as Omarchy's bar does.
+    ///
+    /// # Panics
+    ///
+    /// If there isn't exactly one item, or it refuses.
+    pub fn activate(&self) {
+        if let Err(error) = self.stand_ins.activate_tray_item() {
+            panic!("activate the tray item: {error}");
+        }
+    }
+
+    /// The one registered item's menu, as the tray reads it on opening.
+    ///
+    /// # Panics
+    ///
+    /// If there isn't exactly one item, or its menu can't be read.
+    #[must_use]
+    pub fn menu(&self) -> Vec<MenuEntry> {
+        self.stand_ins
+            .tray_menu()
+            .unwrap_or_else(|error| panic!("read the tray item's menu: {error}"))
+    }
+
+    /// Clicks the entry labelled `label` in the one registered item's menu,
+    /// here or in a submenu.
+    ///
+    /// # Panics
+    ///
+    /// If the menu has no such entry, it is disabled, or the click fails.
+    pub fn click(&self, label: &str) {
+        if let Err(error) = self.stand_ins.click_tray_menu(label) {
+            panic!("click {label:?} in the tray item's menu: {error}");
+        }
+    }
 }
 
 /// The screen's synthetic keyboard. See [`Harness::keyboard`]. Keys go to
@@ -2779,6 +2830,15 @@ fn still_cursor(config: &Path) {
         config.join("gtk-4.0/settings.ini"),
         "[Settings]\ngtk-cursor-blink=false\n",
     );
+}
+
+/// The Simulated Phone: called `name`, or "Simulated Pixel", at a
+/// `random_address`.
+fn simulated_phone_identity(name: Option<String>) -> PhoneIdentity {
+    PhoneIdentity {
+        name: name.unwrap_or_else(|| "Simulated Pixel".to_owned()),
+        address: random_address(),
+    }
 }
 
 /// A locally administered, unicast Bluetooth address, different every run.

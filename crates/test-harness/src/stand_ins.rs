@@ -216,6 +216,7 @@ const NOTIFICATIONS_INTERFACE: &str = "org.freedesktop.Notifications";
 const WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const ITEM_INTERFACE: &str = "org.kde.StatusNotifierItem";
+const MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 /// Where an item that registers with only a bus name has its object.
 const DEFAULT_ITEM_PATH: &str = "/StatusNotifierItem";
 
@@ -271,8 +272,7 @@ impl Theme {
     }
 }
 
-/// One item registered with the tray watcher, with its status and icon as
-/// the item reports them now.
+/// One item registered with the tray watcher, with what it reports now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrayItem {
     pub bus_name: String,
@@ -282,6 +282,55 @@ pub struct TrayItem {
     pub status: Option<String>,
     /// `IconName`, or `None` if the item doesn't answer.
     pub icon_name: Option<String>,
+    /// `IconThemePath`: where a tray looks for `icon_name` when the icon
+    /// theme has no such icon, or `None` if the item doesn't answer.
+    pub icon_theme_path: Option<String>,
+    /// The title of `ToolTip`, which a tray shows on hover, or `None` if the
+    /// item doesn't answer.
+    pub tooltip: Option<String>,
+}
+
+/// One entry of a tray item's menu, as a tray reads it over dbusmenu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuEntry {
+    pub id: i32,
+    /// What the entry says; empty for a separator.
+    pub label: String,
+    pub separator: bool,
+    pub enabled: bool,
+    /// For an entry with a checkmark, whether it is ticked.
+    pub ticked: Option<bool>,
+    /// A submenu's entries.
+    pub children: Vec<MenuEntry>,
+}
+
+impl MenuEntry {
+    /// The entries' labels, a separator as `"---"`, as a tray lists them.
+    #[must_use]
+    pub fn labels(entries: &[Self]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|entry| {
+                if entry.separator {
+                    "---".to_owned()
+                } else {
+                    entry.label.clone()
+                }
+            })
+            .collect()
+    }
+
+    /// The entry labelled `label`, here or in a submenu.
+    #[must_use]
+    pub fn find<'a>(entries: &'a [Self], label: &str) -> Option<&'a Self> {
+        entries.iter().find_map(|entry| {
+            if entry.label == label {
+                Some(entry)
+            } else {
+                Self::find(&entry.children, label)
+            }
+        })
+    }
 }
 
 /// What the stand-ins have recorded.
@@ -291,6 +340,9 @@ struct Records {
     next_notification_id: u32,
     /// Registered tray items: bus name and object path.
     tray_items: Vec<(String, String)>,
+    /// Every status the registered items have reported, in order, each
+    /// change once.
+    tray_statuses: Vec<String>,
 }
 
 #[derive(Default)]
@@ -302,6 +354,16 @@ struct Shared {
 impl Shared {
     fn records(&self) -> MutexGuard<'_, Records> {
         self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Records the statuses `items` report, each change once.
+    fn record_statuses(&self, items: Vec<TrayItem>) {
+        let mut records = self.records();
+        for status in items.into_iter().filter_map(|item| item.status) {
+            if records.tray_statuses.last() != Some(&status) {
+                records.tray_statuses.push(status);
+            }
+        }
     }
 }
 
@@ -335,6 +397,7 @@ impl StandIns {
                 .name(PORTAL_NAME)
                 .build(),
         )?;
+        record_tray_statuses(address.to_owned(), shared.clone());
         Ok(Self { connection, shared })
     }
 
@@ -440,6 +503,178 @@ impl StandIns {
             None => Err(format!("the tray items are {:?}", self.tray_items())),
         }
     }
+
+    /// Every status the registered items have reported, in order.
+    pub fn tray_statuses(&self) -> Vec<String> {
+        self.shared.records().tray_statuses.clone()
+    }
+
+    /// The one registered tray item, as a tray addresses it.
+    fn only_tray_item(&self) -> Result<(String, String), String> {
+        match self.shared.records().tray_items.as_slice() {
+            [item] => Ok(item.clone()),
+            items => Err(format!("expected one tray item, found {items:?}")),
+        }
+    }
+
+    /// Clicks the one registered tray item, as Omarchy's bar does on a left
+    /// click: `Activate` at the pointer's position.
+    pub fn activate_tray_item(&self) -> Result<(), String> {
+        let (bus_name, path) = self.only_tray_item()?;
+        zbus::block_on(self.connection.call_method(
+            Some(bus_name.as_str()),
+            path.as_str(),
+            Some(ITEM_INTERFACE),
+            "Activate",
+            &(0_i32, 0_i32),
+        ))
+        .map(drop)
+        .map_err(|error| error.to_string())
+    }
+
+    /// The one registered tray item's menu, read as a tray reads it when it
+    /// opens: `AboutToShow`, then the whole layout.
+    pub fn tray_menu(&self) -> Result<Vec<MenuEntry>, String> {
+        let (bus_name, path) = self.only_tray_item()?;
+        zbus::block_on(async {
+            let menu = menu_path(&self.connection, &bus_name, &path).await?;
+            self.connection
+                .call_method(
+                    Some(bus_name.as_str()),
+                    menu.as_str(),
+                    Some(MENU_INTERFACE),
+                    "AboutToShow",
+                    &(0_i32,),
+                )
+                .await?;
+            let reply = self
+                .connection
+                .call_method(
+                    Some(bus_name.as_str()),
+                    menu.as_str(),
+                    Some(MENU_INTERFACE),
+                    "GetLayout",
+                    &(0_i32, -1_i32, Vec::<String>::new()),
+                )
+                .await?;
+            let (_revision, (_id, _properties, children)): (u32, MenuNode) =
+                reply.body().deserialize()?;
+            menu_entries(children)
+        })
+        .map_err(|error: zbus::Error| error.to_string())
+    }
+
+    /// Clicks the entry labelled `label` in the one registered tray item's
+    /// menu, as a tray does: a dbusmenu `clicked` event.
+    pub fn click_tray_menu(&self, label: &str) -> Result<(), String> {
+        let entries = self.tray_menu()?;
+        let entry = MenuEntry::find(&entries, label)
+            .ok_or_else(|| format!("the menu has no {label:?}: {entries:#?}"))?;
+        if !entry.enabled {
+            return Err(format!("{label:?} is disabled: {entries:#?}"));
+        }
+        let (bus_name, path) = self.only_tray_item()?;
+        zbus::block_on(async {
+            let menu = menu_path(&self.connection, &bus_name, &path).await?;
+            self.connection
+                .call_method(
+                    Some(bus_name.as_str()),
+                    menu.as_str(),
+                    Some(MENU_INTERFACE),
+                    "Event",
+                    &(entry.id, "clicked", Variant::from(0_i32), 0_u32),
+                )
+                .await
+        })
+        .map(drop)
+        .map_err(|error| error.to_string())
+    }
+}
+
+/// A dbusmenu layout node: id, properties, and its children, each a node in
+/// a variant.
+type MenuNode = (i32, HashMap<String, OwnedVariant>, Vec<OwnedVariant>);
+
+async fn menu_path(connection: &Connection, bus_name: &str, path: &str) -> zbus::Result<String> {
+    let properties = PropertiesProxy::builder(connection)
+        .destination(bus_name.to_owned())
+        .path(path.to_owned())
+        .build()
+        .await?;
+    let value = properties
+        .get(InterfaceName::try_from(ITEM_INTERFACE)?, "Menu")
+        .await?;
+    Ok(zbus::OwnedObjectPath::try_from(value)?.to_string())
+}
+
+fn menu_entries(children: Vec<OwnedVariant>) -> zbus::Result<Vec<MenuEntry>> {
+    children
+        .into_iter()
+        .map(|child| {
+            let (id, properties, children): MenuNode = child.try_into()?;
+            let text = |name: &str| {
+                properties
+                    .get(name)
+                    .and_then(|value| String::try_from(value.try_clone().ok()?).ok())
+            };
+            let flag = |name: &str| {
+                properties
+                    .get(name)
+                    .and_then(|value| bool::try_from(value.try_clone().ok()?).ok())
+            };
+            let ticked = (text("toggle-type").as_deref() == Some("checkmark")).then(|| {
+                properties
+                    .get("toggle-state")
+                    .and_then(|value| i32::try_from(value.try_clone().ok()?).ok())
+                    == Some(1)
+            });
+            Ok(MenuEntry {
+                id,
+                label: text("label").unwrap_or_default(),
+                separator: text("type").as_deref() == Some("separator"),
+                enabled: flag("enabled").unwrap_or(true),
+                ticked,
+                children: menu_entries(children)?,
+            })
+        })
+        .collect()
+}
+
+/// Records each status the registered tray items report, as a tray sees
+/// them: read again whenever a signal arrives, for the rest of the
+/// stand-ins' life.
+fn record_tray_statuses(address: String, shared: Arc<Shared>) {
+    std::thread::spawn(move || {
+        zbus::block_on(async {
+            // A connection of its own, listening only to the tray's
+            // signals: a stream that fills while this waits for property
+            // replies would otherwise stall the stand-ins' own connection.
+            let connection = zbus::connection::Builder::address(address.as_str())
+                .build()
+                .await?;
+            let items = MatchRule::builder()
+                .msg_type(Type::Signal)
+                .interface(ITEM_INTERFACE)
+                .build()?;
+            let registrations = MatchRule::builder()
+                .msg_type(Type::Signal)
+                .interface(WATCHER_NAME)
+                .member("StatusNotifierItemRegistered")
+                .build()?;
+            let mut signals = futures_util::stream::select(
+                MessageStream::for_match_rule(items, &connection, None).await?,
+                MessageStream::for_match_rule(registrations, &connection, None).await?,
+            );
+            loop {
+                let registered = shared.records().tray_items.clone();
+                let items = read_tray_items(&connection, registered).await;
+                shared.record_statuses(items);
+                if signals.next().await.is_none() {
+                    return Ok::<_, zbus::Error>(());
+                }
+            }
+        })
+    });
 }
 
 async fn read_tray_items(
@@ -448,30 +683,51 @@ async fn read_tray_items(
 ) -> Vec<TrayItem> {
     let mut items = Vec::new();
     for (bus_name, path) in registered {
-        let text = |name: &'static str| {
-            let (bus_name, path) = (bus_name.clone(), path.clone());
-            async move {
-                let properties = PropertiesProxy::builder(connection)
-                    .destination(bus_name)
-                    .path(path)
-                    .build()
-                    .await
-                    .ok()?;
-                let interface = InterfaceName::try_from(ITEM_INTERFACE).ok()?;
-                let value = properties.get(interface, name).await.ok()?;
-                String::try_from(value).ok()
-            }
+        // One GetAll, as a tray reads an item: a snapshot no change can
+        // fall in the middle of.
+        let mut properties = all_properties(connection, &bus_name, &path)
+            .await
+            .unwrap_or_default();
+        let mut text = |name: &str| {
+            properties
+                .remove(name)
+                .and_then(|value| String::try_from(value).ok())
         };
-        let status = text("Status").await;
-        let icon_name = text("IconName").await;
+        let status = text("Status");
+        let icon_name = text("IconName");
+        let icon_theme_path = text("IconThemePath");
+        let tooltip = properties
+            .remove("ToolTip")
+            .and_then(|value| ToolTip::try_from(value).ok())
+            .map(|tooltip| tooltip.2);
         items.push(TrayItem {
             bus_name,
             path,
             status,
             icon_name,
+            icon_theme_path,
+            tooltip,
         });
     }
     items
+}
+
+/// A tray item's `ToolTip`: icon name, icon pixmaps, title and description.
+type ToolTip = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
+
+async fn all_properties(
+    connection: &Connection,
+    bus_name: &str,
+    path: &str,
+) -> zbus::Result<HashMap<String, OwnedVariant>> {
+    let properties = PropertiesProxy::builder(connection)
+        .destination(bus_name.to_owned())
+        .path(path.to_owned())
+        .build()
+        .await?;
+    Ok(properties
+        .get_all(InterfaceName::try_from(ITEM_INTERFACE)?)
+        .await?)
 }
 
 /// Writes Omarchy's notification state file under `home` as Omarchy does on

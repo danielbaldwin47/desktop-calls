@@ -374,3 +374,29 @@ fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_hon
         assert_eq!(step(&result, id)["result"], "skipped", "{result:#}");
     }
 }
+
+#[test]
+fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    let questions = runner.play(|_| "y".to_owned());
+
+    // Only what the user sees in Omarchy's bar is asked.
+    let asked: Vec<&String> = questions
+        .iter()
+        .filter(|question| question.contains("icon"))
+        .collect();
+    assert_eq!(asked.len(), 3, "{}", runner.transcript.join("\n"));
+    let result = result_file(results.path());
+    let indicator = step(&result, "7.3");
+    assert_eq!(indicator["result"], "pass", "{indicator:#}");
+    let evidence = indicator["evidence"].to_string();
+    for seen in [
+        "opened the Dialer",
+        "muted the microphone",
+        "unmuted the microphone",
+        "ended the Call",
+    ] {
+        assert!(evidence.contains(seen), "{seen}: {indicator:#}");
+    }
+}

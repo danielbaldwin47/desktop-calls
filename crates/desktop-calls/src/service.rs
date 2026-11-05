@@ -20,6 +20,7 @@ use zbus::Connection;
 
 use crate::control::{DialRequest, Publisher, ShownSurfaces};
 use crate::glib_runtime::GlibRuntime;
+use crate::indicator::Indicator;
 use crate::logging::{self, EventKind};
 use crate::notifications::Notifier;
 use crate::phone_link::Command;
@@ -125,6 +126,12 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let (contacts_sender, contacts_commands) = unbounded();
     let (report_sender, reports) = unbounded();
     let surfaces = has_display.then(|| Surfaces::new(&input_sender, report_sender));
+    // Without the Indicator, Desktop Calls still works from its other
+    // surfaces and the command line.
+    let indicator = Indicator::serve(&session, input_sender.clone())
+        .await
+        .inspect_err(indicator_failed)
+        .ok();
     let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system, input_sender.clone()));
@@ -144,6 +151,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             contacts: contacts_sender,
             publisher,
             surfaces,
+            indicator,
             ringer: Ringer::default(),
             notifier,
             stall_watch: StallWatch::default(),
@@ -220,6 +228,7 @@ struct Shell {
     contacts: UnboundedSender<contacts::Command>,
     publisher: Publisher,
     surfaces: Option<Surfaces>,
+    indicator: Option<Indicator>,
     ringer: Ringer,
     notifier: Notifier,
     stall_watch: StallWatch,
@@ -343,11 +352,25 @@ async fn decide(
         if let Some(surfaces) = &shell.surfaces {
             surfaces.render(&shown);
         }
+        if let Some(indicator) = &shell.indicator
+            && let Err(error) = indicator.render(&next.indicator(&shown)).await
+        {
+            indicator_failed(&error);
+        }
         if let Err(error) = shell.publisher.publish(&next).await {
             publish_failed(&error);
         }
         state = next;
     }
+}
+
+fn indicator_failed(error: &zbus::Error) {
+    tracing::warn!(
+        event_kind = %EventKind::PublishFailed,
+        error_kind = "indicator-failed",
+        detail = %error,
+        "Couldn't show the Indicator in the tray"
+    );
 }
 
 /// When a Handoff was asked for, from the control interface or the Call

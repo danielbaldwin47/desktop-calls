@@ -1,0 +1,27 @@
+# The Indicator in Omarchy's bar
+
+Date: 2026-11-05. Ticket #18, with its comment pointing at the spec amendment on #1 (point 4) and docs/research/2026-11-04-omarchy-4.5-recheck.md.
+Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
+
+**Bottom line:** Desktop Calls now serves a `StatusNotifierItem` at `/StatusNotifierItem` and a `com.canonical.dbusmenu` menu at `/MenuBar` on the session bus. It registers with `org.kde.StatusNotifierWatcher`, and registers again whenever a tray takes that name. Its status is `Active`, or `NeedsAttention` while a Call rings or a Problem exists, never `Passive`. Its five icons are symbolic SVGs that differ in shape, because Omarchy draws `NeedsAttention` like `Active` and paints every symbolic icon in one colour. Every acceptance criterion is checked against the Simulated Phone. Nothing here ran in the user's real Omarchy bar; Real-Phone Checklist step 7.3 covers that, including the one-time pinning.
+
+## How it works
+
+- **Policy in the core.** `State::indicator()` (`crates/core/src/indicator.rs`) works out the look, whether to ask for attention, the status and the menu from the same `Surfaces` the Call Window and Banner show. Precedence: ringing, then in a Call (connecting, calling or live), then not connected, then a Problem, then connected. Each menu entry's `intent()` is the input the matching Call Window button sends: `HangUp(call)` (or `CancelDial` while placing), `SetMuted(!muted)`, `MoveAudio(other side)`. All the words come from `messages` (`indicator_status`, `indicator_tooltip`, `indicator_entry`, `problem_heading`). **[V]** (`crates/core/tests/indicator.rs`, 6 tests)
+- **The adapter** (`crates/desktop-calls/src/indicator.rs`) only maps the view onto D-Bus. It emits `NewIcon`, `NewStatus` and `NewToolTip` when those change, and `LayoutUpdated` with a new revision when the menu does. Menu ids are fixed per kind of entry (status 1, Open Dialer 2, Hang up 3, Mute 4, Move audio 5, Problems 100 and 200), so a click on a menu drawn just before a change still means what it said. **[V]** (`crates/test-harness/tests/indicator.rs`, 7 scenarios)
+- **Icons.** The five SVGs live in `data/icons/`, are compiled into the binary, and are written at every start to `$XDG_DATA_HOME/desktop-calls/icons/` (`~/.local/share/desktop-calls/icons/` by default), the app's own data directory. `IconThemePath` names that directory. Nothing goes into the shared icon theme or Omarchy's config, so no user setup is needed. Not the runtime directory: `$XDG_RUNTIME_DIR/desktop-calls/` holds pulled vCards, and a test checks it is empty once they are read. **[V]** that the files are written and named; **[I]** that Quickshell 0.3.2 finds them through `IconThemePath`: its binary contains the `?path=` fallback, but this ran in no real bar.
+- **Problems in a 232 px menu.** Omarchy's tray menu is a fixed 232 px wide and cuts long lines short (`Tray.qml`). Each Problem is therefore a submenu headed by a few words ("Contacts not shared"), with its explanation underneath as rows wrapped at 26 characters. **[V]** that the rows carry the whole explanation; **[I]** that 26 characters fit at Omarchy's menu font.
+
+## Findings
+
+1. **NeedsAttention looks like Active in Omarchy.** Confirmed in the 4.5 recheck: "attention" appears nowhere in `Tray.qml`. The ringing icon (a phone between sound waves) therefore carries the state. `AttentionIconName` is left empty, so trays that do honour attention keep the same icon. **[V]** (source)
+2. **Symbolic icons are recoloured through an alpha mask at 50 % opacity.** Omarchy paints any icon named `*-symbolic` in the bar's foreground and keeps only pixels at least half opaque. So the icons are solid shapes, and the gallery draws them the same way (`test_harness::draw_tray_icon`). At 12 logical px, 2× scale, all five stay distinct in both Omarchy fixture themes. **[V]** (gallery, `indicator-*.png`)
+3. **The tray drawer hides new items until pinned.** Omarchy 4.5 puts unpinned tray items in a drawer behind the bar's arrow. Pinning is per item `Id` ("desktop-calls"), from the list a right-click on that arrow opens (`Tray.qml:297`, `:540`). This is a one-time user step, now Real-Phone Checklist step 7.3. Desktop Calls must not edit `~/.config/omarchy/shell.json` itself. **[V]** (source)
+4. **Two harness traps, fixed.** Reading an item one property at a time let a read straddle a change: the gallery drew the out-of-range icon under a "connected" tooltip. The tray stand-in now reads each item with one `GetAll`, a snapshot, as a real tray does. **[V]** (gallery). Separately, a deadlock: A tray recorder that matched every signal on the stand-ins' shared zbus connection filled its queue while it waited for property replies. zbus's reader then blocked, and the whole connection hung. The recorder now has its own connection and matches only `org.kde.StatusNotifierItem` signals and `StatusNotifierItemRegistered`. **[V]** (the walk scenario hung, then passed)
+5. **"Problem" has no glossary entry.** The ticket, the spec and the code (`ProblemKind`, the control interface's `Problems`) all use the word for something the user must fix before Desktop Calls works fully, such as Contacts not shared. **[V]** (`GLOSSARY.md`)
+
+## Follow-ups
+
+- The Setup Window ticket adds the "Connect your phone…" menu entry (ticket #18 says it arrives then).
+- Add **Problem** to the glossary.
+- Real-Phone Checklist step 7.3 is the first real check of the icons in Quickshell, the tooltip, left click and the menu.

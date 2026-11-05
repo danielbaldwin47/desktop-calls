@@ -42,6 +42,11 @@ pub enum Failure {
     PhoneConnecting,
     /// A Call can't be placed: the Phone is out of range or has Bluetooth off.
     PhoneOutOfRange,
+    /// A Call can't be placed: the Phone no longer has the Desktop paired.
+    PhonePairingLost,
+    /// The Bluetooth connection to the Phone dropped mid-Call, which carries
+    /// on on the Phone; the Desktop can't act on it until the Phone is back.
+    ConnectionLost,
     /// A Call can't be placed while another Call is live.
     CallInProgress,
     /// The Phone refused the number it was asked to dial.
@@ -90,6 +95,8 @@ impl Failure {
             Self::PhoneNotSetUp => "phone-not-set-up",
             Self::PhoneConnecting => "phone-connecting",
             Self::PhoneOutOfRange => "phone-out-of-range",
+            Self::PhonePairingLost => "phone-pairing-lost",
+            Self::ConnectionLost => "connection-lost",
             Self::CallInProgress => "call-in-progress",
             Self::NumberRefused => "number-refused",
             Self::PhoneBusy => "phone-busy",
@@ -168,6 +175,14 @@ pub fn failure(failure: Failure) -> Message {
             "Phone not connected: it's out of range or has Bluetooth off.",
             None,
         ),
+        Failure::PhonePairingLost => (
+            "Phone not connected: it has forgotten this computer, so pair them again.",
+            None,
+        ),
+        Failure::ConnectionLost => (
+            "Connection to phone lost: the Call continues on your phone.",
+            None,
+        ),
         Failure::CallInProgress => ("Hang up the current Call first.", None),
         Failure::NumberRefused => (
             "Your phone can't dial that number; check it and try again.",
@@ -223,6 +238,8 @@ pub enum ProblemKind {
     ContactsDenied,
     /// The Phone asked whether to share Contacts, and nobody answered.
     ContactsPromptUnanswered,
+    /// The Phone no longer has the Desktop paired.
+    PairingLost,
 }
 
 impl ProblemKind {
@@ -232,6 +249,7 @@ impl ProblemKind {
         match self {
             Self::ContactsDenied => "contacts-denied",
             Self::ContactsPromptUnanswered => "contacts-prompt-unanswered",
+            Self::PairingLost => "pairing-lost",
         }
     }
 }
@@ -247,6 +265,9 @@ pub fn problem(problem: ProblemKind) -> Message {
         ProblemKind::ContactsPromptUnanswered => {
             "Your phone asked whether to share Contacts and nobody answered, so Calls show numbers instead of names; turn Bluetooth off and on again on your phone to be asked again."
         }
+        ProblemKind::PairingLost => {
+            "Your phone has forgotten this computer, so Calls can't reach it; remove your phone from this computer's Bluetooth settings, then pair them again."
+        }
     };
     Message {
         text,
@@ -260,6 +281,7 @@ pub fn problem_heading(problem: ProblemKind) -> &'static str {
     match problem {
         ProblemKind::ContactsDenied => "Contacts not shared",
         ProblemKind::ContactsPromptUnanswered => "Contacts request unanswered",
+        ProblemKind::PairingLost => "Pairing lost",
     }
 }
 
@@ -358,6 +380,10 @@ pub fn status(connection_state: &ConnectionState, phone: Option<&Phone>) -> Stri
         (ConnectionState::Disconnected, Some(phone)) => {
             format!("{} is out of range or has Bluetooth off.", describe(phone))
         }
+        (ConnectionState::PairingLost, Some(phone)) => format!(
+            "{} has forgotten this computer; pair them again.",
+            describe(phone)
+        ),
     }
 }
 

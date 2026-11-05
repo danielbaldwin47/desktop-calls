@@ -1,7 +1,7 @@
 //! What the Desktop surfaces show, worked out from the state.
 
 use super::{Focus, State};
-use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp};
+use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
 use crate::matching::{ContactMatch, DialerRow};
 use crate::messages::Failure;
 
@@ -126,12 +126,30 @@ impl State {
         }
     }
 
+    /// The Call Window for the Call that lost the Bluetooth connection to
+    /// the Phone, while it says so: the Call as it was, with nothing to do
+    /// to it from here.
+    fn lost_call_window(&self) -> Option<CallWindowView> {
+        let lost = &self.connection_lost.as_ref()?.call;
+        Some(CallWindowView {
+            call: Some(lost.id),
+            caller: lost.caller.clone(),
+            contact: self.contact(&lost.caller),
+            phase: phase(lost, false, Mute::Unavailable),
+            audio: None,
+            notice: Some(Failure::ConnectionLost),
+            focused: self.focus == Focus::CallWindow,
+        })
+    }
+
     /// What the Desktop surfaces show.
     #[must_use]
     pub fn surfaces(&self) -> Surfaces {
+        // A Call ringing on a Phone out of reach can't be answered here.
         let banner = self
             .calls
             .iter()
+            .filter(|_| !self.presence.absent)
             .find(|call| call.rings_here())
             .map(|call| BannerView {
                 call: call.id,
@@ -148,29 +166,27 @@ impl State {
             .map(|notice| notice.failure)
             .or(self.audio_notice);
         let call_window = self
-            .calls
-            .iter()
-            .find(|call| call.has_call_window() && self.unwanted != Some(call.id))
-            .map(|call| CallWindowView {
-                call: Some(call.id),
-                caller: call.caller.clone(),
-                contact: self.contact(&call.caller),
-                phase: match (call.active_since, call.state) {
-                    (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
-                        active_since,
-                        wideband: self.codec.is_some_and(Codec::is_wideband),
-                        mute: self.mute(),
-                    },
-                    (_, CallState::Dialing) => CallWindowPhase::Calling,
-                    (_, CallState::Alerting) => CallWindowPhase::Ringing,
-                    _ => CallWindowPhase::Connecting,
-                },
-                audio: call.state.is_live().then(|| CallAudio {
-                    location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                    moving: self.audio_moving_to(),
-                }),
-                notice,
-                focused: self.focus == Focus::CallWindow,
+            .lost_call_window()
+            .or_else(|| {
+                self.calls
+                    .iter()
+                    .find(|call| call.has_call_window() && self.unwanted != Some(call.id))
+                    .map(|call| CallWindowView {
+                        call: Some(call.id),
+                        caller: call.caller.clone(),
+                        contact: self.contact(&call.caller),
+                        phase: phase(
+                            call,
+                            self.codec.is_some_and(Codec::is_wideband),
+                            self.mute(),
+                        ),
+                        audio: call.state.is_live().then(|| CallAudio {
+                            location: self.audio_location().unwrap_or(AudioLocation::Phone),
+                            moving: self.audio_moving_to(),
+                        }),
+                        notice,
+                        focused: self.focus == Focus::CallWindow,
+                    })
             })
             .or_else(|| {
                 let dialling = self
@@ -238,5 +254,19 @@ impl State {
             notice: dialer.notice,
             opened: dialer.opened,
         })
+    }
+}
+
+/// Where `call` is, as the Call Window shows it.
+fn phase(call: &Call, wideband: bool, mute: Mute) -> CallWindowPhase {
+    match (call.active_since, call.state) {
+        (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
+            active_since,
+            wideband,
+            mute,
+        },
+        (_, CallState::Dialing) => CallWindowPhase::Calling,
+        (_, CallState::Alerting) => CallWindowPhase::Ringing,
+        _ => CallWindowPhase::Connecting,
     }
 }

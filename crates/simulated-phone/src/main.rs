@@ -1,7 +1,8 @@
 //! The Simulated Phone: a stand-in for the Phone that the Desktop cannot tell
 //! apart from a real one.
 //!
-//! It serves `org.bluez` on the system bus, and `org.pipewire.Telephony` and
+//! It serves `org.bluez` on the system bus, with logind's `PrepareForSleep`
+//! beside it, and `org.pipewire.Telephony` and
 //! `org.bluez.obex` on the session bus, shaped like the real Pixel 9a behind
 //! PipeWire 1.6.9 and BlueZ 5.87, on whichever buses `DBUS_SYSTEM_BUS_ADDRESS`
 //! and `DBUS_SESSION_BUS_ADDRESS` name. Each service has a connection of its
@@ -15,7 +16,9 @@
 //! With `--scenario FILE` it also acts out a declarative scenario file once
 //! it is on the bus (see `scenario.rs`); `just demo` uses this.
 //!
-//! So far it can be a paired Phone whose hands-free link comes and goes, or
+//! So far it can be a paired Phone that goes out of range and comes back
+//! with its Calls carrying on, that the Desktop connects with `Connect`,
+//! that forgets the pairing, whose hands-free link
 //! drops and comes back for the Desktop with the Call carrying on, that
 //! rings, that dials for the Desktop, whose Telephony service restarts as
 //! `WirePlumber` does, whose Calls can be answered, hung up
@@ -25,12 +28,13 @@
 
 mod bluez;
 mod hands_free;
+mod logind;
 mod obex;
 mod objects;
+mod range;
 mod scenario;
 mod telephony;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -38,9 +42,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use clap::Parser;
 use futures_util::StreamExt as _;
 use zbus::object_server::SignalEmitter;
-use zbus::{Connection, Message, MessageStream, OwnedObjectPath, OwnedVariant, interface};
+use zbus::{Connection, Message, MessageStream, OwnedObjectPath, interface};
 
-use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply, interfaces_added_body};
+use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply};
 use crate::scenario::Step;
 
 const CONTROL_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone";
@@ -108,6 +112,7 @@ struct World {
     audio_gateway: Option<OwnedObjectPath>,
     /// Hands-free dropped for `DisconnectProfile`, until it is back.
     dropped: Option<hands_free::Dropped>,
+    range: range::Range,
     behaviour: telephony::Behaviour,
     dialling: telephony::Dialling,
     recorded: Vec<(Bus, MethodCall)>,
@@ -145,8 +150,11 @@ fn read_scenario(path: &std::path::Path) -> Result<Vec<Step>, String> {
 }
 
 async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
+    let mut bluez = bluez::new_tree(&arguments.name, &arguments.address)?;
+    let range = range::Range::new(&mut bluez, &bluez::device_path(&arguments.address)?);
     let world = Arc::new(Mutex::new(World {
-        bluez: bluez::new_tree(&arguments.name, &arguments.address)?,
+        bluez,
+        range,
         telephony: telephony::new_tree()?,
         obex: obex::new()?,
         phone_address: arguments.address,
@@ -170,6 +178,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let obex_calls = MessageStream::from(&obex);
     obex.request_name(obex::SERVICE).await?;
 
+    let logind = logind::connect().await?;
     let telephony: TelephonyConnection = Arc::new(Mutex::new(Some(session.clone())));
     // The control name comes last, so a test that sees it can rely on the rest.
     let control = zbus::connection::Builder::session()
@@ -179,6 +188,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
                 world: world.clone(),
                 system: system.clone(),
                 telephony: telephony.clone(),
+                logind,
             },
         )
         .name(CONTROL_BUS_NAME)
@@ -241,6 +251,17 @@ async fn serve(
         if matches!(service, Service::Bluez) && hands_free::handles(&call) {
             lock(&world).recorded.push((service.bus(), call.clone()));
             hands_free::answer(
+                world.clone(),
+                connection.clone(),
+                telephony.clone(),
+                call,
+                message,
+            );
+            continue;
+        }
+        if matches!(service, Service::Bluez) && range::handles(&call) {
+            lock(&world).recorded.push((service.bus(), call.clone()));
+            range::answer_connect(
                 world.clone(),
                 connection.clone(),
                 telephony.clone(),
@@ -373,108 +394,86 @@ struct Control {
     world: SharedWorld,
     system: Connection,
     telephony: TelephonyConnection,
+    /// Where logind's signals come from.
+    logind: Connection,
 }
 
 #[interface(interface = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone1")]
 impl Control {
-    /// Brings hands-free up, as a Phone coming into range does: BlueZ marks the
-    /// Phone connected, then, once the service level connection is set up,
-    /// PipeWire registers a new AudioGateway. Does nothing if it is up already.
+    /// Comes into range and connects, as a Phone does by itself: BlueZ marks
+    /// the Phone connected, then, once the service level connection is set
+    /// up, the device gains `Battery1`, PipeWire registers a new AudioGateway
+    /// and sends `ModemAdded`, and announces any Call the Phone carried on
+    /// while away. Does nothing if hands-free is up already.
     async fn connect(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (device, gateway, interfaces) = {
+        let change = {
             let mut world = lock(&self.world);
-            let world = &mut *world;
-            if world.audio_gateway.is_some() {
-                return Ok(());
-            }
-            // A drop for `DisconnectProfile` doesn't come back as well.
-            world.dropped = None;
-            let device = bluez::device_path(&world.phone_address)?;
-            world.bluez.set(
-                &device,
-                bluez::DEVICE,
-                "Connected",
-                OwnedVariant::from(true),
-            );
-            let gateway = telephony::audio_gateway_path(world.next_audio_gateway_index)?;
-            world.next_audio_gateway_index += 1;
-            let address = world.phone_address.clone();
-            let interfaces = telephony::add_audio_gateway(
-                &mut world.telephony,
-                &gateway,
-                &address,
-                &world.behaviour,
-            );
-            world.audio_gateway = Some(gateway.clone());
-            (device, gateway, interfaces)
+            world.range.reachable = true;
+            range::hands_free_up(&mut world)?
         };
-        emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", true).await?;
-        self.telephony()?
-            .emit_signal(
-                None::<&str>,
-                telephony::MANAGER_PATH,
-                objects::OBJECT_MANAGER,
-                "InterfacesAdded",
-                &(gateway, interfaces_added_body(&interfaces)),
-            )
-            .await?;
-        self.audio_gateway_changed(&emitter).await?;
-        Ok(())
+        self.range_changed(change, &emitter).await
     }
 
-    /// Drops hands-free, as a Phone going out of range does: PipeWire removes
-    /// the AudioGateway, then BlueZ marks the Phone disconnected. Does nothing
-    /// if it is down already.
+    /// Goes out of range, as a Phone carried away does: PipeWire unannounces
+    /// each Call, without ending it, then the AudioGateway, and sends
+    /// `ModemRemoved`; the device loses `Battery1`, and BlueZ marks the Phone
+    /// disconnected. The Calls carry on on the Phone. The Desktop's
+    /// `Connect` fails after BlueZ's page timeout until the Phone is back.
     async fn disconnect(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (device, gateway, calls) = {
+        let change = {
             let mut world = lock(&self.world);
-            // Nor after going out of range.
-            world.dropped = None;
-            let Some(gateway) = world.audio_gateway.take() else {
-                return Ok(());
-            };
-            let calls: Vec<OwnedObjectPath> = telephony::calls(&world.telephony, &gateway)
-                .into_iter()
-                .map(|(call, _)| call)
-                .collect();
-            for call in &calls {
-                world.telephony.remove(call);
-            }
-            world.telephony.remove(&gateway);
-            let device = bluez::device_path(&world.phone_address)?;
-            world.bluez.set(
-                &device,
-                bluez::DEVICE,
-                "Connected",
-                OwnedVariant::from(false),
-            );
-            (device, gateway, calls)
+            world.range.reachable = false;
+            range::hands_free_down(&mut world)?
         };
-        // As PipeWire does when hands-free drops mid-Call: each Call goes
-        // first, then the AudioGateway.
-        for call in calls {
-            for signal in telephony::unannounce_call(&gateway, &call) {
-                signal.emit(&self.telephony()?).await?;
-            }
-        }
-        self.telephony()?
-            .emit_signal(
-                None::<&str>,
-                telephony::MANAGER_PATH,
-                objects::OBJECT_MANAGER,
-                "InterfacesRemoved",
-                &(gateway, telephony::AUDIO_GATEWAY_INTERFACES.to_vec()),
-            )
-            .await?;
-        emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", false).await?;
-        self.audio_gateway_changed(&emitter).await?;
-        Ok(())
+        self.range_changed(change, &emitter).await
+    }
+
+    /// Comes back into range without connecting: the Phone answers the
+    /// Desktop's next page, and its `Connect` succeeds.
+    fn return_to_range(&self) {
+        lock(&self.world).range.reachable = true;
+    }
+
+    /// The person holding the Phone forgets the Desktop in its Bluetooth
+    /// settings: the Phone drops the connection, as out of range, and fails
+    /// each `Connect` from then on with `"br-connection-key-missing"`.
+    async fn forget_pairing(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        let change = {
+            let mut world = lock(&self.world);
+            world.range.forgot_pairing = true;
+            range::hands_free_down(&mut world)?
+        };
+        self.range_changed(change, &emitter).await
+    }
+
+    /// The Calls on the Phone, as `(path, State)`: those on the current
+    /// AudioGateway, and those carrying on on the Phone while hands-free is
+    /// down, by the last part of their path.
+    fn calls_on_phone(&self) -> Vec<(String, String)> {
+        let world = lock(&self.world);
+        let mut calls: Vec<(String, String)> = world
+            .audio_gateway
+            .iter()
+            .flat_map(|gateway| telephony::calls(&world.telephony, gateway.as_str()))
+            .map(|(call, properties)| (call.to_string(), range::call_state(&properties)))
+            .collect();
+        calls.extend(world.range.calls_away());
+        calls
+    }
+
+    /// Sends logind's `PrepareForSleep(start)` on the system bus: `true` as
+    /// the Desktop suspends, `false` once it has resumed.
+    async fn prepare_for_sleep(&self, start: bool) -> zbus::fdo::Result<()> {
+        Ok(logind::prepare_for_sleep(&self.logind, start).await?)
     }
 
     /// Rings the Phone from `number`, as a caller does: PipeWire registers an
@@ -874,6 +873,19 @@ impl Control {
         self.emit(signals).await
     }
 
+    /// Sends a change in range's signals, if there was a change.
+    async fn range_changed(
+        &self,
+        change: Option<range::Change>,
+        emitter: &SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        if let Some(change) = change {
+            range::emit(&self.system, &self.telephony, change).await?;
+            self.audio_gateway_changed(emitter).await?;
+        }
+        Ok(())
+    }
+
     async fn emit(&self, signals: Vec<telephony::Signal>) -> zbus::fdo::Result<()> {
         for signal in signals {
             signal.emit(&self.telephony()?).await?;
@@ -929,23 +941,4 @@ fn connected_audio_gateway(world: &World) -> zbus::fdo::Result<OwnedObjectPath> 
         .audio_gateway
         .clone()
         .ok_or_else(|| zbus::fdo::Error::Failed("hands-free is not connected".to_owned()))
-}
-
-async fn emit_properties_changed(
-    connection: &Connection,
-    path: &OwnedObjectPath,
-    interface: &str,
-    name: &str,
-    value: bool,
-) -> zbus::Result<()> {
-    let changed = HashMap::from([(name.to_owned(), OwnedVariant::from(value))]);
-    connection
-        .emit_signal(
-            None::<&str>,
-            path.as_str(),
-            PROPERTIES,
-            "PropertiesChanged",
-            &(interface, changed, Vec::<String>::new()),
-        )
-        .await
 }

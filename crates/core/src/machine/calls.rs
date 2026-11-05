@@ -8,6 +8,7 @@ use super::audio::{
 use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
+use super::presence::{connection_lost_over, found_lost_call, lost_track, reconnect_due};
 use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
 use crate::call::{Call, CallId, CallState, Caller, Direction, Request, Timestamp};
 use crate::messages::Failure;
@@ -43,12 +44,18 @@ pub(super) fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Ef
         state.recent_calls.remove(0);
     }
     state.recent_calls.push((call.id, call.caller.clone()));
+    let id = call.id;
     state.calls.push(call);
+    found_lost_call(state, id);
 }
 
 /// The Phone reports the Call over: it leaves the Desktop, and if it rang
 /// out, it may be a Missed Call.
 pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    if state.presence.absent {
+        lost_track(state, call);
+        return;
+    }
     let ended = state.calls.iter().find(|known| known.id == call).cloned();
     end_call(state, call, effects);
     if let Some(ended) = ended {
@@ -59,6 +66,8 @@ pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Ve
 pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
     match timer {
         Timer::ForgetEarlierRun => state.earlier_calls.clear(),
+        Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
+        Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
         Timer::DismissDial(attempt) => {
             if state
                 .notice
@@ -157,6 +166,7 @@ pub(super) fn call_changed(
     }
     restore_audio(state, effects);
     call_back(state);
+    found_lost_call(state, call);
 }
 
 /// The Phone reported who `call` is with after reporting the Call. Every
@@ -203,6 +213,16 @@ pub(super) fn decline(state: &mut State, call: CallId, effects: &mut Vec<Effect>
 }
 
 pub(super) fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    if state
+        .connection_lost
+        .as_ref()
+        .is_some_and(|lost| lost.call.id == call)
+    {
+        // A hang-up kept until the Phone is back could end the Call the user
+        // is now on, on the Phone.
+        effects.push(Effect::ReportError(Failure::ConnectionLost));
+        return;
+    }
     match state.call_mut(call) {
         Some(known) if matches!(known.request, Request::HangUp | Request::Decline) => {}
         Some(known) => {

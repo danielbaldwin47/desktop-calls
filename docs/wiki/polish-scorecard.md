@@ -11,6 +11,7 @@ Agreed with the user on 2026-11-04 (grilling round 2) as the definition of "poli
 4. From a fresh install, pairing through to the first Call takes 3 minutes or less.
 5. 20 of 20 scripted Simulated Phone scenarios pass, and the Real-Phone Checklist passes.
 6. Reconnects within 10 s of the Phone returning to range, and survives suspend/resume.
+   - 2026-11-05 (#19): against the Simulated Phone, scenarios 17 and 18 (`crates/test-harness/tests/out_of_range.rs`) hold both to 10 s. The Desktop pages the Phone again after 1 s, 2 s, then every 3 s, so the worst case is about 3 + 1.3 + 1 s. Unchecked on the real Pixel.
 7. Every action is reachable by keyboard alone.
 8. A screenshot-review agent finds no visual defects.
 

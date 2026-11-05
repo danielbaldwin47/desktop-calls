@@ -26,8 +26,8 @@ pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
     reason = "each bool is one of the control interface's boolean properties, read as published"
 )]
 pub struct AppState {
-    /// `ConnectionState`: `"not-set-up"`, `"connecting"`, `"connected"` or
-    /// `"disconnected"`.
+    /// `ConnectionState`: `"not-set-up"`, `"connecting"`, `"connected"`,
+    /// `"disconnected"` or `"pairing-lost"`.
     pub connection_state: String,
     /// `Phone`, or `None` while it is empty.
     pub phone: Option<PhoneIdentity>,

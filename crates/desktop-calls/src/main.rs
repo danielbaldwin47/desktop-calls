@@ -10,6 +10,7 @@ mod glib_runtime;
 mod hyprland;
 mod indicator;
 mod logging;
+mod logind;
 mod notifications;
 mod object_manager;
 mod phone_link;

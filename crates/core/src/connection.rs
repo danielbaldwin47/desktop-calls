@@ -24,6 +24,9 @@ pub enum ConnectionState {
     Connected,
     /// The Phone was connected and is not now: out of range, or Bluetooth is off.
     Disconnected,
+    /// The Phone no longer has the Desktop paired, so it can't connect until
+    /// the two are paired again.
+    PairingLost,
 }
 
 impl ConnectionState {
@@ -35,6 +38,7 @@ impl ConnectionState {
             Self::Connecting => "connecting",
             Self::Connected => "connected",
             Self::Disconnected => "disconnected",
+            Self::PairingLost => "pairing-lost",
         }
     }
 }
@@ -58,6 +62,7 @@ impl FromStr for ConnectionState {
             Self::Connecting,
             Self::Connected,
             Self::Disconnected,
+            Self::PairingLost,
         ]
         .into_iter()
         .find(|state| state.as_str() == name)

@@ -1,13 +1,16 @@
-//! The BlueZ client: which paired Phones exist (ADR-0004), and the one write
-//! the Desktop makes to BlueZ: dropping hands-free and connecting it again,
-//! which moves a Call's audio to the Phone (ADR-0005).
+//! The BlueZ client: which paired Phones exist and whether each is within
+//! reach (ADR-0004), and the two writes the Desktop makes to BlueZ:
+//! connecting the Phone while it is away (ADR-0004), and dropping
+//! hands-free and connecting it again, which moves a Call's audio to the
+//! Phone (ADR-0005).
 //!
 //! It reports each paired Bluetooth device that offers the Hands-Free Audio
-//! Gateway profile, which is what makes it a Phone that can carry Calls.
+//! Gateway profile, which is what makes it a Phone that can carry Calls,
+//! and whether it has a Bluetooth connection to the Desktop: `Connected`.
 
 use std::collections::HashMap;
 
-use desktop_calls_core::{Input, Phone};
+use desktop_calls_core::{ConnectFailure, Input, Phone};
 use futures_channel::mpsc::{UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use zbus::fdo::ObjectManagerProxy;
@@ -23,7 +26,8 @@ const DEVICE: &str = "org.bluez.Device1";
 /// The Hands-Free Audio Gateway profile: the Phone's side of hands-free.
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
 
-/// Reports paired Phones to `inputs` until the connection closes.
+/// Reports paired Phones to `inputs` until the connection closes, and
+/// whether each has a Bluetooth connection to the Desktop.
 pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(), WatchError> {
     let (object_sender, mut objects) = unbounded();
     let watching = async {
@@ -40,9 +44,12 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
         // Paired Phones by object path: their addresses.
         let mut phones: HashMap<String, String> = HashMap::new();
         while let Some(event) = objects.next().await {
-            let input = match event {
+            let reported = match event {
                 ObjectEvent::Added { path, interfaces } => {
-                    let Some(phone) = interfaces.get(DEVICE).and_then(paired_phone) else {
+                    let Some(device) = interfaces.get(DEVICE) else {
+                        continue;
+                    };
+                    let Some(phone) = paired_phone(device) else {
                         continue;
                     };
                     tracing::debug!(
@@ -51,7 +58,11 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
                         "Found a paired Phone"
                     );
                     phones.insert(path, phone.address.clone());
-                    Input::PhonePaired(phone)
+                    let presence =
+                        connected(device).map(|connected| presence(&phone.address, connected));
+                    std::iter::once(Input::PhonePaired(phone))
+                        .chain(presence)
+                        .collect()
                 }
                 ObjectEvent::Removed { path, interfaces } => {
                     if !interfaces.iter().any(|interface| interface == DEVICE) {
@@ -65,21 +76,139 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
                         phone_address = %address,
                         "A paired Phone was removed"
                     );
-                    Input::PhoneUnpaired { address }
+                    vec![Input::PhoneUnpaired { address }]
+                }
+                ObjectEvent::Changed {
+                    path,
+                    interface,
+                    changed,
+                } if interface == DEVICE => {
+                    let (Some(address), Some(connected)) = (phones.get(&path), connected(&changed))
+                    else {
+                        continue;
+                    };
+                    vec![presence(address, connected)]
                 }
                 // Pairings outlive a bluetoothd restart; the objects are
                 // listed again when it is back.
                 ObjectEvent::ServiceGone | ObjectEvent::Changed { .. } => continue,
             };
-            inputs
-                .unbounded_send(input)
-                .map_err(|_| WatchError::ListenerGone)?;
+            for input in reported {
+                inputs
+                    .unbounded_send(input)
+                    .map_err(|_| WatchError::ListenerGone)?;
+            }
         }
         Ok(())
     };
     futures_util::future::try_join(watching, reporting)
         .await
         .map(drop)
+}
+
+/// A `Device1`'s `Connected`, if it says.
+fn connected(device: &HashMap<String, OwnedVariant>) -> Option<bool> {
+    device
+        .get("Connected")
+        .and_then(|connected| bool::try_from(connected.clone()).ok())
+}
+
+/// Whether the Phone at `address` has a Bluetooth connection to the
+/// Desktop, as an input.
+fn presence(address: &str, connected: bool) -> Input {
+    let address = address.to_owned();
+    if connected {
+        tracing::debug!(
+            event_kind = %EventKind::PhonePresent,
+            phone_address = %address,
+            "The Phone is connected over Bluetooth"
+        );
+        Input::PhonePresent { address }
+    } else {
+        tracing::info!(
+            event_kind = %EventKind::PhoneAbsent,
+            phone_address = %address,
+            "The Phone isn't connected over Bluetooth: out of range, or Bluetooth is off"
+        );
+        Input::PhoneAbsent { address }
+    }
+}
+
+/// Asks BlueZ to connect the Phone at `address`: `Device1.Connect`, which
+/// pages it and connects the profiles it offers (ADR-0004). A Phone out of
+/// range fails it after BlueZ's page timeout, about 5 s.
+///
+/// # Errors
+///
+/// Why the Phone didn't connect; the raw BlueZ error is logged here.
+pub async fn connect_phone(system: &Connection, address: &str) -> Result<(), ConnectFailure> {
+    tracing::debug!(
+        event_kind = %EventKind::PhoneConnectRequested,
+        phone_address = %address,
+        "Asking BlueZ to connect the Phone"
+    );
+    let device = match find_device(system, address).await {
+        Ok(Some(device)) => device,
+        Ok(None) => {
+            connect_failed(
+                address,
+                ConnectFailure::Unreachable,
+                "BlueZ has no device for the Phone",
+            );
+            return Err(ConnectFailure::Unreachable);
+        }
+        Err(error) => {
+            connect_failed(address, ConnectFailure::Unreachable, &error.to_string());
+            return Err(ConnectFailure::Unreachable);
+        }
+    };
+    let failure = match system
+        .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Connect", &())
+        .await
+    {
+        Ok(_) => return Ok(()),
+        Err(zbus::Error::MethodError(name, message, _)) => {
+            match connect_failure(name.as_str(), message.as_deref().unwrap_or_default()) {
+                None => return Ok(()),
+                Some(failure) => (failure, format!("{name}: {}", message.unwrap_or_default())),
+            }
+        }
+        Err(error) => (ConnectFailure::Unreachable, error.to_string()),
+    };
+    connect_failed(address, failure.0, &failure.1);
+    Err(failure.0)
+}
+
+/// What a BlueZ error from `Device1.Connect` means, or `None` if the Phone
+/// is connected after all.
+fn connect_failure(name: &str, message: &str) -> Option<ConnectFailure> {
+    match name {
+        "org.bluez.Error.AlreadyConnected" => None,
+        // The Phone answered the page and had no link key for the Desktop.
+        "org.bluez.Error.AuthenticationFailed" | "org.bluez.Error.AuthenticationRejected" => {
+            Some(ConnectFailure::PairingLost)
+        }
+        "org.bluez.Error.Failed" if message.contains("key-missing") => {
+            Some(ConnectFailure::PairingLost)
+        }
+        // `br-connection-page-timeout` when out of range, `InProgress`
+        // while BlueZ is connecting it already, and the rest: worth trying
+        // again.
+        _ => Some(ConnectFailure::Unreachable),
+    }
+}
+
+fn connect_failed(address: &str, failure: ConnectFailure, detail: &str) {
+    tracing::info!(
+        event_kind = %EventKind::PhoneConnectFailed,
+        error_kind = match failure {
+            ConnectFailure::Unreachable => "phone-unreachable",
+            ConnectFailure::PairingLost => "pairing-lost",
+        },
+        phone_address = %address,
+        detail = %detail,
+        "BlueZ couldn't connect the Phone"
+    );
 }
 
 /// Why hands-free couldn't be dropped and connected again.
@@ -156,29 +285,9 @@ pub async fn bounce_hands_free(system: &Connection, address: &str) -> Result<(),
 
 /// The object path of BlueZ's device with `address`.
 async fn device_path(system: &Connection, address: &str) -> Result<String, BounceError> {
-    let objects = async {
-        ObjectManagerProxy::builder(system)
-            .destination(SERVICE)
-            .path(ROOT)
-            .build()
-            .await?
-            .get_managed_objects()
-            .await
-            .map_err(zbus::Error::from)
-    }
-    .await
-    .map_err(|error| bounce_failed(BounceError::PhoneNotFound, &error))?;
-    objects
-        .into_iter()
-        .find(|(_, interfaces)| {
-            interfaces
-                .iter()
-                .find(|(name, _)| name.as_str() == DEVICE)
-                .and_then(|(_, device)| device.get("Address"))
-                .and_then(|value| String::try_from(value.clone()).ok())
-                .is_some_and(|found| found.eq_ignore_ascii_case(address))
-        })
-        .map(|(path, _)| path.to_string())
+    find_device(system, address)
+        .await
+        .map_err(|error| bounce_failed(BounceError::PhoneNotFound, &error))?
         .ok_or_else(|| {
             tracing::warn!(
                 event_kind = %EventKind::PhoneCommandFailed,
@@ -188,6 +297,28 @@ async fn device_path(system: &Connection, address: &str) -> Result<String, Bounc
             );
             BounceError::PhoneNotFound
         })
+}
+
+/// The object path of BlueZ's device with `address`, if it has one.
+async fn find_device(system: &Connection, address: &str) -> zbus::Result<Option<String>> {
+    let objects = ObjectManagerProxy::builder(system)
+        .destination(SERVICE)
+        .path(ROOT)
+        .build()
+        .await?
+        .get_managed_objects()
+        .await?;
+    Ok(objects
+        .into_iter()
+        .find(|(_, interfaces)| {
+            interfaces
+                .iter()
+                .find(|(name, _)| name.as_str() == DEVICE)
+                .and_then(|(_, device)| device.get("Address"))
+                .and_then(|value| String::try_from(value.clone()).ok())
+                .is_some_and(|found| found.eq_ignore_ascii_case(address))
+        })
+        .map(|(path, _)| path.to_string()))
 }
 
 fn bounce_failed(kind: BounceError, error: &zbus::Error) -> BounceError {

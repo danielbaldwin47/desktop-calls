@@ -186,6 +186,7 @@ fn connection_states_have_their_wire_names() {
         ConnectionState::Connecting,
         ConnectionState::Connected,
         ConnectionState::Disconnected,
+        ConnectionState::PairingLost,
     ]
     .iter()
     .map(ConnectionState::as_str)
@@ -193,7 +194,17 @@ fn connection_states_have_their_wire_names() {
 
     assert_eq!(
         names,
-        ["not-set-up", "connecting", "connected", "disconnected"]
+        [
+            "not-set-up",
+            "connecting",
+            "connected",
+            "disconnected",
+            "pairing-lost"
+        ]
+    );
+    assert_eq!(
+        "pairing-lost".parse::<ConnectionState>(),
+        Ok(ConnectionState::PairingLost)
     );
     assert_eq!(
         "disconnected".parse::<ConnectionState>(),

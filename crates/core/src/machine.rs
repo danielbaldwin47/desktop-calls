@@ -17,6 +17,7 @@ mod dialling;
 mod input;
 mod missed_calls;
 mod phone;
+mod presence;
 mod view;
 
 use audio::{
@@ -29,9 +30,10 @@ use calls::{
     send_tones, timer_fired,
 };
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
-pub use input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
+pub use input::{ConnectFailure, DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
 use missed_calls::missed_call_input;
-use phone::{command_done, command_failed, contacts_sync, pick_up_earlier_run};
+use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
+use presence::{Presence, forget_phone, presence_input};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Mute, Surfaces,
 };
@@ -68,6 +70,20 @@ const HANDOFF_NOT_STARTED_MS: u32 = 1_000;
 /// to 0.96 s after it dropped and the Call 30 to 60 ms after that, 5 times
 /// in 5 (ticket #14's prototype).
 const HANDOFF_TO_PHONE_TIMEOUT_MS: u32 = 5_000;
+/// How long the Desktop waits between asking BlueZ to connect the Phone
+/// while it is away: after the first failed connect, the second, and every
+/// one after. A connect to a Phone out of range fails after BlueZ's page
+/// timeout, 5.12 s, and one in range answers within a page scan, 1.28 s,
+/// so a Phone back just after a failed connect is connected about 3 + 1.3
+/// + 1 s later: inside the 10 s the Desktop promises (spec story 31).
+const RECONNECT_WAITS_MS: [u32; 3] = [1_000, 2_000, 3_000];
+/// How long the Call Window says the connection to the Phone was lost
+/// before it closes, if the Phone isn't back by then.
+const CONNECTION_LOST_MS: u32 = 10_000;
+/// How long a Call that lost the connection may take to show again once
+/// hands-free is back. The Phone link waits as long for a Call that went
+/// away briefly.
+const LOST_CALL_BACK_MS: u32 = 2_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -186,6 +202,16 @@ struct AudioToRestore {
     call_back: bool,
 }
 
+/// The Bluetooth connection to the Phone dropped with this Call live in the
+/// Call Window: it carries on on the Phone, and the Call Window says so.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConnectionLost {
+    /// The Call as it was when the connection dropped.
+    call: Call,
+    /// Which loss this is, so only its own timer counts.
+    loss: u32,
+}
+
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -238,6 +264,10 @@ pub struct State {
     recent_calls: Vec<(CallId, Caller)>,
     missed: MissedCalls,
     do_not_disturb: bool,
+    presence: Presence,
+    connection_lost: Option<ConnectionLost>,
+    /// How many times the connection was lost mid-Call.
+    losses: u32,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -270,6 +300,7 @@ impl State {
     #[must_use]
     pub fn ringing(&self) -> bool {
         !self.do_not_disturb
+            && !self.presence.absent
             && self.calls.iter().any(Call::rings_here)
             && !self.calls.iter().any(|call| call.state.blocks_ringing())
     }
@@ -324,6 +355,11 @@ impl State {
     /// What is wrong that the user can put right.
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
+        if self.presence.pairing_lost {
+            return vec![Problem {
+                kind: ProblemKind::PairingLost,
+            }];
+        }
         match self.contacts_sync {
             ContactsState::Denied => vec![Problem {
                 kind: ProblemKind::ContactsDenied,
@@ -387,6 +423,7 @@ impl State {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
             ConnectionState::Connecting => Some(Failure::PhoneConnecting),
             ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+            ConnectionState::PairingLost => Some(Failure::PhonePairingLost),
             ConnectionState::Connected if !self.calls.is_empty() || self.dialling.is_some() => {
                 Some(Failure::CallInProgress)
             }
@@ -444,6 +481,14 @@ impl State {
     /// fails at once with the reason; [`step`] refuses the same way.
     #[must_use]
     pub fn refusal(&self, input: &Input) -> Option<Failure> {
+        if self.connection_lost.is_some()
+            && matches!(
+                input,
+                Input::SetMuted(true) | Input::MoveAudio(_) | Input::SendTones(_)
+            )
+        {
+            return Some(Failure::ConnectionLost);
+        }
         match input {
             Input::SetMuted(true) if !self.muted() => match self.audio_location() {
                 None => Some(Failure::NoLiveCall),
@@ -518,11 +563,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         // Desktop Calls works with one Phone: the first one paired.
         Input::EarlierRun(earlier) => pick_up_earlier_run(&mut state, earlier, &mut effects),
         Input::PhonePaired(phone) if state.phone.is_none() => {
-            effects.push(Effect::AttachPhone {
-                address: phone.address.clone(),
-            });
-            state.phone = Some(phone);
-            state.connection = ConnectionState::Connecting;
+            phone_paired(&mut state, phone, &mut effects);
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
@@ -531,6 +572,12 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
             hands_free_down(&mut state, &mut effects);
         }
+        input @ (Input::PhonePresent { .. }
+        | Input::PhoneAbsent { .. }
+        | Input::ConnectPhoneDone
+        | Input::ConnectPhoneFailed(_)
+        | Input::Suspending
+        | Input::Resumed) => presence_input(&mut state, input, &mut effects),
         Input::CallAdded {
             call,
             state: call_state,
@@ -610,13 +657,13 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
 }
 
 /// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps
-/// its own settings.
+/// its own settings and whether it is asleep.
 fn unpair(state: &State) -> (State, Vec<Effect>) {
     let mut effects = vec![Effect::DetachPhone];
     phone_unpaired(state, &mut effects);
     let unpaired = State {
         do_not_disturb: state.do_not_disturb,
-        ..State::default()
+        ..forget_phone(state)
     };
     (unpaired, effects)
 }

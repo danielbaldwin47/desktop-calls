@@ -21,6 +21,20 @@ pub enum Input {
     PhoneConnected { address: String },
     /// The Phone with this address is no longer connected for Calls.
     PhoneDisconnected { address: String },
+    /// The Phone with this address has a Bluetooth connection to the
+    /// Desktop, whether or not hands-free is up on it yet.
+    PhonePresent { address: String },
+    /// The Phone with this address has no Bluetooth connection to the
+    /// Desktop: it is out of range, or its Bluetooth is off.
+    PhoneAbsent { address: String },
+    /// The Phone connected, as [`Effect::ConnectPhone`] asked.
+    ConnectPhoneDone,
+    /// The Phone didn't connect, as [`Effect::ConnectPhone`] asked.
+    ConnectPhoneFailed(ConnectFailure),
+    /// The Desktop is about to suspend.
+    Suspending,
+    /// The Desktop resumed from suspend.
+    Resumed,
     /// The Phone has a Call it didn't have before.
     CallAdded {
         call: CallId,
@@ -170,6 +184,17 @@ pub enum PhoneRefusal {
     Failed,
 }
 
+/// Why the Phone didn't connect when the Desktop asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectFailure {
+    /// The Phone didn't answer: out of range, Bluetooth off, or busy. Worth
+    /// trying again.
+    Unreachable,
+    /// The Phone answered, and no longer has the Desktop paired. Trying
+    /// again would only ask the person holding it to pair.
+    PairingLost,
+}
+
 /// What became of a dial attempt, by its number. Each attempt is either
 /// [`DialProgress::NotPlaced`] at once, or [`DialProgress::Asked`] and then,
 /// in a later step, [`DialProgress::Placed`] or [`DialProgress::NotPlaced`].
@@ -203,6 +228,12 @@ pub enum Timer {
     /// Calls from the earlier run that haven't shown again by now aren't
     /// live any more.
     ForgetEarlierRun,
+    /// Time to ask BlueZ to connect the Phone again, after the wait with
+    /// this number.
+    Reconnect(u32),
+    /// The Call Window has said for long enough, by the loss with this
+    /// number, that the connection to the Phone was lost.
+    ConnectionLost(u32),
 }
 
 /// Something the shell adapters must do.
@@ -213,6 +244,9 @@ pub enum Effect {
     AttachPhone { address: String },
     /// Stop following the Phone.
     DetachPhone,
+    /// Ask BlueZ to connect the Phone with this address. Each ends in
+    /// [`Input::ConnectPhoneDone`] or [`Input::ConnectPhoneFailed`].
+    ConnectPhone { address: String },
     /// Ask the Phone to do something. The Phone commands of one step run in
     /// order, and stop at the first that fails.
     Phone(PhoneCommand),

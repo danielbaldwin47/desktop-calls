@@ -4,12 +4,23 @@
 use super::audio::{activated, ask_once_more, audio_not_moved_to_phone};
 use super::dialling::{dial_failed, refresh_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
+use super::presence::{pairing_found, wait_for_lost_call};
 use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
 use crate::call::{AudioLocation, Request, Transport};
-use crate::connection::ConnectionState;
+use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
 use crate::earlier_run::EarlierRun;
 use crate::messages::Failure;
+
+/// The first paired Phone: Desktop Calls follows it, and waits for it to
+/// be reachable.
+pub(super) fn phone_paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>) {
+    effects.push(Effect::AttachPhone {
+        address: phone.address.clone(),
+    });
+    state.phone = Some(phone);
+    state.connection = ConnectionState::Connecting;
+}
 
 /// What the Contacts sync reports. The open Dialer lists what it brings.
 pub(super) fn contacts_sync(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
@@ -58,6 +69,8 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
 }
 
 pub(super) fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
+    pairing_found(state);
+    wait_for_lost_call(state, effects);
     // Every connect syncs, so the Desktop catches up with changes made on
     // the Phone while apart.
     state.contacts_sync = ContactsState::Syncing;

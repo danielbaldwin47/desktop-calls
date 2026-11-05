@@ -91,7 +91,8 @@ pub struct ControlInterface {
 
 #[interface(interface = "io.github.danielbaldwin47.DesktopCalls1")]
 impl ControlInterface {
-    /// `"not-set-up"`, `"connecting"`, `"connected"` or `"disconnected"`.
+    /// `"not-set-up"`, `"connecting"`, `"connected"`, `"disconnected"` or
+    /// `"pairing-lost"`.
     #[zbus(property)]
     fn connection_state(&self) -> String {
         self.state().connection_state().as_str().to_owned()

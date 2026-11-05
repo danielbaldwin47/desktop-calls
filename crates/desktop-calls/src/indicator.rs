@@ -488,6 +488,7 @@ fn problem_id(problem: messages::ProblemKind) -> i32 {
     match problem {
         messages::ProblemKind::ContactsDenied => 100,
         messages::ProblemKind::ContactsPromptUnanswered => 200,
+        messages::ProblemKind::PairingLost => 300,
     }
 }
 

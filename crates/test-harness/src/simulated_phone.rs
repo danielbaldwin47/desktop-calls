@@ -19,6 +19,14 @@ trait SimulatedPhone1 {
 
     fn disconnect(&self) -> zbus::Result<()>;
 
+    fn return_to_range(&self) -> zbus::Result<()>;
+
+    fn forget_pairing(&self) -> zbus::Result<()>;
+
+    fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
+
+    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
+
     fn ring(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
 
     fn ring_with_caller_id(&self, caller_id: &str) -> zbus::Result<zbus::OwnedObjectPath>;
@@ -128,7 +136,8 @@ pub struct SimulatedPhone<'harness> {
 }
 
 impl SimulatedPhone<'_> {
-    /// Brings hands-free up: the AudioGateway appears once it is fully set up.
+    /// Comes into range and connects by itself: hands-free comes up, and the
+    /// AudioGateway appears once it is fully set up.
     ///
     /// # Panics
     ///
@@ -138,7 +147,8 @@ impl SimulatedPhone<'_> {
             .expect("tell the Simulated Phone to connect");
     }
 
-    /// Drops hands-free: the AudioGateway disappears.
+    /// Goes out of range: the AudioGateway disappears, and BlueZ marks the
+    /// Phone disconnected. Its Calls carry on on the Phone.
     ///
     /// # Panics
     ///
@@ -146,6 +156,51 @@ impl SimulatedPhone<'_> {
     pub fn disconnect(&self) {
         zbus::block_on(async { self.proxy().await?.disconnect().await })
             .expect("tell the Simulated Phone to disconnect");
+    }
+
+    /// Comes back into range without connecting by itself: the Desktop's
+    /// next `Connect` reaches it.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn return_to_range(&self) {
+        zbus::block_on(async { self.proxy().await?.return_to_range().await })
+            .expect("bring the Simulated Phone back into range");
+    }
+
+    /// Forgets the Desktop, as its owner does in its Bluetooth settings: it
+    /// drops the connection and fails each `Connect` from then on.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn forget_pairing(&self) {
+        zbus::block_on(async { self.proxy().await?.forget_pairing().await })
+            .expect("have the Simulated Phone forget the pairing");
+    }
+
+    /// The Calls on the Phone, as `(path, State)`, including those carrying
+    /// on while hands-free is down.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't answer.
+    #[must_use]
+    pub fn calls_on_phone(&self) -> Vec<(String, String)> {
+        zbus::block_on(async { self.proxy().await?.calls_on_phone().await })
+            .expect("list the Simulated Phone's Calls")
+    }
+
+    /// Sends logind's `PrepareForSleep(start)` on the private system bus:
+    /// `true` as the Desktop suspends, `false` once it has resumed.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn prepare_for_sleep(&self, start: bool) {
+        zbus::block_on(async { self.proxy().await?.prepare_for_sleep(start).await })
+            .expect("send PrepareForSleep");
     }
 
     /// Rings the Phone from `number`, as a caller does, and returns the new

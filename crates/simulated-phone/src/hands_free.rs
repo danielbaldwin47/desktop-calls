@@ -19,7 +19,9 @@
 //!   0.7 s), the Phone tries to bring the audio link up, and again
 //!   [`NEXT_AUDIO_LINK_TRY`] later (the Pixel: 50 to 250 ms apart).
 //!
-//! The Phone's late `ModemRemoved` isn't modelled. With the
+//! PipeWire's `ModemRemoved` for the drop comes late, once `ConnectProfile`
+//! has replied, and its `ModemAdded` follows the AudioGateway's
+//! `InterfacesAdded`. With the
 //! `"disconnect-profile-refused"` quirk, `DisconnectProfile` fails and
 //! nothing changes.
 
@@ -58,6 +60,13 @@ pub struct Dropped {
     battery: Option<Properties>,
     /// `ConnectProfile` is bringing it back.
     reconnecting: bool,
+}
+
+impl Dropped {
+    /// What went with hands-free, and the device's `Battery1`.
+    pub fn into_parts(self) -> (Away, Option<Properties>) {
+        (self.away, self.battery)
+    }
 }
 
 /// Whether `call` is one this module answers.
@@ -183,6 +192,14 @@ fn connect_profile(
     }
     std::thread::sleep(RECONNECT_REPLY);
     zbus::block_on(Reply::body(()).send(system, &message.header()))?;
+    // PipeWire's `ModemRemoved` for the drop comes this late.
+    let modem = lock(world)
+        .dropped
+        .as_ref()
+        .map(|dropped| dropped.away.audio_gateway.clone());
+    if let Some(modem) = modem {
+        zbus::block_on(emit(telephony, &[Signal::ModemRemoved { modem }]))?;
+    }
     std::thread::sleep(AUDIO_GATEWAY_BACK.saturating_sub(RECONNECT_REPLY));
     let Some(Returned {
         gateway,
@@ -247,13 +264,16 @@ fn audio_gateway_returns(world: &SharedWorld) -> zbus::Result<Option<Returned>> 
         });
     }
     let address = world.phone_address.clone();
-    let telephony_signals = audio_gateway_back(
+    let mut telephony_signals = audio_gateway_back(
         &mut world.telephony,
         &dropped.away,
         &address,
         &world.behaviour,
     )?;
     let gateway = dropped.away.audio_gateway.clone();
+    telephony_signals.push(Signal::ModemAdded {
+        modem: gateway.clone(),
+    });
     world.audio_gateway = Some(gateway.clone());
     Ok(Some(Returned {
         gateway,

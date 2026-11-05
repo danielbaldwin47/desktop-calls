@@ -35,7 +35,8 @@ pub enum IndicatorLook {
     Ringing,
     /// A Call is live, or being placed.
     InCall,
-    /// The Phone is connected, and a Problem needs fixing.
+    /// A Problem needs fixing, with the Phone connected, or kept from
+    /// connecting by it.
     Problem,
 }
 
@@ -163,6 +164,11 @@ impl State {
                     IndicatorLook::Disconnected,
                     IndicatorStatus::OutOfRange(phone),
                 ),
+                // Not out of range: it needs pairing again, which the
+                // Problem explains.
+                (ConnectionState::PairingLost, Some(phone)) => {
+                    (IndicatorLook::Problem, IndicatorStatus::NotConnected(phone))
+                }
                 (ConnectionState::Connecting, Some(phone)) => (
                     IndicatorLook::Disconnected,
                     IndicatorStatus::NotConnected(phone),

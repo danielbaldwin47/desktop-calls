@@ -322,6 +322,12 @@ pub enum Signal {
         audio_gateway: OwnedObjectPath,
         call: OwnedObjectPath,
     },
+    /// `org.ofono.Manager.ModemAdded` for the AudioGateway at `modem`, with
+    /// no properties, as PipeWire sends it after the AudioGateway's
+    /// `InterfacesAdded`.
+    ModemAdded { modem: OwnedObjectPath },
+    /// `org.ofono.Manager.ModemRemoved` for the AudioGateway at `modem`.
+    ModemRemoved { modem: OwnedObjectPath },
 }
 
 impl Signal {
@@ -406,6 +412,9 @@ impl Signal {
                     )
                     .await
             }
+            Self::ModemAdded { .. } | Self::ModemRemoved { .. } => {
+                self.emit_modem(connection).await
+            }
             Self::CallRemoved {
                 audio_gateway,
                 call,
@@ -420,6 +429,37 @@ impl Signal {
                     )
                     .await
             }
+        }
+    }
+
+    /// Emits `ModemAdded` or `ModemRemoved` on the manager; other signals
+    /// aren't the manager's own.
+    async fn emit_modem(&self, connection: &Connection) -> zbus::Result<()> {
+        match self {
+            Self::ModemAdded { modem } => {
+                let no_properties = HashMap::<&str, OwnedVariant>::new();
+                connection
+                    .emit_signal(
+                        None::<&str>,
+                        MANAGER_PATH,
+                        OFONO_MANAGER,
+                        "ModemAdded",
+                        &(modem, no_properties),
+                    )
+                    .await
+            }
+            Self::ModemRemoved { modem } => {
+                connection
+                    .emit_signal(
+                        None::<&str>,
+                        MANAGER_PATH,
+                        OFONO_MANAGER,
+                        "ModemRemoved",
+                        &(modem,),
+                    )
+                    .await
+            }
+            _ => Ok(()),
         }
     }
 }

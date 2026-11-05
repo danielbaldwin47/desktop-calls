@@ -29,7 +29,7 @@ use crate::phone_link::Command;
 use crate::ringer::Ringer;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
-use crate::{bluez, contacts, earlier_run, phone_link};
+use crate::{bluez, contacts, earlier_run, logind, phone_link};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -139,6 +139,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let _do_not_disturb = DoNotDisturb::follow(input_sender.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
+    context.spawn_local(watch_sleep(system.clone(), input_sender.clone()));
     context.spawn_local(contacts::run(
         session.clone(),
         contacts_commands,
@@ -146,7 +147,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     ));
     context.spawn_local(follow_phone(
         session,
-        system,
+        system.clone(),
         commands,
         input_sender.clone(),
     ));
@@ -156,6 +157,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         dials,
         Shell {
             inputs: input_sender,
+            system,
             commands: command_sender,
             contacts: contacts_sender,
             publisher,
@@ -206,6 +208,17 @@ async fn watch_bluez(system: Connection, inputs: UnboundedSender<Input>) {
     }
 }
 
+async fn watch_sleep(system: Connection, inputs: UnboundedSender<Input>) {
+    if let Err(error) = logind::run(system, inputs).await {
+        tracing::warn!(
+            event_kind = %EventKind::WatchFailed,
+            error_kind = "signals-unavailable",
+            detail = %error,
+            "Stopped watching logind for suspend and resume"
+        );
+    }
+}
+
 async fn follow_phone(
     session: Connection,
     system: Connection,
@@ -234,6 +247,8 @@ async fn publish_surfaces(mut reports: UnboundedReceiver<ShownSurfaces>, publish
 struct Shell {
     /// Where timers report back.
     inputs: UnboundedSender<Input>,
+    /// The system bus, for connecting the Phone through BlueZ.
+    system: Connection,
     commands: UnboundedSender<Command>,
     contacts: UnboundedSender<contacts::Command>,
     publisher: Publisher,
@@ -258,6 +273,19 @@ impl Shell {
                 Effect::DetachPhone => {
                     self.contacts_command(contacts::Command::Detach);
                     self.command(Command::Detach);
+                }
+                Effect::ConnectPhone { address } => {
+                    let system = self.system.clone();
+                    let inputs = self.inputs.clone();
+                    // A Phone out of range takes BlueZ's page timeout to
+                    // fail; the Desktop carries on meanwhile.
+                    MainContext::default().spawn_local(async move {
+                        let input = match bluez::connect_phone(&system, &address).await {
+                            Ok(()) => Input::ConnectPhoneDone,
+                            Err(failure) => Input::ConnectPhoneFailed(failure),
+                        };
+                        let _ = inputs.unbounded_send(input);
+                    });
                 }
                 Effect::SyncContacts => self.contacts_command(contacts::Command::Sync),
                 Effect::RefreshCallHistory => {

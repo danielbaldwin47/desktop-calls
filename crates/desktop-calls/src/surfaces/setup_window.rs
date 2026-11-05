@@ -62,6 +62,11 @@ pub(super) struct SetupWindow {
     phones: RefCell<Vec<Phone>>,
     /// Whether this opening has listed a Phone yet.
     listed: Cell<bool>,
+    /// What [`Self::put_on_top`] put there, whose focus a Phone appearing
+    /// doesn't take.
+    top: RefCell<Option<gtk::Widget>>,
+    /// Whether what is on top keeps keyboard focus when a Phone appears.
+    top_keeps_focus: Cell<bool>,
 }
 
 impl SetupWindow {
@@ -139,6 +144,8 @@ impl SetupWindow {
             step: Cell::default(),
             phones: RefCell::default(),
             listed: Cell::default(),
+            top: RefCell::default(),
+            top_keeps_focus: Cell::default(),
         });
         setup.connect();
         // Pre-warm, as for the other surfaces.
@@ -213,6 +220,36 @@ impl SetupWindow {
         });
     }
 
+    /// Puts `widget` above everything else in the window.
+    pub(super) fn put_on_top(&self, widget: &impl IsA<gtk::Widget>) {
+        if let Some(layout) = self.window.child().and_downcast::<gtk::Box>() {
+            layout.prepend(widget);
+            self.top.replace(Some(widget.clone().upcast()));
+        }
+    }
+
+    /// Says whether what is on top keeps keyboard focus when a Phone
+    /// appears; otherwise the Phone takes it, as without it.
+    pub(super) fn top_keeps_focus(&self, keeps: bool) {
+        self.top_keeps_focus.set(keeps);
+    }
+
+    /// Gives keyboard focus back to the step, if nothing in the window has
+    /// it.
+    pub(super) fn focus_if_lost(&self) {
+        if self.window.is_visible() && GtkWindowExt::focus(&self.window).is_none() {
+            self.focus_default();
+        }
+    }
+
+    /// Whether what is on top has keyboard focus.
+    fn top_has_focus(&self) -> bool {
+        let top = self.top.borrow();
+        GtkWindowExt::focus(&self.window)
+            .zip(top.as_ref())
+            .is_some_and(|(focus, top)| focus.is_ancestor(top))
+    }
+
     fn send(&self, input: Input) {
         let _ = self.intents.unbounded_send(input);
     }
@@ -267,10 +304,15 @@ impl SetupWindow {
                 .set(NAME, Some(reported(&self.content.borrow(), &self.window)));
         }
         if new_step {
-            self.focus_default(&view.step);
+            self.focus_default();
             self.step_reached(step);
-        } else if relisted && self.list.focus_child().is_none() {
-            self.focus_default(&view.step);
+        } else if relisted
+            && self.list.focus_child().is_none()
+            // Before the first Phone shows, focus on top is GTK's default
+            // and goes to the Phone; after, the user put it there.
+            && !(self.top_has_focus() && (self.top_keeps_focus.get() || self.listed.get()))
+        {
+            self.focus_default();
         }
         if !phones.is_empty() && !self.listed.replace(true) {
             self.phone_listed();
@@ -367,8 +409,8 @@ impl SetupWindow {
 
     /// Keyboard focus on the first Phone while choosing, otherwise on the
     /// step's default button.
-    fn focus_default(&self, step: &SetupStep) {
-        if matches!(step, SetupStep::Choose { .. }) {
+    fn focus_default(&self) {
+        if self.step.get() == Some("choose") {
             if let Some(row) = self.list.selected_row() {
                 row.grab_focus();
             }

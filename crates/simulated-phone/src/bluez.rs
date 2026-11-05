@@ -308,7 +308,7 @@ fn path(path: &str) -> zbus::Result<OwnedObjectPath> {
     OwnedObjectPath::try_from(path)
 }
 
-fn text(value: &str) -> OwnedVariant {
+pub fn text(value: &str) -> OwnedVariant {
     OwnedVariant::from(Str::from(value.to_owned()))
 }
 

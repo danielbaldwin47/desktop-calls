@@ -39,8 +39,55 @@ pub struct Builder {
     hyprland: Option<HyprlandSettings>,
     installed: bool,
     notification_state: NotificationState,
-    /// The Simulated Phone's arguments saying who is nearby.
+    /// The Simulated Phone's arguments saying who is nearby, and what the
+    /// Desktop's Bluetooth is like.
     nearby: Vec<String>,
+    /// The Desktop's `WirePlumber` drop-ins, or `None` for audio set up for
+    /// Calls.
+    wireplumber: Option<Vec<WirePlumberEntry>>,
+}
+
+/// One entry in the Desktop's `WirePlumber` drop-in folder.
+enum WirePlumberEntry {
+    File { name: String, text: String },
+    Folder { name: String },
+}
+
+/// The drop-in the Desktop has unless a scenario says otherwise: audio set
+/// up for Calls, as on the user's Desktop, in one file of its own.
+const AUDIO_SET_UP: &str = "\
+monitor.bluez.properties = {
+  bluez5.telephony.default-reject-sco = true
+}
+monitor.bluez.rules = [
+  {
+    matches = [ { device.name = \"~bluez_card.*\" } ]
+    actions = { update-props = { bluez5.auto-connect = [ a2dp_sink a2dp_source hfp_hf ] } }
+  }
+]
+";
+
+/// Where `WirePlumber` reads the user's drop-ins, under `config`.
+pub(super) const WIREPLUMBER_DROP_INS: &str = "wireplumber/wireplumber.conf.d";
+
+/// Leaves the Desktop's `WirePlumber` drop-ins under `config` as `entries`
+/// say, or set up for Calls.
+fn write_wireplumber(config: &Path, entries: Option<Vec<WirePlumberEntry>>) {
+    let folder = config.join(WIREPLUMBER_DROP_INS);
+    fs::create_dir_all(&folder).expect("create the WirePlumber drop-in folder");
+    let entries = entries.unwrap_or_else(|| {
+        vec![WirePlumberEntry::File {
+            name: "55-audio-for-calls.conf".to_owned(),
+            text: AUDIO_SET_UP.to_owned(),
+        }]
+    });
+    for entry in entries {
+        match entry {
+            WirePlumberEntry::File { name, text } => fs::write(folder.join(name), text),
+            WirePlumberEntry::Folder { name } => fs::create_dir(folder.join(name)),
+        }
+        .expect("write a WirePlumber drop-in");
+    }
 }
 
 /// What Omarchy's Do Not Disturb state file holds when the app starts.
@@ -202,6 +249,59 @@ impl Builder {
         self
     }
 
+    /// The Desktop's Bluetooth is off; turning it on works.
+    pub fn bluetooth_off(mut self) -> Self {
+        self.nearby
+            .extend(["--adapter-power", "off"].map(str::to_owned));
+        self
+    }
+
+    /// The Desktop's Bluetooth is off and blocked by rfkill, as airplane
+    /// mode leaves it: turning it on fails.
+    pub fn bluetooth_blocked(mut self) -> Self {
+        self.nearby
+            .extend(["--adapter-power", "blocked"].map(str::to_owned));
+        self
+    }
+
+    /// The Desktop's Bluetooth file-transfer service, which syncs Contacts,
+    /// isn't installed: nobody serves `org.bluez.obex`.
+    pub fn without_contacts_support(mut self) -> Self {
+        self.nearby.push("--without-obex".to_owned());
+        self
+    }
+
+    /// BlueZ's own experimental hands-free is on and holds the Phone's
+    /// hands-free link: the Phone's device has an `org.bluez.Telephony1`.
+    pub fn bluez_hands_free_on(mut self) -> Self {
+        self.nearby.push("--bluez-telephony".to_owned());
+        self
+    }
+
+    /// Puts a `WirePlumber` drop-in named `name` holding `text` in the
+    /// Desktop's user drop-in folder. Without any, the folder holds one
+    /// that sets audio up for Calls.
+    pub fn wireplumber_config(mut self, name: &str, text: &str) -> Self {
+        self.wireplumber
+            .get_or_insert_default()
+            .push(WirePlumberEntry::File {
+                name: name.to_owned(),
+                text: text.to_owned(),
+            });
+        self
+    }
+
+    /// Puts a folder named `name` in the Desktop's `WirePlumber` drop-in
+    /// folder, where no file can then be written.
+    pub fn wireplumber_config_folder(mut self, name: &str) -> Self {
+        self.wireplumber
+            .get_or_insert_default()
+            .push(WirePlumberEntry::Folder {
+                name: name.to_owned(),
+            });
+        self
+    }
+
     /// Another Phone named `name` is paired with the Desktop, and out of
     /// range: the Phone the user switches from. It lists before the Phone
     /// in BlueZ's objects, by its address.
@@ -243,6 +343,18 @@ impl Builder {
         self
     }
 
+    /// Sets up the scenario's home and config folders under `directory`:
+    /// the Omarchy theme, the notification daemon's state and the
+    /// `WirePlumber` drop-ins.
+    fn set_up_home(&mut self, directory: &Path) {
+        if let Some(theme) = self.omarchy_theme {
+            stand_ins::switch_omarchy_theme(&directory.join("home"), theme)
+                .expect("make the Omarchy theme current");
+        }
+        self.notification_state.set_up(&directory.join("home"));
+        write_wireplumber(&directory.join("config"), self.wireplumber.take());
+    }
+
     /// Starts private buses, the compositor if asked for, the Simulated Phone
     /// and the app, and returns once the app's control interface is on the
     /// bus.
@@ -251,7 +363,7 @@ impl Builder {
     ///
     /// If any of them fails to start; the panic says which and where its log is.
     #[must_use]
-    pub fn start(self) -> Harness {
+    pub fn start(mut self) -> Harness {
         let directory = tempfile::Builder::new()
             .prefix("desktop-calls-test-")
             .tempdir()
@@ -273,17 +385,13 @@ impl Builder {
                 address
             });
         let mut environment = environment(&directory, &system_bus, &session_bus);
-        if let Some(time_zone) = self.time_zone {
+        if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
         }
         let hyprland = self
             .hyprland
             .map(|settings| settings.serve(&directory, &mut environment));
-        if let Some(theme) = self.omarchy_theme {
-            stand_ins::switch_omarchy_theme(&directory.join("home"), theme)
-                .expect("make the Omarchy theme current");
-        }
-        self.notification_state.set_up(&directory.join("home"));
+        self.set_up_home(&directory);
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &group, &mut processes);
             environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));

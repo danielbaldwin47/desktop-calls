@@ -104,9 +104,15 @@ impl IndicatorEntry {
                 query: String::new(),
                 select_call: None,
             }),
-            Self::ConnectPhone | Self::Problem(ProblemKind::PairingLost) => {
-                Some(Input::OpenSetupWindow)
-            }
+            Self::ConnectPhone
+            | Self::Problem(
+                ProblemKind::PairingLost
+                | ProblemKind::BluetoothOff
+                | ProblemKind::BluetoothBlocked
+                | ProblemKind::ContactsSupportMissing
+                | ProblemKind::AudioNotSetUp
+                | ProblemKind::BluezHandsFree,
+            ) => Some(Input::OpenSetupWindow),
             Self::HangUp(call) => Some(call.map_or(Input::CancelDial, Input::HangUp)),
             Self::Mute(Mute::Off) => Some(Input::SetMuted(true)),
             Self::Mute(Mute::On) => Some(Input::SetMuted(false)),
@@ -151,7 +157,7 @@ impl State {
             )
         });
         let phone = self.phone().cloned();
-        let (look, status) = if let Some(banner) = &surfaces.banner {
+        let (mut look, status) = if let Some(banner) = &surfaces.banner {
             (
                 IndicatorLook::Ringing,
                 IndicatorStatus::Ringing(banner.caller.clone()),
@@ -197,6 +203,12 @@ impl State {
                 _ => (IndicatorLook::Disconnected, IndicatorStatus::NoPhone),
             }
         };
+
+        // The Phone can't connect for Calls until the Desktop's Problem is
+        // put right, which the Problem explains.
+        if look == IndicatorLook::Disconnected && self.desktop_keeps_phone_away() {
+            look = IndicatorLook::Problem;
+        }
 
         let mut menu = vec![
             IndicatorEntry::Status,

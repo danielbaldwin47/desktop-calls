@@ -85,6 +85,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
         Timer::SetupStep(wait) => setup_timer(state, wait, effects),
         Timer::NumberLate(call) => state.awaiting_number.retain(|id| *id != call),
+        Timer::CheckDesktop => super::desktop::check_again(state, effects),
         Timer::DismissDial(attempt) => {
             if state
                 .notice

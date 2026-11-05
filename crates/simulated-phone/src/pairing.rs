@@ -315,6 +315,9 @@ fn set_property(world: &mut World, call: &MethodCall, message: &Message) -> (Rep
     else {
         return (invalid("Set takes (s, s, v)"), Vec::new());
     };
+    if interface == ADAPTER && name == "Powered" {
+        return crate::desktop::set_powered(world, bool::try_from(value).unwrap_or(false));
+    }
     let writable = matches!(
         (interface.as_str(), name.as_str()),
         (
@@ -375,6 +378,9 @@ fn start_discovery(
     system: &Connection,
     message: &Message,
 ) -> zbus::Result<()> {
+    if !crate::desktop::powered(&lock(world)) {
+        return zbus::block_on(crate::desktop::not_ready().send(system, &message.header()));
+    }
     let signal = set(
         &mut lock(world),
         ADAPTER_PATH,

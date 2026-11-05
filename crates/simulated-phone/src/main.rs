@@ -27,6 +27,7 @@
 //! `Activate`, and switch on quirks other Phones show.
 
 mod bluez;
+mod desktop;
 mod hands_free;
 mod logind;
 mod obex;
@@ -72,6 +73,8 @@ struct Arguments {
     scenario: Option<PathBuf>,
     #[command(flatten)]
     nearby: pairing::Nearby,
+    #[command(flatten)]
+    desktop: desktop::Conditions,
 }
 
 /// Which bus a method call arrived on.
@@ -160,6 +163,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let device = bluez::device_path(&arguments.address)?;
     let mut range = range::Range::new(&mut bluez, &device);
     let pairing = pairing::Pairing::new(&mut bluez, &device, &arguments.nearby, &mut range)?;
+    arguments.desktop.apply(&mut bluez, &device)?;
     let world = Arc::new(Mutex::new(World {
         bluez,
         range,
@@ -185,12 +189,14 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
 
     let obex = zbus::connection::Builder::session().build().await?;
     let obex_calls = MessageStream::from(&obex);
-    obex.request_name(obex::SERVICE).await?;
+    if arguments.desktop.has_obex() {
+        obex.request_name(obex::SERVICE).await?;
+    }
 
     let logind = logind::connect().await?;
     let telephony: TelephonyConnection = Arc::new(Mutex::new(Some(session.clone())));
     // The control name comes last, so a test that sees it can rely on the rest.
-    let control = zbus::connection::Builder::session()
+    let control = desktop::serve(zbus::connection::Builder::session(), &world, &system)
         .serve_at(
             CONTROL_PATH,
             Control {

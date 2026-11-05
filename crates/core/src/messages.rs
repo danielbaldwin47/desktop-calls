@@ -13,7 +13,11 @@ use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
+mod checks;
+mod problems;
 mod setup;
+pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
+pub use problems::{ProblemKind, problem, problem_heading};
 pub use setup::{SetupWindowText, setup_window};
 
 /// A failure the user can be told about.
@@ -301,60 +305,6 @@ pub fn failure(failure: Failure) -> Message {
     Message { text, next_action }
 }
 
-/// Something wrong that the user can put right, shown until it is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProblemKind {
-    /// The Phone refuses to share Contacts and Call History.
-    ContactsDenied,
-    /// The Phone asked whether to share Contacts, and nobody answered.
-    ContactsPromptUnanswered,
-    /// The Phone no longer has the Desktop paired.
-    PairingLost,
-}
-
-impl ProblemKind {
-    /// The lower-case kind the control interface's `Problems` carries.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ContactsDenied => "contacts-denied",
-            Self::ContactsPromptUnanswered => "contacts-prompt-unanswered",
-            Self::PairingLost => "pairing-lost",
-        }
-    }
-}
-
-/// What to tell the user about `problem`: one line, saying how to put it
-/// right.
-#[must_use]
-pub fn problem(problem: ProblemKind) -> Message {
-    let (text, next_action) = match problem {
-        ProblemKind::ContactsDenied => (
-            "Your phone isn't sharing Contacts, so Calls show numbers instead of names; to allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer and turn on Contacts and call history.",
-            None,
-        ),
-        ProblemKind::ContactsPromptUnanswered => (
-            "Your phone asked whether to share Contacts and nobody answered, so Calls show numbers instead of names; turn Bluetooth off and on again on your phone to be asked again.",
-            None,
-        ),
-        ProblemKind::PairingLost => (
-            "Your phone has forgotten this computer, so Calls can't reach it; choose Pair again to pair them again.",
-            Some(NextAction::Command("desktop-calls connect")),
-        ),
-    };
-    Message { text, next_action }
-}
-
-/// A Problem in a few words, for a menu entry or a tooltip.
-#[must_use]
-pub fn problem_heading(problem: ProblemKind) -> &'static str {
-    match problem {
-        ProblemKind::ContactsDenied => "Contacts not shared",
-        ProblemKind::ContactsPromptUnanswered => "Contacts request unanswered",
-        ProblemKind::PairingLost => "Pairing lost",
-    }
-}
-
 /// The Indicator's status: its menu's first line, and its tooltip without
 /// the Problems.
 #[must_use]
@@ -425,7 +375,11 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         } => label(Label::MoveAudioToPhone).to_owned(),
         // Its click opens the Setup Window.
         IndicatorEntry::Problem(ProblemKind::PairingLost) => "Pairing lost: pair again…".to_owned(),
-        IndicatorEntry::Problem(problem) => problem_heading(*problem).to_owned(),
+        IndicatorEntry::Problem(
+            problem @ (ProblemKind::ContactsDenied | ProblemKind::ContactsPromptUnanswered),
+        ) => problem_heading(*problem).to_owned(),
+        // Its click opens the Setup Window, which puts it right.
+        IndicatorEntry::Problem(problem) => format!("{}: put it right…", problem_heading(*problem)),
     }
 }
 

@@ -493,6 +493,11 @@ fn problem_id(problem: messages::ProblemKind) -> i32 {
         messages::ProblemKind::ContactsDenied => 100,
         messages::ProblemKind::ContactsPromptUnanswered => 200,
         messages::ProblemKind::PairingLost => 300,
+        messages::ProblemKind::BluetoothOff => 400,
+        messages::ProblemKind::BluetoothBlocked => 500,
+        messages::ProblemKind::ContactsSupportMissing => 600,
+        messages::ProblemKind::AudioNotSetUp => 700,
+        messages::ProblemKind::BluezHandsFree => 800,
     }
 }
 

@@ -1,11 +1,13 @@
 //! What the Call state machine takes in and gives out: inputs from the shell
 //! adapters, and the commands, timers and effects it asks them for.
 
+use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
 use crate::connection::Phone;
 use crate::contacts::{CallHistory, Contacts, SyncFailure};
 use crate::earlier_run::EarlierRun;
 use crate::messages::Failure;
+use crate::messages::ProblemKind;
 use crate::missed::MissedCallNotice;
 
 /// Something that happened, as the shell adapters report it.
@@ -186,6 +188,15 @@ pub enum Input {
     /// The user asked to try again, after switching "Phone calls" on or
     /// bringing the Phone close.
     RetryHandsFree,
+    /// A setup check found this about the Desktop: at startup, on every
+    /// change it can follow, and after each [`Effect::CheckDesktop`].
+    DesktopChecked(DesktopCheck),
+    /// The user asked, in the Setup Window, to put this Problem right.
+    Fix(ProblemKind),
+    /// The Desktop did what [`Effect::Fix`] asked.
+    FixDone(DesktopFix),
+    /// What [`Effect::Fix`] asked didn't work.
+    FixFailed(FixFailure),
 }
 
 /// Why pairing with a Phone didn't happen.
@@ -316,6 +327,9 @@ pub enum Timer {
     /// The Phone has had long enough to report the number of this Call,
     /// which rang with none: if it hasn't by now, the number is withheld.
     NumberLate(CallId),
+    /// Time to check again the Desktop's Problems that can't be followed as
+    /// they change.
+    CheckDesktop,
 }
 
 /// Something the shell adapters must do.
@@ -377,4 +391,10 @@ pub enum Effect {
     /// comes as [`Input::HandsFreeRefused`], or [`Input::HandsFreeUnreachable`]
     /// if it didn't answer.
     ConnectHandsFree { address: String },
+    /// Check again what can't be followed as it changes, and report each
+    /// finding as [`Input::DesktopChecked`].
+    CheckDesktop,
+    /// Put a Desktop Problem right, as the user asked. Ends in
+    /// [`Input::FixDone`] or [`Input::FixFailed`].
+    Fix(DesktopFix),
 }

@@ -1,6 +1,7 @@
 //! The long-running process that the systemd user unit starts.
 //!
-//! One thread runs one GLib main context. zbus and GTK run on it, zbus
+//! One thread runs one GLib main context (a short-lived second one prepares
+//! number formatting at startup). zbus and GTK run on it, zbus
 //! through [`GlibRuntime`]; the BlueZ client, the Phone link, the control
 //! interface and the surfaces turn what happens into inputs; the Call state
 //! machine decides; this module carries out its effects, renders the
@@ -9,7 +10,7 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use desktop_calls_core::{Effect, Input, State, step};
+use desktop_calls_core::{Effect, Input, State, messages, step};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::select;
@@ -52,6 +53,7 @@ pub fn run() -> ExitCode {
         log_destination = %destination,
         "Desktop Calls started"
     );
+    prepare_caller();
     // GTK needs a display. Without one (a headless session, a test with no
     // screen) Desktop Calls still runs and follows Calls, with no surfaces.
     let has_display = match adw::init() {
@@ -81,6 +83,20 @@ pub fn run() -> ExitCode {
             );
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Formatting the first caller's number loads the phone-number metadata,
+/// which held the main thread, and so the Banner, for 0.3 s on the Desktop
+/// and over a second on a CI runner (debug builds). It loads on a thread of
+/// its own while GTK starts; if the thread can't start, it loads now, still
+/// before any Call.
+fn prepare_caller() {
+    let spawned = std::thread::Builder::new()
+        .name("prepare-caller".to_owned())
+        .spawn(messages::prepare_caller);
+    if spawned.is_err() {
+        messages::prepare_caller();
     }
 }
 

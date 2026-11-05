@@ -160,6 +160,15 @@ pub fn caller(caller: &Caller) -> String {
     }
 }
 
+/// Does in advance the work the first [`caller`] for a number would
+/// otherwise do: loading the phone-number metadata. That work is slow enough
+/// (over a second on a slow CPU in a debug build) to hold up the Incoming
+/// Call Banner, so the shell calls this once, off the main thread, at
+/// startup.
+pub fn prepare_caller() {
+    crate::number::prepare();
+}
+
 /// The Call timer's text for `seconds`: `m:ss`, or `h:mm:ss` from an hour.
 #[must_use]
 pub fn elapsed(seconds: u64) -> String {

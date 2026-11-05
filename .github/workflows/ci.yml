@@ -16,7 +16,12 @@ jobs:
     name: just check
     runs-on: ubuntu-latest
     # Arch Linux, to match the user's Desktop (Omarchy).
-    container: archlinux:latest
+    container:
+      image: archlinux:latest
+      # Headless sway and grim keep each 3840x2160 frame (33 MB) in /dev/shm,
+      # and screen scenarios run four at a time. Docker's default 64 MB ran
+      # out: grim died of SIGBUS and sway failed to start.
+      options: --shm-size=1g
     steps:
       # sway is the screen harness's headless compositor, grim its screenshot
       # tool, and libnotify's notify-send a client of the notification stand-in.

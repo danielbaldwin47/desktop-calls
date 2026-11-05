@@ -238,7 +238,8 @@ impl Screen {
         };
         assert!(
             captured.status.success(),
-            "grim failed: {}",
+            "grim failed ({}): {}",
+            captured.status,
             String::from_utf8_lossy(&captured.stderr)
         );
         let png = fs::read(path).expect("read the screenshot");

@@ -14,3 +14,11 @@ pub fn format(number: &str) -> String {
         Err(_) => number.to_owned(),
     }
 }
+
+/// Loads libphonenumber's metadata for every region, which the first
+/// [`format`] otherwise does. On the Desktop that takes about 40 ms in a
+/// release build and 0.27 s in a debug build.
+pub fn prepare() {
+    // Dereferencing the lazily built database builds it.
+    let _: &phonenumber::metadata::Database = &phonenumber::metadata::DATABASE;
+}

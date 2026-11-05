@@ -61,3 +61,13 @@ expect_used = "deny"
 # Suppress a lint only with `#[expect(lint, reason = "...")]`.
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+
+# The regex compiler, optimised even in debug builds. libphonenumber compiles
+# its metadata's patterns when it loads, and unoptimised that took 0.27 s on
+# the Desktop and over a second on a CI runner (41 ms in a release build), so
+# debug builds, which the scenario tests run, missed the 1 s Banner target.
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3

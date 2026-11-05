@@ -226,8 +226,7 @@ impl SetupWindow {
                 let _ = intents.unbounded_send(Input::CloseSetupWindow);
                 glib::Propagation::Stop
             }
-            gtk::gdk::Key::Tab => between_buttons(&window, &buttons, true),
-            gtk::gdk::Key::ISO_Left_Tab => between_buttons(&window, &buttons, false),
+            gtk::gdk::Key::Tab => round_from_the_last_button(&window, &buttons),
             _ => glib::Propagation::Proceed,
         });
         self.window.add_controller(keys);
@@ -553,31 +552,17 @@ impl SetupWindow {
     }
 }
 
-/// Tab, or Shift+Tab when not `forward`, on a button moves to the next
-/// button, or the previous, round from the last to the first: GTK would
-/// move focus out of the window past the last.
-fn between_buttons(window: &gtk::Window, buttons: &gtk::Box, forward: bool) -> glib::Propagation {
-    let mut all = Vec::new();
-    let mut child = buttons.first_child();
-    while let Some(button) = child {
-        child = button.next_sibling();
-        all.push(button);
-    }
-    let focused = gtk::prelude::GtkWindowExt::focus(window);
-    let Some(at) = all
-        .iter()
-        .position(|button| Some(button) == focused.as_ref())
-    else {
+/// Tab on the last button moves round to the first: GTK would move focus
+/// out of the window. Shift+Tab is GTK's own, so from the first button it
+/// reaches the Problems above.
+fn round_from_the_last_button(window: &gtk::Window, buttons: &gtk::Box) -> glib::Propagation {
+    let (Some(first), Some(last)) = (buttons.first_child(), buttons.last_child()) else {
         return glib::Propagation::Proceed;
     };
-    let next = if forward {
-        (at + 1) % all.len()
-    } else {
-        (at + all.len() - 1) % all.len()
-    };
-    if let Some(button) = all.get(next) {
-        button.grab_focus();
+    if gtk::prelude::GtkWindowExt::focus(window).as_ref() != Some(&last) {
+        return glib::Propagation::Proceed;
     }
+    first.grab_focus();
     glib::Propagation::Stop
 }
 

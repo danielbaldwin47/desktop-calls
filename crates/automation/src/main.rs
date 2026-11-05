@@ -24,7 +24,7 @@ enum Command {
     /// Report every polish-scorecard item with its status and evidence.
     Scorecard {
         /// Where the Real-Phone Checklist's result files are. Default:
-        /// `docs/real-phone-checklist`.
+        /// `~/.local/state/desktop-calls/real-phone-checklist`.
         #[arg(long)]
         results: Option<PathBuf>,
     },
@@ -41,7 +41,8 @@ enum Command {
         #[arg(long, requires = "demo")]
         headless: bool,
         /// Where to keep the dated result files. Default:
-        /// `docs/real-phone-checklist`, or under `target/` with --demo.
+        /// `~/.local/state/desktop-calls/real-phone-checklist` (under
+        /// `$XDG_STATE_HOME` if set), or under `target/` with --demo.
         #[arg(long)]
         results: Option<PathBuf>,
         /// Start a new result file even if the last run is unfinished.

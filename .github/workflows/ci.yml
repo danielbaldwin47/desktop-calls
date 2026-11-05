@@ -1,13 +1,17 @@
 name: CI
 
 on:
-  # Pull requests run on pull_request only. Triggering on every push too
-  # ran CI twice per PR push, in different concurrency groups.
+  # Full CI runs here only on pushes to main, as a canary after each merge.
+  # Everywhere else CI runs on the author's machine: `just ci-local` runs
+  # these same jobs in this same image, and posts the commit status "CI
+  # passed" that branch protection requires (ticket #158). So nothing here
+  # runs on pull_request, and nothing here posts "CI passed" on a PR head.
   push:
     branches: [main]
-  pull_request:
   # `gh workflow run CI --ref <branch> -f keep_scenario_logs=true` keeps the
-  # logs of passing scenarios too, to compare them with failing ones.
+  # logs of passing scenarios too, to compare them with failing ones. Its
+  # summary job is named differently (below), so it never stands in for, or
+  # contradicts, the status `just ci-local` posted on that commit.
   workflow_dispatch:
     inputs:
       keep_scenario_logs:
@@ -52,8 +56,8 @@ jobs:
       - name: Decide whether code changed
         id: decide
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE: ${{ github.event.before }}
+          HEAD: ${{ github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
 
   # `just check` is `just lint` and then a build of every target. CI runs
@@ -218,13 +222,9 @@ jobs:
       # Scenarios run the built binaries, as in `just test`. As many at once
       # as the runner has CPUs, as `cargo test` does: four at a time on two
       # CPUs failed Banner and Handoff timings in run 42034428129.
-      - name: Build the binaries the scenarios run
-        run: cargo build --workspace --bins --locked
-
-      - name: just test, the harness's scenarios, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
-        run: >-
-          cargo nextest run -p test-harness --locked --no-fail-fast
-          --partition count:${{ matrix.shard }}/${{ strategy.job-total }}
+      # `just ci-scenarios` builds them, then runs this shard.
+      - name: just ci-scenarios, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
+        run: just ci-scenarios --partition count:${{ matrix.shard }}/${{ strategy.job-total }}
 
       # How many scenarios this shard ran and, from the first, how many there
       # are, for "CI passed" to check that the shards ran every one.
@@ -251,13 +251,10 @@ jobs:
       # First-frame timings, judged one scenario at a time as on the Desktop,
       # which runs one app (issue #47). In the whole run above, every
       # scenario's app at once slows each first paint past its target. Only
-      # the first shard runs them. `just test-file` fails if a file has no
-      # ignored scenario left, rather than run nothing.
-      - name: just test, first-frame timings one scenario at a time
+      # the first shard runs them.
+      - name: just ci-first-frame-timings
         if: matrix.shard == 1
-        run: |
-          just test-file dialer_surface --ignored --test-threads=1
-          just test-file incoming_call_surfaces --ignored --test-threads=1
+        run: just ci-first-frame-timings
 
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots
@@ -280,7 +277,10 @@ jobs:
   # both halves succeeded, or were skipped because `changes` found only docs.
   # `just merge` waits on every check and every unfinished run.
   ci-passed:
-    name: CI passed
+    # Only a push to main posts the context branch protection requires. A
+    # dispatched run on a branch would post a "CI passed" on a commit
+    # `just ci-local` judged, and a failure there would contradict it.
+    name: ${{ github.event_name == 'push' && 'CI passed' || 'CI passed (dispatched run)' }}
     if: ${{ !cancelled() }}
     needs: [changes, lint, check, scenarios]
     runs-on: ubuntu-latest

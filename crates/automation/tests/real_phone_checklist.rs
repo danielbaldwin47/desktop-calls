@@ -22,12 +22,15 @@ use std::time::Duration;
 const QUIET_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The group-2 questions a machine can't answer today: what the helper
-/// hears, and what the notification server draws. The rest of group 2 is
-/// observed through the control interface.
+/// hears, what the notification server draws, and what the Desktop's
+/// speakers play. The rest of group 2 is observed through the control
+/// interface.
 const HEARD_CLEARLY: &str = "Does your helper hear you clearly, with no echo of their own voice?";
 const MISSED_CALL_SHOWN: &str =
     "Does a notification say you missed a call from your helper, by name or number, with the time?";
 const WITHHELD_SHOWN: &str = "Does a notification say you missed a call from a withheld number, and that it can't be called back?";
+const DESKTOP_SILENT: &str =
+    "Apart from the Pixel itself, was the Desktop silent while the Call rang?";
 
 /// A running checklist, and what it has printed.
 struct Runner {
@@ -170,7 +173,12 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
 
     assert_eq!(
         questions,
-        [HEARD_CLEARLY, MISSED_CALL_SHOWN, WITHHELD_SHOWN],
+        [
+            HEARD_CLEARLY,
+            MISSED_CALL_SHOWN,
+            WITHHELD_SHOWN,
+            DESKTOP_SILENT
+        ],
         "{}",
         runner.transcript.join("\n")
     );
@@ -206,7 +214,7 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
         "{answered:#}"
     );
 
-    for id in ["2.2", "2.3", "2.4", "2.5", "2.6", "2.8"] {
+    for id in ["2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"] {
         let observed = step(&result, id);
         assert_eq!(observed["result"], "pass", "{observed:#}");
         assert!(
@@ -238,14 +246,22 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
                 .is_some_and(|line| line.contains("No Missed Call")))),
         "{declined:#}"
     );
-    let waiting = step(&result, "2.7");
-    assert_eq!(waiting["result"], "skipped", "{waiting:#}");
-    assert!(
-        waiting["evidence"][0]
-            .as_str()
-            .is_some_and(|evidence| evidence.starts_with("Not yet runnable")),
-        "{waiting:#}"
-    );
+    // 2.7: under Do Not Disturb the Banner shows, the Desktop never rings,
+    // and Decline on the Desktop is still told from the Pixel's.
+    let quiet = step(&result, "2.7");
+    for seen in [
+        "saw Do Not Disturb turn on",
+        "never rang",
+        "after Decline",
+        "saw Do Not Disturb turn off",
+    ] {
+        assert!(
+            quiet["evidence"].as_array().is_some_and(|evidence| evidence
+                .iter()
+                .any(|line| line.as_str().is_some_and(|line| line.contains(seen)))),
+            "{seen:?} in {quiet:#}"
+        );
+    }
     // Only group 2 ran.
     assert!(
         result["steps"]
@@ -309,7 +325,7 @@ fn the_scorecard_reads_the_latest_real_phone_result_and_never_a_demo() {
     );
     assert!(
         checklist.contains("Real-Phone Checklist")
-            && checklist.contains("7 pass, 0 fail, 1 skipped"),
+            && checklist.contains("8 pass, 0 fail, 0 skipped"),
         "{real}"
     );
 }
@@ -337,12 +353,12 @@ fn an_interrupted_run_resumes_at_the_failed_step_and_keeps_what_passed() {
     );
     assert_eq!(
         second.steps_started(),
-        ["2.1", "2.3", "2.4", "2.5", "2.6", "2.8"],
+        ["2.1", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"],
         "the failed step and those not yet run, but not 2.2:\n{}",
         second.transcript.join("\n")
     );
     let after_second = result_file(results.path());
-    for id in ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.8"] {
+    for id in ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"] {
         assert_eq!(
             step(&after_second, id)["result"],
             "pass",

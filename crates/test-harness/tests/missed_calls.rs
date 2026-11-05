@@ -66,11 +66,16 @@ fn synced_with(contacts: &str) -> Harness {
     harness
 }
 
-/// Rings the Phone from `number` and waits until the Desktop rings.
-/// Returns the Call's object path and id.
+/// Rings the Phone from `number` and waits until the app lists the Call
+/// ringing: the Desktop rings too, unless Do Not Disturb is on. Returns the
+/// Call's object path and id.
 fn ring(harness: &Harness, number: &str) -> (String, u32) {
     let path = harness.simulated_phone().ring(number);
-    let state = harness.wait_for_app("the Desktop rings", DEADLINE, |state| state.ringing);
+    let state = harness.wait_for_app("the Call rings", DEADLINE, |state| {
+        state.calls.len() == 1
+            && state.calls[0].state == "ringing"
+            && state.ringing != state.do_not_disturb
+    });
     (path, state.calls[0].id)
 }
 

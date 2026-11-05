@@ -264,11 +264,13 @@ impl State {
         &self.calls
     }
 
-    /// Whether the Desktop ringtone should be playing: a Call rings here and
-    /// no other Call is live, so a waiting Call never rings over a live one.
+    /// Whether the Desktop ringtone should be playing: a Call rings here, no
+    /// other Call is live, so a waiting Call never rings over a live one, and
+    /// Do Not Disturb is off. The Banner shows either way.
     #[must_use]
     pub fn ringing(&self) -> bool {
-        self.calls.iter().any(Call::rings_here)
+        !self.do_not_disturb
+            && self.calls.iter().any(Call::rings_here)
             && !self.calls.iter().any(|call| call.state.blocks_ringing())
     }
 

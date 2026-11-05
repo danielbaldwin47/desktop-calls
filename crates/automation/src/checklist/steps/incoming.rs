@@ -267,6 +267,84 @@ pub(super) fn decline_on_the_pixel(sitting: &mut Sitting) -> Result<(), Stop> {
     Ok(())
 }
 
+/// 2.7: under Omarchy's Do Not Disturb a Call still shows the Banner, but
+/// the Desktop never rings, and Decline on the Desktop still works. The
+/// runner sees `DoNotDisturb`, the Banner and `Ringing`; it asks only
+/// whether the speakers stayed silent. It ends with Do Not Disturb off, as
+/// the steps after it need.
+pub(super) fn do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
+    sitting.say(
+        "Turn Do Not Disturb on: click the bell in Omarchy's bar, or press Super+Ctrl+Alt+Comma.",
+        &["do-not-disturb-on"],
+    );
+    sitting.wait_for("Do Not Disturb turning on", ACT_DEADLINE, |state| {
+        state.do_not_disturb
+    })?;
+    sitting.observed("Desktop Calls saw Do Not Disturb turn on.".to_owned());
+    let quiet_since = sitting.mark();
+    let call = helper_calls(sitting, "Ask your helper to call you.")?;
+    sitting.say(
+        "Listen to the Desktop's speakers for a few seconds, then click Decline on the Banner.",
+        &["decline"],
+    );
+    let declined = sitting.wait_for("Decline on the Desktop", ACT_DEADLINE, |state| {
+        handled_on_desktop(state, call) || stopped_ringing(state, call)
+    })?;
+    let rang = sitting.seen_since(quiet_since, |state| state.ringing);
+    sitting.check(
+        rang.is_none(),
+        if rang.is_none() {
+            "The Banner showed and the Desktop never rang (Ringing stayed false).".to_owned()
+        } else {
+            "The Desktop rang under Do Not Disturb (Ringing was true).".to_owned()
+        },
+    );
+    let silent =
+        sitting.ask("Apart from the Pixel itself, was the Desktop silent while the Call rang?")?;
+    sitting.check(
+        silent,
+        if silent {
+            "You heard nothing from the Desktop while the Call rang.".to_owned()
+        } else {
+            "You heard the Desktop while the Call rang under Do Not Disturb.".to_owned()
+        },
+    );
+    if handled_on_desktop(&declined.state, call) {
+        let ended = sitting.wait_for("the declined Call ending", APP_DEADLINE, |state| {
+            stopped_ringing(state, call)
+        })?;
+        let unanswered = ended.state.call(call).is_none();
+        sitting.check(
+            unanswered,
+            if unanswered {
+                format!(
+                    "The Call ended {} after Decline, unanswered.",
+                    seconds(ended.at - declined.at)
+                )
+            } else {
+                "The Call was answered instead of ending.".to_owned()
+            },
+        );
+    } else {
+        sitting.check(
+            false,
+            "The Call stopped ringing without Decline on the Desktop.".to_owned(),
+        );
+    }
+    if sitting.now().call(call).is_some() {
+        call_ends(sitting, call, "Hang up, on either device.", &["hang-up"])?;
+    }
+    sitting.say(
+        "Turn Do Not Disturb off again, the same way.",
+        &["do-not-disturb-off"],
+    );
+    sitting.wait_for("Do Not Disturb turning off", ACT_DEADLINE, |state| {
+        !state.do_not_disturb
+    })?;
+    sitting.observed("Desktop Calls saw Do Not Disturb turn off.".to_owned());
+    Ok(())
+}
+
 /// 2.8: the keybinding focuses the Banner, Escape gives focus back, A
 /// answers and, on a second Call, D declines.
 pub(super) fn keybinding(sitting: &mut Sitting) -> Result<(), Stop> {

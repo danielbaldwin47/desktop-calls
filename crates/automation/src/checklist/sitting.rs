@@ -173,6 +173,28 @@ impl Sitting {
         }
     }
 
+    /// Where the next wait starts looking, for [`Sitting::seen_since`] to
+    /// look back over everything published from here on.
+    pub fn mark(&self) -> usize {
+        self.cursor
+    }
+
+    /// The first state published since `mark` that satisfies `condition`,
+    /// for something that must not have happened at any point, such as the
+    /// Desktop ringing. Waits still start where they would have.
+    pub fn seen_since(&self, mark: usize, condition: impl Fn(&AppState) -> bool) -> Option<Seen> {
+        self.timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .skip(mark)
+            .find(|(_, state)| condition(state))
+            .map(|(at, state)| Seen {
+                at: *at,
+                state: state.clone(),
+            })
+    }
+
     /// Whether the app publishes a state that satisfies `condition` within
     /// `window`: for something that must not happen, such as the audio
     /// leaving the Phone.
@@ -381,6 +403,8 @@ impl Sitting {
 ///   notification server and the keyboard: `answer`, `decline`, `hang-up`,
 ///   `mute`, `unmute`, `keybinding`, `escape`, `a`, `d`,
 ///   `click-notification`, `enter`;
+/// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
+///   Omarchy's bell records it;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
 pub struct Demo {
     /// The user's own window, which has keyboard focus until the keybinding
@@ -546,6 +570,8 @@ impl Demo {
             "click-notification" => self.click_notification(),
             "enter" => self.harness.keyboard().press(Key::Return),
             "phone-dials" => self.phone_dials(),
+            "do-not-disturb-on" => self.harness.set_do_not_disturb(true),
+            "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
             other => self.act_on_call(other, call),
         }
         flush();
@@ -595,7 +621,8 @@ impl Demo {
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
                      click-notification, enter, phone-dials, indicator-click, indicator-mute, \
-                     indicator-hang-up, quirk NAME; or skip, or quit."
+                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, quirk NAME; or \
+                     skip, or quit."
                 ),
             },
         }

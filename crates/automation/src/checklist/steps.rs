@@ -19,7 +19,7 @@ mod missed_calls;
 use during_a_call::{keypad_tones, mute};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
-    keybinding,
+    do_not_disturb, keybinding,
 };
 use keyboard_and_look::{banner_beside_a_notification, indicator_in_the_bar};
 use missed_calls::{ring_out, withheld_ring_out};
@@ -103,6 +103,7 @@ pub const GROUPS: &[Group] = &[
             "Desktop Calls running, with the Pixel connected.",
             "A helper with a second phone who can call you several times.",
             "A Hyprland keybinding that runs `desktop-calls` (the Setup Window offers one once #22 lands).",
+            "Omarchy's Do Not Disturb off. Step 2.7 has you turn it on, then off again.",
         ],
         steps: &[
             Step {
@@ -144,8 +145,8 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "2.7",
                 title: "Turn Do Not Disturb on and receive a Call: the Banner shows and the Desktop stays silent",
-                script: None,
-                lands_with: &[17],
+                script: Some(do_not_disturb),
+                lands_with: &[],
             },
             Step {
                 id: "2.8",
@@ -394,12 +395,25 @@ fn call_ends(
     })
 }
 
-/// Whether the user has pressed Answer or Decline on the Desktop: the
-/// Desktop stops ringing while the Phone still rings.
+/// Whether the user has pressed Answer or Decline on the Desktop while the
+/// Phone still rings.
+///
+/// Without Do Not Disturb, the Desktop stops ringing. `Ringing` is published
+/// with the Call's state, so this can't be mistaken for the Pixel answering.
+/// Under Do Not Disturb the Desktop never rings, so the Banner closing tells
+/// instead. `Surfaces` follows the Call's state a moment later, so for that
+/// moment a Call answered on the Pixel looks the same; 2.7, the one step run
+/// under Do Not Disturb, asks only for Decline on the Desktop.
 fn handled_on_desktop(state: &AppState, call: u32) -> bool {
-    state
+    let still_ringing = state
         .call(call)
-        .is_some_and(|known| known.state == "ringing" && !state.ringing)
+        .is_some_and(|known| known.state == "ringing");
+    let desktop_let_go = if state.do_not_disturb {
+        !state.shows("banner")
+    } else {
+        !state.ringing
+    };
+    still_ringing && desktop_let_go
 }
 
 /// Whether the Call has stopped ringing on the Phone: answered or gone.

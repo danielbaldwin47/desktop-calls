@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Child, Output, Stdio};
 use std::sync::PoisonError;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt as _;
 use zbus::fdo::PropertiesProxy;
@@ -226,6 +226,67 @@ impl Harness {
             "the app took {took:?} for {what}, against {target:?} (from {from} to {to} in its log)"
         );
         took
+    }
+
+    /// Checks the app logged an event matching `to` within `target` of
+    /// `since`, a moment on the test's clock such as just before it changed
+    /// something the app watches, and returns how long it took. Both clocks
+    /// are the Desktop's wall clock, and nothing but the app sits between
+    /// the change and the event: no test process starting, no D-Bus round
+    /// trip. `what` names the wait in the panic.
+    ///
+    /// # Panics
+    ///
+    /// If it took longer, or the app didn't log it within 5 s.
+    pub fn assert_app_within_since(
+        &self,
+        what: &str,
+        since: SystemTime,
+        to: &AppEvent,
+        target: Duration,
+    ) -> Duration {
+        let since_us = since
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_micros());
+        let deadline = Duration::from_secs(5);
+        let log = self.directory.join("state/desktop-calls/desktop-calls.log");
+        let started = Instant::now();
+        let at = loop {
+            let found = fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .filter(|event| to.matches(event))
+                .filter_map(|event| timestamp_us(&event))
+                .find(|at| u128::from(*at) >= since_us);
+            if let Some(at) = found {
+                break at;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the app logged no {to} within {deadline:?} for {what}; see {}{}",
+                log.display(),
+                self.timeline.render()
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        let took = Duration::from_micros(
+            u64::try_from(u128::from(at).saturating_sub(since_us)).unwrap_or(u64::MAX),
+        );
+        assert!(
+            took <= target,
+            "the app took {took:?} for {what}, against {target:?} (to {to} in its log)"
+        );
+        took
+    }
+
+    /// Whether the app has logged an event matching `event` so far.
+    #[must_use]
+    pub fn app_logged(&self, event: &AppEvent) -> bool {
+        self.app_log()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .any(|logged| event.matches(&logged))
     }
 
     /// Checks the app drew the Incoming Call Banner's first frame within

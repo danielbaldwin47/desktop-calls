@@ -27,12 +27,17 @@ pub const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 /// kept: only whether the number is withheld, and a fingerprint that tells
 /// whether two Calls had the same number.
 #[derive(Clone, Debug, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one of the control interface's boolean properties, read as published"
+)]
 pub struct AppState {
     pub connection_state: String,
     pub phone_name: String,
     pub calls: Vec<AppCall>,
     pub audio_location: String,
     pub ringing: bool,
+    pub do_not_disturb: bool,
     pub muted: bool,
     pub codec: String,
     pub wideband: bool,
@@ -127,6 +132,7 @@ impl AppState {
             }
             "AudioLocation" => self.audio_location = String::try_from(value)?,
             "Ringing" => self.ringing = bool::try_from(value)?,
+            "DoNotDisturb" => self.do_not_disturb = bool::try_from(value)?,
             "Muted" => self.muted = bool::try_from(value)?,
             "Codec" => (self.codec, self.wideband) = <(String, bool)>::try_from(value)?,
             "Surfaces" => self.surfaces = BTreeMap::try_from(value)?,

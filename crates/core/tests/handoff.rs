@@ -1,7 +1,8 @@
 //! The Call state machine's Audio Location policy at its public interface:
 //! a Call placed on the Phone keeps its audio there, Handoff to the Desktop
-//! with its one retry, a Handoff that fails, and the fallback instruction
-//! for a Handoff to the Phone.
+//! with its one retry (a second after `Activate` if the audio link hasn't
+//! started) and its 3 s limit, a Handoff that fails, and the fallback
+//! instruction for a Handoff to the Phone.
 
 use desktop_calls_core::{
     AudioLocation, CallAudio, CallId, CallState, Caller, Effect, Input, Phone, PhoneCommand, State,
@@ -91,15 +92,54 @@ fn reported(effects: &[Effect]) -> Vec<Failure> {
         .collect()
 }
 
-/// The Handoff timer the effects started, if any.
+/// The timer for the Handoff's 3 s limit the effects started, if any.
 fn handoff_timer(effects: &[Effect]) -> Option<Timer> {
+    started(
+        effects,
+        |timer| matches!(timer, Timer::HandoffTimedOut(_)),
+        3_000,
+    )
+}
+
+/// The timer the effects started to check, a second after `Activate`, that
+/// the audio link has started, if any.
+fn not_started_timer(effects: &[Effect]) -> Option<Timer> {
+    started(
+        effects,
+        |timer| matches!(timer, Timer::HandoffNotStarted(_)),
+        1_000,
+    )
+}
+
+/// The timer the effects started that `is`, checking it runs `after_ms`.
+fn started(effects: &[Effect], is: impl Fn(&Timer) -> bool, after_ms: u32) -> Option<Timer> {
     effects.iter().find_map(|effect| match effect {
         Effect::StartTimer {
-            timer: timer @ Timer::HandoffTimedOut(_),
-            ..
-        } => Some(*timer),
+            timer,
+            after_ms: ms,
+        } if is(timer) => {
+            assert_eq!(*ms, after_ms, "{timer:?}");
+            Some(*timer)
+        }
         _ => None,
     })
+}
+
+/// The Desktop has asked for the audio and the Phone has carried out
+/// `Activate`: returns the state, the 3 s limit's timer, and the timer that
+/// checks the audio link has started.
+fn activated(state: State) -> (State, Timer, Timer) {
+    let (state, effects) = run(state, [Input::MoveAudio(AudioLocation::Desktop)]);
+    let limit = handoff_timer(&effects)
+        .unwrap_or_else(|| panic!("no timer for the 3 s limit: {effects:?}"));
+    assert_eq!(not_started_timer(&effects), None, "{effects:?}");
+    let (state, effects) = run(
+        state,
+        [Input::PhoneCommandDone(PhoneCommand::MoveAudioToDesktop)],
+    );
+    let not_started = not_started_timer(&effects)
+        .unwrap_or_else(|| panic!("no timer a second after Activate: {effects:?}"));
+    (state, limit, not_started)
 }
 
 /// What the Call Window says about the audio; `None` with no Call Window
@@ -188,32 +228,79 @@ fn asking_twice_while_the_audio_moves_asks_the_phone_once() {
 }
 
 #[test]
-fn if_the_phone_ignores_activate_the_desktop_asks_once_more() {
-    let (state, effects) = run(live_on_phone(), [Input::MoveAudio(AudioLocation::Desktop)]);
-    let first = handoff_timer(&effects).expect("a Handoff timer");
+fn if_the_audio_link_hasnt_started_a_second_after_activate_the_desktop_asks_once_more() {
+    let (state, limit, not_started) = activated(live_on_phone());
 
-    let (state, effects) = run(state, [Input::TimerFired(first)]);
+    let (state, effects) = run(state, [Input::TimerFired(not_started)]);
 
     assert_eq!(phone_commands(&effects), [PhoneCommand::MoveAudioToDesktop]);
     assert_eq!(reported(&effects), []);
+    // The retry keeps the Handoff's 3 s limit: it starts no timer of its own.
+    assert_eq!(handoff_timer(&effects), None, "{effects:?}");
     assert_eq!(audio(&state), Some(MOVING_HERE));
-    let second = handoff_timer(&effects).expect("a second Handoff timer");
-    assert_ne!(first, second);
 
-    // The first attempt's timer can't end the second.
-    let (state, effects) = run(state, [Input::TimerFired(first)]);
+    // The retry's own `Activate` doesn't lead to a third.
+    let (state, effects) = run(
+        state,
+        [Input::PhoneCommandDone(PhoneCommand::MoveAudioToDesktop)],
+    );
+    assert_eq!(not_started_timer(&effects), None, "{effects:?}");
+    let (state, effects) = run(state, [Input::TimerFired(not_started)]);
+    assert_eq!(effects, []);
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::TransportChanged(Transport::Pending),
+            Input::TransportChanged(Transport::Active),
+        ],
+    );
+    assert_eq!(phone_commands(&effects), [PhoneCommand::KeepAudioOnPhone]);
+    assert_eq!(audio(&state), Some(ON_DESKTOP));
+    let (_, effects) = run(state, [Input::TimerFired(limit)]);
+    assert_eq!(effects, []);
+}
+
+#[test]
+fn an_audio_link_that_has_started_gets_until_the_limit_without_a_second_activate() {
+    let (state, limit, not_started) = activated(live_on_phone());
+    let (state, _) = run(state, [Input::TransportChanged(Transport::Pending)]);
+
+    let (state, effects) = run(state, [Input::TimerFired(not_started)]);
+    assert_eq!(effects, []);
+    assert_eq!(audio(&state), Some(MOVING_HERE));
+
+    // A link that started but never came up fails at the limit, unretried.
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+    assert_eq!(phone_commands(&effects), []);
+    assert_eq!(reported(&effects), [Failure::AudioNotMoved]);
+    assert_eq!(audio(&state), Some(ON_PHONE));
+}
+
+#[test]
+fn a_new_handoff_isnt_ended_by_the_last_ones_timers() {
+    let (state, limit, not_started) = activated(live_on_phone());
+    let (state, _) = run(state, [Input::TimerFired(not_started)]);
+    let (state, _) = run(state, [Input::TimerFired(limit)]);
+
+    let (state, again, again_not_started) = activated(state);
+    assert_ne!(again, limit);
+    assert_ne!(again_not_started, not_started);
+    let (state, effects) = run(
+        state,
+        [Input::TimerFired(limit), Input::TimerFired(not_started)],
+    );
     assert_eq!(effects, []);
     assert_eq!(audio(&state), Some(MOVING_HERE));
 }
 
 #[test]
-fn a_handoff_the_phone_never_carries_out_says_so_with_the_fallback_and_keeps_the_call() {
-    let (state, effects) = run(live_on_phone(), [Input::MoveAudio(AudioLocation::Desktop)]);
-    let first = handoff_timer(&effects).expect("a Handoff timer");
-    let (state, effects) = run(state, [Input::TimerFired(first)]);
-    let second = handoff_timer(&effects).expect("a second Handoff timer");
+fn a_handoff_the_phone_never_carries_out_says_so_at_the_limit_and_keeps_the_call() {
+    let (state, limit, not_started) = activated(live_on_phone());
+    let (state, effects) = run(state, [Input::TimerFired(not_started)]);
+    assert_eq!(phone_commands(&effects), [PhoneCommand::MoveAudioToDesktop]);
 
-    let (state, effects) = run(state, [Input::TimerFired(second)]);
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
 
     assert_eq!(reported(&effects), [Failure::AudioNotMoved]);
     // RejectSCO stays false, so the fallback on the Phone works; no hang-up.
@@ -226,11 +313,9 @@ fn a_handoff_the_phone_never_carries_out_says_so_with_the_fallback_and_keeps_the
 
 #[test]
 fn the_failure_notice_goes_once_the_audio_arrives_after_all() {
-    let (state, effects) = run(live_on_phone(), [Input::MoveAudio(AudioLocation::Desktop)]);
-    let first = handoff_timer(&effects).expect("a Handoff timer");
-    let (state, effects) = run(state, [Input::TimerFired(first)]);
-    let second = handoff_timer(&effects).expect("a second Handoff timer");
-    let (state, _) = run(state, [Input::TimerFired(second)]);
+    let (state, limit, not_started) = activated(live_on_phone());
+    let (state, _) = run(state, [Input::TimerFired(not_started)]);
+    let (state, _) = run(state, [Input::TimerFired(limit)]);
 
     let (state, _) = run(state, [Input::TransportChanged(Transport::Active)]);
 
@@ -271,21 +356,25 @@ fn answering_here_retries_and_reports_like_a_handoff() {
     )
     .0;
     let (state, effects) = run(ringing, [Input::Answer(CALL)]);
-    let first = handoff_timer(&effects).expect("a Handoff timer");
-    let (state, _) = run(
+    let limit = handoff_timer(&effects).expect("a timer for the 3 s limit");
+    let (state, effects) = run(
         state,
-        [Input::CallChanged {
-            call: CALL,
-            state: CallState::Active,
-            at: Timestamp(2_000),
-        }],
+        [
+            Input::PhoneCommandDone(PhoneCommand::Answer(CALL)),
+            Input::CallChanged {
+                call: CALL,
+                state: CallState::Active,
+                at: Timestamp(2_000),
+            },
+            Input::PhoneCommandDone(PhoneCommand::MoveAudioToDesktop),
+        ],
     );
+    let not_started = not_started_timer(&effects).expect("a timer a second after Activate");
     assert_eq!(audio(&state), Some(MOVING_HERE));
 
-    let (state, effects) = run(state, [Input::TimerFired(first)]);
+    let (state, effects) = run(state, [Input::TimerFired(not_started)]);
     assert_eq!(phone_commands(&effects), [PhoneCommand::MoveAudioToDesktop]);
-    let second = handoff_timer(&effects).expect("a second Handoff timer");
-    let (state, effects) = run(state, [Input::TimerFired(second)]);
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
 
     assert_eq!(reported(&effects), [Failure::AudioNotMoved]);
     assert_eq!(audio(&state), Some(ON_PHONE));

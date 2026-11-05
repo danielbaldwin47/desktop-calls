@@ -10,7 +10,7 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use desktop_calls_core::{Effect, Input, State, messages, step};
+use desktop_calls_core::{AudioLocation, Effect, Input, State, messages, step};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::select;
@@ -301,6 +301,9 @@ async fn decide(
     );
     let mut state = State::default();
     while let Some((input, verdict)) = inputs.next().await {
+        if let Input::MoveAudio(location) = &input {
+            handoff_requested(*location);
+        }
         let (next, effects, shown) = stall_watch::timed("deciding", || {
             let (next, effects) = step(state.clone(), input);
             let shown = next.surfaces();
@@ -332,6 +335,11 @@ async fn decide(
                 next.connection_state()
             );
         }
+        if let (Some(from), Some(to)) = (state.audio_location(), next.audio_location())
+            && from != to
+        {
+            audio_moved(to);
+        }
         if let Some(surfaces) = &shell.surfaces {
             surfaces.render(&shown);
         }
@@ -339,6 +347,36 @@ async fn decide(
             publish_failed(&error);
         }
         state = next;
+    }
+}
+
+/// When a Handoff was asked for, from the control interface or the Call
+/// Window alike, so its own time can be told apart from its client's
+/// start-up (ticket #80).
+fn handoff_requested(location: AudioLocation) {
+    tracing::info!(
+        event_kind = %EventKind::HandoffRequested,
+        audio_location = location.as_str(),
+        "Asked for a Handoff to the {}",
+        place(location)
+    );
+}
+
+/// When a live Call's audio changed place, by a Handoff or the Phone's own
+/// button.
+fn audio_moved(location: AudioLocation) {
+    tracing::info!(
+        event_kind = %EventKind::AudioMoved,
+        audio_location = location.as_str(),
+        "The Call audio is on the {}",
+        place(location)
+    );
+}
+
+fn place(location: AudioLocation) -> &'static str {
+    match location {
+        AudioLocation::Desktop => "Desktop",
+        AudioLocation::Phone => "Phone",
     }
 }
 

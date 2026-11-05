@@ -1,8 +1,8 @@
 //! Scenarios 11 and 12: a Call placed on the Phone keeps its audio there,
 //! and a Handoff brings it to the Desktop, by the Call Window's button, the
 //! control interface and the CLI; a Phone that ignores `Activate` once gets
-//! one more try, and one that keeps ignoring it gets a plain message and
-//! keeps the Call. Checked through the control interface, the Call Window's
+//! one more try a second later (ticket #70), and one that keeps ignoring it
+//! gets a plain message after 3 s and keeps the Call. Checked through the control interface, the Call Window's
 //! `Surfaces`, screenshots, and what the Simulated Phone was asked.
 
 use std::collections::BTreeMap;
@@ -15,12 +15,29 @@ const DEADLINE: Duration = Duration::from_secs(5);
 /// How long the screen may take to show a change. One capture takes up to a
 /// second on a slow runner.
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
-/// How long the audio may take to reach the Desktop once asked (ticket #13).
+/// How long the audio may take to reach the Desktop once the app is asked
+/// (ticket #13), as the app's log records it (ticket #80).
 const HANDOFF_DEADLINE: Duration = Duration::from_millis(1_500);
+/// How long `desktop-calls audio here` may take, from starting the CLI to the
+/// audio on the Desktop. Its slack over [`HANDOFF_DEADLINE`] absorbs the
+/// CLI's start-up on a loaded runner, which took the round trip to 1.536 s
+/// while the audio arrived 1 ms after `Activate` (ticket #80).
+const CLI_HANDOFF_DEADLINE: Duration = Duration::from_secs(3);
 /// How long something the Phone must not be asked is watched for.
 const QUIET: Duration = Duration::from_secs(1);
-/// How long the Desktop waits for each attempt, twice, plus slack.
-const GIVE_UP: Duration = Duration::from_secs(10);
+/// How long the Desktop waits for the audio before it says it didn't come
+/// (ticket #70).
+const HANDOFF_LIMIT: Duration = Duration::from_secs(3);
+/// How long after [`HANDOFF_LIMIT`] the app may take to report it, by its log.
+const GIVE_UP_SLACK: Duration = Duration::from_millis(1_500);
+/// How long the Simulated Phone takes after `Activate` to open the audio
+/// link: about the slowest the Pixel took (313 ms, ticket #13).
+const PHONE_OPENS_LINK: Duration = Duration::from_millis(300);
+/// How long the audio may take when the Phone ignores the first `Activate`:
+/// the second comes a second after the first, and the Phone takes
+/// [`PHONE_OPENS_LINK`], so about 1.3 s. Waiting the full limit before
+/// asking again took about 3.3 s (ticket #70).
+const RETRIED_HANDOFF_DEADLINE: Duration = Duration::from_millis(2_500);
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
@@ -126,9 +143,9 @@ fn live_on_phone(harness: &Harness) {
 }
 
 /// Waits until the audio is on the Desktop and the Call Window offers to
-/// move it back, and checks it took no longer than [`HANDOFF_DEADLINE`]
-/// from `asked`.
-fn wait_for_audio_here(harness: &Harness, asked: Instant) -> AppState {
+/// move it back, and checks the app's own part took no longer than
+/// [`HANDOFF_DEADLINE`].
+fn wait_for_audio_here(harness: &Harness) -> AppState {
     let state = harness.wait_for_app(
         "the audio is on the Desktop and the Call Window offers to move it back",
         DEADLINE,
@@ -138,12 +155,45 @@ fn wait_for_audio_here(harness: &Harness, asked: Instant) -> AppState {
                 && shown(state, "handoff").as_deref() == Some("Move audio to phone")
         },
     );
-    let took = asked.elapsed();
+    let took = since_handoff_requested(harness, "audio-moved");
     assert!(
         took <= HANDOFF_DEADLINE,
-        "the audio took {took:?} to reach the Desktop"
+        "the audio took {took:?} to reach the Desktop once the app was asked"
     );
     state
+}
+
+/// How long the app took from the Handoff request reaching it to its first
+/// log event of `kind`, by the app's log. The tests' own clock also counts
+/// the time to get the request to the app and the change back, which on a
+/// loaded runner overran the targets by a few milliseconds (ticket #80).
+fn since_handoff_requested(harness: &Harness, kind: &str) -> Duration {
+    let requested = logged(harness, "handoff-requested");
+    let then = logged(harness, kind);
+    for event in [&requested, &then] {
+        if let Some(location) = event.get("audio_location") {
+            assert_eq!(location, "desktop", "{event}");
+        }
+    }
+    Duration::from_micros(
+        timestamp_us(&then)
+            .checked_sub(timestamp_us(&requested))
+            .unwrap_or_else(|| {
+                panic!("{kind} came before the Handoff request: {requested} {then}")
+            }),
+    )
+}
+
+/// The app's first log event of `kind`, parsed.
+fn logged(harness: &Harness, kind: &str) -> serde_json::Value {
+    let line = harness.wait_for_app_log(&format!("\"event_kind\":\"{kind}\""), DEADLINE);
+    serde_json::from_str(&line).unwrap_or_else(|error| panic!("{line:?} isn't JSON: {error}"))
+}
+
+fn timestamp_us(event: &serde_json::Value) -> u64 {
+    event["timestamp_us"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("{event} has no timestamp_us"))
 }
 
 /// Checks the Phone was asked to clear `RejectSCO`, to `Activate`, and,
@@ -184,12 +234,11 @@ fn move_audio_desktop_brings_the_audio_here_and_sets_reject_sco_again() {
     let harness = connected();
     live_on_phone(&harness);
 
-    let asked = Instant::now();
     harness
         .move_audio("desktop")
         .expect("MoveAudio(\"desktop\") is accepted");
 
-    wait_for_audio_here(&harness, asked);
+    wait_for_audio_here(&harness);
     assert_handed_off(&harness);
     let state = harness.app_holds("the audio stays on the Desktop", QUIET, |state| {
         state.audio_location == "desktop"
@@ -214,7 +263,12 @@ fn desktop_calls_audio_here_brings_the_audio_here() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "Moving the audio to this computer."
     );
-    wait_for_audio_here(&harness, asked);
+    wait_for_audio_here(&harness);
+    let took = asked.elapsed();
+    assert!(
+        took <= CLI_HANDOFF_DEADLINE,
+        "the audio took {took:?} to reach the Desktop from starting the CLI"
+    );
     assert_handed_off(&harness);
 }
 
@@ -223,12 +277,11 @@ fn a_handoff_works_while_the_call_placed_on_the_phone_still_dials() {
     let harness = connected();
     placed_on_phone(&harness);
 
-    let asked = Instant::now();
     harness
         .move_audio("desktop")
         .expect("MoveAudio(\"desktop\") is accepted");
 
-    let state = wait_for_audio_here(&harness, asked);
+    let state = wait_for_audio_here(&harness);
     assert_eq!(shown(&state, "status").as_deref(), Some("Calling…"));
 }
 
@@ -247,19 +300,21 @@ fn an_incoming_call_answered_on_the_phone_can_move_its_audio_here() {
         },
     );
 
-    let asked = Instant::now();
     harness
         .move_audio("desktop")
         .expect("MoveAudio(\"desktop\") is accepted");
 
-    wait_for_audio_here(&harness, asked);
+    wait_for_audio_here(&harness);
     assert_handed_off(&harness);
 }
 
 #[test]
-fn a_phone_that_ignores_activate_once_is_asked_once_more() {
+fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
     let harness = connected();
     live_on_phone(&harness);
+    harness
+        .simulated_phone()
+        .set_activate_delay(PHONE_OPENS_LINK);
     harness
         .simulated_phone()
         .enable_quirk("activate-ignored-once");
@@ -268,9 +323,20 @@ fn a_phone_that_ignores_activate_once_is_asked_once_more() {
         .move_audio("desktop")
         .expect("MoveAudio(\"desktop\") is accepted");
 
-    let state = harness.wait_for_app("the audio reaches the Desktop", GIVE_UP, |state| {
+    // The audio can't arrive before the second `Activate` a second in, so
+    // the Call Window says it is coming the whole time.
+    harness.app_holds("the Call Window says Moving audio here…", QUIET, |state| {
+        shown(state, "handoff").as_deref() == Some("Moving audio here…")
+            && state.audio_location == "phone"
+    });
+    let state = harness.wait_for_app("the audio reaches the Desktop", DEADLINE, |state| {
         state.audio_location == "desktop"
     });
+    let took = since_handoff_requested(&harness, "audio-moved");
+    assert!(
+        took < RETRIED_HANDOFF_DEADLINE,
+        "the audio took {took:?} to reach the Desktop once the app was asked"
+    );
     assert_eq!(shown(&state, "notice"), None);
     let calls = harness.simulated_phone().wait_for_recorded(
         "RejectSCO is set again once the audio is here",
@@ -291,6 +357,33 @@ fn a_phone_that_ignores_activate_once_is_asked_once_more() {
 }
 
 #[test]
+fn a_phone_that_opens_the_audio_link_in_300_ms_is_asked_to_activate_once() {
+    let harness = connected();
+    live_on_phone(&harness);
+    harness
+        .simulated_phone()
+        .set_activate_delay(PHONE_OPENS_LINK);
+
+    harness
+        .move_audio("desktop")
+        .expect("MoveAudio(\"desktop\") is accepted");
+
+    wait_for_audio_here(&harness);
+    assert_handed_off(&harness);
+    // Past the second after `Activate` at which an unstarted link is retried.
+    let calls = harness.simulated_phone().recorded_holds(
+        "the Phone is asked to Activate only once",
+        QUIET,
+        |calls| telephony(calls).filter(|call| is_activate(call)).count() == 1,
+    );
+    assert_eq!(
+        handoff_requests(&calls),
+        ["RejectSCO=false", "Activate", "RejectSCO=true"],
+        "{calls:#?}"
+    );
+}
+
+#[test]
 fn a_phone_that_keeps_the_audio_gets_a_plain_message_and_the_call_stays_live() {
     let harness = connected();
     live_on_phone(&harness);
@@ -302,8 +395,26 @@ fn a_phone_that_keeps_the_audio_gets_a_plain_message_and_the_call_stays_live() {
 
     let state = harness.wait_for_app(
         "the Call Window says the Phone kept the audio",
-        GIVE_UP,
+        HANDOFF_LIMIT + DEADLINE,
         |state| shown(state, "notice").is_some(),
+    );
+    let reported = logged(&harness, "error-reported");
+    assert_eq!(reported["error_kind"], "audio-not-moved", "{reported}");
+    let took = since_handoff_requested(&harness, "error-reported");
+    assert!(
+        (HANDOFF_LIMIT..=HANDOFF_LIMIT + GIVE_UP_SLACK).contains(&took),
+        "it gave up after {took:?} once the app was asked"
+    );
+    // Asked twice, a second apart, and never a third time.
+    let calls = harness.simulated_phone().wait_for_recorded(
+        "the Phone was asked twice",
+        DEADLINE,
+        |calls| handoff_requests(calls).len() >= 4,
+    );
+    assert_eq!(
+        handoff_requests(&calls),
+        ["RejectSCO=false", "Activate", "RejectSCO=false", "Activate"],
+        "{calls:#?}"
     );
     let notice = shown(&state, "notice").unwrap_or_default();
     assert!(
@@ -406,10 +517,9 @@ fn clicking_move_audio_here_brings_the_audio_here_and_the_button_offers_the_phon
     let hang_up = hang_up_button(&harness, "call-window-audio-on-phone");
     let (x, y) = handoff_button_centre(hang_up);
 
-    let asked = Instant::now();
     harness.pointer().click(x, y);
 
-    wait_for_audio_here(&harness, asked);
+    wait_for_audio_here(&harness);
     assert_handed_off(&harness);
     // Hang up stayed on its row, and the window on the right edge, so the
     // Handoff button is still under the pointer. The window narrows as the

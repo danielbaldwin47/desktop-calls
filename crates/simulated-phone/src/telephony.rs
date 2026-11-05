@@ -28,7 +28,9 @@
 //!   `org.pipewire.Telephony.Error.InvalidState`.
 //! - Setting `RejectSCO` emits no signal. `Activate` does nothing while it is
 //!   true; otherwise the transport reports its codec, then `pending`, then
-//!   `active`, as the Pixel does.
+//!   `active`, as the Pixel does. PipeWire replies to `Activate` before the
+//!   Phone acts, and tests can make the Phone take a while to act
+//!   (`SetActivateDelay`), as the Pixel took 62 to 313 ms.
 //! - `Dial`, on `AudioGateway1` or `org.ofono.VoiceCallManager`, checks the
 //!   number as PipeWire does (`0`-`9`, `A`-`D`, `#`, `*`, `+` and `,`, 1 to
 //!   80 of them, else `InvalidFormat` "Invalid phone number or tones"), and
@@ -49,6 +51,7 @@
 //!   longer string fails with `CME` here too.
 
 use std::collections::{BTreeSet, HashMap};
+use std::time::Duration;
 
 use zbus::{Connection, Message, OwnedObjectPath, OwnedVariant, Str};
 
@@ -117,7 +120,7 @@ pub enum Quirk {
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
-pub const SLOW_REPLY: std::time::Duration = std::time::Duration::from_secs(1);
+pub const SLOW_REPLY: Duration = Duration::from_secs(1);
 
 impl Quirk {
     /// The quirk with this control-interface name.
@@ -143,6 +146,9 @@ pub struct Behaviour {
     pub microphone_volume: u8,
     pub quirks: BTreeSet<Quirk>,
     pub earbuds: Earbuds,
+    /// How long the Phone takes after `Activate` to act on it. PipeWire
+    /// replies at once either way.
+    pub activate_delay: Duration,
 }
 
 /// Earbuds connected to the Phone beside the Desktop: a second hands-free
@@ -183,6 +189,7 @@ impl Default for Behaviour {
             microphone_volume: 15,
             quirks: BTreeSet::new(),
             earbuds: Earbuds::default(),
+            activate_delay: Duration::ZERO,
         }
     }
 }
@@ -693,9 +700,24 @@ pub fn unannounce_call(audio_gateway: &OwnedObjectPath, call: &OwnedObjectPath) 
     ]
 }
 
+/// What the service does about a method call: the reply, the signals that
+/// follow it, and what the Phone does later.
+pub struct Answer {
+    pub reply: Reply,
+    pub signals: Vec<Signal>,
+    pub later: Option<ActivateLater>,
+}
+
+/// The Phone acts on an `Activate` to the AudioGateway at `audio_gateway`
+/// once `after` has passed: [`activate_later`] does it.
+pub struct ActivateLater {
+    pub after: Duration,
+    pub audio_gateway: OwnedObjectPath,
+}
+
 /// Answers a method call on the Telephony service, changing the tree as the
 /// real service would. The signals go out after the reply. A quirk that
-/// shows only once is used up here.
+/// shows only once is used up here, or for `Activate`, when the Phone acts.
 pub fn answer(
     tree: &mut ObjectTree,
     audio_gateway: Option<&OwnedObjectPath>,
@@ -703,10 +725,15 @@ pub fn answer(
     dialling: &mut Dialling,
     call: &MethodCall,
     message: &Message,
-) -> (Reply, Vec<Signal>) {
+) -> Answer {
+    let now = |(reply, signals): (Reply, Vec<Signal>)| Answer {
+        reply,
+        signals,
+        later: None,
+    };
     match tree.answer(call, message) {
         Reply::Unhandled => {}
-        reply => return (reply, Vec::new()),
+        reply => return now((reply, Vec::new())),
     }
     // The AudioGateway the call is addressed to, if it is to the AudioGateway
     // itself or to one of its Calls.
@@ -716,7 +743,7 @@ pub fn answer(
             .strip_prefix(gateway.as_str())
             .is_some_and(|rest| rest.starts_with("/call"))
     });
-    match (
+    let answered = match (
         call.interface.as_str(),
         call.member.as_str(),
         to_audio_gateway,
@@ -757,6 +784,18 @@ pub fn answer(
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SendTones", Some(gateway), _) => {
             (send_tones(tree, gateway, message), Vec::new())
         }
+        (AUDIO_GATEWAY_TRANSPORT, "Activate", Some(gateway), _)
+            if !behaviour.activate_delay.is_zero() =>
+        {
+            return Answer {
+                reply: Reply::body(()),
+                signals: Vec::new(),
+                later: Some(ActivateLater {
+                    after: behaviour.activate_delay,
+                    audio_gateway: gateway.clone(),
+                }),
+            };
+        }
         (AUDIO_GATEWAY_TRANSPORT, "Activate", Some(gateway), _) => {
             (Reply::body(()), activate(tree, gateway, behaviour))
         }
@@ -774,7 +813,22 @@ pub fn answer(
         ),
         (CALL | VOICE_CALL, "Hangup", _, Some(gateway)) => hang_up(tree, gateway, behaviour, call),
         _ => (Reply::unknown_method(call), Vec::new()),
+    };
+    now(answered)
+}
+
+/// The Phone acts on an `Activate` it was sent earlier, if the AudioGateway
+/// it went to is still there. Returns the signals to emit.
+pub fn activate_later(
+    tree: &mut ObjectTree,
+    audio_gateway: Option<&OwnedObjectPath>,
+    behaviour: &mut Behaviour,
+    later: &ActivateLater,
+) -> Vec<Signal> {
+    if audio_gateway != Some(&later.audio_gateway) {
+        return Vec::new();
     }
+    activate(tree, &later.audio_gateway, behaviour)
 }
 
 /// `Properties.Set` on an AudioGateway: `RejectSCO`, which emits nothing,

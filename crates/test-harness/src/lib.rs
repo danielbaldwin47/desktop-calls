@@ -172,6 +172,8 @@ trait SimulatedPhone1 {
 
     fn set_pull_delay(&self, delay_ms: u32) -> zbus::Result<()>;
 
+    fn set_activate_delay(&self, delay_ms: u32) -> zbus::Result<()>;
+
     fn set_microphone_volume(&self, volume: u8) -> zbus::Result<()>;
 
     fn answer_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
@@ -2211,6 +2213,18 @@ impl SimulatedPhone<'_> {
         let delay_ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
         zbus::block_on(async { self.proxy().await?.set_pull_delay(delay_ms).await })
             .expect("set the Simulated Phone's pull delay");
+    }
+
+    /// Makes the Phone take `delay` after each `Activate` before it opens
+    /// the audio link, as the Pixel took 62 to 313 ms.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_activate_delay(&self, delay: Duration) {
+        let delay_ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
+        zbus::block_on(async { self.proxy().await?.set_activate_delay(delay_ms).await })
+            .expect("set the Simulated Phone's Activate delay");
     }
 
     /// The most PBAP sessions the Phone has had open at once, counting a

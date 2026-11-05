@@ -29,11 +29,17 @@ const NOTICE_MS: u32 = 6_000;
 /// How long the Phone may take to report a Call it was asked to dial. The
 /// Pixel's took under a second.
 const DIAL_TIMEOUT_MS: u32 = 15_000;
-/// How long the Phone may take to bring the audio here after `Activate()`
-/// before the Desktop asks once more, and then before it gives up. The
-/// Pixel took under 0.25 s 5 times in 7, 2.9 s once, and ignored it once
-/// (ADR-0005).
+/// How long the Phone may take to bring the audio here, from the Desktop
+/// asking until the Call Window says it didn't come. The Pixel took under
+/// 0.5 s 12 times in 15, 2.8 s and 2.9 s once each, and ignored `Activate()`
+/// once (ADR-0005, ticket #13).
 const HANDOFF_TIMEOUT_MS: u32 = 3_000;
+/// How long after `Activate()` returns the Phone may take to start opening
+/// the audio link before the Desktop asks once more. The Pixel started
+/// within 62 to 313 ms in 8 of 8 timed Handoffs later in a Call, but
+/// ignored 3 of 4 `Activate()`s sent within a second of the Call going
+/// active, and the second one then worked (tickets #13 and #70).
+const HANDOFF_NOT_STARTED_MS: u32 = 1_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -204,8 +210,11 @@ pub enum Timer {
     DismissDial(u32),
     /// Give up on the Phone reporting the Call of this dial attempt.
     DialTimedOut(u32),
-    /// The audio hasn't come here since this attempt to bring it here.
+    /// The audio hasn't come here within the limit for this Handoff.
     HandoffTimedOut(u32),
+    /// A second has passed since the Phone carried out `Activate()` for
+    /// this Handoff: if the audio link hasn't started, ask once more.
+    HandoffNotStarted(u32),
     /// Calls from the earlier run that haven't shown again by now aren't
     /// live any more.
     ForgetEarlierRun,
@@ -418,8 +427,8 @@ struct Dialer {
 /// The Desktop asked the Phone to bring the audio here, and it hasn't yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct MovingAudio {
-    /// The attempt whose [`Timer::HandoffTimedOut`] counts.
-    attempt: u32,
+    /// Which Handoff this is, so only its own timers count.
+    handoff: u32,
     /// The Phone has already been asked a second time.
     retried: bool,
 }
@@ -468,8 +477,8 @@ pub struct State {
     earlier_calls: Vec<EarlierCall>,
     moving_audio: Option<MovingAudio>,
     restore_audio: Option<AudioToRestore>,
-    /// How many times the Phone has been asked to bring the audio here.
-    handoff_attempts: u32,
+    /// How many Handoffs to the Desktop the Desktop has started.
+    handoffs: u32,
     /// Why the audio isn't where the user asked: shown beside the Call until
     /// the audio moves, the user asks again, or the Call ends.
     audio_notice: Option<Failure>,
@@ -1115,7 +1124,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::DialerChoose(_)
         | Input::CloseDialer) => dialer_input(&mut state, input, &mut effects),
         Input::PhoneCommandDone(command) => {
-            command_done(&mut state, &command);
+            command_done(&mut state, &command, &mut effects);
             restore_audio(&mut state, &mut effects);
         }
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
@@ -1219,12 +1228,21 @@ fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
                 dial_failed(state, Failure::DialFailed, effects);
             }
         }
-        Timer::HandoffTimedOut(attempt) => {
+        Timer::HandoffTimedOut(handoff) => {
             if state
                 .moving_audio
-                .is_some_and(|moving| moving.attempt == attempt)
+                .is_some_and(|moving| moving.handoff == handoff)
             {
-                audio_not_here(state, effects);
+                audio_not_moved(state, effects);
+            }
+        }
+        Timer::HandoffNotStarted(handoff) => {
+            if state
+                .moving_audio
+                .is_some_and(|moving| moving.handoff == handoff && !moving.retried)
+                && !state.transport.is_up()
+            {
+                ask_once_more(state, effects);
             }
         }
         Timer::CloseCallWindow(call) => {
@@ -1398,7 +1416,7 @@ fn still_silenced(state: &mut State) {
     }
 }
 
-fn command_done(state: &mut State, command: &PhoneCommand) {
+fn command_done(state: &mut State, command: &PhoneCommand, effects: &mut Vec<Effect>) {
     if let PhoneCommand::SetMicrophoneVolume(volume) = command
         && state.silenced == Some(*volume)
     {
@@ -1417,6 +1435,7 @@ fn command_done(state: &mut State, command: &PhoneCommand) {
         {
             state.muting = Muting::Off;
         }
+        (PhoneCommand::MoveAudioToDesktop, _) => activated(state, effects),
         _ => {}
     }
 }
@@ -1653,40 +1672,64 @@ fn move_audio(state: &mut State, location: AudioLocation, effects: &mut Vec<Effe
         && state.moving_audio.is_none()
     {
         state.audio_notice = None;
-        bring_audio_here(state, false, effects);
+        bring_audio_here(state, effects);
     }
 }
 
-/// Asks the Phone to bring the audio here, and starts the wait for it.
-fn bring_audio_here(state: &mut State, retried: bool, effects: &mut Vec<Effect>) {
+/// Starts a Handoff to the Desktop: asks the Phone to bring the audio here,
+/// and starts its overall limit. The check that the audio link has started
+/// waits for the Phone to carry out `Activate()`.
+fn bring_audio_here(state: &mut State, effects: &mut Vec<Effect>) {
     effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
-    start_waiting_for_audio(state, retried, effects);
-}
-
-fn start_waiting_for_audio(state: &mut State, retried: bool, effects: &mut Vec<Effect>) {
-    state.handoff_attempts += 1;
-    let attempt = state.handoff_attempts;
-    state.moving_audio = Some(MovingAudio { attempt, retried });
+    state.handoffs += 1;
+    let handoff = state.handoffs;
+    state.moving_audio = Some(MovingAudio {
+        handoff,
+        retried: false,
+    });
     effects.push(Effect::StartTimer {
-        timer: Timer::HandoffTimedOut(attempt),
+        timer: Timer::HandoffTimedOut(handoff),
         after_ms: HANDOFF_TIMEOUT_MS,
     });
 }
 
-/// An attempt to bring the audio here failed or ran out of time. The Phone
-/// ignored `Activate()` once in 7 tries on the Pixel, so it is asked once
-/// more; after that the user is told how to do it on the Phone. `RejectSCO`
-/// stays false, so doing it on the Phone works.
-fn audio_not_here(state: &mut State, effects: &mut Vec<Effect>) {
-    match state.moving_audio {
-        Some(MovingAudio { retried: false, .. }) => bring_audio_here(state, true, effects),
-        Some(MovingAudio { retried: true, .. }) => {
-            state.moving_audio = None;
-            state.audio_notice = Some(Failure::AudioNotMoved);
-            effects.push(Effect::ReportError(Failure::AudioNotMoved));
+/// The Phone carried out `Activate()` for the first time in this Handoff:
+/// check a second later that the audio link has started.
+fn activated(state: &State, effects: &mut Vec<Effect>) {
+    if let Some(MovingAudio {
+        handoff,
+        retried: false,
+    }) = state.moving_audio
+    {
+        effects.push(Effect::StartTimer {
+            timer: Timer::HandoffNotStarted(handoff),
+            after_ms: HANDOFF_NOT_STARTED_MS,
+        });
+    }
+}
+
+/// The Phone refused to bring the audio here, or hadn't started opening the
+/// audio link a second after `Activate()`. The Pixel sometimes ignores
+/// `Activate()`, mostly just after the Call goes active (ticket #70), so it
+/// is asked once more, within the same limit; a second refusal tells the
+/// user at once.
+fn ask_once_more(state: &mut State, effects: &mut Vec<Effect>) {
+    match state.moving_audio.as_mut() {
+        Some(moving) if !moving.retried => {
+            moving.retried = true;
+            effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
         }
+        Some(_) => audio_not_moved(state, effects),
         None => {}
     }
+}
+
+/// The audio didn't come here: the user is told how to do it on the Phone.
+/// `RejectSCO` stays false, so doing it on the Phone works.
+fn audio_not_moved(state: &mut State, effects: &mut Vec<Effect>) {
+    state.moving_audio = None;
+    state.audio_notice = Some(Failure::AudioNotMoved);
+    effects.push(Effect::ReportError(Failure::AudioNotMoved));
 }
 
 fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
@@ -1694,7 +1737,7 @@ fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         Some(known) if known.rings_here() => {
             known.request = Request::Answer;
             effects.push(Effect::Phone(PhoneCommand::Answer(call)));
-            bring_audio_here(state, false, effects);
+            bring_audio_here(state, effects);
         }
         Some(known) if known.request == Request::Answer => {}
         Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
@@ -1884,7 +1927,7 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
             }
             effects.push(Effect::ReportError(Failure::HangUpFailed));
         }
-        PhoneCommand::MoveAudioToDesktop => audio_not_here(state, effects),
+        PhoneCommand::MoveAudioToDesktop => ask_once_more(state, effects),
         // Without these the Phone never dialled.
         PhoneCommand::AllowAudioOnDesktop | PhoneCommand::Dial(_) => {
             dial_failed(state, Failure::DialFailed, effects);

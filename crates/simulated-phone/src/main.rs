@@ -19,8 +19,8 @@
 //! rings, that dials for the Desktop, whose Telephony service restarts as
 //! `WirePlumber` does, whose Calls can be answered, hung up
 //! and have their audio brought to the Desktop, and that opens a PBAP
-//! session. Tests can pick the codec and
-//! switch on quirks other Phones show.
+//! session. Tests can pick the codec, how long the Phone takes to act on
+//! `Activate`, and switch on quirks other Phones show.
 
 mod bluez;
 mod obex;
@@ -219,7 +219,7 @@ async fn serve(
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
-        let (reply, signals, later, slow) = {
+        let (reply, signals, later, activate_later, slow) = {
             let mut world = lock(&world);
             world.recorded.push((service.bus(), call.clone()));
             let world = &mut *world;
@@ -235,10 +235,11 @@ async fn serve(
                     bluez::answer(&world.bluez, &call, &message),
                     Vec::new(),
                     None,
+                    None,
                     slow,
                 ),
                 Service::Telephony => {
-                    let (reply, signals) = telephony::answer(
+                    let answer = telephony::answer(
                         &mut world.telephony,
                         world.audio_gateway.as_ref(),
                         &mut world.behaviour,
@@ -246,12 +247,12 @@ async fn serve(
                         &call,
                         &message,
                     );
-                    (reply, signals, None, slow)
+                    (answer.reply, answer.signals, None, answer.later, slow)
                 }
                 Service::Obex => {
                     let answer =
                         obex::answer(&mut world.obex, &world.phone_address, &call, &message);
-                    (answer.reply, answer.signals, answer.later, slow)
+                    (answer.reply, answer.signals, answer.later, None, slow)
                 }
             }
         };
@@ -268,8 +269,36 @@ async fn serve(
         if let Some((after, later)) = later {
             run_obex_later(world.clone(), connection.clone(), message, after, later);
         }
+        if let Some(later) = activate_later {
+            run_activate_later(world.clone(), connection.clone(), later);
+        }
     }
     Ok(())
+}
+
+/// Has the Phone act on an `Activate` once its delay has passed, on a
+/// thread of its own so the service keeps answering meanwhile.
+fn run_activate_later(world: SharedWorld, connection: Connection, later: telephony::ActivateLater) {
+    std::thread::spawn(move || {
+        std::thread::sleep(later.after);
+        let signals = {
+            let mut world = lock(&world);
+            let world = &mut *world;
+            telephony::activate_later(
+                &mut world.telephony,
+                world.audio_gateway.as_ref(),
+                &mut world.behaviour,
+                &later,
+            )
+        };
+        zbus::block_on(async {
+            for signal in signals {
+                if signal.emit(&connection).await.is_err() {
+                    break;
+                }
+            }
+        });
+    });
 }
 
 /// Sends `reply` to `message`, then emits `signals`: as the real service,
@@ -674,6 +703,14 @@ impl Control {
     /// Makes every PBAP pull take `delay_ms` before it completes.
     fn set_pull_delay(&self, delay_ms: u32) {
         lock(&self.world).obex.pull_delay = std::time::Duration::from_millis(u64::from(delay_ms));
+    }
+
+    /// Makes the Phone take `delay_ms` after each `Activate` before it acts
+    /// on it, as the Pixel took 62 to 313 ms to start opening the audio
+    /// link. The reply still comes at once, as PipeWire's does.
+    fn set_activate_delay(&self, delay_ms: u32) {
+        lock(&self.world).behaviour.activate_delay =
+            std::time::Duration::from_millis(u64::from(delay_ms));
     }
 
     /// The most PBAP sessions open at once so far, counting each from its

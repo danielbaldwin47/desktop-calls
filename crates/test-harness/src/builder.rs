@@ -278,6 +278,15 @@ impl Builder {
         self
     }
 
+    /// The job that restarts `WirePlumber` ends `result`, as systemd's
+    /// would report it: `"failed"` or `"timeout"`, or `"never"` for a job
+    /// that doesn't end. `WirePlumber` doesn't restart in any of them.
+    pub fn wireplumber_restart_job(mut self, result: &str) -> Self {
+        self.nearby
+            .extend(["--wireplumber-restart-job", result].map(str::to_owned));
+        self
+    }
+
     /// Puts a `WirePlumber` drop-in named `name` holding `text` in the
     /// Desktop's user drop-in folder. Without any, the folder holds one
     /// that sets audio up for Calls.

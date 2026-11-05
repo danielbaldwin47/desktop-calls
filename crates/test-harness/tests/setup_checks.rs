@@ -551,6 +551,58 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
     );
 }
 
+/// Sets up audio against a Desktop whose systemd accepts the restart of
+/// `WirePlumber` and then ends the job as `result` says, and checks the
+/// Setup Window says the audio didn't restart and keeps the Problem, with
+/// its button, so the user can try again. `wait` is how long the app may
+/// take to give up on the job.
+fn setting_up_audio_with_a_restart_job_ending(result: &str, wait: Duration) {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config("51-music.conf", ROLES_WITHOUT_HANDS_FREE)
+        .wireplumber_restart_job(result)
+        .start();
+    wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
+
+    press_set_up_audio(&harness);
+
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber's restart is accepted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    let state = harness.wait_for_app("the Setup Window says the audio didn't restart", wait, |state| {
+        field(state, "notice").is_some_and(|notice| notice.contains("didn't restart"))
+    });
+    assert_eq!(kinds(&state), ["audio-not-set-up"]);
+    assert_eq!(field(&state, "buttons"), Some("Set up audio"), "it can be tried again");
+    assert!(
+        harness.wireplumber_drop_ins().contains_key(DROP_IN),
+        "the audio setting is saved"
+    );
+    no_raw_dbus_text(&[
+        field(&state, "notice").unwrap_or_default(),
+        field(&state, "buttons").unwrap_or_default(),
+    ]);
+}
+
+#[test]
+fn a_restart_job_that_fails_keeps_the_problem_and_says_the_audio_didnt_restart() {
+    setting_up_audio_with_a_restart_job_ending("failed", DEADLINE);
+}
+
+#[test]
+fn a_restart_job_that_times_out_keeps_the_problem_and_says_the_audio_didnt_restart() {
+    setting_up_audio_with_a_restart_job_ending("timeout", DEADLINE);
+}
+
+#[test]
+fn a_restart_job_that_never_ends_keeps_the_problem_once_the_app_gives_up_waiting() {
+    setting_up_audio_with_a_restart_job_ending("never", Duration::from_secs(15));
+}
+
 #[test]
 fn bluez_hands_free_on_shows_the_conflict_and_how_to_turn_it_off() {
     let harness = Harness::builder()

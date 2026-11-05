@@ -17,19 +17,23 @@
 //!
 //! Turning Bluetooth on sets the first adapter's `Powered`. Setting up audio
 //! writes the drop-in, then restarts `wireplumber.service` through the
-//! systemd user manager.
+//! systemd user manager and waits, at most `RESTART_JOB_DEADLINE`, for that
+//! job's `JobRemoved` signal: the reply to `RestartUnit` only says the job
+//! is queued, so only a result of `done` counts as restarted.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::Duration;
 
 use desktop_calls_core::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, Input};
 use futures_channel::mpsc::{UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
+use futures_util::future::{Either, select};
 use glib::MainContext;
 use zbus::fdo::DBusProxy;
 use zbus::zvariant::Variant;
-use zbus::{Connection, OwnedVariant};
+use zbus::{Connection, OwnedObjectPath, OwnedVariant};
 
 use crate::logging::EventKind;
 use crate::object_manager::{self, ObjectEvent, WatchError, Watched};
@@ -44,6 +48,9 @@ const SYSTEMD: &str = "org.freedesktop.systemd1";
 const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
 const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 const WIREPLUMBER: &str = "wireplumber.service";
+/// How long the restart job may take to end before the audio counts as not
+/// restarted. `WirePlumber` comes back in about a second.
+const RESTART_JOB_DEADLINE: Duration = Duration::from_secs(10);
 
 /// What BlueZ says of the Desktop's adapters and its own hands-free.
 #[derive(Default)]
@@ -308,18 +315,72 @@ impl SetupChecks {
         Settings::read(&folder)
             .and_then(|settings| settings.write_set_up())
             .map_err(|error| not_saved(error.to_string()))?;
-        self.session
-            .call_method(
-                Some(SYSTEMD),
-                SYSTEMD_PATH,
-                Some(SYSTEMD_MANAGER),
-                "RestartUnit",
-                &(WIREPLUMBER, "replace"),
+        self.restart_wireplumber()
+            .await
+            .map_err(|detail| (FixFailure::AudioNotRestarted, detail))
+    }
+
+    /// Restarts `WirePlumber` and waits for the job to end.
+    async fn restart_wireplumber(&self) -> Result<(), String> {
+        let error = |error: zbus::Error| error.to_string();
+        let manager = zbus::Proxy::new(&self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER)
+            .await
+            .map_err(error)?;
+        // systemd sends a job's end only to clients that subscribed, and the
+        // signal can come before the reply: listen first.
+        manager.call_method("Subscribe", &()).await.map_err(error)?;
+        let result = match manager.receive_signal("JobRemoved").await {
+            Ok(ended) => match select(
+                Box::pin(restart_job_result(&manager, ended)),
+                Box::pin(glib::timeout_future(RESTART_JOB_DEADLINE)),
             )
             .await
-            .map(drop)
-            .map_err(|error| (FixFailure::AudioNotRestarted, error.to_string()))
+            {
+                Either::Left((result, _)) => result,
+                Either::Right(_) => Err(format!(
+                    "the restart job didn't end within {} s",
+                    RESTART_JOB_DEADLINE.as_secs()
+                )),
+            },
+            Err(listening) => Err(listening.to_string()),
+        };
+        // The restart is over either way; a failure to unsubscribe changes
+        // nothing the user sees.
+        let _ = manager.call_method("Unsubscribe", &()).await;
+        result
     }
+}
+
+/// Asks systemd to restart `WirePlumber`, then waits for that job's end in
+/// `ended`: restarted if its result is `done`, otherwise why not.
+async fn restart_job_result(
+    manager: &zbus::Proxy<'_>,
+    mut ended: zbus::proxy::SignalStream<'_>,
+) -> Result<(), String> {
+    let reply = manager
+        .call_method("RestartUnit", &(WIREPLUMBER, "replace"))
+        .await
+        .map_err(|error| error.to_string())?;
+    let job: OwnedObjectPath = reply
+        .body()
+        .deserialize()
+        .map_err(|error| error.to_string())?;
+    while let Some(signal) = ended.next().await {
+        let Ok((_, removed, _, result)) = signal
+            .body()
+            .deserialize::<(u32, OwnedObjectPath, String, String)>()
+        else {
+            continue;
+        };
+        if removed == job {
+            return if result == "done" {
+                Ok(())
+            } else {
+                Err(format!("the restart job ended as {result:?}"))
+            };
+        }
+    }
+    Err("the session bus closed".to_owned())
 }
 
 fn failure_kind(failure: FixFailure) -> &'static str {

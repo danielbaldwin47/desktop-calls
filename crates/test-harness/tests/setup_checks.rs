@@ -403,6 +403,95 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
     no_problems_shown(&harness);
 }
 
+/// Presses Set up audio once the Problem shows, and waits until setting up
+/// is done: `WirePlumber` restarted and no Problem left.
+fn set_up_audio_and_wait_until_done(harness: &Harness) {
+    wait_for_problems(harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(harness);
+    press_set_up_audio(harness);
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber is restarted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    no_problems_shown(harness);
+}
+
+/// A permission mode the default umask can't produce: files made with a
+/// umask of 022 get 0644, and 077 gives 0600.
+const GROUP_READABLE: u32 = 0o640;
+
+#[test]
+fn setting_up_audio_keeps_the_permissions_of_a_drop_in_it_rewrites() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_with_mode("51-music.conf", ROLES_WITHOUT_HANDS_FREE, GROUP_READABLE)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert_eq!(
+        harness.wireplumber_drop_in_text("51-music.conf"),
+        ROLES_MOVED,
+        "the drop-in was rewritten"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_mode("51-music.conf"),
+        GROUP_READABLE
+    );
+}
+
+#[test]
+fn setting_up_audio_keeps_the_permissions_of_its_own_drop_in_it_rewrites() {
+    // What an earlier Set up audio wrote, since changed by hand.
+    const EARLIER: &str = "\
+# Written by Desktop Calls when you chose Set up audio: hands-free with
+monitor.bluez.properties = {
+  bluez5.roles = [ a2dp_sink a2dp_source ]
+}
+";
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_with_mode(DROP_IN, EARLIER, 0o660)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert_ne!(
+        harness.wireplumber_drop_in_text(DROP_IN),
+        EARLIER,
+        "the drop-in was rewritten"
+    );
+    assert_eq!(harness.wireplumber_drop_in_mode(DROP_IN), 0o660);
+}
+
+#[test]
+fn setting_up_audio_rewrites_the_file_a_linked_drop_in_points_to_and_keeps_its_permissions() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_linked("51-music.conf", ROLES_WITHOUT_HANDS_FREE, GROUP_READABLE)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert!(
+        harness.wireplumber_drop_in_is_link("51-music.conf"),
+        "the drop-in is still a link"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_text("51-music.conf"),
+        ROLES_MOVED,
+        "the file it points to was rewritten"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_mode("51-music.conf"),
+        GROUP_READABLE
+    );
+}
+
 #[test]
 fn keeping_audio_off_the_phone_turned_off_alone_is_a_problem_even_in_an_odd_drop_in() {
     // One line, a non-breaking space, and the other two settings right.

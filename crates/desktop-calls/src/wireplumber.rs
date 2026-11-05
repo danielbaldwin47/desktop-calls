@@ -241,10 +241,21 @@ fn replace(folder: &Path, name: &str, text: &str) -> io::Result<()> {
     );
     let temporary = path.with_file_name(format!(".{file_name}.desktop-calls"));
     fs::write(&temporary, text)
+        .and_then(|()| keep_permissions(&path, &temporary))
         .and_then(|()| fs::rename(&temporary, &path))
         .inspect_err(|_| {
             let _ = fs::remove_file(&temporary);
         })
+}
+
+/// Gives `temporary` the permission bits `target` has, if it exists; a new
+/// file keeps the ones it was made with.
+fn keep_permissions(target: &Path, temporary: &Path) -> io::Result<()> {
+    match fs::metadata(target) {
+        Ok(existing) => fs::set_permissions(temporary, existing.permissions()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// What a moved setting leaves behind: itself, commented out, and the rest

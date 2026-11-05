@@ -49,9 +49,25 @@ pub struct Builder {
 
 /// One entry in the Desktop's `WirePlumber` drop-in folder.
 enum WirePlumberEntry {
-    File { name: String, text: String },
-    Folder { name: String },
+    /// A file, with its permission bits if they aren't the umask's.
+    File {
+        name: String,
+        text: String,
+        mode: Option<u32>,
+    },
+    /// A symbolic link to a file of the same name in `DOTFILES`.
+    Link {
+        name: String,
+        text: String,
+        mode: u32,
+    },
+    Folder {
+        name: String,
+    },
 }
+
+/// Where a linked `WirePlumber` drop-in's file is, under `config`.
+pub(super) const DOTFILES: &str = "dotfiles";
 
 /// The drop-in the Desktop has unless a scenario says otherwise: audio set
 /// up for Calls, as on the user's Desktop, in one file of its own.
@@ -79,11 +95,27 @@ fn write_wireplumber(config: &Path, entries: Option<Vec<WirePlumberEntry>>) {
         vec![WirePlumberEntry::File {
             name: "55-audio-for-calls.conf".to_owned(),
             text: AUDIO_SET_UP.to_owned(),
+            mode: None,
         }]
     });
     for entry in entries {
         match entry {
-            WirePlumberEntry::File { name, text } => fs::write(folder.join(name), text),
+            WirePlumberEntry::File { name, text, mode } => {
+                let path = folder.join(name);
+                fs::write(&path, text).and_then(|()| {
+                    mode.map_or(Ok(()), |mode| {
+                        fs::set_permissions(&path, fs::Permissions::from_mode(mode))
+                    })
+                })
+            }
+            WirePlumberEntry::Link { name, text, mode } => {
+                let dotfiles = config.join(DOTFILES);
+                let target = dotfiles.join(&name);
+                fs::create_dir_all(&dotfiles)
+                    .and_then(|()| fs::write(&target, text))
+                    .and_then(|()| fs::set_permissions(&target, fs::Permissions::from_mode(mode)))
+                    .and_then(|()| std::os::unix::fs::symlink(&target, folder.join(name)))
+            }
             WirePlumberEntry::Folder { name } => fs::create_dir(folder.join(name)),
         }
         .expect("write a WirePlumber drop-in");
@@ -296,6 +328,34 @@ impl Builder {
             .push(WirePlumberEntry::File {
                 name: name.to_owned(),
                 text: text.to_owned(),
+                mode: None,
+            });
+        self
+    }
+
+    /// Like [`Builder::wireplumber_config`], with the file's permission
+    /// bits set to `mode` (for example `0o640`).
+    pub fn wireplumber_config_with_mode(mut self, name: &str, text: &str, mode: u32) -> Self {
+        self.wireplumber
+            .get_or_insert_default()
+            .push(WirePlumberEntry::File {
+                name: name.to_owned(),
+                text: text.to_owned(),
+                mode: Some(mode),
+            });
+        self
+    }
+
+    /// Like [`Builder::wireplumber_config_with_mode`], but the drop-in is a
+    /// symbolic link, as a dotfiles manager leaves it, to a file of that
+    /// name outside the drop-in folder that holds `text` and `mode`.
+    pub fn wireplumber_config_linked(mut self, name: &str, text: &str, mode: u32) -> Self {
+        self.wireplumber
+            .get_or_insert_default()
+            .push(WirePlumberEntry::Link {
+                name: name.to_owned(),
+                text: text.to_owned(),
+                mode,
             });
         self
     }

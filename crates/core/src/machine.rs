@@ -522,12 +522,17 @@ impl State {
     /// first sync read before it was cut short don't make it ready.
     fn held_contacts_state(&self) -> ContactsState {
         match self.contacts_sync {
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
+            ContactsState::Syncing
+            | ContactsState::PermissionNeeded { .. }
+            | ContactsState::Unavailable(Unavailable::Failed)
                 if self.contacts_held =>
             {
                 ContactsState::Ready
             }
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => {
+            // A failure as the link dropped is the sync cut short too.
+            ContactsState::Syncing
+            | ContactsState::PermissionNeeded { .. }
+            | ContactsState::Unavailable(Unavailable::Failed) => {
                 ContactsState::Unavailable(Unavailable::NotSynced)
             }
             other => other,

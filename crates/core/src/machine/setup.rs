@@ -779,6 +779,20 @@ pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
     };
     let phone = match &setup.step {
         Step::ContactsWarning(phone) | Step::Contacts(phone) => phone.clone(),
+        // The link dropping can fail the sync just before the Phone is
+        // known to have left: that failure is the Phone leaving, so the
+        // window says so rather than that Contacts couldn't be read.
+        Step::Done(phone)
+            if !here
+                && !setup.progress.contacts.is_read()
+                && matches!(
+                    sync,
+                    ContactsState::Unavailable(Unavailable::Failed | Unavailable::NotSynced)
+                ) =>
+        {
+            setup.step = Step::ContactsAway(phone.clone());
+            return;
+        }
         _ => return,
     };
     let at_contacts = matches!(setup.step, Step::Contacts(_));

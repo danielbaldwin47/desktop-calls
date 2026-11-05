@@ -754,3 +754,26 @@ fn keys_taken_after_the_offer_refresh_the_offer_instead_of_asking_to_try_again()
         "{shown:?}"
     );
 }
+
+#[test]
+fn a_sync_failing_just_before_the_phone_leaves_still_says_the_phone_left() {
+    // The link dropping fails the PBAP session before hands-free goes down.
+    let (state, _) = run(
+        syncing(),
+        [
+            Input::ContactsPermissionNeeded {
+                deadline: Timestamp(30_000),
+            },
+            Input::ContactsSyncFailed(SyncFailure::Unavailable(Unavailable::Failed)),
+            disconnected(),
+        ],
+    );
+    says_the_phone_left(&state);
+    assert_eq!(
+        state.contacts_state(),
+        ContactsState::Unavailable(Unavailable::NotSynced)
+    );
+    let (state, _) = reconnected(state);
+    let (_, effects) = run(state, [Input::ContinueContacts]);
+    assert_eq!(syncs(&effects), 1);
+}

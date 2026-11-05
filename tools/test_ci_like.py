@@ -4,7 +4,8 @@ failure before pushing. No root, no Docker.
 
 Usage (through just):
   just test-ci-like                                   # the whole suite
-  just test-ci-like -p test-harness --test incoming_call_surfaces
+  just test-ci-like -p test-harness --test scenarios -- incoming_call_surfaces::
+  just test-file incoming_call_surfaces --ci-like       # the same
 
 Arguments go to `cargo test --workspace --locked`, as with `just test`.
 

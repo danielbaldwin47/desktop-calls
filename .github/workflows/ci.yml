@@ -231,9 +231,9 @@ jobs:
       - name: just test, first-frame timings one scenario at a time
         if: matrix.shard == 1
         run: >-
-          cargo test -p test-harness --locked
-          --test dialer_surface --test incoming_call_surfaces
+          cargo test -p test-harness --locked --test scenarios
           -- --ignored --test-threads=1
+          dialer_surface:: incoming_call_surfaces::
 
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots

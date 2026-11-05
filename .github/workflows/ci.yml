@@ -46,6 +46,12 @@ jobs:
           ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
           if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
 
+      # The package gives sway the file capability cap_sys_nice, which is
+      # outside this container's bounding set, so exec fails with EPERM.
+      # sway runs without it; only its realtime scheduling goes.
+      - name: Let sway run in the container
+        run: setcap -r /usr/bin/sway
+
       - name: just test
         run: just test
 

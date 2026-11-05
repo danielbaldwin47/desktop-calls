@@ -100,10 +100,17 @@ impl Screen {
         }
         let child = match command.spawn() {
             Ok(child) => child,
-            Err(error) => panic!(
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => panic!(
                 "start sway ({error}); the screen harness needs the sway and grim packages: \
                  sudo pacman -S --needed sway grim"
             ),
+            // Arch's sway carries the file capability cap_sys_nice, and a
+            // container whose capability bounding set lacks it can't run it.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => panic!(
+                "start sway ({error}); if this is a container, sway's file capability is \
+                 outside its bounding set: setcap -r /usr/bin/sway"
+            ),
+            Err(error) => panic!("start sway ({error})"),
         };
         processes.push(("compositor", child));
 

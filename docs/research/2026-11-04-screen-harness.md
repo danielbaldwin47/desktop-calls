@@ -51,4 +51,5 @@ Legend: **[V]** = verified on this machine. **[I]** = inferred, not tested.
 
 ## 6. CI
 
+- Arch's sway `post_install` runs `setcap cap_sys_nice+ep /usr/bin/sway`. In the CI container that capability is outside the bounding set, so starting sway fails with `Operation not permitted (os error 1)`. **[V]** (run 41940032873.) CI removes it with `setcap -r /usr/bin/sway`; sway only loses realtime scheduling. On the Desktop the capability is harmless. **[I]**
 - CI installs `sway grim libnotify`, runs `just screenshot` and `just scorecard` after `just test`, and uploads `target/screenshots` and `scorecard.txt` as the `screenshots` and `scorecard` artifacts. **[I]** until the PR's first run.

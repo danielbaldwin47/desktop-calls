@@ -13,6 +13,7 @@ mod logging;
 mod logind;
 mod notifications;
 mod object_manager;
+mod pairing;
 mod phone_link;
 mod ringer;
 mod service;
@@ -63,6 +64,9 @@ enum Command {
     },
     /// Mute the microphone during a Call, or unmute it if it is muted.
     Mute,
+    /// Open the window that pairs your phone with this computer: to set it
+    /// up, pair it again, or switch to another phone.
+    Connect,
     /// Move the Call's audio to this computer or to your phone.
     Audio {
         /// Where the audio goes.
@@ -99,6 +103,7 @@ fn main() -> ExitCode {
         Some(Command::Status { json }) => cli::status(json),
         Some(Command::Dialer { query }) => cli::dialer(&query),
         Some(Command::Mute) => cli::mute(),
+        Some(Command::Connect) => cli::connect_phone(),
         Some(Command::Audio { to }) => cli::audio(to.into()),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),

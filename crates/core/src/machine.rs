@@ -19,6 +19,7 @@ mod input;
 mod missed_calls;
 mod phone;
 mod presence;
+mod setup;
 mod view;
 
 use audio::{
@@ -32,10 +33,14 @@ use calls::{
     send_tones, timer_fired,
 };
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
-pub use input::{ConnectFailure, DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
+pub use input::{
+    ConnectFailure, DialProgress, Effect, Input, PairingFailure, PhoneCommand, PhoneRefusal, Timer,
+};
 use missed_calls::missed_call_input;
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
 use presence::{Presence, forget_phone, presence_input};
+use setup::Setup;
+pub use setup::{SetupNotice, SetupStep, SetupWindowView};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute, Surfaces,
 };
@@ -283,6 +288,15 @@ pub struct State {
     connection_lost: Option<ConnectionLost>,
     /// How many times the connection was lost mid-Call.
     losses: u32,
+    /// The open Setup Window.
+    setup: Option<Setup>,
+    /// The Setup Window has had its one chance to open by itself.
+    setup_offered: bool,
+    /// How many times the Setup Window has opened.
+    setup_openings: u32,
+    /// Phones nearby that aren't paired with the Desktop, in the order
+    /// BlueZ found them.
+    nearby_phones: Vec<Phone>,
     /// Incoming Calls that rang with no number, while the Phone may still
     /// report one.
     awaiting_number: Vec<CallId>,
@@ -581,6 +595,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     } else {
         release_mute(&mut state, &mut effects);
     }
+    setup::follow_connection(&mut state);
     (state, effects)
 }
 
@@ -589,6 +604,11 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     match input {
         // Desktop Calls works with one Phone: the first one paired.
         Input::EarlierRun(earlier) => pick_up_earlier_run(&mut state, earlier, &mut effects),
+        // Except a Phone the user pairs in the Setup Window, which it
+        // switches to.
+        Input::PhonePaired(phone) if state.setup_pairs(&phone.address) => {
+            setup::paired(&mut state, phone, &mut effects);
+        }
         Input::PhonePaired(phone) if state.phone.is_none() => {
             phone_paired(&mut state, phone, &mut effects);
         }
@@ -599,30 +619,15 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
             hands_free_down(&mut state, &mut effects);
         }
+        input @ (Input::ConnectPhoneDone | Input::ConnectPhoneFailed(_)) => {
+            presence_input(&mut state, input, &mut effects);
+            setup::connect_ended(&mut state, &mut effects);
+        }
         input @ (Input::PhonePresent { .. }
         | Input::PhoneAbsent { .. }
-        | Input::ConnectPhoneDone
-        | Input::ConnectPhoneFailed(_)
         | Input::Suspending
         | Input::Resumed) => presence_input(&mut state, input, &mut effects),
-        Input::CallAdded {
-            call,
-            state: call_state,
-            caller,
-            at,
-        } => {
-            let call = Call {
-                id: call,
-                direction: Direction::from_first_state(call_state),
-                state: call_state,
-                caller,
-                active_since: call_state.is_connected().then_some(at),
-                added_at: at,
-                request: Request::None,
-            };
-            await_number(&mut state, &call, &mut effects);
-            call_added(&mut state, call, &mut effects);
-        }
+        input @ Input::CallAdded { .. } => phone_added_call(&mut state, input, &mut effects),
         Input::CallChanged {
             call,
             state: call_state,
@@ -642,12 +647,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::TransportChanged(transport) => {
             transport_changed(&mut state, transport, &mut effects);
         }
-        Input::CodecChanged(codec) => {
-            state.reported_codec = codec;
-            if codec.is_some() && state.transport.is_up() {
-                state.codec = codec;
-            }
-        }
+        Input::CodecChanged(codec) => codec_changed(&mut state, codec),
         Input::MicrophoneVolumeChanged(volume) => microphone_volume_changed(&mut state, volume),
         Input::SetMuted(true) => mute(&mut state, &mut effects),
         Input::SetMuted(false) => unmute(&mut state, &mut effects),
@@ -679,12 +679,57 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         }
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::DoNotDisturbChanged(on) => state.do_not_disturb = on,
+        input @ (Input::PairedPhonesListed
+        | Input::OpenSetupWindow
+        | Input::CloseSetupWindow
+        | Input::SetupReady { .. }
+        | Input::SetupUnavailable
+        | Input::PhoneNearby(_)
+        | Input::PhoneNotNearby { .. }
+        | Input::ChoosePhone { .. }
+        | Input::PairingCode { .. }
+        | Input::ConfirmPairing
+        | Input::RejectPairing
+        | Input::PairingFailed(_)
+        | Input::HandsFreeRefused
+        | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// The Phone reported a Call: `input` is `Input::CallAdded`.
+fn phone_added_call(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    let Input::CallAdded {
+        call,
+        state: call_state,
+        caller,
+        at,
+    } = input
+    else {
+        return;
+    };
+    let call = Call {
+        id: call,
+        direction: Direction::from_first_state(call_state),
+        state: call_state,
+        caller,
+        active_since: call_state.is_connected().then_some(at),
+        added_at: at,
+        request: Request::None,
+    };
+    await_number(state, &call, effects);
+    call_added(state, call, effects);
+}
+
+fn codec_changed(state: &mut State, codec: Option<Codec>) {
+    state.reported_codec = codec;
+    if codec.is_some() && state.transport.is_up() {
+        state.codec = codec;
+    }
 }
 
 /// An incoming Call that rings with no number may get one a moment later:
@@ -701,13 +746,23 @@ fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
 }
 
 /// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps
-/// its own settings and whether it is asleep.
+/// its own settings, whether it is asleep, and the Setup Window.
 fn unpair(state: &State) -> (State, Vec<Effect>) {
     let mut effects = vec![Effect::DetachPhone];
     phone_unpaired(state, &mut effects);
-    let unpaired = State {
+    (forget_phone_keeping_desktop(state), effects)
+}
+
+/// The state once the Desktop stops following its Phone: nothing of the
+/// Phone is left, and the Desktop's own settings, whether it is asleep and
+/// the Setup Window stay.
+fn forget_phone_keeping_desktop(state: &State) -> State {
+    State {
         do_not_disturb: state.do_not_disturb,
+        setup: state.setup.clone(),
+        setup_offered: state.setup_offered,
+        setup_openings: state.setup_openings,
+        nearby_phones: state.nearby_phones.clone(),
         ..forget_phone(state)
-    };
-    (unpaired, effects)
+    }
 }

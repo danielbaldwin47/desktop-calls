@@ -23,3 +23,5 @@ This **amends [ADR-0004](0004-bluez-device-api-for-presence-and-pairing.md)**. A
 - If upstream PipeWire gains `Deactivate()`, prefer it and supersede this ADR.
 
 _2026-11-05 note (#101, PR #110, `f7a35a6`): when hands-free doesn't return after the bounce, the Desktop retries `ConnectProfile` (after 1 s, 2 s, then every 3 s) outside the bounce itself, while the Call is shown as continuing on the Phone. `ConnectProfile` was chosen over `Device1.Connect` because it is proven on the Pixel and the Phone stays connected. See `docs/research/2026-11-05-handsfree-not-back.md`._
+
+_2026-11-05 note (#21): the Setup Window also calls `ConnectProfile` for the hands-free UUID, once, when a Phone it has just paired connects without hands-free, and again when the user chooses Try again after switching Phone calls on. A refusal tells the user where that switch is. This is a second purpose beyond the Handoff bounce; `DisconnectProfile` is still used only for the bounce. See `docs/research/2026-11-05-setup-window.md`._

@@ -37,7 +37,7 @@ use crate::telephony::hands_free::{
     Away, audio_gateway_back, audio_link_tries, calls_back, drop_hands_free,
 };
 use crate::telephony::{Quirk, Signal};
-use crate::{SharedWorld, TelephonyConnection, World, bluez, lock};
+use crate::{SharedWorld, TelephonyConnection, World, bluez, lock, pairing, range};
 
 /// The Hands-Free Audio Gateway profile: the Phone's side of hands-free.
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
@@ -181,6 +181,7 @@ fn connect_profile(
     call: &MethodCall,
     message: &Message,
 ) -> zbus::Result<()> {
+    let mut ask = false;
     // BlueZ takes a while to give up, as it does to connect.
     let mut slow = false;
     let reply = {
@@ -192,6 +193,11 @@ fn connect_profile(
                 "org.bluez.Error.AlreadyConnected",
                 "Already Connected".to_owned(),
             )),
+            // Connected without hands-free: the Phone is asked for it.
+            None if world.dropped.is_none() && pairing::connected_without_hands_free(world) => {
+                ask = true;
+                None
+            }
             None => match world.dropped.as_mut() {
                 None => Some(Reply::Error(
                     "org.bluez.Error.Failed",
@@ -220,6 +226,9 @@ fn connect_profile(
             std::thread::sleep(RECONNECT_REPLY);
         }
         return zbus::block_on(reply.send(system, &message.header()));
+    }
+    if ask {
+        return ask_for_hands_free(world, system, telephony, message);
     }
     std::thread::sleep(RECONNECT_REPLY);
     zbus::block_on(Reply::body(()).send(system, &message.header()))?;
@@ -270,6 +279,24 @@ fn connect_profile(
         zbus::block_on(emit(telephony, signals))?;
     }
     Ok(())
+}
+
+/// The Phone, connected without hands-free, is asked for it: it brings it
+/// up, or refuses, as its "Phone calls" switch says.
+fn ask_for_hands_free(
+    world: &SharedWorld,
+    system: &Connection,
+    telephony: &TelephonyConnection,
+    message: &Message,
+) -> zbus::Result<()> {
+    std::thread::sleep(pairing::HANDS_FREE_ANSWER_TIME);
+    let (reply, change) = pairing::connect_hands_free(&mut lock(world))?;
+    zbus::block_on(async {
+        if let Some(change) = change {
+            range::emit(system, telephony, change).await?;
+        }
+        reply.send(system, &message.header()).await
+    })
 }
 
 /// Whether this `ConnectProfile` fails, by the quirks: every time, or this

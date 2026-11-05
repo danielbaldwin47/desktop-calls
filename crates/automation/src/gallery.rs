@@ -31,7 +31,12 @@ struct State {
     reach: fn(&Harness),
     /// Whether a capture under `look` shows the state yet.
     shown: fn(&Screenshot, Look) -> bool,
+    /// Sets the scenario up before it starts.
+    prepare: fn(Builder) -> Builder,
 }
+
+/// The Simulated Phone's name, for the Setup Window's states.
+const PHONE_NAME: &str = "My Pixel";
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
@@ -98,12 +103,14 @@ const STATES: &[State] = &[
     State {
         name: "bare-output",
         title: "The bare output, with the Phone connected and no surface shown",
+        prepare: as_is,
         reach: connect,
         shown: |_, _| true,
     },
     State {
         name: "incoming-call-banner",
         title: "The Incoming Call Banner, ringing",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             ring(harness);
@@ -113,6 +120,7 @@ const STATES: &[State] = &[
     State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             // A withheld number: the Banner identifies the caller for as long
@@ -131,6 +139,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-live",
         title: "The Call Window, answered here, with HD audio on this computer",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().set_codec(2);
@@ -152,6 +161,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-muted",
         title: "The Call Window, muted, with the keypad shown and tones sent",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let call = ring(harness);
@@ -201,6 +211,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-mute-unavailable",
         title: "The Call Window, answered on the phone, so Mute is unavailable",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let path = harness.simulated_phone().ring(NUMBER);
@@ -227,6 +238,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-ended",
         title: "The Call Window, just after the Call ended",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let call = ring(harness);
@@ -281,6 +293,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-connection-lost",
         title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let call = ring(harness);
@@ -309,6 +322,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-calling",
         title: "The Call Window, placing a Call, before the other end rings",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             dial(harness);
@@ -318,6 +332,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-ringing",
         title: "The Call Window, placing a Call, ringing at the other end",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             dial(harness);
@@ -329,6 +344,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-not-placed",
         title: "The Call Window, after the Phone couldn't place the Call",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().refuse_next_dial("cme:30");
@@ -346,6 +362,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-call-history",
         title: "The Dialer, before typing: the Call History, newest first, Missed Calls marked",
+        prepare: as_is,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "");
@@ -355,6 +372,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-results",
         title: "The Dialer, searching for smith, the second match selected",
+        prepare: as_is,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "smith");
@@ -368,6 +386,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-not-connected",
         title: "The Dialer, after Enter with the Phone out of range",
+        prepare: as_is,
         reach: |harness| {
             sync(harness);
             harness.simulated_phone().disconnect();
@@ -383,6 +402,56 @@ const STATES: &[State] = &[
             });
         },
         shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
+        name: "setup-window-choose",
+        title: "The Setup Window on a fresh install, listing the Phone nearby",
+        prepare: fresh_install,
+        reach: |harness| {
+            setup_window_at(harness, "choose");
+            harness.wait_for_app("the Phone is listed", DEADLINE, |state| {
+                setup_window_shows(state, "phones", PHONE_NAME)
+                    && state
+                        .surface("setup-window")
+                        .is_some_and(|window| window.contains_key("desktop"))
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-confirm",
+        title: "The Setup Window, showing the code to check against the Phone's",
+        prepare: fresh_install,
+        reach: |harness| {
+            setup_window_at(harness, "choose");
+            harness.wait_for_app("the Phone is listed", DEADLINE, |state| {
+                setup_window_shows(state, "phones", PHONE_NAME)
+            });
+            harness.keyboard().press(Key::Return);
+            setup_window_at(harness, "confirm");
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-phone-calls-off",
+        title: "The Setup Window, after the Phone refused hands-free: where to switch Phone calls on",
+        prepare: fresh_install,
+        reach: |harness| {
+            harness.simulated_phone().set_hands_free("refused");
+            pair_through_setup_window(harness);
+            setup_window_at(harness, "phone-calls-off");
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-done",
+        title: "The Setup Window, paired and connected for Calls",
+        prepare: fresh_install,
+        reach: |harness| {
+            pair_through_setup_window(harness);
+            setup_window_at(harness, "done");
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];
 
@@ -562,6 +631,46 @@ fn wait_for_status(harness: &Harness, status: &str) {
     );
 }
 
+/// The scenario as it is set up by default: the Phone paired.
+fn as_is(builder: Builder) -> Builder {
+    builder
+}
+
+/// A fresh install: the Phone nearby and not paired, and headphones nearby
+/// too, so the Setup Window opens by itself.
+fn fresh_install(builder: Builder) -> Builder {
+    builder
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .headphones_nearby("WH-1000XM5")
+}
+
+fn setup_window_shows(state: &AppState, key: &str, value: &str) -> bool {
+    state
+        .surface("setup-window")
+        .and_then(|window| window.get(key))
+        .is_some_and(|shown| shown == value)
+}
+
+fn setup_window_at(harness: &Harness, step: &str) {
+    harness.wait_for_app(
+        &format!("the Setup Window is at step {step:?}"),
+        DEADLINE,
+        |state| setup_window_shows(state, "step", step),
+    );
+}
+
+/// Chooses the Phone in the Setup Window and confirms its code.
+fn pair_through_setup_window(harness: &Harness) {
+    setup_window_at(harness, "choose");
+    harness.wait_for_app("the Phone is listed", DEADLINE, |state| {
+        setup_window_shows(state, "phones", PHONE_NAME)
+    });
+    harness.keyboard().press(Key::Return);
+    setup_window_at(harness, "confirm");
+    harness.keyboard().press(Key::Return);
+}
+
 fn connect(harness: &Harness) {
     harness.simulated_phone().connect();
     harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
@@ -667,8 +776,7 @@ pub fn run(options: &Options) -> ExitCode {
     for repetition in 1..=options.repeat {
         for state in &states {
             for look in LOOKS {
-                let harness = look
-                    .builder()
+                let harness = (state.prepare)(look.builder())
                     .headless_screen()
                     .omarchy_bar()
                     .screenshot_directory(output.clone())

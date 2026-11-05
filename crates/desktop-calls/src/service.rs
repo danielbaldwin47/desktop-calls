@@ -31,7 +31,7 @@ use crate::phone_link::Command;
 use crate::ringer::Ringer;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
-use crate::{bluez, contacts, earlier_run, logind, phone_link};
+use crate::{bluez, contacts, earlier_run, logind, pairing, phone_link};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -158,6 +158,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         inputs,
         dials,
         Shell {
+            pairing: pairing::Pairing::new(system.clone(), input_sender.clone()),
             inputs: input_sender,
             system,
             commands: command_sender,
@@ -259,6 +260,8 @@ struct Shell {
     ringer: Ringer,
     notifier: Notifier,
     stall_watch: StallWatch,
+    /// Carries out the Setup Window's pairing on BlueZ.
+    pairing: pairing::Pairing,
 }
 
 impl Shell {
@@ -305,6 +308,12 @@ impl Shell {
                         let _ = inputs.unbounded_send(Input::TimerFired(timer));
                     });
                 }
+                effect @ (Effect::StartSetup
+                | Effect::StopSetup
+                | Effect::PairPhone { .. }
+                | Effect::AnswerPairingCode { .. }
+                | Effect::TrustPhone { .. }
+                | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
                 Effect::ReportError(failure) => {

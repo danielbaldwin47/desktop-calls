@@ -52,11 +52,13 @@ mod banner;
 mod call_window;
 mod dialer;
 mod first_frames;
+mod setup_window;
 
 use banner::Banner;
 use call_window::CallWindow;
 use dialer::Dialer;
 use first_frames::FirstFrames;
+use setup_window::SetupWindow;
 
 /// How wide Omarchy's notification-toast column is taken to be when
 /// Hyprland can't say. Omarchy 4.5's is 394.
@@ -115,6 +117,7 @@ pub struct Surfaces {
     banner: Banner,
     call_window: Rc<CallWindow>,
     dialer: Rc<Dialer>,
+    setup_window: Rc<SetupWindow>,
     first_frames: FirstFrames,
     _theme: Option<Theme>,
 }
@@ -162,7 +165,8 @@ impl Surfaces {
         let dialer = Dialer::new(intents, report.clone());
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
-            call_window: CallWindow::new(intents, report),
+            call_window: CallWindow::new(intents, report.clone()),
+            setup_window: SetupWindow::new(intents, report),
             first_frames: FirstFrames::new(dialer.surface.window.clone()),
             dialer,
             _theme: theme,
@@ -197,6 +201,7 @@ impl Surfaces {
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
         self.dialer.render(view.dialer.as_ref());
+        self.setup_window.render(view.setup_window.as_ref());
         stack(
             &self.banner.surface.window,
             &self.call_window.surface.window,

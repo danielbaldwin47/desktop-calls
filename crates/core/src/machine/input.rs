@@ -145,6 +145,52 @@ pub enum Input {
     /// The Desktop's Do Not Disturb is on (`true`) or off, as read at
     /// startup and on every change.
     DoNotDisturbChanged(bool),
+    /// BlueZ has listed the devices it knows, at startup: every paired
+    /// Phone has been reported by now.
+    PairedPhonesListed,
+    /// The user asked for the Setup Window: from the Indicator, the
+    /// control interface, the command line or a Problem.
+    OpenSetupWindow,
+    /// The user closed the Setup Window.
+    CloseSetupWindow,
+    /// The Desktop is looking for Phones and is discoverable, as
+    /// [`Effect::StartSetup`] asked, and shows on Phones as `desktop_name`.
+    SetupReady { desktop_name: String },
+    /// The Desktop can't look for Phones: Bluetooth is off or missing.
+    SetupUnavailable,
+    /// A Phone nearby that isn't paired with the Desktop, or its new name.
+    PhoneNearby(Phone),
+    /// The nearby Phone with this address is gone from BlueZ's list.
+    PhoneNotNearby { address: String },
+    /// The user chose this nearby Phone in the Setup Window, to pair it.
+    ChoosePhone { address: String },
+    /// Pairing with this Phone asks whether it shows the same code: six
+    /// digits, 0 to 999999. Each ends in [`Effect::AnswerPairingCode`].
+    PairingCode { phone: Phone, code: u32 },
+    /// The user confirmed the pairing code shows on the Phone too.
+    ConfirmPairing,
+    /// The user turned the pairing down.
+    RejectPairing,
+    /// Pairing didn't happen, for this reason.
+    PairingFailed(PairingFailure),
+    /// The Phone refused hands-free when asked: its "Phone calls" setting
+    /// for the Desktop is off.
+    HandsFreeRefused,
+    /// The user asked to try hands-free again, after switching "Phone
+    /// calls" on.
+    RetryHandsFree,
+}
+
+/// Why pairing with a Phone didn't happen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PairingFailure {
+    /// The person holding the Phone, or the user, turned it down, or it was
+    /// cancelled.
+    Rejected,
+    /// The Phone didn't answer.
+    Unreachable,
+    /// Anything else.
+    Failed,
 }
 
 /// What the Phone link can be asked to do with Calls.
@@ -255,6 +301,8 @@ pub enum Timer {
     /// The Call Window has said for long enough why the Phone refused Hold &
     /// answer, End & answer or Swap, by the refusal with this number.
     DismissCallWaitingNotice(u32),
+    /// The Setup Window's step with this number has waited long enough.
+    SetupStep(u32),
     /// The Phone has had long enough to report the number of this Call,
     /// which rang with none: if it hasn't by now, the number is withheld.
     NumberLate(CallId),
@@ -294,4 +342,22 @@ pub enum Effect {
     /// Delete the Contacts and Call History held for the attached Phone,
     /// on disk too.
     ForgetContacts,
+    /// Look for nearby Phones, make the Desktop discoverable, and take
+    /// pairing requests, until [`Effect::StopSetup`]. Answered by
+    /// [`Input::SetupReady`] or [`Input::SetupUnavailable`].
+    StartSetup,
+    /// Stop looking for Phones, stop being discoverable, and turn down
+    /// pairing requests.
+    StopSetup,
+    /// Pair with the nearby Phone with this address. Its code comes as
+    /// [`Input::PairingCode`]; a failure as [`Input::PairingFailed`].
+    PairPhone { address: String },
+    /// Answer the pairing code asked about last: `confirm` if the user
+    /// confirmed it.
+    AnswerPairingCode { confirm: bool },
+    /// Let the Phone with this address connect without asking each time.
+    TrustPhone { address: String },
+    /// Ask the Phone with this address for hands-free alone. A refusal
+    /// comes as [`Input::HandsFreeRefused`].
+    ConnectHandsFree { address: String },
 }

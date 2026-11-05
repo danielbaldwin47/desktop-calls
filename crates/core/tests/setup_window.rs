@@ -1,0 +1,506 @@
+//! The Setup Window at the Call state machine's public interface: opening
+//! by itself with no Phone set up, pairing a nearby Phone with the same
+//! code on both screens, pairing started from the Phone, checking that the
+//! Phone shares Calls, and switching to another Phone.
+
+use desktop_calls_core::{
+    ConnectFailure, ConnectionState, Effect, IndicatorEntry, Input, PairingFailure, Phone,
+    PhoneCommand, SetupNotice, SetupStep, SetupWindowView, State, Timer,
+    messages::{self, ProblemKind},
+    step,
+};
+
+const PHONE: &str = "AA:BB:CC:DD:EE:FF";
+const OTHER: &str = "48:A4:93:00:00:7E";
+
+fn run(state: State, inputs: impl IntoIterator<Item = Input>) -> (State, Vec<Effect>) {
+    let mut state = state;
+    let mut effects = Vec::new();
+    for input in inputs {
+        let (next, mut more) = step(state, input);
+        state = next;
+        effects.append(&mut more);
+    }
+    (state, effects)
+}
+
+fn phone(name: &str, address: &str) -> Phone {
+    Phone {
+        name: name.to_owned(),
+        address: address.to_owned(),
+    }
+}
+
+fn pixel() -> Phone {
+    phone("My Pixel", PHONE)
+}
+
+fn setup_step(state: &State) -> Option<SetupStep> {
+    state.surfaces().setup_window.map(|window| window.step)
+}
+
+/// The window's wait timers the effects started.
+fn setup_timers(effects: &[Effect]) -> Vec<Timer> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::StartTimer {
+                timer: timer @ Timer::SetupStep(_),
+                ..
+            } => Some(*timer),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A fresh install: BlueZ listed no paired Phone, and the Pixel is nearby.
+fn choosing() -> State {
+    run(
+        State::default(),
+        [
+            Input::PairedPhonesListed,
+            Input::SetupReady {
+                desktop_name: "desktop".to_owned(),
+            },
+            Input::PhoneNearby(pixel()),
+        ],
+    )
+    .0
+}
+
+/// The Pixel paired through the window, and BlueZ said so.
+fn paired() -> (State, Vec<Effect>) {
+    run(
+        choosing(),
+        [
+            Input::ChoosePhone {
+                address: PHONE.to_owned(),
+            },
+            Input::PairingCode {
+                phone: pixel(),
+                code: 48_213,
+            },
+            Input::ConfirmPairing,
+            Input::PhonePaired(pixel()),
+        ],
+    )
+}
+
+#[test]
+fn with_no_phone_set_up_the_setup_window_opens_by_itself_and_starts_looking() {
+    let (state, effects) = run(State::default(), [Input::PairedPhonesListed]);
+
+    assert_eq!(effects, [Effect::StartSetup]);
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Choose { phones: vec![] })
+    );
+}
+
+#[test]
+fn with_a_phone_set_up_the_setup_window_stays_closed() {
+    let (state, effects) = run(
+        State::default(),
+        [Input::PhonePaired(pixel()), Input::PairedPhonesListed],
+    );
+
+    assert!(!effects.contains(&Effect::StartSetup));
+    assert_eq!(setup_step(&state), None);
+}
+
+#[test]
+fn nearby_phones_are_listed_by_name_in_the_order_found_and_leave_when_gone() {
+    let (state, _) = run(
+        choosing(),
+        [
+            Input::PhoneNearby(phone("Work phone", OTHER)),
+            Input::PhoneNearby(phone("Pixel 8", PHONE)),
+        ],
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Choose {
+            phones: vec![phone("Pixel 8", PHONE), phone("Work phone", OTHER)]
+        })
+    );
+
+    let (state, _) = run(
+        state,
+        [Input::PhoneNotNearby {
+            address: PHONE.to_owned(),
+        }],
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Choose {
+            phones: vec![phone("Work phone", OTHER)]
+        })
+    );
+}
+
+#[test]
+fn choosing_a_phone_pairs_it_and_shows_its_code_until_confirmed() {
+    let (state, effects) = run(
+        choosing(),
+        [Input::ChoosePhone {
+            address: PHONE.to_owned(),
+        }],
+    );
+    assert_eq!(
+        effects,
+        [Effect::PairPhone {
+            address: PHONE.to_owned()
+        }]
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Pairing { phone: pixel() })
+    );
+
+    let (state, _) = run(
+        state,
+        [Input::PairingCode {
+            phone: pixel(),
+            code: 48_213,
+        }],
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Confirm {
+            phone: pixel(),
+            code: 48_213
+        })
+    );
+
+    let (state, effects) = run(state, [Input::ConfirmPairing]);
+    assert!(effects.contains(&Effect::AnswerPairingCode { confirm: true }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Confirmed { phone: pixel() })
+    );
+}
+
+#[test]
+fn once_paired_the_phone_is_followed_trusted_and_connected() {
+    let (state, effects) = paired();
+
+    assert_eq!(state.phone(), Some(&pixel()));
+    assert_eq!(state.connection_state(), &ConnectionState::Connecting);
+    for wanted in [
+        Effect::AttachPhone {
+            address: PHONE.to_owned(),
+        },
+        Effect::TrustPhone {
+            address: PHONE.to_owned(),
+        },
+        Effect::ConnectPhone {
+            address: PHONE.to_owned(),
+        },
+    ] {
+        assert!(effects.contains(&wanted), "{wanted:?} in {effects:?}");
+    }
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Connecting { phone: pixel() })
+    );
+}
+
+#[test]
+fn the_setup_is_done_once_the_phone_is_connected_for_calls() {
+    let (state, _) = paired();
+    let (state, _) = run(
+        state,
+        [
+            Input::ConnectPhoneDone,
+            Input::PhonePresent {
+                address: PHONE.to_owned(),
+            },
+            Input::PhoneConnected {
+                address: PHONE.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    );
+
+    assert_eq!(state.connection_state(), &ConnectionState::Connected);
+    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+}
+
+#[test]
+fn a_phone_pairing_from_its_own_screen_shows_the_same_code() {
+    let (state, _) = run(
+        choosing(),
+        [Input::PairingCode {
+            phone: pixel(),
+            code: 7,
+        }],
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Confirm {
+            phone: pixel(),
+            code: 7
+        })
+    );
+
+    let (state, _) = run(state, [Input::ConfirmPairing, Input::PhonePaired(pixel())]);
+    assert_eq!(state.phone(), Some(&pixel()));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Connecting { phone: pixel() })
+    );
+}
+
+#[test]
+fn with_the_setup_window_closed_pairing_requests_are_turned_down() {
+    let (state, effects) = run(
+        choosing(),
+        [
+            Input::CloseSetupWindow,
+            Input::PairingCode {
+                phone: pixel(),
+                code: 7,
+            },
+        ],
+    );
+
+    assert_eq!(
+        effects,
+        [
+            Effect::StopSetup,
+            Effect::AnswerPairingCode { confirm: false }
+        ]
+    );
+    assert_eq!(setup_step(&state), None);
+}
+
+#[test]
+fn a_rejected_pairing_goes_back_to_the_list_and_says_why() {
+    let (state, _) = run(
+        choosing(),
+        [
+            Input::ChoosePhone {
+                address: PHONE.to_owned(),
+            },
+            Input::PairingFailed(PairingFailure::Rejected),
+        ],
+    );
+
+    let window = state.surfaces().setup_window.expect("the Setup Window");
+    assert_eq!(
+        window.step,
+        SetupStep::Choose {
+            phones: vec![pixel()]
+        }
+    );
+    assert_eq!(window.notice, Some(SetupNotice::PairingRejected));
+}
+
+#[test]
+fn a_phone_connected_without_hands_free_is_asked_for_it_alone() {
+    let (state, _) = paired();
+    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let timers = setup_timers(&effects);
+    assert_eq!(timers.len(), 1);
+
+    let (state, effects) = run(state, [Input::TimerFired(timers[0])]);
+    assert!(effects.contains(&Effect::ConnectHandsFree {
+        address: PHONE.to_owned()
+    }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Connecting { phone: pixel() })
+    );
+
+    let (state, _) = run(
+        state,
+        [
+            Input::PhoneConnected {
+                address: PHONE.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    );
+    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+}
+
+#[test]
+fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_again() {
+    let (state, _) = paired();
+    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let (state, _) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
+
+    let (state, _) = run(state, [Input::HandsFreeRefused]);
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::PhoneCallsOff { phone: pixel() })
+    );
+
+    let (_, effects) = run(state, [Input::RetryHandsFree]);
+    assert!(effects.contains(&Effect::ConnectHandsFree {
+        address: PHONE.to_owned()
+    }));
+}
+
+#[test]
+fn pairing_a_second_phone_switches_to_it() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(phone("Old phone", OTHER)),
+            Input::PairedPhonesListed,
+            Input::OpenSetupWindow,
+            Input::PhoneNearby(pixel()),
+        ],
+    );
+    assert_eq!(state.phone(), Some(&phone("Old phone", OTHER)));
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::ChoosePhone {
+                address: PHONE.to_owned(),
+            },
+            Input::PairingCode {
+                phone: pixel(),
+                code: 1,
+            },
+            Input::ConfirmPairing,
+            Input::PhonePaired(pixel()),
+        ],
+    );
+
+    assert_eq!(state.phone(), Some(&pixel()));
+    assert!(effects.contains(&Effect::DetachPhone));
+    assert!(effects.contains(&Effect::AttachPhone {
+        address: PHONE.to_owned()
+    }));
+}
+
+#[test]
+fn the_setup_window_opens_on_request_and_closing_stops_the_looking() {
+    let (state, _) = run(
+        State::default(),
+        [Input::PhonePaired(pixel()), Input::PairedPhonesListed],
+    );
+
+    let (state, effects) = run(state, [Input::OpenSetupWindow]);
+    assert_eq!(effects, [Effect::StartSetup]);
+    assert!(state.surfaces().setup_window.is_some());
+
+    let (state, effects) = run(state, [Input::CloseSetupWindow]);
+    assert_eq!(effects, [Effect::StopSetup]);
+    assert_eq!(state.surfaces().setup_window, None);
+}
+
+#[test]
+fn pair_again_after_the_phone_forgot_the_pairing_pairs_from_the_phone() {
+    let address = || PHONE.to_owned();
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::PhoneAbsent { address: address() },
+            Input::ConnectPhoneFailed(ConnectFailure::PairingLost),
+        ],
+    );
+    assert_eq!(state.connection_state(), &ConnectionState::PairingLost);
+    let pair_again = IndicatorEntry::Problem(ProblemKind::PairingLost)
+        .intent()
+        .expect("the Problem offers Pair again");
+    assert_eq!(pair_again, Input::OpenSetupWindow);
+
+    // The person holding the Phone pairs from its Pair new device screen.
+    let (state, effects) = run(
+        state,
+        [
+            pair_again,
+            Input::PhonePresent { address: address() },
+            Input::PairingCode {
+                phone: pixel(),
+                code: 990_001,
+            },
+            Input::ConfirmPairing,
+            Input::PhoneConnected { address: address() },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    );
+
+    assert!(effects.contains(&Effect::AnswerPairingCode { confirm: true }));
+    assert!(state.problems().is_empty());
+    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+}
+
+#[test]
+fn a_phone_paired_again_that_does_not_connect_by_itself_is_connected() {
+    let address = || PHONE.to_owned();
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::PhoneAbsent { address: address() },
+            Input::ConnectPhoneFailed(ConnectFailure::PairingLost),
+            Input::OpenSetupWindow,
+            Input::PairingCode {
+                phone: pixel(),
+                code: 990_001,
+            },
+        ],
+    );
+    let (state, effects) = run(state, [Input::ConfirmPairing]);
+    let (state, effects) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
+
+    assert!(effects.contains(&Effect::ConnectPhone { address: address() }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Connecting { phone: pixel() })
+    );
+}
+
+#[test]
+fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
+    let view = |step| SetupWindowView {
+        step,
+        desktop_name: Some("desktop".to_owned()),
+        notice: None,
+        opened: 1,
+    };
+    let choose = messages::setup_window(&view(SetupStep::Choose {
+        phones: vec![pixel()],
+    }));
+    assert_eq!(
+        choose.keys,
+        "Up and Down choose a phone, Enter pairs it; Escape closes"
+    );
+
+    let confirm = messages::setup_window(&view(SetupStep::Confirm {
+        phone: pixel(),
+        code: 42,
+    }));
+    assert_eq!(confirm.code.as_deref(), Some("000042"));
+    assert_eq!(
+        confirm.keys,
+        "Enter: Confirm; Tab moves between buttons; Escape closes"
+    );
+
+    let off = messages::setup_window(&view(SetupStep::PhoneCallsOff { phone: pixel() }));
+    assert_eq!(
+        off.summary.as_deref(),
+        Some("My Pixel is paired, but isn't sharing Calls with this computer.")
+    );
+    assert!(
+        off.instructions
+            .iter()
+            .all(|line| !line.contains("is paired"))
+    );
+
+    let done = messages::setup_window(&view(SetupStep::Done { phone: pixel() }));
+    assert!(done.instructions.is_empty());
+    assert_eq!(
+        done.summary.as_deref(),
+        Some("Calls to your phone ring here now, and you can Call from here.")
+    );
+    assert_eq!(done.keys, "Enter: Done; Escape closes");
+}

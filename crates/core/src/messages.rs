@@ -12,6 +12,9 @@ use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
+mod setup;
+pub use setup::{SetupWindowText, setup_window};
+
 /// A failure the user can be told about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Failure {
@@ -199,7 +202,7 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::PhonePairingLost => (
             "Phone not connected: it has forgotten this computer, so pair them again.",
-            None,
+            Some(NextAction::Command("desktop-calls connect")),
         ),
         Failure::ConnectionLost => (
             "Connection to phone lost: the Call continues on your phone.",
@@ -294,21 +297,21 @@ impl ProblemKind {
 /// right.
 #[must_use]
 pub fn problem(problem: ProblemKind) -> Message {
-    let text = match problem {
-        ProblemKind::ContactsDenied => {
-            "Your phone isn't sharing Contacts, so Calls show numbers instead of names; to allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer and turn on Contacts and call history."
-        }
-        ProblemKind::ContactsPromptUnanswered => {
-            "Your phone asked whether to share Contacts and nobody answered, so Calls show numbers instead of names; turn Bluetooth off and on again on your phone to be asked again."
-        }
-        ProblemKind::PairingLost => {
-            "Your phone has forgotten this computer, so Calls can't reach it; remove your phone from this computer's Bluetooth settings, then pair them again."
-        }
+    let (text, next_action) = match problem {
+        ProblemKind::ContactsDenied => (
+            "Your phone isn't sharing Contacts, so Calls show numbers instead of names; to allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer and turn on Contacts and call history.",
+            None,
+        ),
+        ProblemKind::ContactsPromptUnanswered => (
+            "Your phone asked whether to share Contacts and nobody answered, so Calls show numbers instead of names; turn Bluetooth off and on again on your phone to be asked again.",
+            None,
+        ),
+        ProblemKind::PairingLost => (
+            "Your phone has forgotten this computer, so Calls can't reach it; choose Pair again to pair them again.",
+            Some(NextAction::Command("desktop-calls connect")),
+        ),
     };
-    Message {
-        text,
-        next_action: None,
-    }
+    Message { text, next_action }
 }
 
 /// A Problem in a few words, for a menu entry or a tooltip.
@@ -357,6 +360,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
     match entry {
         IndicatorEntry::Status => indicator_status(&view.status),
         IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
+        IndicatorEntry::ConnectPhone => "Connect your phone…".to_owned(),
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),
@@ -376,6 +380,8 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
             to: AudioLocation::Phone,
             ..
         } => label(Label::MoveAudioToPhone).to_owned(),
+        // Its click opens the Setup Window.
+        IndicatorEntry::Problem(ProblemKind::PairingLost) => "Pairing lost: pair again…".to_owned(),
         IndicatorEntry::Problem(problem) => problem_heading(*problem).to_owned(),
     }
 }

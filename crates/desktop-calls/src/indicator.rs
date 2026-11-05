@@ -440,6 +440,7 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
                 IndicatorEntry::HangUp(_) => 3,
                 IndicatorEntry::Mute(_) => 4,
                 IndicatorEntry::MoveAudio { .. } => 5,
+                IndicatorEntry::ConnectPhone => 6,
                 IndicatorEntry::Separator => {
                     separators += 1;
                     9 + separators

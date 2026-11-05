@@ -39,6 +39,8 @@ pub struct Builder {
     hyprland: Option<HyprlandSettings>,
     installed: bool,
     notification_state: NotificationState,
+    /// The Simulated Phone's arguments saying who is nearby.
+    nearby: Vec<String>,
 }
 
 /// What Omarchy's Do Not Disturb state file holds when the app starts.
@@ -185,6 +187,29 @@ impl Builder {
         self
     }
 
+    /// A fresh install: the Simulated Phone is nearby and not paired with
+    /// the Desktop, so no Phone is set up.
+    pub fn phone_unpaired(mut self) -> Self {
+        self.nearby.push("--unpaired".to_owned());
+        self
+    }
+
+    /// Headphones named `name` are nearby, not paired: discovery finds them
+    /// beside the Phone.
+    pub fn headphones_nearby(mut self, name: &str) -> Self {
+        self.nearby.push("--headphones".to_owned());
+        self.nearby.push(name.to_owned());
+        self
+    }
+
+    /// Another Phone named `name` is paired with the Desktop, and out of
+    /// range: the Phone the user switches from.
+    pub fn old_phone_paired(mut self, name: &str) -> Self {
+        self.nearby.push("--old-phone".to_owned());
+        self.nearby.push(name.to_owned());
+        self
+    }
+
     /// Installs Desktop Calls into the scenario's home as `just install`
     /// does, and leaves the service stopped: the session bus starts it
     /// through D-Bus activation once something calls it, as the user's
@@ -326,7 +351,7 @@ impl Builder {
             harness.bar = Some(bar);
         }
 
-        harness.start_simulated_phone(self.scenario.as_deref());
+        harness.start_simulated_phone(self.scenario.as_deref(), &self.nearby);
         if self.phone_connected {
             harness.simulated_phone().connect();
         }

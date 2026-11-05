@@ -551,6 +551,17 @@ impl Harness {
         }
     }
 
+    /// Calls the app's `OpenConnectWindow`, which opens the Setup Window.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface doesn't answer.
+    pub fn open_connect_window(&self) {
+        if let Err(error) = self.try_app_method("OpenConnectWindow", &()) {
+            panic!("OpenConnectWindow on the app: {error:?}");
+        }
+    }
+
     /// Calls the app's `OpenDialer` with `query` typed and the Call with id
     /// `call` selected (0 for none).
     ///

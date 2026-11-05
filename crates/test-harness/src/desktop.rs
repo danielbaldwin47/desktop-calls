@@ -34,7 +34,8 @@ impl Harness {
     }
 
     /// Turns Omarchy's Do Not Disturb on or off, by rewriting its state file
-    /// as Omarchy does.
+    /// as Omarchy does. The notification server stand-in silences the
+    /// notifications that arrive from now on as Omarchy would.
     ///
     /// # Panics
     ///
@@ -42,6 +43,7 @@ impl Harness {
     pub fn set_do_not_disturb(&self, on: bool) {
         stand_ins::write_do_not_disturb(&self.directory.join("home"), on)
             .expect("write Omarchy's notification state file");
+        self.stand_ins.set_do_not_disturb(on);
     }
 
     /// Switches Omarchy's current theme to `theme`, as `omarchy-theme-set`

@@ -2,13 +2,14 @@
 //! Do Not Disturb state file, exercised the way the Desktop's own clients
 //! would use them.
 
+use std::collections::HashMap;
 use std::io::Read as _;
 use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use test_harness::{Harness, TrayItem};
+use test_harness::{Harness, Notification, TrayItem};
 use zbus::interface;
 use zbus::object_server::SignalEmitter;
 
@@ -145,6 +146,147 @@ fn toggling_do_not_disturb_rewrites_omarchys_notification_state_file() {
         read_json(&state_file),
         serde_json::json!({ "version": 3, "dnd": false })
     );
+}
+
+/// What Omarchy 4.5 makes of each notification text (summary, body): the
+/// verification codes it finds, which it offers to copy and which let the
+/// notification through Do Not Disturb. Worked out by running Omarchy's own
+/// `Detect.js` and `Delivery.js` on these texts; see
+/// `docs/research/2026-11-05-notification-text.md`.
+const OMARCHY_VERDICTS: &[(&str, &str, &[&str])] = &[
+    ("Missed call from Alice (mobile)", "08:30", &[]),
+    ("Your verification code", "482913", &["482913"]),
+    (
+        "Missed call from Gate code 4821 (mobile)",
+        "08:30",
+        &["4821"],
+    ),
+    ("Door code", "482-913", &["482913"]),
+    ("code", "G-482913", &["482913"]),
+    ("2FA", "48 2139", &["482139"]),
+    ("One-time password", "12 34 5678", &["1234", "5678"]),
+    ("Two factor", "4821 and 9999 and 4821", &["4821", "9999"]),
+    ("Confirmation", "4821", &["4821"]),
+    ("Enter 482913 as your code", "", &["482913"]),
+    // Uppercase letters and digits, when no digits alone are near.
+    ("PIN", "A9F3K2", &["A9F3K2"]),
+    // A capitalised word before "Code" makes a product name.
+    ("Claude Code", "Build 48213 passed", &[]),
+    // A year, too many digits, a digit run joined to a word.
+    ("Verify by 2026", "", &[]),
+    ("Code", "123456789", &[]),
+    ("Security key", "4821_x", &[]),
+    // The keyword must be a whole word, and the code near it.
+    ("confirmations", "4821", &[]),
+    ("Missed call from Pinkerton 4821", "08:30", &[]),
+    (
+        "code",
+        "................................................................................482913",
+        &[],
+    ),
+    // A zero-width non-joiner inside the keyword hides it.
+    ("Missed call from P\u{200c}in 4821 (mobile)", "08:30", &[]),
+];
+
+/// Normal and critical urgency, from the notification specification.
+const NORMAL: u8 = 1;
+const CRITICAL: u8 = 2;
+
+#[test]
+fn under_do_not_disturb_the_notification_server_silences_what_omarchy_silences() {
+    let harness = Harness::start();
+    harness.set_do_not_disturb(true);
+
+    for (summary, body, codes) in OMARCHY_VERDICTS {
+        let notification = notify(&harness, "Desktop Calls", NORMAL, summary, body);
+        assert_eq!(
+            (notification.verification_codes, notification.silenced),
+            (
+                codes.iter().map(|code| (*code).to_owned()).collect(),
+                codes.is_empty()
+            ),
+            "{summary:?} {body:?}"
+        );
+    }
+}
+
+#[test]
+fn only_omarchys_own_senders_get_through_do_not_disturb_without_a_code() {
+    let harness = Harness::start();
+    harness.set_do_not_disturb(true);
+
+    for (app_name, urgency, silenced) in [
+        ("omarchy-action", NORMAL, false),
+        ("notify-send", CRITICAL, false),
+        ("notify-send", NORMAL, true),
+        // Critical alone is not enough.
+        ("Desktop Calls", CRITICAL, true),
+    ] {
+        let notification = notify(&harness, app_name, urgency, "Backup finished", "08:30");
+        assert_eq!(notification.silenced, silenced, "{app_name} {urgency}");
+    }
+}
+
+#[test]
+fn without_do_not_disturb_nothing_is_silenced() {
+    let harness = Harness::start();
+    harness.set_do_not_disturb(true);
+    harness.set_do_not_disturb(false);
+
+    let notification = notify(
+        &harness,
+        "Desktop Calls",
+        NORMAL,
+        "Missed call from Alice",
+        "",
+    );
+    assert!(!notification.silenced, "{notification:?}");
+}
+
+/// Sends a notification as an app would, and returns what the notification
+/// server recorded of it.
+#[expect(
+    clippy::expect_used,
+    reason = "a test helper fails its test the way the test itself would"
+)]
+fn notify(
+    harness: &Harness,
+    app_name: &str,
+    urgency: u8,
+    summary: &str,
+    body: &str,
+) -> Notification {
+    let id: u32 = zbus::block_on(async {
+        let connection = zbus::connection::Builder::address(harness.session_bus_address())
+            .build()
+            .await?;
+        let reply = connection
+            .call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "Notify",
+                &(
+                    app_name,
+                    0_u32,
+                    "",
+                    summary,
+                    body,
+                    Vec::<&str>::new(),
+                    HashMap::from([("urgency", zbus::Variant::from(urgency))]),
+                    -1_i32,
+                ),
+            )
+            .await?;
+        reply.body().deserialize::<u32>()
+    })
+    .expect("send a notification");
+    harness
+        .notifications()
+        .received()
+        .into_iter()
+        .rfind(|notification| notification.id == id)
+        .expect("the notification server recorded it")
 }
 
 /// A minimal tray icon, as an app's `StatusNotifierItem` would be.

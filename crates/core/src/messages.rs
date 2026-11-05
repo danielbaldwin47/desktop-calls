@@ -589,7 +589,9 @@ pub struct NotificationText {
 /// label, and when, as [`when`] shows it; for repeats, how many and when
 /// the latest was. Omarchy lets a notification through Do Not Disturb if it
 /// looks like a verification code (4 to 8 digits near a word such as code,
-/// pin or confirm), so none of these words is used.
+/// pin or confirm), so none of these words is used, and in a Contact's name
+/// or number label each is hidden from Omarchy (see
+/// [`hide_verification_code_keywords`]).
 #[must_use]
 pub fn missed_call(
     notice: &MissedCallNotice,
@@ -622,7 +624,113 @@ pub fn missed_call(
         body.push_str(" · ");
         body.push_str(label(Label::CantCallBack));
     }
-    NotificationText { summary, body }
+    NotificationText {
+        summary: hide_verification_code_keywords(&summary),
+        body: hide_verification_code_keywords(&body),
+    }
+}
+
+/// An invisible character that isn't a letter, so it ends a word for
+/// Omarchy's pattern matching. A line never breaks at it, and Omarchy's
+/// notification card draws a summary with it pixel for pixel as without
+/// (the word joiner, U+2060, comes from a fallback font that makes the line
+/// taller).
+const ZERO_WIDTH_NON_JOINER: char = '\u{200c}';
+
+/// A part of a verification-code keyword.
+enum KeywordPart {
+    Letters(&'static str),
+    /// White space or a hyphen.
+    Separator,
+    /// White space, a hyphen, or nothing.
+    OptionalSeparator,
+}
+
+/// Omarchy 4.5's verification-code keywords: `CODE_WORDS` in its
+/// notification plugin's `Detect.js`,
+/// `code|otp|one[\s-]?time|verification|verify|passcode|pin|2fa|two[\s-]factor|security key|confirm(?:ation)?`.
+const KEYWORDS: [&[KeywordPart]; 12] = {
+    use KeywordPart::{Letters, OptionalSeparator, Separator};
+    [
+        &[Letters("code")],
+        &[Letters("otp")],
+        &[Letters("one"), OptionalSeparator, Letters("time")],
+        &[Letters("verification")],
+        &[Letters("verify")],
+        &[Letters("passcode")],
+        &[Letters("pin")],
+        &[Letters("2fa")],
+        &[Letters("two"), Separator, Letters("factor")],
+        &[Letters("security key")],
+        &[Letters("confirmation")],
+        &[Letters("confirm")],
+    ]
+};
+
+/// `text` with a [`ZERO_WIDTH_NON_JOINER`] after the first letter of each whole word
+/// Omarchy takes for a verification-code keyword, so it finds none and a
+/// Contact's name can't let a notification through Do Not Disturb. The text
+/// looks the same.
+///
+/// Omarchy matches the keywords as JavaScript does without the `u` flag:
+/// ignoring ASCII case only, with `\b` between an ASCII word character
+/// (`[A-Za-z0-9_]`) and anything else, and `\s` as Unicode white space.
+fn hide_verification_code_keywords(text: &str) -> String {
+    let mut hidden = String::with_capacity(text.len());
+    let mut after_word = false;
+    for (at, character) in text.char_indices() {
+        hidden.push(character);
+        if !after_word && is_keyword_at(&text[at..]) {
+            hidden.push(ZERO_WIDTH_NON_JOINER);
+        }
+        after_word = is_ascii_word(character);
+    }
+    hidden
+}
+
+/// Whether `text` starts with a whole verification-code keyword.
+fn is_keyword_at(text: &str) -> bool {
+    KEYWORDS.iter().any(|parts| {
+        let mut rest = text;
+        for part in *parts {
+            rest = match part {
+                KeywordPart::Letters(letters) => match rest.get(..letters.len()) {
+                    Some(start) if start.eq_ignore_ascii_case(letters) => &rest[letters.len()..],
+                    _ => return false,
+                },
+                KeywordPart::Separator | KeywordPart::OptionalSeparator => {
+                    match rest.chars().next() {
+                        Some(next) if next == '-' || is_javascript_space(next) => {
+                            &rest[next.len_utf8()..]
+                        }
+                        _ if matches!(part, KeywordPart::OptionalSeparator) => rest,
+                        _ => return false,
+                    }
+                }
+            };
+        }
+        !rest.chars().next().is_some_and(is_ascii_word)
+    })
+}
+
+/// JavaScript's `\w`.
+fn is_ascii_word(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+/// JavaScript's `\s`: white space and line terminators.
+fn is_javascript_space(character: char) -> bool {
+    matches!(
+        character,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
 }
 
 const MONTHS: [&str; 12] = [

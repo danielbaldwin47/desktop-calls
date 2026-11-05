@@ -44,7 +44,9 @@ mod builder;
 mod client;
 mod control;
 mod desktop;
+mod hyprland;
 mod input;
+mod omarchy_quiet;
 mod process_group;
 mod redraw;
 mod screen;
@@ -149,7 +151,7 @@ pub struct Harness {
     /// The stand-in for Omarchy's bar, if the scenario has one.
     bar: Option<TestClient>,
     /// The Hyprland stand-in, if the scenario runs under one.
-    hyprland: Option<stand_ins::Hyprland>,
+    hyprland: Option<hyprland::Hyprland>,
     /// The process IDs of the test clients started, which draw on the
     /// screen as the app does. Some may have stopped since.
     test_clients: Mutex<Vec<u32>>,

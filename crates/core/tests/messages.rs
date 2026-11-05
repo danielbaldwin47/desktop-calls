@@ -164,6 +164,67 @@ fn repeat_missed_calls_are_counted_with_the_latest_time() {
 }
 
 #[test]
+fn a_contacts_name_and_label_cant_make_a_missed_call_look_like_a_verification_code() {
+    // Omarchy 4.5 lets a notification through Do Not Disturb if it finds 4
+    // to 8 digits near a whole word such as code, pin or verify. A
+    // zero-width non-joiner (U+200C), which no one sees, after the keyword's
+    // first letter keeps it from being that word.
+    let custom = |label: &str| NumberLabel::Custom(label.to_owned());
+    for (name, label, count, summary) in [
+        (
+            "Gate code 4821",
+            NumberLabel::Mobile,
+            1,
+            "Missed call from Gate c\u{200c}ode 4821 (mobile)",
+        ),
+        (
+            "PIN A9F3K",
+            NumberLabel::Work,
+            1,
+            "Missed call from P\u{200c}IN A9F3K (work)",
+        ),
+        (
+            "Pin 4821",
+            NumberLabel::Mobile,
+            2,
+            "2 missed calls from P\u{200c}in 4821",
+        ),
+        (
+            "Bank",
+            custom("verify 4821"),
+            1,
+            "Missed call from Bank (v\u{200c}erify 4821)",
+        ),
+        (
+            "one-time 482913",
+            NumberLabel::Home,
+            1,
+            "Missed call from o\u{200c}ne-time 482913 (home)",
+        ),
+        (
+            "Two factor, security key, confirmation 2FA",
+            NumberLabel::Home,
+            1,
+            "Missed call from T\u{200c}wo factor, s\u{200c}ecurity key, c\u{200c}onfirmation 2\u{200c}FA (home)",
+        ),
+        // Not whole keywords, so left as they are.
+        (
+            "Pinkerton Codey 4821",
+            NumberLabel::Mobile,
+            1,
+            "Missed call from Pinkerton Codey 4821 (mobile)",
+        ),
+    ] {
+        let contact = ContactMatch {
+            name: name.to_owned(),
+            label,
+        };
+        let notice = missed_call(alices_number(), Some(contact), count);
+        assert_eq!(messages::missed_call(&notice, NOW, 0).summary, summary);
+    }
+}
+
+#[test]
 fn missed_call_notifications_never_look_like_a_verification_code() {
     // Omarchy 4.5 lets a notification through Do Not Disturb if it finds 4
     // to 8 digits near a word such as code, pin, verify or confirm.

@@ -48,9 +48,14 @@ fn missed(number: Option<&str>, at: &str) -> String {
 /// A Phone with Contacts and a Call History, connected and synced, on a
 /// screen of its own.
 fn synced() -> Harness {
+    synced_with(&contacts())
+}
+
+/// [`synced`], with `contacts` as the Phone's Contacts.
+fn synced_with(contacts: &str) -> Harness {
     let harness = Harness::builder().headless_screen().start();
     let phone = harness.simulated_phone();
-    phone.set_pbap_folder("pb", &contacts());
+    phone.set_pbap_folder("pb", contacts);
     call_history(&harness, &[]);
     phone.connect();
     harness.wait_for_app(
@@ -346,6 +351,69 @@ fn a_call_that_rings_out_is_notified_if_the_call_history_refresh_fails() {
     rings_out(&harness, &path);
 
     wait_for_notification(&harness, "Missed call from Alice (mobile)");
+}
+
+/// A Contact's name can't change how Omarchy treats the notification. Omarchy
+/// 4.5 lets through Do Not Disturb any notification in which it finds a
+/// verification code: 4 to 8 digits near a word such as "code" or "pin". A
+/// Missed Call from a Contact named "Gate code 4821" reads the same as ever,
+/// yet is silenced like Alice's and offers no code to copy.
+#[test]
+fn a_missed_call_from_a_contact_named_like_a_verification_code_is_silenced_under_do_not_disturb() {
+    // The Phone reports the gate's Calls from this number.
+    const GATE: &str = "+447700900456";
+    let mut all = contacts();
+    all.push_str(&vcards::contact(
+        "Gate code 4821",
+        &[("CELL", "+44 7700 900456")],
+    ));
+    let harness = synced_with(&all);
+    harness.set_do_not_disturb(true);
+
+    let mut newest = Vec::new();
+    for (number, reads, at) in [
+        (ALICE, "Missed call from Alice (mobile)", "20261105T100000"),
+        (
+            GATE,
+            "Missed call from Gate code 4821 (mobile)",
+            "20261105T100500",
+        ),
+        (
+            GATE,
+            "2 missed calls from Gate code 4821",
+            "20261105T101000",
+        ),
+    ] {
+        let (path, _) = ring(&harness, number);
+        newest.insert(0, missed(Some(number), at));
+        call_history(&harness, &newest);
+
+        rings_out(&harness, &path);
+
+        let notification = harness.notifications().wait_for(
+            &format!("a notification reading {reads:?}"),
+            SYNC_DEADLINE,
+            |notification| as_read(&notification.summary) == reads,
+        );
+        assert_eq!(
+            (notification.silenced, notification.verification_codes.len()),
+            (true, 0),
+            "{notification:?}"
+        );
+    }
+}
+
+/// `text` as a reader sees it: without the invisible format characters
+/// (zero-width spaces and joiners, word joiners, byte order marks).
+fn as_read(text: &str) -> String {
+    text.chars()
+        .filter(|character| {
+            !matches!(
+                character,
+                '\u{200b}'..='\u{200f}' | '\u{2060}'..='\u{2064}' | '\u{feff}'
+            )
+        })
+        .collect()
 }
 
 /// Scenario 9, and the withheld quirk scenario: a withheld number arrives

@@ -2,7 +2,8 @@
 //! what the app asks of it.
 //!
 //! - a notification server, `org.freedesktop.Notifications`, which records
-//!   every `Notify` and can click a notification (invoke its `default`
+//!   every `Notify`, decides as Omarchy 4.5 does whether Do Not Disturb
+//!   silences it, and can click a notification (invoke its `default`
 //!   action) the way Omarchy does;
 //! - a tray watcher, `org.kde.StatusNotifierWatcher`, which records every
 //!   registration and reads each item's status and icon;
@@ -12,21 +13,15 @@
 //! - Omarchy's current theme, `~/.local/state/omarchy/current/theme/`,
 //!   switched the way `omarchy-theme-set` switches it;
 //! - Omarchy's bar: `test-client --bar`, a layer-shell surface across the
-//!   top of the output that reserves [`BAR_HEIGHT`], drawn in [`BAR_COLOUR`];
-//! - Hyprland's request socket, answering `j/layers` with an
-//!   `omarchy-notifications` layer as wide as the scenario asks, the way
-//!   `hyprctl layers -j` reports Omarchy's notification-toast column, and
-//!   `j/getoption decoration:rounding` with the scenario's corner rounding;
-//!   and its event socket, which announces `configreloaded` when the
-//!   rounding changes.
+//!   top of the output that reserves [`BAR_HEIGHT`], drawn in [`BAR_COLOUR`].
+//!
+//! Hyprland's sockets are in [`crate::hyprland`].
 //!
 //! The D-Bus stand-ins share one connection to the scenario's session bus,
 //! served from the harness's process.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::{Read as _, Write as _};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -38,98 +33,12 @@ use zbus::names::InterfaceName;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, MatchRule, MessageStream, OwnedVariant, Variant, interface};
 
-use crate::within;
+use crate::{omarchy_quiet, within};
 
 /// The height of Omarchy's bar, in layout coordinates.
 pub const BAR_HEIGHT: f64 = 26.0;
 /// The bar stand-in's colour, so screenshots can tell it from the app.
 pub const BAR_COLOUR: [u8; 3] = [0x30, 0x30, 0x60];
-
-/// The instance signature the Hyprland stand-in serves under.
-pub(crate) const HYPRLAND_SIGNATURE: &str = "desktop-calls-test";
-
-/// How wide Omarchy 4.5's notification-toast column is, as Hyprland reports
-/// it on the user's Desktop.
-pub(crate) const OMARCHY_TOAST_COLUMN_WIDTH: u32 = 394;
-
-/// The running Hyprland stand-in.
-pub(crate) struct Hyprland {
-    rounding: Arc<Mutex<u32>>,
-    /// Clients of the event socket.
-    listeners: Arc<Mutex<Vec<UnixStream>>>,
-}
-
-impl Hyprland {
-    /// Changes `decoration:rounding` and announces the reload on the event
-    /// socket, as Hyprland does when its configuration is reloaded.
-    pub fn set_rounding(&self, rounding: u32) {
-        *self.rounding.lock().unwrap_or_else(PoisonError::into_inner) = rounding;
-        self.listeners
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .retain_mut(|listener| listener.write_all(b"configreloaded>>\n").is_ok());
-    }
-}
-
-/// Serves Hyprland's request and event sockets under `runtime`, for the rest
-/// of the test process. The request socket reports an
-/// `omarchy-notifications` layer `toast_width` wide at the top-right of the
-/// headless output, and `decoration:rounding` as `rounding`.
-pub(crate) fn serve_hyprland(
-    runtime: &Path,
-    toast_width: u32,
-    rounding: u32,
-) -> std::io::Result<Hyprland> {
-    let directory = runtime.join("hypr").join(HYPRLAND_SIGNATURE);
-    fs::create_dir_all(&directory)?;
-    let listener = UnixListener::bind(directory.join(".socket.sock"))?;
-    let events = UnixListener::bind(directory.join(".socket2.sock"))?;
-    let (width, height) = crate::SCREEN_SIZE;
-    // `hyprctl layers -j` reports layout coordinates: at scale 1.6 the
-    // 3840x2160 output is 2400x1350.
-    let (width, height) = (width * 10 / 16, height * 10 / 16);
-    let layers = format!(
-        "{{\"HEADLESS-1\": {{\"levels\": {{\"0\": [], \"1\": [], \"2\": [], \"3\": [\
-         {{\"address\": \"0x1\", \"x\": {x}, \"y\": 0, \"w\": {toast_width}, \
-         \"h\": {height}, \"namespace\": \"omarchy-notifications\", \"pid\": 1, \
-         \"alpha\": 1.0}}]}}}}}}",
-        x = width.saturating_sub(toast_width),
-    );
-    let hyprland = Hyprland {
-        rounding: Arc::new(Mutex::new(rounding)),
-        listeners: Arc::default(),
-    };
-    let rounding = hyprland.rounding.clone();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut request = [0; 256];
-            let Ok(length) = stream.read(&mut request) else {
-                continue;
-            };
-            let reply = match &request[..length] {
-                b"j/layers" => layers.clone(),
-                // As Hyprland 0.56 answers `hyprctl getoption -j`.
-                b"j/getoption decoration:rounding" => format!(
-                    "{{\"option\": \"decoration:rounding\", \"int\": {}, \"set\": true }}",
-                    rounding.lock().unwrap_or_else(PoisonError::into_inner)
-                ),
-                _ => "unknown request".to_owned(),
-            };
-            let _ = stream.write_all(reply.as_bytes());
-        }
-    });
-    let listeners = hyprland.listeners.clone();
-    std::thread::spawn(move || {
-        for stream in events.incoming().flatten() {
-            listeners
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(stream);
-        }
-    });
-    Ok(hyprland)
-}
 
 /// One of the harness's two Omarchy themes, for the theme stand-in. Their
 /// `colors.toml` files are in `crates/test-harness/fixtures/omarchy-themes/`.
@@ -226,6 +135,8 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 /// `NotificationClosed` reasons from the notification specification.
 const CLOSED_BY_USER: u32 = 2;
 const CLOSED_BY_CALL: u32 = 3;
+/// The urgency a notification without an `urgency` hint has.
+const URGENCY_NORMAL: u8 = 1;
 
 /// One `Notify` call the notification server received.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -242,6 +153,13 @@ pub struct Notification {
     /// Each hint's value in GVariant text form, such as `byte 0x02`.
     pub hints: BTreeMap<String, String>,
     pub expire_timeout: i32,
+    /// What Omarchy 4.5 takes for verification codes in its summary and
+    /// body, which it offers to copy.
+    pub verification_codes: Vec<String>,
+    /// Whether Omarchy 4.5 keeps it off the screen: Do Not Disturb was on,
+    /// and it neither came from Omarchy's own senders nor carried a
+    /// verification code.
+    pub silenced: bool,
 }
 
 /// Whether the Desktop is light or dark, as the settings portal says.
@@ -338,6 +256,8 @@ impl MenuEntry {
 struct Records {
     notifications: Vec<Notification>,
     next_notification_id: u32,
+    /// Whether Omarchy's Do Not Disturb is on.
+    do_not_disturb: bool,
     /// Registered tray items: bus name and object path.
     tray_items: Vec<(String, String)>,
     /// Every status the registered items have reported, in order, each
@@ -404,6 +324,12 @@ impl StandIns {
     /// Every notification received so far, in order.
     pub fn notifications(&self) -> Vec<Notification> {
         self.shared.records().notifications.clone()
+    }
+
+    /// Turns Do Not Disturb on or off for the notifications that arrive
+    /// from now on.
+    pub fn set_do_not_disturb(&self, on: bool) {
+        self.shared.records().do_not_disturb = on;
     }
 
     /// Waits until a received notification satisfies `condition`.
@@ -781,7 +707,18 @@ impl NotificationServer {
         hints: HashMap<String, OwnedVariant>,
         expire_timeout: i32,
     ) -> u32 {
+        let urgency = hints
+            .get("urgency")
+            .and_then(|urgency| u8::try_from(&**urgency).ok())
+            .unwrap_or(URGENCY_NORMAL);
+        let verification_codes = omarchy_quiet::verification_codes(&summary, &body);
         let mut records = self.shared.records();
+        let silenced = omarchy_quiet::silenced(
+            records.do_not_disturb,
+            &app_name,
+            urgency,
+            &verification_codes,
+        );
         let id = if replaces_id != 0
             && records
                 .notifications
@@ -806,6 +743,8 @@ impl NotificationServer {
                 .map(|(name, value)| (name, value.to_string()))
                 .collect(),
             expire_timeout,
+            verification_codes,
+            silenced,
         });
         drop(records);
         self.shared.changed.notify_all();

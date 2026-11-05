@@ -20,7 +20,7 @@ use crate::process_group::ProcessGroup;
 use crate::screen::{Screen, ScreenKind};
 use crate::stand_ins::StandIns;
 use crate::timeline::{Timeline, unique_name};
-use crate::{OmarchyTheme, Theme, stand_ins};
+use crate::{OmarchyTheme, Theme, hyprland, stand_ins};
 
 /// Chooses what a scenario's world has beyond the buses, the Simulated Phone
 /// and the app. [`Harness::builder`] makes one.
@@ -52,7 +52,7 @@ impl Default for HyprlandSettings {
     /// default square corners.
     fn default() -> Self {
         Self {
-            toast_column: stand_ins::OMARCHY_TOAST_COLUMN_WIDTH,
+            toast_column: hyprland::OMARCHY_TOAST_COLUMN_WIDTH,
             rounding: 0,
         }
     }
@@ -65,13 +65,13 @@ impl HyprlandSettings {
         self,
         directory: &Path,
         environment: &mut Vec<(&'static str, String)>,
-    ) -> stand_ins::Hyprland {
+    ) -> hyprland::Hyprland {
         let hyprland =
-            stand_ins::serve_hyprland(&directory.join("runtime"), self.toast_column, self.rounding)
+            hyprland::serve_hyprland(&directory.join("runtime"), self.toast_column, self.rounding)
                 .expect("serve the Hyprland stand-in");
         environment.push((
             "HYPRLAND_INSTANCE_SIGNATURE",
-            stand_ins::HYPRLAND_SIGNATURE.to_owned(),
+            hyprland::HYPRLAND_SIGNATURE.to_owned(),
         ));
         hyprland
     }

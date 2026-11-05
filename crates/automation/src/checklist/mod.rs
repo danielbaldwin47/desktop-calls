@@ -52,6 +52,9 @@ pub fn run(options: &Options) -> ExitCode {
     let Some(groups) = groups_to_run(options) else {
         return ExitCode::FAILURE;
     };
+    let Some(directory) = results_directory(options) else {
+        return ExitCode::FAILURE;
+    };
     let interrupted = Arc::new(AtomicBool::new(false));
     // Ctrl-C stops the run between waits, so the results are kept and, under
     // the Simulated Phone, every process is stopped.
@@ -70,10 +73,6 @@ pub fn run(options: &Options) -> ExitCode {
     let Some(world) = world else {
         return ExitCode::FAILURE;
     };
-    let directory = options
-        .results
-        .clone()
-        .unwrap_or_else(|| world.default_results());
 
     let (sender, events) = mpsc::channel();
     let timeline = match watch::start(&world.bus, sender.clone()) {
@@ -232,15 +231,6 @@ impl World {
         })
     }
 
-    fn default_results(&self) -> PathBuf {
-        match self.mode {
-            Mode::Real => results::default_directory(),
-            Mode::Demo => super::target_directory()
-                .unwrap_or_default()
-                .join("real-phone-checklist-demo"),
-        }
-    }
-
     fn log(&self) -> AppLog {
         match &self.demo {
             Some(demo) => AppLog::File(
@@ -249,6 +239,29 @@ impl World {
                     .join("state/desktop-calls/desktop-calls.log"),
             ),
             None => AppLog::Journal,
+        }
+    }
+}
+
+/// Where this run's result files go: `--results`, else the user's state
+/// directory against the real Phone, or `target/` under the Simulated
+/// Phone. `None`, having said why, if there is nowhere safe.
+fn results_directory(options: &Options) -> Option<PathBuf> {
+    if let Some(directory) = &options.results {
+        return Some(directory.clone());
+    }
+    if options.demo {
+        return Some(
+            super::target_directory()
+                .unwrap_or_default()
+                .join("real-phone-checklist-demo"),
+        );
+    }
+    match results::default_directory() {
+        Ok(directory) => Some(directory),
+        Err(why) => {
+            eprintln!("{why}");
+            None
         }
     }
 }

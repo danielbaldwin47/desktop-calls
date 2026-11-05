@@ -32,13 +32,23 @@ use serde_json::{Map, Value, json};
 /// `$XDG_STATE_HOME/desktop-calls/real-phone-checklist`, or under
 /// `~/.local/state`. They come from the real Phone and can hold real data,
 /// so they stay out of the repository, which is published (ticket #120).
-pub fn default_directory() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .filter(|state| !state.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-        .unwrap_or_default()
-        .join("desktop-calls/real-phone-checklist")
+/// A relative `XDG_STATE_HOME` is ignored, as the XDG spec says. With no
+/// absolute `HOME` either, it says why rather than fall back to a relative
+/// path, which would put the results in the repository.
+pub fn default_directory() -> Result<PathBuf, String> {
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let state = absolute("XDG_STATE_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".local/state")))
+        .ok_or_else(|| {
+            "HOME isn't set to an absolute path, so the Real-Phone Checklist has nowhere \
+             outside the repository to keep its results. Set HOME, or pass --results DIR."
+                .to_owned()
+        })?;
+    Ok(state.join("desktop-calls/real-phone-checklist"))
 }
 
 /// Whether a run was against the real Phone or the Simulated Phone.

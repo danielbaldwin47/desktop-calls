@@ -502,3 +502,54 @@ fn real_phone_results_live_in_the_users_state_directory_not_the_repository() {
         "{scorecard}"
     );
 }
+
+#[test]
+fn a_relative_xdg_state_home_is_ignored_as_the_xdg_spec_says() {
+    // A relative $XDG_STATE_HOME would put results under whatever directory
+    // the run started in, the repository included; ~/.local/state is used.
+    let home = tempfile::tempdir().expect("a temporary home");
+    let results = home
+        .path()
+        .join(".local/state/desktop-calls/real-phone-checklist");
+    std::fs::create_dir_all(&results).expect("the results directory");
+    std::fs::write(
+        results.join("2026-11-05T13-25-50Z.json"),
+        r#"{"mode": "real", "started": "2026-11-05T13:25:50Z", "phone": "Pixel",
+            "steps": [{"id": "2.1", "title": "Answer on the Desktop", "result": "pass",
+                       "evidence": [], "measurements": {"codec": "msbc", "wideband": true}}]}"#,
+    )
+    .expect("a result file");
+
+    let printed = Command::new(env!("CARGO_BIN_EXE_automation"))
+        .arg("scorecard")
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("XDG_STATE_HOME", "state")
+        .output()
+        .expect("run automation scorecard");
+    assert!(printed.status.success(), "{printed:?}");
+    let scorecard = String::from_utf8(printed.stdout).expect("the scorecard is text");
+    assert!(row(&scorecard, 3).contains("msbc"), "{scorecard}");
+}
+
+#[test]
+fn with_no_home_the_results_have_nowhere_to_go_so_it_says_why_and_writes_nothing() {
+    // With HOME unset, a fallback to a relative path would write results
+    // into the repository (ticket #120).
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    // The checklist reads the same directory, once past its terminal check.
+    let ran = Command::new(env!("CARGO_BIN_EXE_automation"))
+        .arg("scorecard")
+        .current_dir(directory.path())
+        .env_remove("HOME")
+        .env_remove("XDG_STATE_HOME")
+        .output()
+        .expect("run automation scorecard");
+    let said = String::from_utf8_lossy(&ran.stderr);
+    assert!(!ran.status.success(), "{ran:?}");
+    assert!(said.contains("HOME isn't set"), "{said}");
+    let written: Vec<_> = std::fs::read_dir(directory.path())
+        .expect("read the directory")
+        .collect();
+    assert!(written.is_empty(), "{written:?}");
+}

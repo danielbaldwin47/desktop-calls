@@ -34,13 +34,14 @@ use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::process::{Child, ChildStdout, Command, Output, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 mod client;
 mod input;
 mod screen;
+mod screencopy;
 mod stand_ins;
 pub mod vcards;
 
@@ -59,6 +60,7 @@ use zbus::proxy::CacheProperties;
 use zbus::{Connection, MatchRule, MessageStream, proxy};
 
 use crate::screen::{Screen, ScreenKind};
+use crate::screencopy::Recorder;
 use crate::stand_ins::StandIns;
 
 /// The app's control interface, as the contract in `CODING_STANDARDS.md` names it.
@@ -71,6 +73,36 @@ const SIMULATED_PHONE_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.S
 
 /// How long a process may take to start and claim its bus name.
 const STARTUP_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How many frames [`Harness::screenshot_when`] records ahead of the check
+/// that judges them, at 25 MB each. Frames come only when the screen
+/// changes, so a few is plenty; past this, the recording waits and the next
+/// frame shows the screen as it is by then.
+const FRAMES_AHEAD: usize = 8;
+
+/// How long the screen must hold still after a frame satisfies
+/// `screenshot_when`'s `shown` for that frame to be the one returned: a few
+/// frames at 60 Hz, enough for a resize the frame caught midway to finish.
+const SETTLED: Duration = Duration::from_millis(100);
+
+/// The latest frame in the run of frames, starting with `found`, that
+/// satisfy `shown`, once no new frame comes for [`SETTLED`] or one doesn't
+/// satisfy `shown`. Frames passed over are deleted.
+fn settle(
+    mut found: Screenshot,
+    frames: &mpsc::Receiver<Screenshot>,
+    shown: impl Fn(&Screenshot) -> bool,
+) -> Screenshot {
+    while let Ok(frame) = frames.recv_timeout(SETTLED) {
+        if shown(&frame) {
+            let _ = fs::remove_file(std::mem::replace(&mut found, frame).path);
+        } else {
+            let _ = fs::remove_file(frame.path);
+            break;
+        }
+    }
+    found
+}
 
 /// The journal's socket. While it is reachable the app logs there, so the
 /// harness hides it from the app to get a log file per scenario.
@@ -584,14 +616,28 @@ impl Harness {
         )
     }
 
-    /// Captures the screen as `<name>.png` until the capture satisfies
-    /// `shown`, and returns it. What the app reports can run a frame ahead
-    /// of what is on screen; this waits for the screen.
+    /// Captures the screen until a capture satisfies `shown`, and returns
+    /// that capture, kept as `<name>.png`. What the app reports can run a
+    /// frame ahead of what is on screen; this waits for the screen.
+    ///
+    /// The screen is recorded on a thread of its own: its content when this
+    /// is called, then a frame each time anything on screen changes, as the
+    /// compositor reports it (see `screencopy.rs`). `shown` judges the frames
+    /// in order as they arrive. So a state on screen for less time than one
+    /// `shown` takes, such as the Call Window's "Call ended" for 2 s, is
+    /// still caught, and a still screen costs no CPU that the app needs to
+    /// draw. At most [`FRAMES_AHEAD`] frames wait for `shown` at a time.
+    ///
+    /// The capture returned is the latest of the frames that satisfy `shown`
+    /// in a row, once the screen has held still for [`SETTLED`] or stopped
+    /// satisfying `shown`: a window can match while still mid-resize, and a
+    /// test that clicks where the capture shows a button needs where it ends
+    /// up.
     ///
     /// # Panics
     ///
-    /// If no capture satisfies `shown` within `deadline`; the panic names the
-    /// last capture.
+    /// If no frame within `deadline` satisfies `shown`; the panic names the
+    /// last frame, kept as `<name>.png`. Also if the recording fails.
     #[must_use]
     pub fn screenshot_when(
         &self,
@@ -599,17 +645,70 @@ impl Harness {
         deadline: Duration,
         shown: impl Fn(&Screenshot) -> bool,
     ) -> Screenshot {
-        let started = Instant::now();
-        loop {
-            let screenshot = self.screenshot(name);
-            if shown(&screenshot) {
-                return screenshot;
+        let give_up = Instant::now() + deadline;
+        let captures = self.directory.join("captures");
+        let (mut recorder, stopper) = Recorder::connect(&self.screen().socket, &captures)
+            .unwrap_or_else(|error| panic!("record the screen: {error}"));
+        let (found, last, failed) = thread::scope(|scope| {
+            let (sender, receiver) = mpsc::sync_channel(FRAMES_AHEAD);
+            let recording = scope.spawn(move || {
+                for count in 1_u32.. {
+                    let path = captures.join(format!("{name}-{count}.ppm"));
+                    let (width, height) = recorder.next_frame(&path)?;
+                    if sender
+                        .send(Screenshot {
+                            path,
+                            width,
+                            height,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok::<_, String>(())
+            });
+            let mut last: Option<Screenshot> = None;
+            let mut found = None;
+            let mut ended_early = false;
+            while let Some(remaining) = give_up.checked_duration_since(Instant::now()) {
+                let frame = match receiver.recv_timeout(remaining) {
+                    Ok(frame) => frame,
+                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        ended_early = true;
+                        break;
+                    }
+                };
+                if shown(&frame) {
+                    found = Some(settle(frame, &receiver, &shown));
+                    break;
+                }
+                // Each frame is 25 MB; keep only the latest, for the panic.
+                if let Some(previous) = last.replace(frame) {
+                    let _ = fs::remove_file(previous.path);
+                }
             }
-            assert!(
-                started.elapsed() < deadline,
+            stopper.stop();
+            drop(receiver);
+            let ended = recording
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            (found, last, ended.err().filter(|_| ended_early))
+        });
+        if let Some(error) = failed {
+            panic!("recording the screen for {name} failed: {error}");
+        }
+        let kept = |capture: &Screenshot| {
+            capture.save_png(&self.screenshot_directory.join(format!("{name}.png")))
+        };
+        match (found, last) {
+            (Some(capture), _) => kept(&capture),
+            (None, Some(capture)) => panic!(
                 "the screen never showed {name} within {deadline:?}; see {}",
-                screenshot.path.display()
-            );
+                kept(&capture).path.display()
+            ),
+            (None, None) => panic!("no capture of {name} was made within {deadline:?}"),
         }
     }
 

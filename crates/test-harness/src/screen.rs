@@ -7,7 +7,7 @@
 //! devices, so it runs in CI.
 
 use std::fs;
-use std::io::{BufRead as _, BufReader};
+use std::io::{BufRead as _, BufReader, BufWriter, Cursor};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
@@ -44,6 +44,8 @@ pub(crate) struct Screen {
     /// `WAYLAND_DISPLAY` for the scenario's clients, relative to its
     /// `XDG_RUNTIME_DIR`.
     pub wayland_display: String,
+    /// The compositor's socket, for the harness's own connections.
+    pub socket: PathBuf,
     input: Mutex<SyntheticInput>,
 }
 
@@ -94,26 +96,14 @@ impl Screenshot {
     ///
     /// # Panics
     ///
-    /// If the PNG can't be decoded.
+    /// If the screenshot can't be decoded.
     #[must_use]
     pub fn region_where(&self, matches: impl Fn([u8; 3]) -> bool) -> Option<Region> {
-        let file = fs::File::open(&self.path).expect("open the screenshot");
-        let mut decoder = png::Decoder::new(BufReader::new(file));
-        decoder.set_transformations(png::Transformations::normalize_to_color8());
-        let mut reader = decoder.read_info().expect("read the screenshot's header");
-        let mut pixels = vec![0; reader.output_buffer_size().expect("the screenshot's size")];
-        let frame = reader
-            .next_frame(&mut pixels)
-            .expect("decode the screenshot");
-        let channels = frame.color_type.samples();
-        let width = usize::try_from(frame.width).expect("the screenshot's width");
+        let pixels = Pixels::read(&self.path);
         let (mut left, mut top, mut right, mut bottom) = (usize::MAX, usize::MAX, 0, 0);
-        for (row, line) in pixels[..frame.buffer_size()]
-            .chunks_exact(frame.line_size)
-            .enumerate()
-        {
-            for column in 0..width {
-                let pixel = &line[column * channels..column * channels + 3];
+        for (row, line) in pixels.data.chunks_exact(pixels.line_size).enumerate() {
+            for column in 0..pixels.width {
+                let pixel = &line[column * pixels.channels..column * pixels.channels + 3];
                 if matches([pixel[0], pixel[1], pixel[2]]) {
                     left = left.min(column);
                     right = right.max(column + 1);
@@ -134,6 +124,97 @@ impl Screenshot {
             top: to_layout(top),
             right: to_layout(right),
             bottom: to_layout(bottom),
+        })
+    }
+
+    /// Writes this screenshot to `path` as a PNG, and returns the copy.
+    pub(crate) fn save_png(&self, path: &Path) -> Screenshot {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create the screenshot directory");
+        }
+        if self
+            .path
+            .extension()
+            .is_some_and(|extension| extension == "png")
+        {
+            fs::copy(&self.path, path).expect("copy the screenshot");
+        } else {
+            let pixels = Pixels::read(&self.path);
+            let file = fs::File::create(path).expect("create the screenshot");
+            let mut encoder = png::Encoder::new(BufWriter::new(file), self.width, self.height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_compression(png::Compression::Fast);
+            let mut writer = encoder
+                .write_header()
+                .expect("write the screenshot's header");
+            writer
+                .write_image_data(&pixels.data)
+                .expect("write the screenshot");
+            writer.finish().expect("finish the screenshot");
+        }
+        Screenshot {
+            path: path.to_owned(),
+            ..self.clone()
+        }
+    }
+}
+
+/// A screenshot's decoded pixels: rows of `line_size` bytes, `channels`
+/// bytes a pixel, red, green and blue first.
+struct Pixels {
+    width: usize,
+    channels: usize,
+    line_size: usize,
+    data: Vec<u8>,
+}
+
+impl Pixels {
+    /// Decodes the PNG or binary PPM (`P6`, as `grim -t ppm` writes) at `path`.
+    fn read(path: &Path) -> Self {
+        let bytes = fs::read(path).expect("read the screenshot");
+        if bytes.starts_with(b"P6") {
+            return Self::from_ppm(bytes)
+                .unwrap_or_else(|| panic!("{} is not a PPM grim writes", path.display()));
+        }
+        let mut decoder = png::Decoder::new(Cursor::new(bytes));
+        decoder.set_transformations(png::Transformations::normalize_to_color8());
+        let mut reader = decoder.read_info().expect("read the screenshot's header");
+        let mut data = vec![0; reader.output_buffer_size().expect("the screenshot's size")];
+        let frame = reader.next_frame(&mut data).expect("decode the screenshot");
+        data.truncate(frame.buffer_size());
+        Self {
+            width: usize::try_from(frame.width).expect("the screenshot's width"),
+            channels: frame.color_type.samples(),
+            line_size: frame.line_size,
+            data,
+        }
+    }
+
+    /// `P6`, width, height and a maximum of 255, each followed by one
+    /// whitespace byte, then the RGB pixels.
+    fn from_ppm(mut bytes: Vec<u8>) -> Option<Self> {
+        let mut fields = Vec::new();
+        let mut start = 0;
+        while fields.len() < 4 {
+            let end = start
+                + bytes
+                    .get(start..)?
+                    .iter()
+                    .position(u8::is_ascii_whitespace)?;
+            fields.push(std::str::from_utf8(&bytes[start..end]).ok()?.to_owned());
+            start = end + 1;
+        }
+        let width: usize = fields[1].parse().ok()?;
+        let height: usize = fields[2].parse().ok()?;
+        if fields[0] != "P6" || fields[3] != "255" || bytes.len() - start != width * height * 3 {
+            return None;
+        }
+        bytes.drain(..start);
+        Some(Self {
+            width,
+            channels: 3,
+            line_size: width * 3,
+            data: bytes,
         })
     }
 }
@@ -205,13 +286,12 @@ impl Screen {
             .find(|(name, _)| *name == "XDG_RUNTIME_DIR")
             .map(|(_, value)| PathBuf::from(value))
             .expect("the scenario has an XDG_RUNTIME_DIR");
-        let input = SyntheticInput::connect(
-            &runtime.join(&wayland_display),
-            &directory.join("keymap.xkb"),
-        )
-        .unwrap_or_else(|error| panic!("set up the synthetic keyboard and pointer: {error}"));
+        let socket = runtime.join(&wayland_display);
+        let input = SyntheticInput::connect(&socket, &directory.join("keymap.xkb"))
+            .unwrap_or_else(|error| panic!("set up the synthetic keyboard and pointer: {error}"));
         Self {
             wayland_display,
+            socket,
             input: Mutex::new(input),
         }
     }

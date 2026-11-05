@@ -1,9 +1,12 @@
 //! Scenarios: the app on a screen of its own, captured as PNG, and the
 //! harness's synthetic keyboard and pointer.
 
+use std::sync::Barrier;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::Duration;
 
-use test_harness::{Harness, Key};
+use test_harness::{Harness, Key, Screenshot};
 
 /// How long the app, or a client, may take to notice a change.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -90,4 +93,55 @@ fn a_synthetic_click_reaches_the_client_under_the_pointer() {
         "the client saw no press: {:#?}",
         client.lines()
     );
+}
+
+/// How long the brief state stays on screen.
+const BRIEFLY: Duration = Duration::from_millis(200);
+
+/// How long the compositor may take to take a closed window off screen.
+const CLOSING: Duration = Duration::from_millis(500);
+
+/// The test client's window colour, RGB 0x80 0x80 0x80.
+const CLIENT_GREY: [u8; 3] = [0x80; 3];
+
+/// A state on screen for only 200 ms, from start to end while `shown` is
+/// still judging the first frame, is captured: frames are recorded as the
+/// screen changes, not taken once the last judgement ends. "Call ended"
+/// shows for 2 s, which the gallery missed while it sampled the screen (#42).
+#[test]
+fn screenshot_when_catches_a_state_shown_for_200_ms() {
+    let harness = Harness::builder().headless_screen().start();
+    let shows_client = |screenshot: &Screenshot| {
+        screenshot
+            .region_where(|pixel| pixel == CLIENT_GREY)
+            .is_some()
+    };
+    // Met twice: when the first judgement starts, and once the window has
+    // come and gone.
+    let judging = Barrier::new(2);
+    let first = AtomicBool::new(true);
+
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            judging.wait();
+            let client = harness.start_test_client();
+            client.wait_for("the test client has drawn", DEADLINE, |line| {
+                line.starts_with("configured")
+            });
+            thread::sleep(BRIEFLY);
+            // Dropping the client closes its window.
+            drop(client);
+            thread::sleep(CLOSING);
+            judging.wait();
+        });
+        // Panics unless a frame shows the window.
+        let screenshot = harness.screenshot_when("brief-window", DEADLINE * 2, |screenshot| {
+            if first.swap(false, Ordering::Relaxed) {
+                judging.wait();
+                judging.wait();
+            }
+            shows_client(screenshot)
+        });
+        assert!(shows_client(&screenshot), "{}", screenshot.path.display());
+    });
 }

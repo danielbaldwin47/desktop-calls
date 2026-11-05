@@ -711,11 +711,12 @@ impl Harness {
         seen
     }
 
-    /// The app's `Calls` and `Surfaces` just after each of its
-    /// `PropertiesChanged` signals that changed either, since the scenario
-    /// started, in the order the app sent them: what a client following the
-    /// control interface saw, step by step. Returns once the signals
-    /// collected have caught up with the state the app publishes now.
+    /// What the app had published after each of its signals that changed
+    /// `Calls`, `Surfaces` or `ConnectionState`, or sent an `Error` or a
+    /// `MissedCall`, since the scenario started, in the order the app sent
+    /// them: what a client following the control interface saw, step by
+    /// step. Returns once the signals collected have caught up with the
+    /// state the app publishes now.
     ///
     /// # Panics
     ///
@@ -730,16 +731,24 @@ impl Harness {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone();
-            let last = published.last().cloned().unwrap_or_default();
-            if last.calls == now.calls && last.surfaces == now.surfaces {
+            let last = published
+                .last()
+                .cloned()
+                .unwrap_or_else(Published::at_start);
+            if last.calls == now.calls
+                && last.surfaces == now.surfaces
+                && last.connection_state == now.connection_state
+                && last.errors == self.app_errors()
+                && last.missed_calls == self.missed_calls()
+            {
                 return published;
             }
             assert!(
                 started.elapsed() < SIGNALS_ARRIVE,
-                "the app's PropertiesChanged signals collected show {last:?}, \
-                 but it publishes {:?} and {:?}{}",
+                "the app's signals collected show {last:?}, but it publishes {:?}, {:?} and {:?}{}",
                 now.calls,
                 now.surfaces,
+                now.connection_state,
                 self.timeline.render()
             );
             thread::sleep(Duration::from_millis(20));

@@ -488,8 +488,11 @@ impl ControlInterface {
 /// nothing that follows from a state can show before the state is
 /// published. A client following the control interface therefore sees each
 /// Call change before the surface changes it causes, such as a Call answered
-/// on the Phone before its Banner closing (ticket #107).
-#[must_use = "the surfaces render only once their state is published"]
+/// on the Phone before its Banner closing (ticket #107). The `Error` and
+/// `MissedCall` signals take one too, so each follows the state it describes
+/// (ticket #116).
+#[derive(Clone)]
+#[must_use = "the surfaces and signals that follow a state wait until it is published"]
 pub struct Published(());
 
 /// Logs a change the control interface couldn't signal.
@@ -593,8 +596,9 @@ impl Publisher {
         Ok(())
     }
 
-    /// Signals `failure` as `Error(kind, message)`.
-    pub async fn report_error(&self, failure: Failure) -> zbus::Result<()> {
+    /// Signals `failure` as `Error(kind, message)`, once the state it
+    /// describes is `published`.
+    pub async fn report_error(&self, failure: Failure, _published: &Published) -> zbus::Result<()> {
         let message = messages::failure(failure);
         ControlInterface::error(
             self.interface.signal_emitter(),
@@ -604,8 +608,13 @@ impl Publisher {
         .await
     }
 
-    /// Signals the Missed Call `notice` tells of as `MissedCall`.
-    pub async fn missed_call(&self, notice: &MissedCallNotice) -> zbus::Result<()> {
+    /// Signals the Missed Call `notice` tells of as `MissedCall`, once the
+    /// state it describes is `published`.
+    pub async fn missed_call(
+        &self,
+        notice: &MissedCallNotice,
+        _published: &Published,
+    ) -> zbus::Result<()> {
         let number = match &notice.caller {
             Caller::Number(number) => number.as_str(),
             Caller::Withheld => "",

@@ -20,7 +20,7 @@ use zbus::message::Type;
 
 use zbus::{Connection, MatchRule, MessageStream, Variant};
 
-use crate::control::Publisher;
+use crate::control::{Published, Publisher};
 use crate::logging::EventKind;
 use crate::surfaces;
 
@@ -53,7 +53,7 @@ type Shown = Rc<RefCell<HashMap<CallId, u32>>>;
 /// Shows Missed Call notifications, and reports what the user does with
 /// them.
 pub struct Notifier {
-    notices: UnboundedSender<MissedCallNotice>,
+    notices: UnboundedSender<(MissedCallNotice, Published)>,
 }
 
 impl Notifier {
@@ -75,10 +75,13 @@ impl Notifier {
     }
 
     /// Shows `notice`, replacing its caller's notification if still shown.
-    /// Never waits on the notification server.
-    pub fn notify(&self, notice: MissedCallNotice) {
+    /// Never waits on the notification server. Takes the proof that the
+    /// state the Missed Call follows from is `published`, so neither the
+    /// notification nor the `MissedCall` signal can come before it
+    /// (ticket #116).
+    pub fn notify(&self, notice: MissedCallNotice, published: &Published) {
         // The queue only closes with the main context.
-        let _ = self.notices.unbounded_send(notice);
+        let _ = self.notices.unbounded_send((notice, published.clone()));
     }
 }
 
@@ -86,11 +89,11 @@ impl Notifier {
 /// notification it replaces.
 async fn show_all(
     session: Connection,
-    mut queued: UnboundedReceiver<MissedCallNotice>,
+    mut queued: UnboundedReceiver<(MissedCallNotice, Published)>,
     shown: Shown,
     publisher: Publisher,
 ) {
-    while let Some(notice) = queued.next().await {
+    while let Some((notice, published)) = queued.next().await {
         let replaces = shown
             .borrow()
             .get(&notice.notification)
@@ -114,7 +117,7 @@ async fn show_all(
                 "Couldn't show the Missed Call notification"
             ),
         }
-        if let Err(error) = publisher.missed_call(&notice).await {
+        if let Err(error) = publisher.missed_call(&notice, &published).await {
             tracing::warn!(
                 event_kind = %EventKind::PublishFailed,
                 error_kind = "publish-failed",

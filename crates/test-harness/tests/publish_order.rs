@@ -3,7 +3,11 @@
 //! `PropertiesChanged`, such as the Real-Phone Checklist runner, never sees
 //! a surface for a Call the control interface doesn't list yet, nor the
 //! Incoming Call Banner closed beside a Call still listed as ringing when
-//! the Desktop wasn't asked to answer or decline it.
+//! the Desktop wasn't asked to answer or decline it. The `Error` and
+//! `MissedCall` signals follow the state they describe too (ticket #116):
+//! `MissedCall` once `Calls` has dropped the Call that rang out, and
+//! `Error` once the state it follows from, such as `ConnectionState`, is
+//! published.
 
 use std::time::Duration;
 
@@ -14,6 +18,8 @@ const DEADLINE: Duration = Duration::from_secs(5);
 /// How long the tests' own round trip may take; the targets are asserted on
 /// the app's log elsewhere (ticket #83).
 const ROUND_TRIP: Duration = Duration::from_secs(3);
+/// How long a Contacts sync may take.
+const SYNC: Duration = Duration::from_secs(15);
 
 const NUMBER: &str = "+447700900123";
 
@@ -89,6 +95,108 @@ fn assert_calls_published_before_surfaces(harness: &Harness) {
         }
         before = now.clone();
     }
+}
+
+/// Checks every step the app published, in the order it sent them, for a
+/// Call that rang out: the `MissedCall` signal that tells of it comes only
+/// once `Calls` has dropped the Call, and the Call was listed before.
+fn assert_missed_calls_published_after_their_call_is_over(harness: &Harness, expected: usize) {
+    let published = harness.published();
+    let mut before = Published::default();
+    for (step, now) in published.iter().enumerate() {
+        for missed in &now.missed_calls[before.missed_calls.len()..] {
+            let call = missed.call.to_string();
+            assert_eq!(
+                call_state(now, &call),
+                None,
+                "step {step}: MissedCall told of Call {call} while Calls still listed it; \
+                 every step: {published:#?}"
+            );
+            assert!(
+                published[..step]
+                    .iter()
+                    .any(|earlier| call_state(earlier, &call).is_some()),
+                "step {step}: MissedCall told of Call {call}, which Calls never listed; \
+                 every step: {published:#?}"
+            );
+        }
+        before = now.clone();
+    }
+    let signalled = published.last().map_or(0, |last| last.missed_calls.len());
+    assert_eq!(
+        signalled, expected,
+        "MissedCall signals; every step: {published:#?}"
+    );
+}
+
+/// Checks every step the app published, in the order it sent them, for a
+/// dial the Phone's going out of range cancels: the `Error` that says so
+/// comes only once `ConnectionState` says the Phone is disconnected.
+fn assert_out_of_range_published_after_the_connection_is_lost(harness: &Harness) {
+    let published = harness.published();
+    let mut before = Published::default();
+    let mut told = 0;
+    for (step, now) in published.iter().enumerate() {
+        for error in &now.errors[before.errors.len()..] {
+            told += 1;
+            assert_eq!(error.kind, "phone-out-of-range", "{published:#?}");
+            assert_eq!(
+                now.connection_state, "disconnected",
+                "step {step}: the Error {:?} came while ConnectionState was {:?}; \
+                 every step: {published:#?}",
+                error.kind, now.connection_state
+            );
+        }
+        before = now.clone();
+    }
+    assert_eq!(told, 1, "Error signals; every step: {published:#?}");
+}
+
+#[test]
+fn a_call_that_rings_out_with_contacts_denied_calls_drops_it_before_missed_call_is_signalled() {
+    let harness = Harness::builder().headless_screen().start();
+    harness.simulated_phone().set_contacts_prompt("deny");
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ContactsState is denied", SYNC, |state| {
+        state.contacts.state == "denied"
+    });
+    let path = ring_until_banner(&harness);
+
+    harness.simulated_phone().caller_hangs_up(&path);
+
+    harness.wait_for_app("the Call is over", SYNC, |state| {
+        state.surface("banner").is_none() && state.calls.is_empty()
+    });
+    let started = std::time::Instant::now();
+    while harness.missed_calls().is_empty() {
+        assert!(
+            started.elapsed() < DEADLINE,
+            "no MissedCall signal within {DEADLINE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_missed_calls_published_after_their_call_is_over(&harness, 1);
+}
+
+#[test]
+fn a_dial_the_phone_going_out_of_range_cancels_says_disconnected_before_the_error() {
+    let harness = connected(Harness::builder());
+    let dial = harness.start_dial(NUMBER);
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone is asked to dial",
+        DEADLINE,
+        |calls| calls.iter().any(|call| call.member == "Dial"),
+    );
+
+    harness.simulated_phone().disconnect();
+
+    assert_eq!(
+        harness.wait_for_app_error(DEADLINE).kind,
+        "phone-out-of-range"
+    );
+    dial.outcome(DEADLINE)
+        .expect_err("the dial is not placed once the Phone is out of range");
+    assert_out_of_range_published_after_the_connection_is_lost(&harness);
 }
 
 #[test]

@@ -167,12 +167,15 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
         |recorded| !sets_powered(recorded),
     );
     // Enter presses Turn on, so the key hint no longer says Enter pairs.
-    let state = harness.wait_for_app("the Setup Window's key hint", DEADLINE, |state| {
-        window_field(state, "keys").is_some()
-    });
-    assert_eq!(
-        window_field(&state, "keys"),
-        Some("Enter presses the highlighted button; Tab moves between buttons; Escape closes")
+    harness.wait_for_app(
+        "the key hint says Enter presses the highlighted button",
+        DEADLINE,
+        |state| {
+            window_field(state, "keys")
+                == Some(
+                    "Enter presses the highlighted button; Tab moves between buttons; Escape closes",
+                )
+        },
     );
 
     harness.keyboard().press(Key::Return);

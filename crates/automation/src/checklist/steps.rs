@@ -200,13 +200,13 @@ pub const GROUPS: &[Group] = &[
         steps: &[
             Step {
                 id: "4.1",
-                title: "Call the Test Number from the Desktop while the second helper calls you: Hold & answer, then Swap, then hang up one; the other stays live",
+                title: "Call the Test Number from the Desktop while the second helper calls you: Hold & Answer, then Swap, then hang up one; the other stays live",
                 script: None,
                 lands_with: &[10, 16],
             },
             Step {
                 id: "4.2",
-                title: "Repeat with End & answer: your Call ends and the second helper's connects",
+                title: "Repeat with End & Answer: your Call ends and the second helper's connects",
                 script: None,
                 lands_with: &[10, 16],
             },

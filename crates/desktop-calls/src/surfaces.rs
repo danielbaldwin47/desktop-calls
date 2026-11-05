@@ -14,7 +14,7 @@
 //!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
 //!   It is unmapped whenever nothing rings: a mapped overlay surface stops
 //!   Hyprland scanning a fullscreen window out directly. While the Call
-//!   Window shows too, for a waiting Call, the Banner sits below it.
+//!   Window shows too, for a Waiting Call, the Banner sits below it.
 //! - The Call Window is on the top layer, so fullscreen windows cover it, in
 //!   the same corner, and takes keyboard focus only when clicked or when the
 //!   keybinding asks; Escape gives it back. Each of its actions has a

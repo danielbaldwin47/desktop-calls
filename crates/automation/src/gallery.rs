@@ -42,6 +42,8 @@ const PHONE_NAME: &str = "My Pixel";
 const NUMBER: &str = "+447700900123";
 /// A second caller, for call waiting.
 const SECOND_NUMBER: &str = "+447700900456";
+/// A third caller, while the first Call is on hold and the second live.
+const THIRD_NUMBER: &str = "+447700900789";
 
 /// The stock Answer button's green, the stock Decline and Hang up buttons'
 /// red, and the orange that marks the microphone muted under every look.
@@ -263,7 +265,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-waiting-banner",
-        title: "A second Call waiting: the Banner, with Hold & answer, below the Call Window",
+        title: "A Waiting Call: the Banner, with Hold & Answer, below the Call Window",
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -281,7 +283,7 @@ const STATES: &[State] = &[
             on_a_call(harness);
             waiting(harness);
             if let Err(error) = harness.hold_and_answer() {
-                panic!("Hold & answer: {error:?}");
+                panic!("Hold & Answer: {error:?}");
             }
             harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
                 state
@@ -291,6 +293,39 @@ const STATES: &[State] = &[
             });
         },
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-window-held-third-call-waiting",
+        title: "Three Calls: one live, one on hold with no Swap or Hang up, and a Waiting Call's Banner",
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            waiting(harness);
+            if let Err(error) = harness.hold_and_answer() {
+                panic!("Hold & Answer: {error:?}");
+            }
+            harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
+                state
+                    .surface("call-window")
+                    .is_some_and(|window| window.contains_key("held-caller"))
+                    && state.surface("banner").is_none()
+            });
+            let _path = harness.simulated_phone().ring(THIRD_NUMBER);
+            harness.wait_for_app(
+                "the Call Window says why the Held Call has no Swap or Hang up",
+                DEADLINE,
+                |state| {
+                    state
+                        .surface("call-window")
+                        .is_some_and(|window| window.contains_key("held-waiting-first"))
+                        && state
+                            .surface("banner")
+                            .is_some_and(|banner| banner.contains_key("options"))
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
         name: "call-window-connection-lost",
@@ -703,7 +738,7 @@ fn on_a_call(harness: &Harness) {
 /// A second caller rings during the Call: waits for its Banner.
 fn waiting(harness: &Harness) {
     let _path = harness.simulated_phone().ring(SECOND_NUMBER);
-    harness.wait_for_app("the waiting Call's Banner shows", DEADLINE, |state| {
+    harness.wait_for_app("the Waiting Call's Banner shows", DEADLINE, |state| {
         state
             .surface("banner")
             .is_some_and(|banner| banner.contains_key("options"))

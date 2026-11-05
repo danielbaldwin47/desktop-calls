@@ -42,9 +42,9 @@ pub struct BannerView {
     pub focused: bool,
     /// The Contact the caller is, if Contacts say.
     pub contact: Option<ContactMatch>,
-    /// The Call rings while another is connected, so the Banner offers Hold
-    /// & answer, End & answer and Decline instead of Answer and Decline.
-    pub waiting: bool,
+    /// What the Banner offers for a Waiting Call in place of Answer, or
+    /// `None` for the only Call ringing.
+    pub waiting: Option<WaitingOptions>,
     /// The Call rang with no number, and the Phone may still report one,
     /// so the Banner doesn't yet say the number is withheld.
     pub awaiting_number: bool,
@@ -71,6 +71,16 @@ pub struct CallWindowView {
     pub held: Option<HeldCall>,
 }
 
+/// What the Banner offers for a Waiting Call, besides Decline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitingOptions {
+    /// Hold & Answer and End & Answer: the user's other Call is connected.
+    HoldOrEnd,
+    /// End & Answer alone: the user's own Call is still being placed, and a
+    /// Call nobody has answered can't be put on hold.
+    End,
+}
+
 /// A Call on hold behind the one the Call Window shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HeldCall {
@@ -78,6 +88,9 @@ pub struct HeldCall {
     pub caller: Caller,
     /// The Contact the other party is, if Contacts say.
     pub contact: Option<ContactMatch>,
+    /// Whether Swap and Hang up are offered for it. Not while a Waiting Call
+    /// rings: the Phone would answer or decline that Call instead.
+    pub can_act: bool,
 }
 
 /// What the Call Window says about the Call's audio, and so what its
@@ -182,7 +195,8 @@ impl State {
                 contact: self.contact(&call.caller),
                 waiting: self
                     .waiting_call()
-                    .is_some_and(|waiting| waiting.id == call.id),
+                    .filter(|waiting| waiting.id == call.id)
+                    .map(|_| self.waiting_options()),
                 awaiting_number: call.caller == Caller::Withheld
                     && self.awaiting_number.contains(&call.id),
             });
@@ -283,6 +297,7 @@ impl State {
                 call: held.id,
                 caller: held.caller.clone(),
                 contact: self.contact(&held.caller),
+                can_act: !self.has_waiting_call(),
             }),
         })
     }

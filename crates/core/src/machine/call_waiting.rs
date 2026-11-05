@@ -1,25 +1,63 @@
-//! Call waiting: a second Call ringing during a connected one, and Hold &
-//! answer, End & answer and Swap. The Phone carries them out on its
-//! AudioGateway, and may refuse them; then both Calls stay as they were and
-//! the Call Window says so.
+//! Call waiting: a Waiting Call ringing while the user is on another Call,
+//! and Hold & Answer, End & Answer and Swap. The Phone carries them out on
+//! its AudioGateway, and may refuse them; then both Calls stay as they were
+//! and the Call Window says so.
+//!
+//! While the user's own Call is still being placed, the Phone can't hold it,
+//! and PipeWire's `ReleaseAndAnswer` needs an active Call, so End & Answer
+//! hangs that Call up and answers the Waiting Call once the Phone presents
+//! it as ringing.
 
 use super::audio::bring_audio_here;
 use super::input::{Effect, Input, PhoneCommand, Timer};
+use super::view::WaitingOptions;
 use super::{NOTICE_MS, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Request};
 use crate::messages::Failure;
 
 impl State {
-    /// The Call ringing while another is connected: the one the Banner offers
-    /// Hold & answer, End & answer and Decline for.
+    /// The Waiting Call: one ringing while the user is on another Call, or
+    /// still placing one. The Banner offers Hold & Answer or End & Answer,
+    /// and Decline, for it, since the Phone answers a `waiting` Call only
+    /// that way.
     pub(super) fn waiting_call(&self) -> Option<&Call> {
         self.calls.iter().find(|call| {
             call.rings_here()
                 && self
                     .calls
                     .iter()
-                    .any(|other| other.id != call.id && other.state.is_connected())
+                    .any(|other| other.id != call.id && other.state.is_live())
         })
+    }
+
+    /// What the Banner offers for the Waiting Call: Hold & Answer too, unless
+    /// the user's other Call is still being placed.
+    pub(super) fn waiting_options(&self) -> WaitingOptions {
+        if self.unconnected_call().is_some()
+            && !self.calls.iter().any(|call| call.state.is_connected())
+        {
+            WaitingOptions::End
+        } else {
+            WaitingOptions::HoldOrEnd
+        }
+    }
+
+    /// Whether the Phone has a Call in state `waiting`, answered or not. Then
+    /// `Hangup` on a Held Call is `AT+CHLD=0`, which rejects the Waiting
+    /// Call first.
+    pub(super) fn has_waiting_call(&self) -> bool {
+        self.calls
+            .iter()
+            .any(|call| call.state == CallState::Waiting)
+    }
+
+    /// The user's own Call still being placed: dialing, or ringing at the
+    /// other end.
+    fn unconnected_call(&self) -> Option<CallId> {
+        self.calls
+            .iter()
+            .find(|call| matches!(call.state, CallState::Dialing | CallState::Alerting))
+            .map(|call| call.id)
     }
 
     /// Whether a Call is on hold, so Swap has something to swap to.
@@ -28,7 +66,7 @@ impl State {
     }
 }
 
-/// Hold & answer: the Phone puts the connected Call on hold and answers the
+/// Hold & Answer: the Phone puts the connected Call on hold and answers the
 /// waiting one. Answered here, its audio comes here, as for any Call
 /// answered on the Desktop.
 pub(super) fn hold_and_answer(state: &mut State, effects: &mut Vec<Effect>) {
@@ -40,15 +78,51 @@ pub(super) fn hold_and_answer(state: &mut State, effects: &mut Vec<Effect>) {
     );
 }
 
-/// End & answer: the Phone ends the connected Call and answers the waiting
-/// one, its audio here.
+/// End & Answer: the Phone ends the connected Call and answers the Waiting
+/// Call, its audio here. With the user's own Call still being placed, that
+/// Call is hung up instead, and the Waiting Call answered once it rings.
 pub(super) fn end_and_answer(state: &mut State, effects: &mut Vec<Effect>) {
+    if state.refusal(&Input::EndAndAnswer).is_none()
+        && state.waiting_options() == WaitingOptions::End
+        && let (Some(waiting), Some(placing)) = (
+            state.waiting_call().map(|call| call.id),
+            state.unconnected_call(),
+        )
+    {
+        state.waiting_notice = None;
+        if let Some(call) = state.call_mut(waiting) {
+            call.request = Request::Answer;
+        }
+        if let Some(call) = state.call_mut(placing) {
+            call.request = Request::HangUp;
+        }
+        effects.push(Effect::Phone(PhoneCommand::HangUp(placing)));
+        return;
+    }
     answer_waiting(
         state,
         &Input::EndAndAnswer,
         PhoneCommand::EndAndAnswer,
         effects,
     );
+}
+
+/// The Phone presents a Call the user chose End & Answer for as ringing,
+/// now that the Call being placed has ended: it is answered, as Answer
+/// does.
+pub(super) fn answer_once_ringing(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    effects.push(Effect::Phone(PhoneCommand::Answer(call)));
+    bring_audio_here(state, effects);
+}
+
+/// The Phone didn't hang up the Call being placed for End & Answer: the
+/// Waiting Call rings on, and the Banner offers it again.
+pub(super) fn placing_hang_up_failed(state: &mut State) {
+    for call in &mut state.calls {
+        if call.state == CallState::Waiting && call.request == Request::Answer {
+            call.request = Request::None;
+        }
+    }
 }
 
 fn answer_waiting(
@@ -78,7 +152,7 @@ fn answer_waiting(
 }
 
 /// Swap: the Phone puts the live Call on hold and makes the held one live
-/// again; with only a held Call, it is live again.
+/// again; with only a Held Call, it is live again.
 pub(super) fn swap(state: &mut State, effects: &mut Vec<Effect>) {
     if let Some(failure) = state.refusal(&Input::Swap) {
         effects.push(Effect::ReportError(failure));
@@ -88,8 +162,8 @@ pub(super) fn swap(state: &mut State, effects: &mut Vec<Effect>) {
     effects.push(Effect::Phone(PhoneCommand::Swap));
 }
 
-/// The Phone refused Hold & answer, End & answer or Swap, or never
-/// answered. It changed nothing, so the waiting Call rings on, and the Call
+/// The Phone refused Hold & Answer, End & Answer or Swap, or never
+/// answered. It changed nothing, so the Waiting Call rings on, and the Call
 /// Window says what happened for a while.
 pub(super) fn call_waiting_failed(
     state: &mut State,

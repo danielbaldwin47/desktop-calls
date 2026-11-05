@@ -40,6 +40,7 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         "call-window-connection-lost",
         "call-waiting-banner",
         "call-window-held",
+        "call-window-held-third-call-waiting",
     ];
     let files = states.iter().flat_map(|state| {
         ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))

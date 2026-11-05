@@ -1,6 +1,8 @@
 //! Answering method calls on the Telephony service, as PipeWire does.
 
-use super::call_waiting::{after_hang_up, hold_and_answer, release_and_answer, swap_calls};
+use super::call_waiting::{
+    after_hang_up, hold_and_answer, hung_up_call, release_and_answer, swap_calls,
+};
 use super::phone::{calls, set_volume};
 use super::tree::{
     call_state, end_call, find_call, set_call_state, set_transport, transport_state,
@@ -103,7 +105,7 @@ pub fn answer(
             hold_and_answer(tree, gateway, behaviour)
         }
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "ReleaseAndAnswer", Some(gateway), _) => {
-            release_and_answer(tree, gateway)
+            release_and_answer(tree, gateway, behaviour)
         }
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SwapCalls", Some(gateway), _) => {
             swap_calls(tree, gateway, behaviour)
@@ -331,7 +333,8 @@ fn hang_up(
     ) {
         return (invalid_state(), Vec::new());
     }
-    let mut signals = end_call(tree, audio_gateway, &path);
+    let ended = hung_up_call(tree, audio_gateway, path, &state);
+    let mut signals = end_call(tree, audio_gateway, &ended);
     signals.extend(after_hang_up(tree, audio_gateway, &state));
     let reply = if behaviour.quirks.contains(&Quirk::HangupTooFewArguments) {
         Reply::Error(

@@ -52,6 +52,10 @@ pub enum Refused {
     NoWaitingCall(String),
     /// `Swap` with no Call on hold.
     NoHeldCall(String),
+    /// `HoldAndAnswer` while the user's own Call is still being placed.
+    NotConnectedYet(String),
+    /// `Swap` while a Waiting Call rings: the Phone would answer it instead.
+    WaitingCallFirst(String),
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
@@ -69,6 +73,8 @@ impl From<Failure> for Refused {
             Failure::InvalidTones => Self::InvalidTones(text),
             Failure::NoWaitingCall => Self::NoWaitingCall(text),
             Failure::NoHeldCall => Self::NoHeldCall(text),
+            Failure::NotConnectedYet => Self::NotConnectedYet(text),
+            Failure::WaitingCallFirst => Self::WaitingCallFirst(text),
             Failure::Undialable
             | Failure::PhoneNotSetUp
             | Failure::PhoneConnecting
@@ -285,7 +291,7 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
     }
 
-    /// Puts the live Call on hold and answers the waiting Call, its audio on
+    /// Puts the live Call on hold and answers the Waiting Call, its audio on
     /// the Desktop. It returns once the Phone is asked; the Calls' states
     /// change when the Phone has done it, and `Error` says so if it refuses.
     /// Fails with the reason while no Call is waiting.
@@ -293,14 +299,14 @@ impl ControlInterface {
         self.pass_on(Input::HoldAndAnswer)
     }
 
-    /// Ends the live Call and answers the waiting Call, as `HoldAndAnswer`
+    /// Ends the live Call and answers the Waiting Call, as `HoldAndAnswer`
     /// does otherwise.
     fn end_and_answer(&self) -> Result<(), Refused> {
         self.pass_on(Input::EndAndAnswer)
     }
 
-    /// Puts the live Call on hold and makes the held Call live again; with
-    /// only a held Call, makes it live again. It returns once the Phone is
+    /// Puts the live Call on hold and makes the Held Call live again; with
+    /// only a Held Call, makes it live again. It returns once the Phone is
     /// asked, and `Error` says so if it refuses. Fails with the reason while
     /// no Call is on hold.
     fn swap(&self) -> Result<(), Refused> {

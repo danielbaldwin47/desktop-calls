@@ -1,10 +1,10 @@
 //! The Call state machine's call-waiting policy, at its public interface: a
-//! second Call during a live one, Hold & answer, End & answer, Decline,
+//! a Waiting Call during a live one, Hold & Answer, End & Answer, Decline,
 //! Swap, and the Phone refusing them.
 
 use desktop_calls_core::{
     CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone, PhoneCommand, State,
-    Timestamp, Transport, messages::Failure, step,
+    Timestamp, Transport, WaitingOptions, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -80,7 +80,7 @@ fn waiting() -> State {
     .0
 }
 
-/// [`waiting`], then Hold & answer, carried out by the Phone.
+/// [`waiting`], then Hold & Answer, carried out by the Phone.
 fn held() -> State {
     run(
         waiting(),
@@ -118,7 +118,7 @@ fn a_waiting_call_shows_the_banner_with_the_call_waiting_options_and_never_rings
     let banner = state.surfaces().banner.expect("the Banner shows");
     assert_eq!(banner.call, SECOND);
     assert_eq!(banner.caller, alice());
-    assert!(banner.waiting, "the Banner offers the call-waiting options");
+    assert_eq!(banner.waiting, Some(WaitingOptions::HoldOrEnd));
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.call, Some(FIRST));
 }
@@ -289,9 +289,9 @@ fn the_phone_refusing_hold_says_so_and_leaves_both_calls_as_they_were() {
     );
 
     assert!(effects.contains(&Effect::ReportError(Failure::HoldAndAnswerFailed)));
-    let banner = state.surfaces().banner.expect("the waiting Call rings on");
+    let banner = state.surfaces().banner.expect("the Waiting Call rings on");
     assert_eq!(banner.call, SECOND);
-    assert!(banner.waiting);
+    assert_eq!(banner.waiting, Some(WaitingOptions::HoldOrEnd));
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.call, Some(FIRST));
     assert_eq!(window.notice, Some(Failure::HoldAndAnswerFailed));
@@ -345,4 +345,166 @@ fn swap_without_a_call_on_hold_is_refused() {
 
     assert_eq!(effects, [Effect::ReportError(Failure::NoHeldCall)]);
     assert_eq!(state.refusal(&Input::Swap), Some(Failure::NoHeldCall));
+}
+
+/// The Call a third caller makes while Alice is live and Bob on hold.
+const THIRD: CallId = CallId(3);
+
+/// [`held`], and Carol calls: her Call waits too.
+fn three_calls() -> State {
+    run(
+        held(),
+        [Input::CallAdded {
+            call: THIRD,
+            state: CallState::Waiting,
+            caller: Caller::Number("+447700900789".to_owned()),
+            at: Timestamp(5_000),
+        }],
+    )
+    .0
+}
+
+#[test]
+fn while_a_waiting_call_rings_the_held_call_offers_neither_swap_nor_hang_up() {
+    let state = three_calls();
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    let on_hold = window.held.expect("Bob is listed on hold");
+    assert_eq!(on_hold.call, FIRST);
+    assert!(
+        !on_hold.can_act,
+        "AT+CHLD=0 would decline Carol, and =2 answer her"
+    );
+    assert_eq!(state.refusal(&Input::Swap), Some(Failure::WaitingCallFirst));
+    assert_eq!(
+        state.surfaces().banner.map(|banner| banner.call),
+        Some(THIRD)
+    );
+}
+
+#[test]
+fn hanging_up_the_held_call_while_a_waiting_call_rings_is_refused_and_asks_nothing() {
+    let (state, effects) = run(three_calls(), [Input::HangUp(FIRST)]);
+
+    assert_eq!(effects, [Effect::ReportError(Failure::WaitingCallFirst)]);
+    assert_eq!(
+        state.surfaces().banner.map(|banner| banner.call),
+        Some(THIRD)
+    );
+}
+
+#[test]
+fn once_the_waiting_call_is_gone_the_held_call_offers_swap_and_hang_up_again() {
+    let (state, _) = run(
+        three_calls(),
+        [Input::Decline(THIRD), Input::CallEnded { call: THIRD }],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert!(window.held.expect("Bob is still on hold").can_act);
+    assert_eq!(state.refusal(&Input::Swap), None);
+    let (_, effects) = run(state, [Input::HangUp(FIRST)]);
+    assert_eq!(effects, [Effect::Phone(PhoneCommand::HangUp(FIRST))]);
+}
+
+/// Connected, and the user is placing a Call that rings at the other end,
+/// when Alice calls: hers is `waiting`.
+fn waiting_while_placing() -> State {
+    let connected = run(
+        State::default(),
+        [
+            Input::PhonePaired(Phone {
+                name: "My Pixel".to_owned(),
+                address: ADDRESS.to_owned(),
+            }),
+            Input::PhoneConnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    )
+    .0;
+    run(
+        connected,
+        [
+            Input::CallAdded {
+                call: FIRST,
+                state: CallState::Dialing,
+                caller: bob(),
+                at: Timestamp(1_000),
+            },
+            Input::CallChanged {
+                call: FIRST,
+                state: CallState::Alerting,
+                at: Timestamp(1_500),
+            },
+            Input::CallAdded {
+                call: SECOND,
+                state: CallState::Waiting,
+                caller: alice(),
+                at: Timestamp(2_000),
+            },
+        ],
+    )
+    .0
+}
+
+#[test]
+fn a_call_ringing_while_one_is_still_being_placed_waits_with_end_and_answer_only() {
+    let state = waiting_while_placing();
+
+    assert!(!state.ringing());
+    let banner = state.surfaces().banner.expect("the Banner shows");
+    assert_eq!(banner.call, SECOND);
+    assert_eq!(banner.waiting, Some(WaitingOptions::End));
+    assert_eq!(
+        state.refusal(&Input::HoldAndAnswer),
+        Some(Failure::NotConnectedYet)
+    );
+}
+
+#[test]
+fn end_and_answer_while_placing_hangs_that_call_up_then_answers_once_the_phone_rings() {
+    let (state, effects) = run(waiting_while_placing(), [Input::EndAndAnswer]);
+
+    assert_eq!(effects, [Effect::Phone(PhoneCommand::HangUp(FIRST))]);
+    assert_eq!(state.surfaces().banner, None);
+
+    let (_, effects) = run(
+        state,
+        [
+            Input::CallEnded { call: FIRST },
+            Input::CallChanged {
+                call: SECOND,
+                state: CallState::Ringing,
+                at: Timestamp(3_000),
+            },
+        ],
+    );
+    assert!(
+        effects.contains(&Effect::Phone(PhoneCommand::Answer(SECOND))),
+        "{effects:?}"
+    );
+    assert!(!effects.contains(&Effect::StartRinging), "{effects:?}");
+}
+
+#[test]
+fn answer_on_a_call_waiting_while_placing_is_end_and_answer() {
+    let (_, effects) = run(waiting_while_placing(), [Input::Answer(SECOND)]);
+
+    assert_eq!(effects, [Effect::Phone(PhoneCommand::HangUp(FIRST))]);
+}
+
+#[test]
+fn if_the_phone_keeps_the_placed_call_the_waiting_call_is_offered_again() {
+    let (state, _) = run(
+        waiting_while_placing(),
+        [
+            Input::EndAndAnswer,
+            Input::PhoneCommandFailed(PhoneCommand::HangUp(FIRST)),
+        ],
+    );
+
+    let banner = state.surfaces().banner.expect("the Banner is back");
+    assert_eq!(banner.waiting, Some(WaitingOptions::End));
 }

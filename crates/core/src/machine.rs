@@ -43,6 +43,7 @@ use setup::Setup;
 pub use setup::{SetupNotice, SetupStep, SetupWindowView};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute, Surfaces,
+    WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so
@@ -266,7 +267,7 @@ pub struct State {
     /// Why the audio isn't where the user asked: shown beside the Call until
     /// the audio moves, the user asks again, or the Call ends.
     audio_notice: Option<Failure>,
-    /// Why the Phone refused Hold & answer, End & answer or Swap: shown
+    /// Why the Phone refused Hold & Answer, End & Answer or Swap: shown
     /// beside the Calls for a while, until they change, or the user asks
     /// again.
     waiting_notice: Option<Failure>,
@@ -327,7 +328,7 @@ impl State {
     }
 
     /// Whether the Desktop ringtone should be playing: a Call rings here, no
-    /// other Call is live, so a waiting Call never rings over a live one, and
+    /// other Call is live, so a Waiting Call never rings over a live one, and
     /// Do Not Disturb is off. The Banner shows either way.
     #[must_use]
     pub fn ringing(&self) -> bool {
@@ -538,7 +539,12 @@ impl State {
             Input::HoldAndAnswer | Input::EndAndAnswer if self.waiting_call().is_none() => {
                 Some(Failure::NoWaitingCall)
             }
+            Input::HoldAndAnswer if self.waiting_options() == WaitingOptions::End => {
+                Some(Failure::NotConnectedYet)
+            }
             Input::Swap if !self.has_held_call() => Some(Failure::NoHeldCall),
+            // `AT+CHLD=2` would answer the Waiting Call instead.
+            Input::Swap if self.has_waiting_call() => Some(Failure::WaitingCallFirst),
             Input::SendTones(tones) => {
                 if !self
                     .calls

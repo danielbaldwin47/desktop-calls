@@ -5,12 +5,13 @@ use super::audio::{
     ask_once_more, audio_not_moved, bring_audio_here, call_back, call_gone_mid_handoff,
     end_handoff_to_phone, restore_audio, to_phone_timed_out,
 };
-use super::call_waiting::{dismiss_notice, hold_and_answer};
+use super::call_waiting::{answer_once_ringing, dismiss_notice, end_and_answer, hold_and_answer};
 use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
 use super::presence::{connection_lost_over, found_lost_call, lost_track, reconnect_due};
 use super::setup::setup_timer;
+use super::view::WaitingOptions;
 use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
 use crate::call::{Call, CallId, CallState, Caller, Direction, Request, Timestamp};
 use crate::messages::Failure;
@@ -169,12 +170,18 @@ pub(super) fn call_changed(
     if call_state.is_connected() && known.active_since.is_none() {
         known.active_since = Some(at);
     }
+    // A Waiting Call the user chose End & Answer for, ringing now that their
+    // own Call has ended.
+    let answer_now = call_state == CallState::Ringing && known.request == Request::Answer;
     if let Some(restore) = &mut state.restore_audio {
         restore.call_back = true;
     }
     restore_audio(state, effects);
     call_back(state);
     found_lost_call(state, call);
+    if answer_now {
+        answer_once_ringing(state, call, effects);
+    }
 }
 
 /// The Phone reported who `call` is with after reporting the Call. Every
@@ -196,13 +203,17 @@ pub(super) fn caller_changed(state: &mut State, call: CallId, caller: Caller) {
 }
 
 pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
-    // Answering a waiting Call keeps the connected one, on hold: the choice
-    // that loses nothing.
+    // Answering a Waiting Call keeps the connected one, on hold: the choice
+    // that loses nothing. A Call still being placed can't be held, so it
+    // ends.
     if state
         .waiting_call()
         .is_some_and(|waiting| waiting.id == call)
     {
-        hold_and_answer(state, effects);
+        match state.waiting_options() {
+            WaitingOptions::HoldOrEnd => hold_and_answer(state, effects),
+            WaitingOptions::End => end_and_answer(state, effects),
+        }
         return;
     }
     match state.call_mut(call) {
@@ -238,6 +249,16 @@ pub(super) fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>
         // A hang-up kept until the Phone is back could end the Call the user
         // is now on, on the Phone.
         effects.push(Effect::ReportError(Failure::ConnectionLost));
+        return;
+    }
+    if state.has_waiting_call()
+        && state
+            .calls
+            .iter()
+            .any(|known| known.id == call && known.state == CallState::Held)
+    {
+        // `AT+CHLD=0` would reject the Waiting Call before the Held one.
+        effects.push(Effect::ReportError(Failure::WaitingCallFirst));
         return;
     }
     match state.call_mut(call) {

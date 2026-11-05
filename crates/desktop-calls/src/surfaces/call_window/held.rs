@@ -1,5 +1,7 @@
-//! The Call Window's call-waiting row: the other Call, on hold, with Swap
-//! and a Hang up of its own; or, for a lone Call on hold, Resume.
+//! The Call Window's call-waiting row: the Held Call, with Swap and a Hang
+//! up of its own; or, for a lone Call on hold, Resume. While a Waiting Call
+//! rings, the Phone would apply Swap or that Hang up to it instead, so the
+//! row says so in their place.
 
 use super::super::{HANG_UP_HELD_SHORTCUT, SWAP_SHORTCUT, Who};
 use super::show_shortcut;
@@ -22,6 +24,9 @@ pub(super) struct HeldRow {
     /// Hangs up the Call on hold, leaving the live one.
     pub(super) hang_up: gtk::Button,
     hang_up_shortcut: String,
+    buttons: gtk::Box,
+    /// Why Swap and Hang up aren't offered while a Waiting Call rings.
+    waiting_first: gtk::Label,
     held: Rc<Cell<Option<CallId>>>,
 }
 
@@ -67,10 +72,16 @@ impl HeldRow {
         buttons.set_homogeneous(true);
         buttons.append(&swap);
         buttons.append(&hang_up);
+        let waiting_first = gtk::Label::new(Some(messages::label(Label::WaitingCallFirst)));
+        waiting_first.add_css_class("dim-label");
+        waiting_first.set_xalign(0.0);
+        waiting_first.set_wrap(true);
+        waiting_first.set_max_width_chars(36);
         let row = gtk::Box::new(gtk::Orientation::Vertical, 8);
         row.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         row.append(&caller_line);
         row.append(&buttons);
+        row.append(&waiting_first);
         row.set_visible(false);
         for button in [&swap, &hang_up] {
             button.set_focus_on_click(false);
@@ -84,6 +95,8 @@ impl HeldRow {
             swap_shortcut,
             hang_up,
             hang_up_shortcut,
+            buttons,
+            waiting_first,
             held,
         }
     }
@@ -93,18 +106,31 @@ impl HeldRow {
     /// Swap, or while the only Call is on hold, with Resume.
     pub(super) fn update(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         let lone = view.held.is_none() && matches!(view.phase, CallWindowPhase::OnHold { .. });
+        let can_act = view.held.as_ref().is_none_or(|held| held.can_act);
         self.held.set(view.held.as_ref().map(|held| held.call));
         self.row.set_visible(view.held.is_some() || lone);
         // Hidden controls ignore their shortcuts.
-        self.swap.set_sensitive(view.held.is_some() || lone);
-        self.hang_up.set_sensitive(view.held.is_some());
+        self.swap
+            .set_sensitive((view.held.is_some() || lone) && can_act);
+        self.hang_up.set_sensitive(view.held.is_some() && can_act);
         self.hang_up.set_visible(view.held.is_some());
+        self.buttons.set_visible(can_act);
+        self.waiting_first.set_visible(!can_act);
         self.caller_line.set_visible(view.held.is_some());
         if let Some(held) = &view.held {
             let who = Who::of(&held.caller, held.contact.as_ref());
             self.caller.set_text(&who.caller);
             content.insert("held-call".to_owned(), held.call.to_string());
             content.insert("held-caller".to_owned(), who.caller);
+        }
+        if !can_act {
+            content.insert(
+                "held-waiting-first".to_owned(),
+                messages::label(Label::WaitingCallFirst).to_owned(),
+            );
+            return;
+        }
+        if view.held.is_some() {
             content.insert(
                 "hang-up-held-shortcut".to_owned(),
                 self.hang_up_shortcut.clone(),

@@ -70,7 +70,7 @@ pub enum Input {
     /// The user asked to put the live Call on hold and answer the waiting
     /// Call.
     HoldAndAnswer,
-    /// The user asked to end the live Call and answer the waiting Call.
+    /// The user asked to end the live Call and answer the Waiting Call.
     EndAndAnswer,
     /// The user asked to swap the live Call and the Call on hold: the live
     /// one goes on hold and the held one is live again.
@@ -200,11 +200,11 @@ pub enum PhoneCommand {
     Answer(CallId),
     /// Hang up this Call; for a ringing Call, that declines it.
     HangUp(CallId),
-    /// Put the live Call on hold and answer this waiting Call.
+    /// Put the live Call on hold and answer this Waiting Call.
     HoldAndAnswer(CallId),
-    /// End the live Call and answer this waiting Call.
+    /// End the live Call and answer this Waiting Call.
     EndAndAnswer(CallId),
-    /// Put the live Call on hold and make the held Call live again.
+    /// Put the live Call on hold and make the Held Call live again.
     Swap,
     /// Bring the live Call's audio to the Desktop.
     MoveAudioToDesktop,
@@ -299,7 +299,7 @@ pub enum Timer {
     /// number, that the connection to the Phone was lost.
     ConnectionLost(u32),
     /// The Call Window has said for long enough why the Phone refused Hold &
-    /// answer, End & answer or Swap, by the refusal with this number.
+    /// answer, End & Answer or Swap, by the refusal with this number.
     DismissCallWaitingNotice(u32),
     /// The Setup Window's step with this number has waited long enough.
     SetupStep(u32),

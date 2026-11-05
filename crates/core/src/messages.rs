@@ -78,7 +78,7 @@ pub enum Failure {
     TonesNotSent,
     /// The Call History row the user chose has a withheld number.
     WithheldNumber,
-    /// No Call is waiting to be answered with Hold & answer or End & answer.
+    /// No Call is waiting to be answered with Hold & Answer or End & Answer.
     NoWaitingCall,
     /// No Call is on hold for Swap to swap to.
     NoHeldCall,
@@ -91,6 +91,13 @@ pub enum Failure {
     /// The Phone didn't swap the live Call and the held one; both are as
     /// they were.
     SwapFailed,
+    /// Hold & Answer while the user's own Call is still being placed: a
+    /// Call nobody has answered can't be put on hold.
+    NotConnectedYet,
+    /// Swap, or Hang up on the Held Call, while a Waiting Call rings: the
+    /// Phone would answer the Waiting Call (`AT+CHLD=2`) or decline it
+    /// (`AT+CHLD=0`) instead.
+    WaitingCallFirst,
 }
 
 impl Failure {
@@ -132,6 +139,8 @@ impl Failure {
             Self::HoldAndAnswerFailed => "hold-and-answer-failed",
             Self::EndAndAnswerFailed => "end-and-answer-failed",
             Self::SwapFailed => "swap-failed",
+            Self::NotConnectedYet => "not-connected-yet",
+            Self::WaitingCallFirst => "waiting-call-first",
         }
     }
 }
@@ -252,7 +261,7 @@ pub fn failure(failure: Failure) -> Message {
             "That caller withheld their number, so it can't be called back.",
             None,
         ),
-        Failure::NoWaitingCall => ("There's no waiting Call to answer.", None),
+        Failure::NoWaitingCall => ("There's no Waiting Call to answer.", None),
         Failure::NoHeldCall => ("There's no Call on hold to swap to.", None),
         Failure::HoldAndAnswerFailed => (
             "Your phone didn't put your Call on hold, so both Calls are as they were; answer on your phone instead.",
@@ -266,6 +275,11 @@ pub fn failure(failure: Failure) -> Message {
             "Your phone didn't swap the Calls, so both are as they were; swap them on your phone instead.",
             None,
         ),
+        Failure::NotConnectedYet => (
+            "Your Call hasn't connected yet, so it can't be put on hold; choose End & Answer or Decline.",
+            None,
+        ),
+        Failure::WaitingCallFirst => (label(Label::WaitingCallFirst), None),
     };
     Message { text, next_action }
 }
@@ -501,12 +515,14 @@ pub enum Label {
     Dismiss,
     /// The Missed Call notification's click, for desktops that label it.
     ShowInDialer,
-    /// The Incoming Call Banner's heading for a Call ringing while another
-    /// is connected.
-    CallWaiting,
+    /// The Incoming Call Banner's heading for a Waiting Call.
+    WaitingCall,
     /// The same heading while the Banner has keyboard focus: the keys that
     /// work.
-    CallWaitingKeys,
+    WaitingCallKeys,
+    /// The same, while the user's own Call is still being placed, so only
+    /// End & Answer and Decline are offered.
+    WaitingCallEndKeys,
     /// The Banner's button that holds the live Call and answers the waiting
     /// one.
     HoldAndAnswer,
@@ -520,6 +536,9 @@ pub enum Label {
     Resume,
     /// What the Call Window says of a Call on hold.
     OnHold,
+    /// What the Call Window says in place of the Held Call's Swap and Hang
+    /// up while a Waiting Call rings.
+    WaitingCallFirst,
 }
 
 /// The text of `label`.
@@ -558,15 +577,17 @@ pub fn label(label: Label) -> &'static str {
         Label::CallBack => "Call back",
         Label::Dismiss => "Dismiss",
         Label::ShowInDialer => "Show in Dialer",
-        Label::CallWaiting => "Call waiting",
-        Label::CallWaitingKeys => {
-            "Press H to hold and answer, E to end and answer, or D to decline"
-        }
-        Label::HoldAndAnswer => "Hold & answer",
-        Label::EndAndAnswer => "End & answer",
+        Label::WaitingCall => "Waiting Call",
+        Label::WaitingCallKeys => "Press H to Hold & Answer, E to End & Answer, or D to decline",
+        Label::WaitingCallEndKeys => "Press E to End & Answer, or D to decline",
+        Label::HoldAndAnswer => "Hold & Answer",
+        Label::EndAndAnswer => "End & Answer",
         Label::Swap => "Swap",
         Label::Resume => "Resume",
         Label::OnHold => "On hold",
+        Label::WaitingCallFirst => {
+            "Swap, or hanging up this Call, would act on the Waiting Call instead; answer or decline it first."
+        }
     }
 }
 

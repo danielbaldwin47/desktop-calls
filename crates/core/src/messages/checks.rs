@@ -71,15 +71,18 @@ pub fn fixing(fix: DesktopFix) -> &'static str {
     }
 }
 
-/// Why putting a Problem right didn't work.
+/// Why putting a Problem right didn't work. `settings_folder` is where the
+/// audio settings are saved.
 #[must_use]
-pub fn fix_failed(failure: FixFailure) -> &'static str {
-    match failure {
+pub fn fix_failed(failure: FixFailure, settings_folder: &str) -> String {
+    let text = match failure {
         FixFailure::BluetoothNotTurnedOn => {
             "Bluetooth didn't turn on; try again, or turn it on in your Bluetooth settings."
         }
         FixFailure::AudioNotSaved => {
-            "The audio setting couldn't be saved in your settings folder; check that you can write to ~/.config/wireplumber, then try again."
+            return format!(
+                "The audio setting couldn't be saved; check that you can write to {settings_folder}, then try again."
+            );
         }
         FixFailure::AudioNotRestarted => {
             "The audio setting is saved, but the audio didn't restart; log out and back in to use it."
@@ -87,7 +90,8 @@ pub fn fix_failed(failure: FixFailure) -> &'static str {
         FixFailure::CallInProgress => {
             "Setting up audio restarts it, which would cut off your Call; try again once the Call ends."
         }
-    }
+    };
+    text.to_owned()
 }
 
 /// The button that copies a Problem's command.

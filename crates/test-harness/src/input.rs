@@ -220,6 +220,17 @@ impl SyntheticInput {
         self.sync()
     }
 
+    /// Presses and releases `key` while holding Shift, such as Shift+Tab.
+    pub fn press_with_shift(&mut self, key: Key) -> Result<(), String> {
+        self.key(KEY_LEFTSHIFT, true);
+        self.keyboard.modifiers(SHIFT_MASK, 0, 0, 0);
+        self.key(key.code(), true);
+        self.key(key.code(), false);
+        self.key(KEY_LEFTSHIFT, false);
+        self.keyboard.modifiers(0, 0, 0, 0);
+        self.sync()
+    }
+
     /// Presses and releases `key`.
     pub fn press(&mut self, key: Key) -> Result<(), String> {
         self.key(key.code(), true);

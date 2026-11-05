@@ -99,6 +99,9 @@ pub struct SetupProblemsView {
     pub fixing: Option<DesktopFix>,
     /// Why putting a Problem right didn't work, until the user tries again.
     pub notice: Option<FixFailure>,
+    /// A Problem keeps the Phone away, so it comes before pairing: its
+    /// button takes keyboard focus. Contacts support missing doesn't.
+    pub takes_focus: bool,
 }
 
 impl DesktopChecks {
@@ -148,6 +151,7 @@ impl State {
             problems,
             fixing: self.desktop.fixing,
             notice: self.desktop.notice,
+            takes_focus: self.desktop_keeps_phone_away(),
         })
     }
 }

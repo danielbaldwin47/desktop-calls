@@ -228,6 +228,40 @@ fn bluetooth_turned_on_elsewhere_while_the_window_is_open_clears_the_problem() {
     );
 }
 
+/// Waits until the Setup Window lists the Phone nearby, with focus.
+fn wait_for_phone_listed(harness: &Harness) -> AppState {
+    harness.wait_for_app("the Phone is listed, with focus", STARTUP, |state| {
+        state.surface("setup-window").is_some_and(|window| {
+            window.get("step").is_some_and(|step| step == "choose")
+                && window.contains_key("phones")
+                && window.get("focused").is_some_and(|focused| focused == "true")
+        })
+    })
+}
+
+#[test]
+fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .without_contacts_support()
+        .start();
+    harness.wait_for_app("the Contacts support Problem shows", STARTUP, |state| {
+        field(state, "problems") == Some("contacts-support-missing")
+    });
+    wait_for_phone_listed(&harness);
+
+    harness.keyboard().press(Key::Return);
+
+    let state = harness.wait_for_app("pairing with the Phone", DEADLINE, |state| {
+        state
+            .surface("setup-window")
+            .and_then(|window| window.get("step"))
+            .is_some_and(|step| step == "pairing" || step == "confirm")
+    });
+    assert_eq!(field(&state, "copied"), None, "Enter didn't copy");
+}
+
 #[test]
 fn contacts_support_missing_shows_the_install_command_and_copy_puts_it_on_the_clipboard() {
     let harness = Harness::builder()
@@ -235,11 +269,18 @@ fn contacts_support_missing_shows_the_install_command_and_copy_puts_it_on_the_cl
         .phone_unpaired()
         .without_contacts_support()
         .start();
-
-    let state = wait_for_problems(&harness, "contacts-support-missing", STARTUP);
+    let state = harness.wait_for_app("the Contacts support Problem shows", STARTUP, |state| {
+        field(state, "problems") == Some("contacts-support-missing")
+    });
     assert_eq!(field(&state, "commands"), Some(INSTALL));
     assert_eq!(state.problems[0].action, INSTALL);
+    wait_for_phone_listed(&harness);
 
+    // Back from the Phone to the button above it.
+    harness.keyboard().press_with_shift(Key::Tab);
+    harness.wait_for_app("Copy command has focus", DEADLINE, |state| {
+        field(state, "focused") == Some("true")
+    });
     harness.keyboard().press(Key::Return);
 
     harness.wait_for_app("the Setup Window says it copied", DEADLINE, |state| {
@@ -406,8 +447,14 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
 
     harness.keyboard().press(Key::Return);
 
+    let folder = harness
+        .directory()
+        .join("config/wireplumber/wireplumber.conf.d")
+        .display()
+        .to_string();
     let state = harness.wait_for_app("the Setup Window says why", DEADLINE, |state| {
-        field(state, "notice").is_some_and(|notice| notice.contains("couldn't be saved"))
+        field(state, "notice")
+            .is_some_and(|notice| notice.contains("couldn't be saved") && notice.contains(&folder))
     });
     assert_eq!(kinds(&state), ["audio-not-set-up"]);
     assert_eq!(field(&state, "buttons"), Some("Set up audio"), "it can be tried again");

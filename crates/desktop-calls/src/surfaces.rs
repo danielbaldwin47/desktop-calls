@@ -221,6 +221,11 @@ impl Surfaces {
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
         self.dialer.render(view.dialer.as_ref());
+        self.setup_window.top_keeps_focus(
+            view.setup_problems
+                .as_ref()
+                .is_some_and(|problems| problems.takes_focus),
+        );
         self.setup_window.render(view.setup_window.as_ref());
         // After the Setup Window, so its first button takes focus.
         self.setup_problems

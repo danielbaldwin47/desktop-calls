@@ -84,6 +84,18 @@ _Avoid_: tray icon, status icon
 The guided window that pairs the Phone with the Desktop and walks through granting access to Contacts and Call History.
 _Avoid_: first-run wizard, onboarding, "Connect your phone" window
 
+**Problem**:
+Something wrong on the Desktop or Phone that keeps Calls, Contacts or Call History from working, which the user can put right; shown in the Setup Window, the Indicator's menu and `Problems`.
+_Avoid_: error, issue
+
+**Fix**:
+Putting a Problem right for the user, once they press its button (Turn on, Set up audio). A Problem without a Fix shows the command to run instead.
+_Avoid_: repair, remedy, auto-fix
+
+**Contacts support**:
+The Desktop's Bluetooth file transfer service (`bluez-obex`), which brings Contacts and Call History over from the Phone.
+_Avoid_: OBEX, PBAP support
+
 **Do Not Disturb**:
 The Desktop's system-wide setting for silencing notifications, which Desktop Calls also obeys.
 _Avoid_: DND, quiet mode

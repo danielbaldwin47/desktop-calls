@@ -65,6 +65,8 @@ pub(super) struct SetupWindow {
     /// What [`Self::put_on_top`] put there, whose focus a Phone appearing
     /// doesn't take.
     top: RefCell<Option<gtk::Widget>>,
+    /// Whether what is on top keeps keyboard focus when a Phone appears.
+    top_keeps_focus: Cell<bool>,
 }
 
 impl SetupWindow {
@@ -143,6 +145,7 @@ impl SetupWindow {
             phones: RefCell::default(),
             listed: Cell::default(),
             top: RefCell::default(),
+            top_keeps_focus: Cell::default(),
         });
         setup.connect();
         // Pre-warm, as for the other surfaces.
@@ -225,6 +228,12 @@ impl SetupWindow {
         }
     }
 
+    /// Says whether what is on top keeps keyboard focus when a Phone
+    /// appears; otherwise the Phone takes it, as without it.
+    pub(super) fn top_keeps_focus(&self, keeps: bool) {
+        self.top_keeps_focus.set(keeps);
+    }
+
     /// Gives keyboard focus back to the step, if nothing in the window has
     /// it.
     pub(super) fn focus_if_lost(&self) {
@@ -297,7 +306,10 @@ impl SetupWindow {
         if new_step {
             self.focus_default();
             self.step_reached(step);
-        } else if relisted && self.list.focus_child().is_none() && !self.top_has_focus() {
+        } else if relisted
+            && self.list.focus_child().is_none()
+            && !(self.top_keeps_focus.get() && self.top_has_focus())
+        {
             self.focus_default();
         }
         if !phones.is_empty() && !self.listed.replace(true) {

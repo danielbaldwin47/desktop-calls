@@ -385,6 +385,18 @@ impl Keyboard<'_> {
         }
     }
 
+    /// Presses `key` while holding Shift, such as Shift+Tab.
+    ///
+    /// # Panics
+    ///
+    /// If the screen doesn't finish redrawing, or the compositor is gone.
+    pub fn press_with_shift(&self, key: Key) {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().press_with_shift(key) {
+            panic!("press Shift+{key:?}: {error}");
+        }
+    }
+
     /// Presses `character`'s key while holding Control, such as Ctrl+V, and
     /// Shift too where the character needs it: `'H'` is Ctrl+Shift+H.
     ///

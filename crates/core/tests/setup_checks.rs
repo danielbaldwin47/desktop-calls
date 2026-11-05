@@ -241,7 +241,10 @@ fn a_fix_that_fails_says_so_and_can_be_tried_again() {
     assert_eq!(shown.fixing, None);
     assert_eq!(shown.notice, Some(FixFailure::AudioNotSaved));
     assert_eq!(kinds(&state), [ProblemKind::AudioNotSetUp]);
-    assert!(!messages::fix_failed(FixFailure::AudioNotSaved).is_empty());
+    assert!(
+        messages::fix_failed(FixFailure::AudioNotSaved, "/tmp/settings/wireplumber")
+            .contains("/tmp/settings/wireplumber")
+    );
 
     let (state, effects) = step(state, Input::Fix(ProblemKind::AudioNotSetUp));
     assert_eq!(effects, [Effect::Fix(DesktopFix::SetUpAudio)]);

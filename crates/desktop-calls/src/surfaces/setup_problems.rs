@@ -1,24 +1,28 @@
 //! The Desktop's Problems, at the top of the Setup Window: each with its
 //! heading, one plain sentence, and either the button that puts it right
 //! once pressed (Turn on, Set up audio) or the command to run and a button
-//! that copies it. When the Problems first show, or change, the first
-//! one's button has keyboard focus, so Enter presses it; Tab moves on.
+//! that copies it. When a Problem that keeps the Phone away shows, or the
+//! Problems or the step change, the first one's button has keyboard focus,
+//! so Enter presses it; Tab moves on. Contacts support missing alone takes
+//! no focus, so Enter still pairs.
 //!
 //! It reports `setup-problems` while shown, with `problems` (kinds),
 //! `headings`, `messages`, `commands` and `buttons` (one per line, in
-//! order), `fixing` (what is under way), `notice` (why a fix didn't work)
-//! and `copied` (the command last copied).
+//! order), `fixing` (what is under way), `notice` (why a fix didn't work),
+//! `copied` (the command last copied) and `focused` (keyboard focus is on
+//! one of its buttons).
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use desktop_calls_core::messages::{self, NextAction, ProblemKind};
-use desktop_calls_core::{Input, SetupProblemsView, SetupWindowView};
+use desktop_calls_core::{FixFailure, Input, SetupProblemsView, SetupWindowView};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
 
 use super::SharedReport;
+use crate::wireplumber;
 
 const NAME: &str = "setup-problems";
 
@@ -36,6 +40,8 @@ pub(super) struct SetupProblems {
     report: SharedReport,
     content: RefCell<BTreeMap<String, String>>,
     mapped: Cell<bool>,
+    /// Keyboard focus is on one of its buttons.
+    focused: Cell<bool>,
     /// The Problems shown, and the Setup Window opening and step they show
     /// in: when any changes, the first button takes focus again.
     shown: RefCell<Shown>,
@@ -77,6 +83,7 @@ impl SetupProblems {
             report,
             content: RefCell::default(),
             mapped: Cell::default(),
+            focused: Cell::default(),
             shown: RefCell::default(),
             fix_buttons: RefCell::default(),
             first_button: RefCell::default(),
@@ -94,6 +101,24 @@ impl SetupProblems {
                 problems.publish();
             }
         });
+        // Whether keyboard focus is on one of its buttons, as GTK says.
+        let focus = gtk::EventControllerFocus::new();
+        for (signal_enter, focused) in [(true, true), (false, false)] {
+            let weak = Rc::downgrade(self);
+            let changed = move |_: &gtk::EventControllerFocus| {
+                if let Some(problems) = weak.upgrade() {
+                    problems.focused.set(focused);
+                    problems.set_focused_field();
+                    problems.publish();
+                }
+            };
+            if signal_enter {
+                focus.connect_enter(changed);
+            } else {
+                focus.connect_leave(changed);
+            }
+        }
+        self.widget.add_controller(focus);
         let weak = Rc::downgrade(self);
         self.widget.connect_unmap(move |_| {
             if let Some(problems) = weak.upgrade() {
@@ -101,6 +126,15 @@ impl SetupProblems {
                 problems.report.borrow_mut().set(NAME, None);
             }
         });
+    }
+
+    fn set_focused_field(&self) {
+        let mut content = self.content.borrow_mut();
+        if self.focused.get() {
+            content.insert("focused".to_owned(), "true".to_owned());
+        } else {
+            content.remove("focused");
+        }
     }
 
     fn publish(&self) {
@@ -148,13 +182,17 @@ impl SetupProblems {
         });
         self.status.set_text(status.unwrap_or_default());
         self.status.set_visible(status.is_some());
-        let notice = view.notice.map(messages::fix_failed);
-        self.notice.set_text(notice.unwrap_or_default());
+        let notice = view.notice.map(notice_text);
+        self.notice.set_text(notice.as_deref().unwrap_or_default());
         self.notice.set_visible(notice.is_some());
         self.widget.set_visible(true);
         *self.content.borrow_mut() = self.report_content(view);
+        self.set_focused_field();
         self.publish();
-        if changed && let Some(button) = self.first_button.borrow().as_ref() {
+        if changed
+            && view.takes_focus
+            && let Some(button) = self.first_button.borrow().as_ref()
+        {
             button.grab_focus();
         }
     }
@@ -269,14 +307,20 @@ impl SetupProblems {
             content.insert("fixing".to_owned(), messages::fixing(fix).to_owned());
         }
         if let Some(failure) = view.notice {
-            content.insert(
-                "notice".to_owned(),
-                messages::fix_failed(failure).to_owned(),
-            );
+            content.insert("notice".to_owned(), notice_text(failure));
         }
         if let Some(copied) = self.copied.borrow().as_ref() {
             content.insert("copied".to_owned(), copied.clone());
         }
         content
     }
+}
+
+/// Why a fix didn't work, naming where the audio settings go.
+fn notice_text(failure: FixFailure) -> String {
+    let folder = wireplumber::drop_in_folder().map_or_else(
+        || "~/.config/wireplumber/wireplumber.conf.d".to_owned(),
+        |folder| folder.display().to_string(),
+    );
+    messages::fix_failed(failure, &folder)
 }

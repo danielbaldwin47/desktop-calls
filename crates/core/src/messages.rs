@@ -26,6 +26,9 @@ pub enum Failure {
     NoSuchCall,
     /// The Call asked about is no longer ringing.
     CallNotRinging,
+    /// The keybinding has nothing to focus, and the Dialer it would open
+    /// isn't built yet.
+    DialerUnavailable,
 }
 
 impl Failure {
@@ -41,6 +44,7 @@ impl Failure {
             Self::AudioNotMoved => "audio-not-moved",
             Self::NoSuchCall => "no-such-call",
             Self::CallNotRinging => "call-not-ringing",
+            Self::DialerUnavailable => "dialer-unavailable",
         }
     }
 }
@@ -91,6 +95,7 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::NoSuchCall => ("That Call has already ended.", None),
         Failure::CallNotRinging => ("That Call isn't ringing any more.", None),
+        Failure::DialerUnavailable => ("Desktop Calls can't open the Dialer yet.", None),
     };
     Message { text, next_action }
 }
@@ -119,6 +124,9 @@ fn describe(phone: &Phone) -> String {
 pub enum Label {
     /// The Incoming Call Banner's heading.
     IncomingCall,
+    /// The Incoming Call Banner's heading while it has keyboard focus: the
+    /// keys that work.
+    BannerKeys,
     Answer,
     Decline,
     HangUp,
@@ -139,6 +147,7 @@ pub enum Label {
 pub fn label(label: Label) -> &'static str {
     match label {
         Label::IncomingCall => "Incoming call",
+        Label::BannerKeys => "Press A to answer or D to decline",
         Label::Answer => "Answer",
         Label::Decline => "Decline",
         Label::HangUp => "Hang up",

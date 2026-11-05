@@ -286,6 +286,31 @@ fn answering_a_call_that_is_gone_reports_it() {
 }
 
 #[test]
+fn answered_on_the_phone_the_desktop_leaves_the_audio_there() {
+    let (state, effects) = run(
+        ringing(),
+        [Input::CallChanged {
+            call: CALL,
+            state: CallState::Active,
+            at: Timestamp(2_000),
+        }],
+    );
+
+    assert_eq!(effects, [Effect::StopRinging]);
+    assert_eq!(state.surfaces().banner, None);
+    assert_eq!(state.audio_location(), Some(AudioLocation::Phone));
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(
+        window.phase,
+        CallWindowPhase::Live {
+            active_since: Timestamp(2_000),
+            audio_location: AudioLocation::Phone,
+            wideband: false,
+        }
+    );
+}
+
+#[test]
 fn the_caller_hanging_up_stops_the_ringing() {
     let (state, effects) = run(ringing(), [Input::CallEnded { call: CALL }]);
 

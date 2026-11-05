@@ -49,14 +49,44 @@ pub fn status(json: bool) -> ExitCode {
     }
 }
 
-async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
-    let session = zbus::connection::Builder::session()
+/// `desktop-calls` with no subcommand, which the keybinding runs: focuses
+/// the Incoming Call Banner while a Call rings, or the Call Window while one
+/// is live.
+pub fn activate() -> ExitCode {
+    let context = MainContext::default();
+    match context.block_on(call_activate(GlibRuntime::new(context.clone()))) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(failure) => report(failure),
+    }
+}
+
+async fn call_activate(runtime: GlibRuntime) -> Result<(), Failure> {
+    let session = connect(runtime).await?;
+    session
+        .call_method(
+            Some(control::BUS_NAME),
+            control::PATH,
+            Some(INTERFACE),
+            "Activate",
+            &(),
+        )
+        .await
+        .map(drop)
+        .map_err(|error| failure_of(&error))
+}
+
+async fn connect(runtime: GlibRuntime) -> Result<Connection, Failure> {
+    zbus::connection::Builder::session()
         .runtime(runtime)
         .build()
         .await
-        .map_err(|_| Failure::ServiceNotRunning)?;
-    let properties = get_all(&session).await.map_err(|error| match error {
-        zbus::Error::FDO(ref fdo)
+        .map_err(|_| Failure::ServiceNotRunning)
+}
+
+/// What a failed call to the long-running process means for the user.
+fn failure_of(error: &zbus::Error) -> Failure {
+    match error {
+        zbus::Error::FDO(fdo)
             if matches!(
                 **fdo,
                 zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
@@ -64,8 +94,24 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         {
             Failure::ServiceNotRunning
         }
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.ServiceUnknown"
+                    | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            ) =>
+        {
+            Failure::ServiceNotRunning
+        }
         _ => Failure::UnexpectedReply,
-    })?;
+    }
+}
+
+async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
+    let session = connect(runtime).await?;
+    let properties = get_all(&session)
+        .await
+        .map_err(|error| failure_of(&error))?;
     let text = |name: &str| -> Result<String, Failure> {
         properties
             .get(name)

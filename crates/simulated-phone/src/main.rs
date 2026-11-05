@@ -438,6 +438,33 @@ impl Control {
         Ok(())
     }
 
+    /// Answers the ringing Call at `call` on the Phone, as the person holding
+    /// it does. The Phone then brings its audio link up, which lands on the
+    /// Desktop only if `RejectSCO` is false. Returns once the Call is active.
+    async fn answer_on_phone(&self, call: OwnedObjectPath) -> zbus::fdo::Result<()> {
+        let signals = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let gateway = connected_audio_gateway(world)?;
+            telephony::answer_on_phone(&mut world.telephony, &gateway, &world.behaviour, &call)
+                .map_err(zbus::fdo::Error::InvalidArgs)?
+        };
+        self.emit(signals).await
+    }
+
+    /// Declines the ringing Call at `call` on the Phone, as the person
+    /// holding it does. Returns once the Call is gone.
+    async fn decline_on_phone(&self, call: OwnedObjectPath) -> zbus::fdo::Result<()> {
+        self.end_call_on_phone(&call, true).await
+    }
+
+    /// Ends the Call at `call` from the other end, ringing or live, as the
+    /// caller hanging up does. Returns once the Call is gone. On the
+    /// Desktop's side of the bus it looks just like a decline on the Phone.
+    async fn caller_hangs_up(&self, call: OwnedObjectPath) -> zbus::fdo::Result<()> {
+        self.end_call_on_phone(&call, false).await
+    }
+
     /// The current AudioGateway's object path, or `/` while there is none.
     #[zbus(property)]
     fn audio_gateway(&self) -> OwnedObjectPath {
@@ -462,6 +489,37 @@ impl Control {
             })
             .collect()
     }
+}
+
+impl Control {
+    async fn end_call_on_phone(
+        &self,
+        call: &OwnedObjectPath,
+        ringing_only: bool,
+    ) -> zbus::fdo::Result<()> {
+        let signals = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let gateway = connected_audio_gateway(world)?;
+            telephony::end_call_on_phone(&mut world.telephony, &gateway, call, ringing_only)
+                .map_err(zbus::fdo::Error::InvalidArgs)?
+        };
+        self.emit(signals).await
+    }
+
+    async fn emit(&self, signals: Vec<telephony::Signal>) -> zbus::fdo::Result<()> {
+        for signal in signals {
+            signal.emit(&self.session).await?;
+        }
+        Ok(())
+    }
+}
+
+fn connected_audio_gateway(world: &World) -> zbus::fdo::Result<OwnedObjectPath> {
+    world
+        .audio_gateway
+        .clone()
+        .ok_or_else(|| zbus::fdo::Error::Failed("hands-free is not connected".to_owned()))
 }
 
 async fn emit_properties_changed(

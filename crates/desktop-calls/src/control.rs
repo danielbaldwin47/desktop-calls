@@ -117,6 +117,13 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
     }
 
+    /// What the Desktop Calls keybinding does: gives keyboard focus to the
+    /// Incoming Call Banner while a Call rings, otherwise to the Call Window
+    /// while a Call is live. It never answers, declines or ends a Call.
+    fn activate(&self) {
+        let _ = self.intents.unbounded_send(Input::Activate);
+    }
+
     /// Something the user asked for failed: the failure kind and the
     /// sentence to show.
     #[zbus(signal)]

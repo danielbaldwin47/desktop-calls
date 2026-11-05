@@ -521,9 +521,70 @@ fn hang_up(
     ) {
         return (invalid_state(), Vec::new());
     }
-    let mut signals = set_call_state(tree, &path, "disconnected");
-    tree.remove(&path);
-    signals.extend(unannounce_call(audio_gateway, &path));
+    let signals = end_call(tree, audio_gateway, &path);
+    let reply = if behaviour.quirks.contains(&Quirk::HangupTooFewArguments) {
+        Reply::Error(
+            "org.freedesktop.DBus.Error.InvalidArgs",
+            "Too few arguments".to_owned(),
+        )
+    } else {
+        Reply::body(())
+    };
+    (reply, signals)
+}
+
+/// Answers the ringing Call at `call` on the Phone itself, as its holder
+/// does: the Call goes `active`, and the Phone tries to bring its audio link
+/// up, which the Desktop accepts only while `RejectSCO` is false. Returns the
+/// signals, or why the Phone can't.
+pub fn answer_on_phone(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+    call: &str,
+) -> Result<Vec<Signal>, String> {
+    let (path, properties) = find_call(tree, audio_gateway, call)
+        .ok_or_else(|| format!("there is no Call at {call}"))?;
+    let state = call_state(&properties);
+    if state != "incoming" {
+        return Err(format!("the Call at {call} is {state}, not ringing"));
+    }
+    let mut signals = set_call_state(tree, &path, "active");
+    signals.extend(open_audio_link(tree, audio_gateway, behaviour));
+    Ok(signals)
+}
+
+/// Ends the Call at `call` from the Phone's side, as declining it on the
+/// Phone or the caller hanging up does: PipeWire sees the Call vanish from
+/// the Phone's list (`+CIEV` or `+CLCC`), marks it `disconnected`, then
+/// unregisters it (`backend-native.c`, `hfp_hf_clcc_update` and the
+/// `callsetup`/`call` indicators). `ringing_only` refuses a Call that is not
+/// ringing.
+pub fn end_call_on_phone(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    call: &str,
+    ringing_only: bool,
+) -> Result<Vec<Signal>, String> {
+    let (path, properties) = find_call(tree, audio_gateway, call)
+        .ok_or_else(|| format!("there is no Call at {call}"))?;
+    let state = call_state(&properties);
+    if ringing_only && !matches!(state.as_str(), "incoming" | "waiting") {
+        return Err(format!("the Call at {call} is {state}, not ringing"));
+    }
+    Ok(end_call(tree, audio_gateway, &path))
+}
+
+/// The Call at `path` goes `disconnected` and is unregistered; the audio
+/// link drops with the last Call.
+fn end_call(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    path: &OwnedObjectPath,
+) -> Vec<Signal> {
+    let mut signals = set_call_state(tree, path, "disconnected");
+    tree.remove(path);
+    signals.extend(unannounce_call(audio_gateway, path));
     if calls(tree, audio_gateway.as_str()).is_empty()
         && transport_state(tree, audio_gateway).as_deref() != Some("idle")
     {
@@ -536,15 +597,37 @@ fn hang_up(
             ],
         ));
     }
-    let reply = if behaviour.quirks.contains(&Quirk::HangupTooFewArguments) {
-        Reply::Error(
-            "org.freedesktop.DBus.Error.InvalidArgs",
-            "Too few arguments".to_owned(),
-        )
-    } else {
-        Reply::body(())
-    };
-    (reply, signals)
+    signals
+}
+
+/// The Phone brings its audio link up for a live Call, as Android does when
+/// a hands-free unit is connected. While `RejectSCO` is true the Desktop
+/// refuses it and nothing changes.
+fn open_audio_link(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+) -> Vec<Signal> {
+    let rejected = tree
+        .get(audio_gateway, AUDIO_GATEWAY_TRANSPORT, "RejectSCO")
+        .and_then(|value| bool::try_from(value).ok())
+        .unwrap_or(true);
+    if rejected || transport_state(tree, audio_gateway).as_deref() != Some("idle") {
+        return Vec::new();
+    }
+    let mut signals = set_transport(
+        tree,
+        audio_gateway,
+        vec![("Codec", OwnedVariant::from(behaviour.codec))],
+    );
+    for state in ["pending", "active"] {
+        signals.extend(set_transport(
+            tree,
+            audio_gateway,
+            vec![("State", OwnedVariant::from(Str::from(state)))],
+        ));
+    }
+    signals
 }
 
 fn invalid_state() -> Reply {

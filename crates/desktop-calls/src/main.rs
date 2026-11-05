@@ -41,9 +41,7 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Status { json }) => cli::status(json),
         Some(Command::Service) => service::run(),
-        None => {
-            eprintln!("Desktop Calls can't open the Dialer yet (ticket #11).");
-            ExitCode::FAILURE
-        }
+        // What the Desktop Calls keybinding runs.
+        None => cli::activate(),
     }
 }

@@ -93,6 +93,12 @@ trait SimulatedPhone1 {
 
     fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
 
+    fn answer_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
+
+    fn decline_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
+
+    fn caller_hangs_up(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
+
     #[zbus(property)]
     fn audio_gateway(&self) -> zbus::Result<zbus::OwnedObjectPath>;
 
@@ -219,6 +225,7 @@ pub struct Builder {
     screenshot_directory: Option<PathBuf>,
     omarchy_bar: bool,
     toast_column: Option<u32>,
+    phone_connected: bool,
 }
 
 impl Builder {
@@ -263,6 +270,14 @@ impl Builder {
     /// it there is no Hyprland, as under sway.
     pub fn hyprland_toast_column(mut self, width: u32) -> Self {
         self.toast_column = Some(width);
+        self
+    }
+
+    /// Brings the Simulated Phone's hands-free up before the app starts, so
+    /// the app starts with the Phone's AudioGateway already there, as after a
+    /// login or a restart with the Phone in range.
+    pub fn phone_connected(mut self) -> Self {
+        self.phone_connected = true;
         self
     }
 
@@ -379,6 +394,9 @@ impl Builder {
             .expect("start the Simulated Phone");
         harness.processes.push(("simulated-phone", simulated_phone));
         harness.wait_for_bus_name(SIMULATED_PHONE_BUS_NAME, "simulated-phone");
+        if self.phone_connected {
+            harness.simulated_phone().connect();
+        }
 
         let app = harness
             .app_command()
@@ -1131,6 +1149,49 @@ impl SimulatedPhone<'_> {
             self.proxy().await?.reregister_call(&call, after_ms).await
         })
         .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
+    }
+
+    /// Answers the ringing Call at `call` on the Phone, as the person holding
+    /// it does. Returns once the Phone has reported the Call active.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such Call, or it isn't ringing.
+    pub fn answer_on_phone(&self, call: &str) {
+        zbus::block_on(async {
+            let call = zbus::ObjectPath::try_from(call)?;
+            self.proxy().await?.answer_on_phone(&call).await
+        })
+        .unwrap_or_else(|error| panic!("answer the Call at {call} on the Phone: {error}"));
+    }
+
+    /// Declines the ringing Call at `call` on the Phone, as the person holding
+    /// it does. Returns once the Phone has removed the Call.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such Call, or it isn't ringing.
+    pub fn decline_on_phone(&self, call: &str) {
+        zbus::block_on(async {
+            let call = zbus::ObjectPath::try_from(call)?;
+            self.proxy().await?.decline_on_phone(&call).await
+        })
+        .unwrap_or_else(|error| panic!("decline the Call at {call} on the Phone: {error}"));
+    }
+
+    /// Ends the Call at `call` from the other end, as the caller hanging up
+    /// does, whether it is ringing or live. Returns once the Phone has
+    /// removed the Call.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such Call.
+    pub fn caller_hangs_up(&self, call: &str) {
+        zbus::block_on(async {
+            let call = zbus::ObjectPath::try_from(call)?;
+            self.proxy().await?.caller_hangs_up(&call).await
+        })
+        .unwrap_or_else(|error| panic!("hang up the Call at {call} as the caller: {error}"));
     }
 
     /// The object path of the current AudioGateway, or `"/"` while there is

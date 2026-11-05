@@ -46,6 +46,11 @@ pub enum Input {
     Decline(CallId),
     /// The user asked to hang up this Call.
     HangUp(CallId),
+    /// The user pressed the Desktop Calls keybinding: do the most useful
+    /// thing for what is happening now.
+    Activate,
+    /// The user let go of the surface that has keyboard focus (Escape).
+    ReleaseFocus,
     /// The Phone refused, or never answered, this command.
     PhoneCommandFailed(PhoneCommand),
     /// A timer started by [`Effect::StartTimer`] ran out.
@@ -105,6 +110,8 @@ pub struct Surfaces {
 pub struct BannerView {
     pub call: CallId,
     pub caller: Caller,
+    /// The Banner has keyboard focus, so A answers and D declines.
+    pub focused: bool,
 }
 
 /// The Call Window's content.
@@ -113,6 +120,8 @@ pub struct CallWindowView {
     pub call: CallId,
     pub caller: Caller,
     pub phase: CallWindowPhase,
+    /// The Call Window has keyboard focus.
+    pub focused: bool,
 }
 
 /// Where the Call in the Call Window is.
@@ -128,6 +137,16 @@ pub enum CallWindowPhase {
     },
     /// Over; the window closes shortly.
     Ended,
+}
+
+/// Which surface the user gave keyboard focus with the keybinding. Each
+/// surface takes focus only when asked, and gives it up when it closes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Focus {
+    #[default]
+    None,
+    Banner,
+    CallWindow,
 }
 
 /// An ended Call the Call Window still shows.
@@ -149,6 +168,7 @@ pub struct State {
     /// The codec the Desktop's audio negotiated during the current Calls.
     codec: Option<Codec>,
     ended: Option<EndedCall>,
+    focus: Focus,
 }
 
 impl State {
@@ -207,6 +227,7 @@ impl State {
             .map(|call| BannerView {
                 call: call.id,
                 caller: call.caller.clone(),
+                focused: self.focus == Focus::Banner,
             });
         let call_window = self
             .calls
@@ -223,12 +244,14 @@ impl State {
                     },
                     _ => CallWindowPhase::Connecting,
                 },
+                focused: self.focus == Focus::CallWindow,
             })
             .or_else(|| {
                 self.ended.as_ref().map(|ended| CallWindowView {
                     call: ended.id,
                     caller: ended.caller.clone(),
                     phase: CallWindowPhase::Ended,
+                    focused: self.focus == Focus::CallWindow,
                 })
             });
         Surfaces {
@@ -256,7 +279,14 @@ impl State {
 #[must_use]
 pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     let was_ringing = state.ringing();
-    let (state, mut effects) = decide(state, input);
+    let (mut state, mut effects) = decide(state, input);
+    // Focus goes with the surface that had it.
+    let surfaces = state.surfaces();
+    match state.focus {
+        Focus::Banner if surfaces.banner.is_none() => state.focus = Focus::None,
+        Focus::CallWindow if surfaces.call_window.is_none() => state.focus = Focus::None,
+        _ => {}
+    }
     match (was_ringing, state.ringing()) {
         (false, true) => effects.insert(0, Effect::StartRinging),
         (true, false) => effects.insert(0, Effect::StopRinging),
@@ -341,6 +371,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::Answer(call) => answer(&mut state, call, &mut effects),
         Input::Decline(call) => decline(&mut state, call, &mut effects),
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
+        Input::Activate => activate(&mut state, &mut effects),
+        Input::ReleaseFocus => state.focus = Focus::None,
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::TimerFired(Timer::CloseCallWindow(call)) => {
             if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
@@ -353,6 +385,23 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// The keybinding: focus the Banner while a Call rings here, otherwise the
+/// Call Window while a Call is live. Neither touches the Call itself.
+fn activate(state: &mut State, effects: &mut Vec<Effect>) {
+    let surfaces = state.surfaces();
+    if surfaces.banner.is_some() {
+        state.focus = Focus::Banner;
+    } else if surfaces
+        .call_window
+        .is_some_and(|window| window.phase != CallWindowPhase::Ended)
+    {
+        state.focus = Focus::CallWindow;
+    } else {
+        // The Dialer opens here once it exists (ticket #11).
+        effects.push(Effect::ReportError(Failure::DialerUnavailable));
+    }
 }
 
 fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {

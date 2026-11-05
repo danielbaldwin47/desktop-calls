@@ -7,14 +7,20 @@
 //! interface's `Surfaces`.
 //!
 //! - The Banner is an overlay surface, so it shows above fullscreen windows.
-//!   It never takes keyboard focus. It sits top-right, below Omarchy's bar
+//!   It takes keyboard focus only when the keybinding asks; then A answers,
+//!   D declines and Escape gives focus back. It sits top-right, below Omarchy's bar
 //!   (the compositor keeps it out of the bar's exclusive zone) and to the
 //!   left of Omarchy's notification-toast column, as wide as Hyprland says
 //!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
 //!   It is unmapped whenever nothing rings: a mapped overlay surface stops
 //!   Hyprland scanning a fullscreen window out directly.
 //! - The Call Window is on the top layer, so fullscreen windows cover it, in
-//!   the same corner, and takes keyboard focus only when clicked.
+//!   the same corner, and takes keyboard focus only when clicked or when the
+//!   keybinding asks; Escape gives it back.
+//! - Escape only ever gives keyboard focus back. It never ends or declines a
+//!   Call.
+//! - Each surface reports `focused` while it has keyboard focus, as the
+//!   compositor says.
 //! - No output is chosen, so the compositor puts each on the focused output.
 //! - Where the compositor has no layer shell, each is an ordinary window.
 
@@ -177,10 +183,31 @@ struct Surface {
     mapped: Rc<Cell<bool>>,
     report: SharedReport,
     call: Rc<Cell<Option<CallId>>>,
+    /// How the surface takes keyboard focus when nobody asked it to.
+    keyboard: KeyboardMode,
+    /// Escape gave keyboard focus back, and the compositor hasn't yet taken
+    /// it: until then the surface takes no focus at all, not even on demand.
+    releasing: Rc<Cell<bool>>,
+}
+
+/// What a surface reports: its content, and `focused` while it has keyboard
+/// focus.
+fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMap<String, String> {
+    let mut reported = content.clone();
+    if window.is_active() {
+        reported.insert("focused".to_owned(), "true".to_owned());
+    }
+    reported
 }
 
 impl Surface {
-    fn new(name: &'static str, layer: Layer, keyboard: KeyboardMode, report: SharedReport) -> Self {
+    fn new(
+        name: &'static str,
+        layer: Layer,
+        keyboard: KeyboardMode,
+        intents: &UnboundedSender<Input>,
+        report: SharedReport,
+    ) -> Self {
         let window = gtk::Window::new();
         window.set_title(Some("Desktop Calls"));
         window.set_resizable(false);
@@ -205,18 +232,37 @@ impl Surface {
             mapped: Rc::default(),
             report,
             call: Rc::default(),
+            keyboard,
+            releasing: Rc::default(),
         };
         let (content, mapped, report) = (
             surface.content.clone(),
             surface.mapped.clone(),
             surface.report.clone(),
         );
-        surface.window.connect_map(move |_| {
+        surface.window.connect_map(move |window| {
             mapped.set(true);
             report
                 .borrow_mut()
-                .set(name, Some(content.borrow().clone()));
+                .set(name, Some(reported(&content.borrow(), window)));
         });
+        let (content, mapped, report, releasing) = (
+            surface.content.clone(),
+            surface.mapped.clone(),
+            surface.report.clone(),
+            surface.releasing.clone(),
+        );
+        surface.window.connect_is_active_notify(move |window| {
+            if !window.is_active() && releasing.replace(false) && gtk4_layer_shell::is_supported() {
+                window.set_keyboard_mode(keyboard);
+            }
+            if mapped.get() {
+                report
+                    .borrow_mut()
+                    .set(name, Some(reported(&content.borrow(), window)));
+            }
+        });
+        surface.on_escape(intents);
         let (mapped, report) = (surface.mapped.clone(), surface.report.clone());
         surface.window.connect_unmap(move |_| {
             mapped.set(false);
@@ -237,15 +283,60 @@ impl Surface {
         if !self.window.is_visible() {
             self.window.present();
         } else if self.mapped.get() && !unchanged {
-            self.report
-                .borrow_mut()
-                .set(self.name, Some(self.content.borrow().clone()));
+            self.report.borrow_mut().set(
+                self.name,
+                Some(reported(&self.content.borrow(), &self.window)),
+            );
         }
     }
 
     fn hide(&self) {
         self.call.set(None);
+        self.releasing.set(false);
         self.window.set_visible(false);
+    }
+
+    /// Takes keyboard focus while `focused`, as the keybinding asked;
+    /// otherwise takes it only as the surface usually does.
+    fn focus(&self, focused: bool) {
+        if !gtk4_layer_shell::is_supported() {
+            if focused && self.window.is_visible() {
+                self.window.present();
+            }
+            return;
+        }
+        let mode = if focused {
+            self.releasing.set(false);
+            KeyboardMode::Exclusive
+        } else if self.releasing.get() {
+            KeyboardMode::None
+        } else {
+            self.keyboard
+        };
+        if self.window.keyboard_mode() != mode {
+            self.window.set_keyboard_mode(mode);
+        }
+    }
+
+    /// Escape gives keyboard focus back, however the surface got it, and
+    /// tells the Call state machine so.
+    fn on_escape(&self, intents: &UnboundedSender<Input>) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (window, releasing, intents) =
+            (self.window.clone(), self.releasing.clone(), intents.clone());
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if key != gtk::gdk::Key::Escape || has_command_modifier(modifiers) {
+                return glib::Propagation::Proceed;
+            }
+            if gtk4_layer_shell::is_supported() {
+                releasing.set(true);
+                window.set_keyboard_mode(KeyboardMode::None);
+            }
+            let _ = intents.unbounded_send(Input::ReleaseFocus);
+            glib::Propagation::Stop
+        });
+        self.window.add_controller(keys);
     }
 
     /// A button that sends the intent `make` builds for the surface's Call.
@@ -269,15 +360,33 @@ impl Surface {
     }
 }
 
+/// Whether a key press holds Control, Alt or Super, so it is a shortcut of
+/// something else and not a plain letter.
+fn has_command_modifier(modifiers: gtk::gdk::ModifierType) -> bool {
+    modifiers.intersects(
+        gtk::gdk::ModifierType::CONTROL_MASK
+            | gtk::gdk::ModifierType::ALT_MASK
+            | gtk::gdk::ModifierType::SUPER_MASK,
+    )
+}
+
 /// The Incoming Call Banner.
 struct Banner {
     surface: Surface,
+    heading: gtk::Label,
     caller: gtk::Label,
+    answer: gtk::Button,
 }
 
 impl Banner {
     fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Self {
-        let surface = Surface::new("banner", Layer::Overlay, KeyboardMode::None, report);
+        let surface = Surface::new(
+            "banner",
+            Layer::Overlay,
+            KeyboardMode::None,
+            intents,
+            report,
+        );
         let heading = gtk::Label::new(Some(messages::label(Label::IncomingCall)));
         heading.add_css_class("dim-label");
         heading.set_xalign(0.0);
@@ -294,7 +403,36 @@ impl Banner {
         content.append(&caller);
         content.append(&buttons);
         surface.window.set_child(Some(&content));
-        Self { surface, caller }
+        let banner = Self {
+            surface,
+            heading,
+            caller,
+            answer,
+        };
+        banner.on_letters(intents);
+        banner
+    }
+
+    /// While the Banner has keyboard focus, A answers and D declines.
+    fn on_letters(&self, intents: &UnboundedSender<Input>) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (call, intents) = (self.surface.call.clone(), intents.clone());
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let make: fn(CallId) -> Input = match key.to_lower() {
+                gtk::gdk::Key::a => Input::Answer,
+                gtk::gdk::Key::d => Input::Decline,
+                _ => return glib::Propagation::Proceed,
+            };
+            if has_command_modifier(modifiers) {
+                return glib::Propagation::Proceed;
+            }
+            if let Some(call) = call.get() {
+                let _ = intents.unbounded_send(make(call));
+            }
+            glib::Propagation::Stop
+        });
+        self.surface.window.add_controller(keys);
     }
 
     fn render(&self, view: Option<&BannerView>) {
@@ -304,15 +442,24 @@ impl Banner {
         };
         let caller = messages::caller(&view.caller);
         self.caller.set_text(&caller);
+        // While focused, the heading says which keys do what.
+        let heading = messages::label(if view.focused {
+            Label::BannerKeys
+        } else {
+            Label::IncomingCall
+        });
+        self.heading.set_text(heading);
         self.surface.call.set(Some(view.call));
         self.surface.show(BTreeMap::from([
             ("call".to_owned(), view.call.to_string()),
-            (
-                "heading".to_owned(),
-                messages::label(Label::IncomingCall).to_owned(),
-            ),
+            ("heading".to_owned(), heading.to_owned()),
             ("caller".to_owned(), caller),
         ]));
+        self.surface.focus(view.focused);
+        if view.focused {
+            // Enter and Space then answer, never decline.
+            self.answer.grab_focus();
+        }
     }
 }
 
@@ -331,7 +478,13 @@ struct CallWindow {
 
 impl CallWindow {
     fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
-        let surface = Surface::new("call-window", Layer::Top, KeyboardMode::OnDemand, report);
+        let surface = Surface::new(
+            "call-window",
+            Layer::Top,
+            KeyboardMode::OnDemand,
+            intents,
+            report,
+        );
         let caller = gtk::Label::new(None);
         caller.add_css_class("caller");
         caller.set_xalign(0.0);
@@ -381,6 +534,7 @@ impl CallWindow {
             self.stop_ticker();
         }
         self.update();
+        self.surface.focus(view.focused);
     }
 
     /// Brings every label up to date with the view and the clock.

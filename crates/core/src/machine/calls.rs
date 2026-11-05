@@ -70,9 +70,17 @@ pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Ve
     }
 }
 
+/// The earlier run's Calls that haven't shown again by now had ended.
+fn forget_earlier_run(state: &mut State, effects: &mut Vec<Effect>) {
+    if !state.earlier_calls.is_empty() {
+        effects.push(Effect::EarlierCallsForgotten(state.earlier_calls.len()));
+        state.earlier_calls.clear();
+    }
+}
+
 pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
     match timer {
-        Timer::ForgetEarlierRun => state.earlier_calls.clear(),
+        Timer::ForgetEarlierRun => forget_earlier_run(state, effects),
         Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
         Timer::SetupStep(wait) => setup_timer(state, wait, effects),

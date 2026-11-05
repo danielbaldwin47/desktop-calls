@@ -37,7 +37,7 @@ These rules bind every change to Desktop Calls. Most are enforced by `just check
 ## No test-only code paths
 
 - Production code never asks whether it is under test: no `#[cfg(test)]` branches in production logic, no environment variable or flag that only tests set, no hidden "simulation mode".
-- Bus addresses come only from `DBUS_SESSION_BUS_ADDRESS` and `DBUS_SYSTEM_BUS_ADDRESS`. Paths come only from the XDG variables (`XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`) and `HOME`. Tests point these at private buses and a temporary home; the app cannot tell the difference.
+- Bus addresses come only from `DBUS_SESSION_BUS_ADDRESS` and `DBUS_SYSTEM_BUS_ADDRESS`. Paths come only from the XDG variables (`XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`) and `HOME`, plus `RUNTIME_DIRECTORY`, which systemd sets for the installed service ([ADR-0006](docs/adr/0006-real-phone-dev-runs-stop-the-installed-service.md)). Tests point these at private buses and a temporary home; the app cannot tell the difference.
 - The Simulated Phone is a separate binary that implements the same D-Bus interfaces as the real stack. Never add a code path to the app for it.
 
 ## Logging and privacy

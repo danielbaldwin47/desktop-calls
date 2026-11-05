@@ -44,7 +44,6 @@ import dbus
 import real_phone as rp
 
 APP = Path(__file__).resolve().parents[2] / "target" / "debug" / "desktop-calls"
-APP_NAME = "io.github.danielbaldwin47.DesktopCalls"
 APP_PATH = "/io/github/danielbaldwin47/DesktopCalls"
 APP_IF = "io.github.danielbaldwin47.DesktopCalls1"
 DEVICE_IF = "org.bluez.Device1"
@@ -164,8 +163,14 @@ def bounce_only() -> int:
 
 
 def app_property(bus: dbus.Bus, name: str) -> Any:
+    """One of the app's properties; None while no copy of the app is on the
+    bus. Sent to the copy's unique name, so it never starts the installed
+    service through D-Bus activation."""
     try:
-        return rp.call(bus, APP_NAME, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
+        owner = rp.app_owner(bus)
+        if owner is None:
+            return None
+        return rp.call(bus, owner, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
                        signature="ss", timeout=1.0)
     except dbus.DBusException:
         return None
@@ -239,7 +244,7 @@ def during_call() -> int:
     tel = rp.Telephony(rp.read_test_number(), os.environ.get("DESKTOP_CALLS_PHONE_ADDRESS"))
     bus = dbus.SessionBus()
     system = dbus.SystemBus()
-    if app_property(bus, "AudioLocation") is not None:
+    if rp.app_on_bus(bus):
         print("another desktop-calls already owns the bus name; not starting one")
         return 1
     path = device_path(system, tel.phone_address or "")

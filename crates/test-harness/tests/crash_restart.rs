@@ -131,6 +131,35 @@ fn after_a_crash_while_muted_the_call_shows_muted_and_unmutes() {
 }
 
 #[test]
+fn a_call_that_ended_while_the_app_was_down_is_forgotten_and_the_log_says_so() {
+    let mut harness = connected(Harness::builder());
+    let path = harness.simulated_phone().ring(NUMBER);
+    harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    harness.simulated_phone().answer_on_phone(&path);
+    harness.wait_for_app("the Call is live", DEADLINE, is_live);
+
+    harness.kill_app_by_hand();
+    harness.simulated_phone().caller_hangs_up(&path);
+    harness.start_app_by_hand();
+
+    let loaded = harness.wait_for_app_log(r#""event_kind":"earlier-run-loaded""#, DEADLINE);
+    assert!(
+        loaded.contains(r#""calls":1"#) && loaded.contains("may be continuing"),
+        "the startup line says the Call may be continuing: {loaded}"
+    );
+    // The app gives the earlier run's Calls 30 s to show again.
+    let forgotten = harness.wait_for_app_log(
+        r#""event_kind":"earlier-run-forgotten""#,
+        Duration::from_secs(40),
+    );
+    assert!(
+        forgotten.contains(r#""calls":1"#) && forgotten.contains("never showed them again"),
+        "the log says the Call was forgotten, and why: {forgotten}"
+    );
+    harness.wait_for_app("no Call shows", DEADLINE, |state| state.calls.is_empty());
+}
+
+#[test]
 fn started_while_a_call_is_live_on_the_phone_the_app_shows_it() {
     let harness = Harness::builder().phone_connected().installed().start();
     let path = harness.simulated_phone().ring(NUMBER);

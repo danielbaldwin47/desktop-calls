@@ -46,7 +46,6 @@ from gi.repository import GLib
 import real_phone as rp
 
 APP = Path(__file__).resolve().parents[2] / "target" / "debug" / "desktop-calls"
-APP_NAME = "io.github.danielbaldwin47.DesktopCalls"
 APP_PATH = "/io/github/danielbaldwin47/DesktopCalls"
 APP_IF = "io.github.danielbaldwin47.DesktopCalls1"
 BUS = "org.freedesktop.DBus"
@@ -117,8 +116,14 @@ class Watch:
 
 
 def app_property(bus: dbus.Bus, name: str) -> Any:
+    """One of the app's properties; None while no copy of the app is on the
+    bus. Sent to the copy's unique name, so it never starts the installed
+    service through D-Bus activation."""
     try:
-        return rp.call(bus, APP_NAME, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
+        owner = rp.app_owner(bus)
+        if owner is None:
+            return None
+        return rp.call(bus, owner, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
                        signature="ss", timeout=1.0)
     except dbus.DBusException:
         return None
@@ -153,7 +158,7 @@ def stop(app: subprocess.Popen[bytes]) -> None:
 def time_handoff(audio_gateway: str, settle: float) -> int:
     bus = dbus.SessionBus()
     watch = Watch()
-    if app_property(bus, "AudioLocation") is not None:
+    if rp.app_on_bus(bus):
         print("another desktop-calls already owns the bus name; not starting one")
         return 1
     app = subprocess.Popen([str(APP), "service"], stdin=subprocess.DEVNULL,

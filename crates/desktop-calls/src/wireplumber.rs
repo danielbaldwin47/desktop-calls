@@ -114,7 +114,8 @@ impl Settings {
                 || Path::new(&name)
                     .extension()
                     .is_none_or(|extension| extension != "conf")
-                || !entry.file_type()?.is_file()
+                // A link counts as the file it points to.
+                || !fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_file())
             {
                 continue;
             }
@@ -228,9 +229,17 @@ impl Settings {
 }
 
 /// Replaces `folder/name` with `text` whole, by renaming a new file over it.
+/// A link stays a link: the file it points to is replaced.
 fn replace(folder: &Path, name: &str, text: &str) -> io::Result<()> {
-    let temporary = folder.join(format!(".{name}.desktop-calls"));
-    let path = folder.join(name);
+    let mut path = folder.join(name);
+    if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink()) {
+        path = fs::canonicalize(&path)?;
+    }
+    let file_name = path.file_name().map_or_else(
+        || name.to_owned(),
+        |file_name| file_name.to_string_lossy().into_owned(),
+    );
+    let temporary = path.with_file_name(format!(".{file_name}.desktop-calls"));
     fs::write(&temporary, text)
         .and_then(|()| fs::rename(&temporary, &path))
         .inspect_err(|_| {
@@ -411,16 +420,19 @@ impl Parser<'_> {
         self.text.as_bytes().get(self.at).copied()
     }
 
-    /// Skips whitespace, comments and the separators `,` `:` `=`.
+    /// Skips whitespace (any Unicode whitespace), comments and the
+    /// separators `,` `:` `=`.
     fn skip(&mut self) {
-        while let Some(byte) = self.peek() {
-            match byte {
-                b'#' => {
+        while let Some(character) = self.text[self.at..].chars().next() {
+            match character {
+                '#' => {
+                    // Up to the newline, which is a whole character.
                     while self.peek().is_some_and(|byte| byte != b'\n') {
                         self.at += 1;
                     }
                 }
-                b' ' | b'\t' | b'\r' | b'\n' | b',' | b':' | b'=' => self.at += 1,
+                ',' | ':' | '=' => self.at += 1,
+                _ if character.is_whitespace() => self.at += character.len_utf8(),
                 _ => return,
             }
         }
@@ -523,7 +535,12 @@ impl Parser<'_> {
             .find(|character: char| character.is_whitespace() || "{}[],:=#\"".contains(character))
             .unwrap_or(rest.len());
         word.push_str(&rest[..length]);
-        self.at += length.max(1).min(rest.len());
+        // Always moves on, by whole characters.
+        self.at += if length == 0 {
+            rest.chars().next().map_or(0, char::len_utf8)
+        } else {
+            length
+        };
         word
     }
 }

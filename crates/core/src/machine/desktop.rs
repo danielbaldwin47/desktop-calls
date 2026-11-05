@@ -83,6 +83,9 @@ pub(super) struct DesktopChecks {
     bluez_hands_free: Option<bool>,
     fixing: Option<DesktopFix>,
     notice: Option<FixFailure>,
+    /// The audio settings were saved but `WirePlumber` didn't restart, so
+    /// they aren't in use yet: the Problem stands until a restart works.
+    restart_pending: bool,
     /// A check-again timer is pending.
     checking_again: bool,
 }
@@ -112,7 +115,7 @@ impl DesktopChecks {
         if self.bluez_hands_free == Some(true) {
             problems.push(ProblemKind::BluezHandsFree);
         }
-        if self.audio_set_up == Some(false) {
+        if self.audio_set_up == Some(false) || self.restart_pending {
             problems.push(ProblemKind::AudioNotSetUp);
         }
         if self.contacts_support == Some(false) {
@@ -212,6 +215,9 @@ pub(super) fn fix_done(state: &mut State, fix: DesktopFix, effects: &mut Vec<Eff
     if state.desktop.fixing == Some(fix) {
         state.desktop.fixing = None;
     }
+    if fix == DesktopFix::SetUpAudio {
+        state.desktop.restart_pending = false;
+    }
     effects.push(Effect::CheckDesktop);
 }
 
@@ -220,4 +226,7 @@ pub(super) fn fix_done(state: &mut State, fix: DesktopFix, effects: &mut Vec<Eff
 pub(super) fn fix_failed(state: &mut State, failure: FixFailure) {
     state.desktop.fixing = None;
     state.desktop.notice = Some(failure);
+    if failure == FixFailure::AudioNotRestarted {
+        state.desktop.restart_pending = true;
+    }
 }

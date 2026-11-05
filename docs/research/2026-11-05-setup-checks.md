@@ -31,7 +31,7 @@ Two of them are fixed after one key press: Turn on, and Set up audio. The other 
 ## 3. Audio (WirePlumber)
 
 - User drop-ins live in `$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/*.conf` and load in file-name order; a later value overrides an earlier one. **[I]** (WirePlumber 0.5 configuration documentation)
-- The packaged `/usr/share/wireplumber/wireplumber.conf` sets none of the three properties below. **[V]** (read on this Desktop) The check reads only the user's drop-ins; `/etc/wireplumber` drop-ins are not read (a known limit).
+- The packaged `/usr/share/wireplumber/wireplumber.conf` sets none of the three properties below. **[V]** (read on this Desktop) The check reads only the user's drop-ins, following links (dotfile managers), so a drop-in in `/etc/wireplumber` or the packaged `wireplumber.conf.d` could still override the app's setting. That is a known limit: the app can't write there without root.
 - What Calls need:
   - `bluez5.roles` (in `monitor.bluez.properties`) includes `hfp_hf`, or is unset. The default includes it. **[I]**
   - `bluez5.auto-connect`, set by a `monitor.bluez.rules` rule's `update-props`, includes `hfp_hf`. Unset counts as missing. **[I]**
@@ -46,11 +46,12 @@ Two of them are fixed after one key press: Turn on, and Set up audio. The other 
 - A `60-desktop-calls.conf` the user wrote (without the app's header line) is edited like any other drop-in, and the settings go in `60-desktop-calls-audio.conf` instead. This Desktop has such a hand-written file, and it already has all three settings, so the check finds no audio Problem here. **[V]** (read only)
 - The Phone link already sets `RejectSCO=true` on each AudioGateway whenever no Desktop-audio Call is live, including after a WirePlumber restart. **[V]** (scenario `a_problem_stays_while_the_phone_comes_and_goes_…`, and `telephony_restart`)
 - Set up audio is refused during a Call: a restart would drop the Call's audio.
+- If the settings are saved but WirePlumber doesn't restart, the Problem stays, with its notice, until a restart works. The saved files alone would otherwise read as set up.
 
 ## 4. BlueZ's own hands-free
 
 - BlueZ 5.8x's experimental telephony (`org.bluez.Telephony1`) takes the hands-free UUID, so PipeWire's hands-free can't register it. It is off unless bluetoothd runs with `-E` or `Experimental = true` is in `/etc/bluetooth/main.conf`. **[I]** (BlueZ's `doc/org.bluez.Telephony.rst`, `main.conf` documentation; not tried on this Desktop)
-- The app shows the Problem while any object has `org.bluez.Telephony1`. The object path the Simulated Phone uses (`…/dev_…/telephony_ag1`) is a guess. **[I]**
+- The app shows the Problem while any object has `org.bluez.Telephony1`. The object path the Simulated Phone uses (`…/dev_…/telephony_ag1`) is a guess. So is when BlueZ adds the object: the Simulated Phone has it from the start, even before pairing, but real BlueZ probably adds it only once it holds a Phone's hands-free link. On a real Desktop, the Problem may first show after the Phone connects. **[I]**
 - The fix needs root (`/etc`), so the app explains it and offers `sudo systemctl restart bluetooth` to copy.
 
 ## 5. Not verified

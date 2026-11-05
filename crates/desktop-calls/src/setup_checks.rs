@@ -145,6 +145,8 @@ pub struct SetupChecks {
     session: Connection,
     inputs: UnboundedSender<Input>,
     bluez: Rc<RefCell<Bluez>>,
+    /// What checking again last found: Contacts support, and the audio.
+    last_checked: Rc<RefCell<(Option<DesktopCheck>, Option<DesktopCheck>)>>,
 }
 
 impl SetupChecks {
@@ -155,6 +157,7 @@ impl SetupChecks {
             session,
             inputs,
             bluez: Rc::default(),
+            last_checked: Rc::default(),
         };
         MainContext::default().spawn_local(checks.clone().follow_bluez());
         checks.check_again();
@@ -189,12 +192,12 @@ impl SetupChecks {
                 if let Some(power) = now.0
                     && reported.0 != now.0
                 {
-                    self.report(DesktopCheck::Bluetooth(power));
+                    self.report(DesktopCheck::Bluetooth(power), true);
                 }
                 if let Some(on) = now.1
                     && reported.1 != now.1
                 {
-                    self.report(DesktopCheck::BluezHandsFree(on));
+                    self.report(DesktopCheck::BluezHandsFree(on), true);
                 }
                 reported = now;
             }
@@ -209,12 +212,22 @@ impl SetupChecks {
         }
     }
 
-    fn report(&self, check: DesktopCheck) {
-        tracing::info!(
-            event_kind = %EventKind::DesktopChecked,
-            check = ?check,
-            "A setup check found {check:?}"
-        );
+    /// Tells the Call state machine; logged as news only when the finding
+    /// `changed`, so checking again every few seconds stays quiet.
+    fn report(&self, check: DesktopCheck, changed: bool) {
+        if changed {
+            tracing::info!(
+                event_kind = %EventKind::DesktopChecked,
+                check = ?check,
+                "A setup check found {check:?}"
+            );
+        } else {
+            tracing::debug!(
+                event_kind = %EventKind::DesktopChecked,
+                check = ?check,
+                "A setup check found {check:?} again"
+            );
+        }
         let _ = self.inputs.unbounded_send(Input::DesktopChecked(check));
     }
 
@@ -222,11 +235,17 @@ impl SetupChecks {
     pub fn check_again(&self) {
         let checks = self.clone();
         MainContext::default().spawn_local(async move {
-            checks.report(DesktopCheck::ContactsSupport(
-                contacts_support(&checks.session).await,
-            ));
-            if let Some(set_up) = audio_set_up() {
-                checks.report(DesktopCheck::AudioSetUp(set_up));
+            let contacts = DesktopCheck::ContactsSupport(contacts_support(&checks.session).await);
+            let audio = audio_set_up().map(DesktopCheck::AudioSetUp);
+            let changed = {
+                let mut last = checks.last_checked.borrow_mut();
+                let changed = (last.0 != Some(contacts), audio.is_some() && last.1 != audio);
+                *last = (Some(contacts), audio.or(last.1));
+                changed
+            };
+            checks.report(contacts, changed.0);
+            if let Some(audio) = audio {
+                checks.report(audio, changed.1);
             }
         });
     }

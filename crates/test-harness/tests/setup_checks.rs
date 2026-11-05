@@ -262,16 +262,10 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
         "51-music.conf".to_owned(),
         ROLES_WITHOUT_HANDS_FREE.to_owned(),
     )]);
-    std::thread::sleep(BEFORE_CONSENT);
-    assert_eq!(
-        harness.wireplumber_drop_ins(),
-        before,
-        "nothing written before the user asks"
-    );
     harness.simulated_phone().recorded_holds(
-        "WirePlumber not restarted before the user asks",
-        Duration::ZERO,
-        |recorded| !restarts_wireplumber(recorded),
+        "nothing written or restarted before the user asks",
+        BEFORE_CONSENT,
+        |recorded| !restarts_wireplumber(recorded) && harness.wireplumber_drop_ins() == before,
     );
 
     harness.keyboard().press(Key::Return);
@@ -288,6 +282,86 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
         Some(ROLES_MOVED)
     );
     assert_eq!(after.len(), 2, "{after:#?}");
+    no_problems_shown(&harness);
+}
+
+#[test]
+fn keeping_audio_off_the_phone_turned_off_alone_is_a_problem_even_in_an_odd_drop_in() {
+    // One line, a non-breaking space, and the other two settings right.
+    const ODD: &str = "monitor.bluez.properties = {\u{a0}bluez5.telephony.default-reject-sco = false }\n\
+        monitor.bluez.rules = [ { matches = [ { device.name = \"~bluez_card.*\" } ] \
+        actions = { update-props = { bluez5.auto-connect = [ hfp_hf ] } } } ]\n";
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config("51-odd.conf", ODD)
+        .start();
+    wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+
+    harness.keyboard().press(Key::Return);
+
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber is restarted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    let after = harness.wireplumber_drop_ins();
+    let ours = after.get(DROP_IN).map_or("", String::as_str);
+    assert!(
+        ours.contains("  bluez5.telephony.default-reject-sco = true\n"),
+        "{ours}"
+    );
+    assert!(!ours.contains("bluez5.roles"), "roles were fine: {ours}");
+    assert!(!ours.contains("auto-connect"), "auto-connect was fine: {ours}");
+    assert_eq!(
+        after.get("51-odd.conf").map(String::as_str),
+        Some(
+            ODD.replace(
+                "bluez5.telephony.default-reject-sco = false",
+                "# Moved to 60-desktop-calls.conf by Desktop Calls: \
+                 bluez5.telephony.default-reject-sco = false\n"
+            )
+            .as_str()
+        ),
+        "the rest of the line goes on a line of its own"
+    );
+    no_problems_shown(&harness);
+}
+
+#[test]
+fn auto_connect_without_hands_free_alone_is_a_problem_and_gains_it() {
+    const MUSIC_ONLY: &str = "\
+monitor.bluez.properties = {
+  bluez5.telephony.default-reject-sco = true
+}
+monitor.bluez.rules = [
+  {
+    matches = [ { device.name = \"~bluez_card.*\" } ]
+    actions = { update-props = { bluez5.auto-connect = [ a2dp_sink ] } }
+  }
+]
+";
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config("51-music.conf", MUSIC_ONLY)
+        .start();
+    wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+
+    harness.keyboard().press(Key::Return);
+
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber is restarted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    let after = harness.wireplumber_drop_ins();
+    let ours = after.get(DROP_IN).map_or("", String::as_str);
+    assert!(
+        ours.contains("        bluez5.auto-connect = [ a2dp_sink hfp_hf ]\n"),
+        "{ours}"
+    );
+    assert!(!ours.contains("default-reject-sco"), "it was fine: {ours}");
     no_problems_shown(&harness);
 }
 

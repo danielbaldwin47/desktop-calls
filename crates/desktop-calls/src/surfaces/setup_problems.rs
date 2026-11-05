@@ -139,9 +139,15 @@ impl SetupProblems {
         for button in self.fix_buttons.borrow().iter() {
             button.set_sensitive(view.fixing.is_none());
         }
-        let fixing = view.fixing.map(messages::fixing);
-        self.status.set_text(fixing.unwrap_or_default());
-        self.status.set_visible(fixing.is_some());
+        // What is under way, or else that a command was copied.
+        let status = view.fixing.map(messages::fixing).or_else(|| {
+            self.copied
+                .borrow()
+                .as_ref()
+                .map(|_| messages::command_copied())
+        });
+        self.status.set_text(status.unwrap_or_default());
+        self.status.set_visible(status.is_some());
         let notice = view.notice.map(messages::fix_failed);
         self.notice.set_text(notice.unwrap_or_default());
         self.notice.set_visible(notice.is_some());

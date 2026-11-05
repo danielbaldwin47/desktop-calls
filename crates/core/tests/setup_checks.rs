@@ -249,6 +249,32 @@ fn a_fix_that_fails_says_so_and_can_be_tried_again() {
 }
 
 #[test]
+fn audio_saved_but_not_restarted_stays_a_problem_with_its_notice_until_a_restart_works() {
+    let state = setup_open(run(
+        all_well(connected()),
+        [checked(DesktopCheck::AudioSetUp(false))],
+    ));
+    let state = run(
+        state,
+        [
+            Input::Fix(ProblemKind::AudioNotSetUp),
+            Input::FixFailed(FixFailure::AudioNotRestarted),
+            Input::TimerFired(Timer::CheckDesktop),
+            // The settings are saved, so the files now read as set up.
+            checked(DesktopCheck::AudioSetUp(true)),
+        ],
+    );
+    let shown = state.surfaces().setup_problems.expect("still shown");
+    assert_eq!(shown.problems, [ProblemKind::AudioNotSetUp]);
+    assert_eq!(shown.notice, Some(FixFailure::AudioNotRestarted));
+
+    let (state, effects) = step(state, Input::Fix(ProblemKind::AudioNotSetUp));
+    assert_eq!(effects, [Effect::Fix(DesktopFix::SetUpAudio)]);
+    let state = run(state, [Input::FixDone(DesktopFix::SetUpAudio)]);
+    assert!(kinds(&state).is_empty(), "{:?}", kinds(&state));
+}
+
+#[test]
 fn audio_set_up_is_checked_again_once_done() {
     let state = setup_open(run(
         all_well(connected()),

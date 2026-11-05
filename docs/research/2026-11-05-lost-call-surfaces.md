@@ -13,7 +13,7 @@ Legend: **[V]** = verified against the Simulated Phone. **[I]** = inferred, not 
 - **`CallWindowView.connection_lost`** is the core's word that the Call Window shows Calls the Desktop can't act on. The shell greys out every control from it, the same way it uses `waiting_first`. **[V]**
 - **A Held Call stays listed.** `lose_calls` now keeps the Calls that the Call Window was showing: the live one, and the one on hold behind it. Before, it took the first live Call in the list, which could be the held one, and the window dropped the other. In the held row, Swap and its Hang up are hidden, and the window's notice explains why. **[V]**
 - **A Waiting Call's Banner goes as soon as the Calls are out of reach,** and that includes hands-free being lost. Before, only an absent Phone hid it. So the Banner offered Hold & Answer for about 2 s, until the Phone link gave up on the Call. **[V]**
-- **Ringing follows the same rule.** Before, the scenario's log showed `ringing-started` for a moment, when the Phone link dropped the live Call before the Waiting Call. That is **[V]** from the log. That it no longer rings is **[I]**: no scenario asserts it.
+- **Ringing follows the same rule.** Before, the scenario's log showed `ringing-started` for a moment, when the Phone link dropped the live Call before the Waiting Call. That is **[V]** from the log. The scenario now asserts that the app isn't ringing in the state that first shows the lost message. That the momentary ring is gone is **[I]**: a ring shorter than one property read can slip between the harness's reads.
 - **What is refused while the Call Window shows the lost message:**
   - Hang up of any Call, the held one included.
   - Answer and Decline, while the Calls are also out of reach.

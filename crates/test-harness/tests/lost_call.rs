@@ -169,7 +169,10 @@ fn assert_keys_do_nothing(harness: &Harness) {
     let errors = harness.app_errors().len();
     harness.keyboard().press_with_control('h');
     harness.keyboard().press_with_control('H');
-    harness.keyboard().type_text("ms1");
+    harness.keyboard().type_text("maks1");
+    // Nothing the app reports marks a key as handled when it does nothing,
+    // so this watches for a while instead. Before #111, these keys reached
+    // the app within it as refused intents, each an `Error` signal.
     harness.simulated_phone().recorded_holds(
         "no key asks the Phone anything",
         HOLD,
@@ -339,14 +342,11 @@ fn with_a_waiting_call_its_banner_goes_and_it_cannot_be_answered() {
     let (_, alice) = alice_waits(&harness);
     lose_hands_free(&harness);
 
-    harness.wait_for_app(
-        "the Call Window says the connection is lost, and no Banner shows",
-        DEADLINE,
-        |state| {
-            call_window(state, "notice").as_deref() == Some(LOST)
-                && state.surface("banner").is_none()
-        },
-    );
+    // The Banner goes in the same change that shows the lost notice, not
+    // only once the Phone link gives up on Alice's Call.
+    let state = wait_lost(&harness);
+    assert!(state.surface("banner").is_none(), "{state:#?}");
+    assert!(!state.ringing, "{state:#?}");
     let menu = indicator_says(&harness, INDICATOR_LOST_BOB);
     assert_lost_menu(&menu, INDICATOR_LOST_BOB);
     let before = acts_on_calls(&harness.simulated_phone().wait_for_recorded(
@@ -381,28 +381,34 @@ fn with_a_waiting_call_its_banner_goes_and_it_cannot_be_answered() {
 #[test]
 fn when_contact_comes_back_hang_up_works_again_and_the_refused_one_is_not_kept() {
     let harness = connected();
-    let (bob_path, bob) = on_a_call(&harness);
+    let (_, bob) = on_a_call(&harness);
     harness
         .simulated_phone()
         .enable_quirk("connect-profile-fails-once");
-    harness
-        .move_audio("phone")
-        .expect("MoveAudio(\"phone\") is accepted");
+    if let Err(error) = harness.move_audio("phone") {
+        panic!("MoveAudio(\"phone\") was refused: {error:?}");
+    }
     wait_lost(&harness);
     harness.hang_up(bob);
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.message, LOST, "{error:?}");
 
+    // Bob's Call may come back under a new id and path, if the Phone takes
+    // longer than the Phone link waits: take both from what is shown.
     let state = harness.wait_for_app(
-        "the Call is back, with Hang up and Mute's hint offered again",
+        "the Call is back live, with Hang up and Mute's hint offered again",
         DEADLINE,
         |state| {
             state.connection_state == "connected"
                 && call_window(state, "notice").is_none()
                 && call_window(state, "hang-up-shortcut").is_some()
+                && call_window(state, "call")
+                    .and_then(|call| call.parse().ok())
+                    .is_some_and(|call| state_of(state, call) == Some("active"))
         },
     );
-    assert_eq!(state_of(&state, bob), Some("active"));
+    assert_eq!(state.calls.len(), 1, "{state:#?}");
+    assert_eq!(state.calls[0].number, BOB);
     assert_eq!(call_window(&state, "hang-up"), None);
     assert_eq!(
         call_window(&state, "mute-unavailable").as_deref(),
@@ -410,10 +416,10 @@ fn when_contact_comes_back_hang_up_works_again_and_the_refused_one_is_not_kept()
         "the audio is on the Phone, so Mute says why it is greyed out"
     );
     let on_phone = harness.simulated_phone().calls_on_phone();
-    assert!(
-        on_phone.contains(&(bob_path.clone(), "active".to_owned())),
-        "the refused Hang up wasn't kept: {on_phone:?}"
-    );
+    let [(bob_path, bob_state)] = on_phone.as_slice() else {
+        panic!("the refused Hang up wasn't kept, so Bob's Call is on the Phone: {on_phone:?}");
+    };
+    assert_eq!(bob_state, "active");
 
     harness.activate();
     harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
@@ -425,6 +431,6 @@ fn when_contact_comes_back_hang_up_works_again_and_the_refused_one_is_not_kept()
         .wait_for_recorded("Bob's Call is hung up", DEADLINE, |recorded| {
             recorded
                 .iter()
-                .any(|call| call.member == "Hangup" && call.path == bob_path)
+                .any(|call| call.member == "Hangup" && call.path == *bob_path)
         });
 }

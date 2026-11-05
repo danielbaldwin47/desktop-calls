@@ -204,6 +204,9 @@ pub enum PhoneCommand {
     HoldAndAnswer(CallId),
     /// End the live Call and answer this Waiting Call.
     EndAndAnswer(CallId),
+    /// Answer this Waiting Call while the only other Call stays on hold:
+    /// PipeWire's `SwapCalls`, `AT+CHLD=2`.
+    AnswerBesideHeld(CallId),
     /// Put the live Call on hold and make the Held Call live again.
     Swap,
     /// Bring the live Call's audio to the Desktop.

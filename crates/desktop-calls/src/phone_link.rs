@@ -732,6 +732,7 @@ impl PhoneLink {
                 | PhoneCommand::SendTones(_)
                 | PhoneCommand::HoldAndAnswer(_)
                 | PhoneCommand::EndAndAnswer(_)
+                | PhoneCommand::AnswerBesideHeld(_)
                 | PhoneCommand::Swap => self.connected.clone().map(Target::Object),
             };
             match target {

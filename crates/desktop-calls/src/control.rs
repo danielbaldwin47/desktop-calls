@@ -54,8 +54,14 @@ pub enum Refused {
     NoHeldCall(String),
     /// `HoldAndAnswer` while the user's own Call is still being placed.
     NotConnectedYet(String),
-    /// `Swap` while a Waiting Call rings: the Phone would answer it instead.
+    /// `Swap` or `HangUp` while a Call is on hold and a Waiting Call rings:
+    /// the Phone would answer or decline it instead.
     WaitingCallFirst(String),
+    /// `HoldAndAnswer` or `Answer` while another Call is on hold already.
+    AlreadyHolding(String),
+    /// `HoldAndAnswer` or `EndAndAnswer` while the only other Call is on
+    /// hold.
+    NothingToHoldOrEnd(String),
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
@@ -75,6 +81,8 @@ impl From<Failure> for Refused {
             Failure::NoHeldCall => Self::NoHeldCall(text),
             Failure::NotConnectedYet => Self::NotConnectedYet(text),
             Failure::WaitingCallFirst => Self::WaitingCallFirst(text),
+            Failure::AlreadyHolding => Self::AlreadyHolding(text),
+            Failure::NothingToHoldOrEnd => Self::NothingToHoldOrEnd(text),
             Failure::Undialable
             | Failure::PhoneNotSetUp
             | Failure::PhoneConnecting

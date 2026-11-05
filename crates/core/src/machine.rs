@@ -539,8 +539,17 @@ impl State {
             Input::HoldAndAnswer | Input::EndAndAnswer if self.waiting_call().is_none() => {
                 Some(Failure::NoWaitingCall)
             }
+            Input::HoldAndAnswer | Input::EndAndAnswer
+                if self.waiting_options() == WaitingOptions::Answer =>
+            {
+                Some(Failure::NothingToHoldOrEnd)
+            }
             Input::HoldAndAnswer if self.waiting_options() == WaitingOptions::End => {
-                Some(Failure::NotConnectedYet)
+                Some(if self.has_held_call() {
+                    Failure::AlreadyHolding
+                } else {
+                    Failure::NotConnectedYet
+                })
             }
             Input::Swap if !self.has_held_call() => Some(Failure::NoHeldCall),
             // `AT+CHLD=2` would answer the Waiting Call instead.

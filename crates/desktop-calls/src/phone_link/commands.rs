@@ -82,7 +82,11 @@ pub(super) async fn execute(
                 PhoneCommand::EndAndAnswer(_) => {
                     call(session, &path, AUDIO_GATEWAY, "ReleaseAndAnswer", &()).await
                 }
-                PhoneCommand::Swap => call(session, &path, AUDIO_GATEWAY, "SwapCalls", &()).await,
+                // With only a held Call besides the waiting one, AT+CHLD=2
+                // accepts the waiting Call and keeps the held one.
+                PhoneCommand::Swap | PhoneCommand::AnswerBesideHeld(_) => {
+                    call(session, &path, AUDIO_GATEWAY, "SwapCalls", &()).await
+                }
                 // Resolved to the Phone itself, above.
                 PhoneCommand::MoveAudioToPhone | PhoneCommand::ConnectHandsFree => Ok(()),
             };

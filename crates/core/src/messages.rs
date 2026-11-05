@@ -95,10 +95,16 @@ pub enum Failure {
     /// Hold & Answer while the user's own Call is still being placed: a
     /// Call nobody has answered can't be put on hold.
     NotConnectedYet,
-    /// Swap, or Hang up on the Held Call, while a Waiting Call rings: the
-    /// Phone would answer the Waiting Call (`AT+CHLD=2`) or decline it
-    /// (`AT+CHLD=0`) instead.
+    /// Swap, or Hang up on either Call, while one is on hold and a Waiting
+    /// Call rings: the Phone would answer the Waiting Call (`AT+CHLD=2`,
+    /// `AT+CHLD=1`) or decline it (`AT+CHLD=0`) instead.
     WaitingCallFirst,
+    /// Hold & Answer, or Answer, while another Call is on hold already: the
+    /// Phone holds one Call at a time.
+    AlreadyHolding,
+    /// Hold & Answer or End & Answer while the only other Call is on hold:
+    /// there is no live Call to hold or end.
+    NothingToHoldOrEnd,
 }
 
 impl Failure {
@@ -142,6 +148,8 @@ impl Failure {
             Self::SwapFailed => "swap-failed",
             Self::NotConnectedYet => "not-connected-yet",
             Self::WaitingCallFirst => "waiting-call-first",
+            Self::AlreadyHolding => "already-holding",
+            Self::NothingToHoldOrEnd => "nothing-to-hold-or-end",
         }
     }
 }
@@ -281,6 +289,14 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::WaitingCallFirst => (label(Label::WaitingCallFirst), None),
+        Failure::AlreadyHolding => (
+            "You already have a Call on hold, so this one can't go on hold too; choose End & Answer or Decline.",
+            None,
+        ),
+        Failure::NothingToHoldOrEnd => (
+            "Your other Call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
+            None,
+        ),
     };
     Message { text, next_action }
 }
@@ -525,9 +541,12 @@ pub enum Label {
     /// The same heading while the Banner has keyboard focus: the keys that
     /// work.
     WaitingCallKeys,
-    /// The same, while the user's own Call is still being placed, so only
-    /// End & Answer and Decline are offered.
+    /// The same, while the user's own Call is still being placed or another
+    /// is on hold already, so only End & Answer and Decline are offered.
     WaitingCallEndKeys,
+    /// The same, while the user's only other Call is on hold, so Answer and
+    /// Decline are offered.
+    WaitingCallAnswerKeys,
     /// The Banner's button that holds the live Call and answers the waiting
     /// one.
     HoldAndAnswer,
@@ -541,8 +560,8 @@ pub enum Label {
     Resume,
     /// What the Call Window says of a Call on hold.
     OnHold,
-    /// What the Call Window says in place of the Held Call's Swap and Hang
-    /// up while a Waiting Call rings.
+    /// What the Call Window says in place of Swap, Resume and Hang up while a
+    /// Call is on hold and a Waiting Call rings.
     WaitingCallFirst,
 }
 
@@ -585,13 +604,16 @@ pub fn label(label: Label) -> &'static str {
         Label::WaitingCall => "Waiting Call",
         Label::WaitingCallKeys => "Press H to Hold & Answer, E to End & Answer, or D to decline",
         Label::WaitingCallEndKeys => "Press E to End & Answer, or D to decline",
+        Label::WaitingCallAnswerKeys => {
+            "Press A to answer, keeping your other Call on hold, or D to decline"
+        }
         Label::HoldAndAnswer => "Hold & Answer",
         Label::EndAndAnswer => "End & Answer",
         Label::Swap => "Swap",
         Label::Resume => "Resume",
         Label::OnHold => "On hold",
         Label::WaitingCallFirst => {
-            "Swap, or hanging up this Call, would act on the Waiting Call instead; answer or decline it first."
+            "Answer or decline the Waiting Call first: until then, your phone would act on it instead of these Calls."
         }
     }
 }

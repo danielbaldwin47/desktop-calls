@@ -78,6 +78,10 @@ pub struct CallWindowView {
     /// The other connected Call, on hold, while there are two: listed below
     /// the live one, which Swap makes live again.
     pub held: Option<HeldCall>,
+    /// A Call is on hold while a Waiting Call rings: Swap, Resume and Hang
+    /// up aren't offered, as the Phone would answer or decline the Waiting
+    /// Call instead (`AT+CHLD`).
+    pub waiting_first: bool,
 }
 
 /// What the Banner offers for a Waiting Call, besides Decline.
@@ -86,8 +90,12 @@ pub enum WaitingOptions {
     /// Hold & Answer and End & Answer: the user's other Call is connected.
     HoldOrEnd,
     /// End & Answer alone: the user's own Call is still being placed, and a
-    /// Call nobody has answered can't be put on hold.
+    /// Call nobody has answered can't be put on hold; or another Call is on
+    /// hold already, and the Phone holds one Call at a time.
     End,
+    /// Answer, which keeps the user's only other Call on hold: there is no
+    /// live Call to hold or end.
+    Answer,
 }
 
 /// A Call on hold behind the one the Call Window shows.
@@ -97,9 +105,6 @@ pub struct HeldCall {
     pub caller: Caller,
     /// The Contact the other party is, if Contacts say.
     pub contact: Option<ContactMatch>,
-    /// Whether Swap and Hang up are offered for it. Not while a Waiting Call
-    /// rings: the Phone would answer or decline that Call instead.
-    pub can_act: bool,
 }
 
 /// What the Call Window says about the Call's audio, and so what its
@@ -185,6 +190,7 @@ impl State {
             notice: Some(Failure::ConnectionLost),
             focused: self.focus == Focus::CallWindow,
             held: None,
+            waiting_first: false,
         })
     }
 
@@ -246,6 +252,7 @@ impl State {
                     notice,
                     focused: self.focus == Focus::CallWindow,
                     held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -258,6 +265,7 @@ impl State {
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
                     held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -272,6 +280,7 @@ impl State {
                     notice: Some(notice.failure),
                     focused: self.focus == Focus::CallWindow,
                     held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -284,6 +293,7 @@ impl State {
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
                     held: None,
+                    waiting_first: false,
                 })
             });
         Surfaces {
@@ -316,8 +326,8 @@ impl State {
                 call: held.id,
                 caller: held.caller.clone(),
                 contact: self.contact(&held.caller),
-                can_act: !self.has_waiting_call(),
             }),
+            waiting_first: self.has_waiting_call() && self.has_held_call(),
         })
     }
 

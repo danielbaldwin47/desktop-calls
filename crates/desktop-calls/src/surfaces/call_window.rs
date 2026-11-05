@@ -532,10 +532,15 @@ impl CallWindow {
             .set_text(audio_location.unwrap_or_default());
         let handoff = self.show_handoff(view.audio);
         self.hd.set_visible(wideband);
-        self.hang_up.set_sensitive(!matches!(
-            view.phase,
-            CallWindowPhase::Ended | CallWindowPhase::NotPlaced
-        ));
+        // While a Call is on hold and a Waiting Call rings, the Phone would
+        // answer or decline the Waiting Call instead; the held row says so.
+        self.hang_up.set_sensitive(
+            !view.waiting_first
+                && !matches!(
+                    view.phase,
+                    CallWindowPhase::Ended | CallWindowPhase::NotPlaced
+                ),
+        );
         let notice = view.notice.map(|failure| messages::failure(failure).text);
         self.notice.set_text(notice.unwrap_or_default());
         self.notice.set_visible(notice.is_some());

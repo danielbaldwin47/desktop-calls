@@ -190,7 +190,10 @@ pub(super) fn command_failed(state: &mut State, command: &PhoneCommand, effects:
             }
         }
         PhoneCommand::SendTones(_) => effects.push(Effect::ReportError(Failure::TonesNotSent)),
-        PhoneCommand::HoldAndAnswer(_) | PhoneCommand::EndAndAnswer(_) | PhoneCommand::Swap => {
+        PhoneCommand::HoldAndAnswer(_)
+        | PhoneCommand::EndAndAnswer(_)
+        | PhoneCommand::AnswerBesideHeld(_)
+        | PhoneCommand::Swap => {
             call_waiting_failed(state, command, effects);
         }
         PhoneCommand::SetMicrophoneVolume(0) => {

@@ -310,7 +310,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-held-third-call-waiting",
-        title: "Three Calls: one live, one on hold with no Swap or Hang up, and a Waiting Call's Banner",
+        title: "Three Calls: one live and one on hold, neither with Hang up, and a Waiting Call's Banner with End & Answer and Decline only",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -340,7 +340,8 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+        // Decline is red; with no Hold & Answer, nothing is green.
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
         name: "call-window-connection-lost",

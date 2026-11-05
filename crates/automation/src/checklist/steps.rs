@@ -69,6 +69,7 @@ const STAYS_ON_PHONE: Duration = Duration::from_secs(3);
 const HELPER: &str = "A helper with a second phone who can call you.";
 const TEST_NUMBER: &str = "The Test Number already given to the agent.";
 const TWO_HELPERS: &str = "Two helpers: one to take your Call on the Test Number's phone, and one with another phone who can call you during it.";
+const THIRD_PHONE: &str = "A third phone that can call you while you are on two Calls.";
 const PIXEL_IN_HAND: &str =
     "The Pixel unlocked and in hand: it may ask to allow access to contacts and call history.";
 const NOTIFICATIONS: &str = "Omarchy's notifications showing: Do Not Disturb off.";
@@ -232,6 +233,20 @@ pub const GROUPS: &[Group] = &[
                 id: "4.4",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat, leaving the second helper's Call to ring out: a Missed Call notification appears",
+                script: None,
+                lands_with: &[16],
+            },
+            Step {
+                id: "4.5",
+                needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
+                title: "With the Test Number's Call on hold and the second helper's live, have the third phone call you: the Banner offers only End & Answer and Decline, and End & Answer ends only the second helper's Call while the Test Number's stays on hold",
+                script: None,
+                lands_with: &[16],
+            },
+            Step {
+                id: "4.6",
+                needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
+                title: "Then have the third phone hang up, leaving the Test Number's Call on hold alone, and have the second helper call again: the Banner offers Answer and Decline, and Answer connects them while the Test Number's Call stays on hold",
                 script: None,
                 lands_with: &[16],
             },

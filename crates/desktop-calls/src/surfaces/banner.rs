@@ -83,7 +83,8 @@ impl Banner {
     }
 
     /// While the Banner has keyboard focus, A answers and D declines; for a
-    /// Waiting Call, H is Hold & Answer and E End & Answer too.
+    /// Waiting Call, H is Hold & Answer and E End & Answer too, where the
+    /// Banner offers them.
     fn on_letters(&self, intents: &UnboundedSender<Input>) {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -99,7 +100,14 @@ impl Banner {
                 gtk::gdk::Key::h if waiting.get() == Some(WaitingOptions::HoldOrEnd) => {
                     |_| Input::HoldAndAnswer
                 }
-                gtk::gdk::Key::e if waiting.get().is_some() => |_| Input::EndAndAnswer,
+                gtk::gdk::Key::e
+                    if matches!(
+                        waiting.get(),
+                        Some(WaitingOptions::HoldOrEnd | WaitingOptions::End)
+                    ) =>
+                {
+                    |_| Input::EndAndAnswer
+                }
                 _ => return glib::Propagation::Proceed,
             };
             if has_command_modifier(modifiers) {
@@ -133,15 +141,19 @@ impl Banner {
             (None, false) => Label::IncomingCall,
             (Some(WaitingOptions::HoldOrEnd), true) => Label::WaitingCallKeys,
             (Some(WaitingOptions::End), true) => Label::WaitingCallEndKeys,
+            (Some(WaitingOptions::Answer), true) => Label::WaitingCallAnswerKeys,
             (Some(_), false) => Label::WaitingCall,
         });
         let can_hold = view.waiting == Some(WaitingOptions::HoldOrEnd);
+        let can_end = matches!(
+            view.waiting,
+            Some(WaitingOptions::HoldOrEnd | WaitingOptions::End)
+        );
         self.waiting.shown.set(view.waiting);
-        self.answer.set_visible(view.waiting.is_none());
+        self.answer
+            .set_visible(matches!(view.waiting, None | Some(WaitingOptions::Answer)));
         self.waiting.hold_and_answer.set_visible(can_hold);
-        self.waiting
-            .end_and_answer
-            .set_visible(view.waiting.is_some());
+        self.waiting.end_and_answer.set_visible(can_end);
         self.heading.set_text(heading);
         self.surface.call.set(Some(view.call));
         let mut content = BTreeMap::from([
@@ -154,6 +166,7 @@ impl Banner {
                     &[Label::HoldAndAnswer, Label::EndAndAnswer, Label::Decline]
                 }
                 WaitingOptions::End => &[Label::EndAndAnswer, Label::Decline],
+                WaitingOptions::Answer => &[Label::Answer, Label::Decline],
             };
             content.insert(
                 "options".to_owned(),
@@ -171,7 +184,7 @@ impl Banner {
             // Enter and Space then answer, never decline, and never end a
             // Call: with only End & Answer and Decline, they do nothing.
             match view.waiting {
-                None => {
+                None | Some(WaitingOptions::Answer) => {
                     self.answer.grab_focus();
                 }
                 Some(WaitingOptions::HoldOrEnd) => {

@@ -106,7 +106,7 @@ impl HeldRow {
     /// Swap, or while the only Call is on hold, with Resume.
     pub(super) fn update(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         let lone = view.held.is_none() && matches!(view.phase, CallWindowPhase::OnHold { .. });
-        let can_act = view.held.as_ref().is_none_or(|held| held.can_act);
+        let can_act = !view.waiting_first;
         self.held.set(view.held.as_ref().map(|held| held.call));
         self.row.set_visible(view.held.is_some() || lone);
         // Hidden controls ignore their shortcuts.

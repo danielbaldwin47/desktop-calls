@@ -19,7 +19,7 @@ sys.path.insert(0, str(TOOLS))
 import checklist_tickets  # noqa: E402
 import merge  # noqa: E402
 
-OPEN = {16, 22}
+OPEN = {16, 22, 148}
 
 
 def is_open(ticket: int) -> bool:
@@ -47,7 +47,7 @@ def steps_rs(*blocks: str, runs_with: str = "") -> str:
 class Rules(unittest.TestCase):
     def test_the_real_steps_are_all_read_and_none_waits_on_a_closed_ticket(self):
         text = (TOOLS.parent / checklist_tickets.STEPS).read_text(encoding="utf-8")
-        self.assertEqual(len(checklist_tickets.steps(text)), 27)
+        self.assertEqual(len(checklist_tickets.steps(text)), 30)
         self.assertEqual(checklist_tickets.problems(text, set(), is_open), [])
 
     def test_a_step_without_a_script_may_not_land_with_a_closed_ticket(self):

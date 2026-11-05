@@ -89,7 +89,14 @@ pub enum Quirk {
     /// `Hangup` replies `InvalidArgs` "Too few arguments" while the Call is
     /// torn down anyway.
     HangupTooFewArguments,
+    /// `Properties.Set` on an AudioGateway is carried out and recorded at
+    /// once, but answered only [`SLOW_REPLY`] later, as a busy `WirePlumber`
+    /// may. Tests use it to see what the app shows before the reply.
+    SlowPropertyWrites,
 }
+
+/// How long [`Quirk::SlowPropertyWrites`] holds each reply.
+pub const SLOW_REPLY: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl Quirk {
     /// The quirk with this control-interface name.
@@ -97,6 +104,7 @@ impl Quirk {
         match name {
             "call1-hangup-missing" => Some(Self::Call1HangupMissing),
             "hangup-too-few-arguments" => Some(Self::HangupTooFewArguments),
+            "slow-property-writes" => Some(Self::SlowPropertyWrites),
             _ => None,
         }
     }

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use test_harness::vcards::{self, CallKind};
-use test_harness::{AppState, Harness, Screenshot};
+use test_harness::{AppState, Harness, RecordedMethodCall, Screenshot};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -72,13 +72,10 @@ fn pulls_ask_for_vcard_3() {
     phone.connect();
     harness.wait_for_app("ContactsState is ready", SYNC_DEADLINE, is_ready);
 
-    let pulls: Vec<_> = phone
-        .recorded_method_calls()
-        .into_iter()
-        .filter(|call| call.member == "PullAll")
-        .collect();
-    assert!(!pulls.is_empty(), "the app pulled nothing");
-    for pull in pulls {
+    let recorded = phone.wait_for_recorded("the app pulls", DEADLINE, |recorded| {
+        recorded.iter().any(|call| call.member == "PullAll")
+    });
+    for pull in recorded.iter().filter(|call| call.member == "PullAll") {
         assert!(
             pull.arguments.contains(r#""Format": <"vcard30">"#),
             "the app asked for another format: {}",
@@ -312,28 +309,24 @@ fn pbap_sessions_never_overlap() {
     assert_eq!(phone.most_pbap_sessions_at_once(), 1);
 }
 
-/// How many times the app has selected `folder` on the Phone.
-fn folder_selections(harness: &Harness, folder: &str) -> usize {
+/// How many times among `recorded` the app selected `folder` on the Phone.
+fn folder_selections(recorded: &[RecordedMethodCall], folder: &str) -> usize {
     let selected = format!(r#"("int", "{folder}")"#);
-    harness
-        .simulated_phone()
-        .recorded_method_calls()
-        .into_iter()
+    recorded
+        .iter()
         .filter(|call| call.member == "Select" && call.arguments == selected)
         .count()
 }
 
-/// Waits until the app has selected `folder` `count` times.
-fn wait_for_folder_pulls(harness: &Harness, folder: &str, count: usize) {
-    let started = Instant::now();
-    while folder_selections(harness, folder) < count {
-        assert!(
-            started.elapsed() < SYNC_DEADLINE,
-            "the app selected {folder} {} times, not {count}",
-            folder_selections(harness, folder)
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+/// Waits until the app has selected `folder` at least `count` times, and
+/// returns how many times it has.
+fn wait_for_folder_pulls(harness: &Harness, folder: &str, count: usize) -> usize {
+    let recorded = harness.simulated_phone().wait_for_recorded(
+        &format!("the app selects {folder} {count} times"),
+        SYNC_DEADLINE,
+        |recorded| folder_selections(recorded, folder) >= count,
+    );
+    folder_selections(&recorded, folder)
 }
 
 #[test]
@@ -342,7 +335,7 @@ fn call_history_is_pulled_again_after_a_call_ends() {
     let phone = harness.simulated_phone();
     phone.set_pbap_folder("cch", &vcards::call_history(5));
     synced(&harness);
-    assert_eq!(folder_selections(&harness, "cch"), 1);
+    assert_eq!(wait_for_folder_pulls(&harness, "cch", 1), 1);
     phone.set_pbap_folder("cch", &vcards::call_history(6));
 
     let _call = phone.ring(ALICE_CALLING);
@@ -595,20 +588,32 @@ fn with_5000_contacts_the_banner_still_shows_within_a_second() {
     assert_eq!(state.contacts.contacts, 5_001);
 }
 
-/// The `PullAll`s the app has made of `folder`, by their filters, in order.
-fn folder_pulls(harness: &Harness, folder: &str) -> Vec<String> {
-    let mut selected = String::new();
+/// The `PullAll`s among `recorded` that the app made of `folder`, by their
+/// filters, in order.
+fn folder_pulls(recorded: &[RecordedMethodCall], folder: &str) -> Vec<String> {
+    let mut selected = "";
     let mut pulls = Vec::new();
-    for call in harness.simulated_phone().recorded_method_calls() {
+    for call in recorded {
         match call.member.as_str() {
-            "Select" => selected = call.arguments,
+            "Select" => selected = &call.arguments,
             "PullAll" if selected == format!(r#"("int", "{folder}")"#) => {
-                pulls.push(call.arguments);
+                pulls.push(call.arguments.clone());
             }
             _ => {}
         }
     }
     pulls
+}
+
+/// Waits until the app has pulled the Call History at least `count` times,
+/// and returns its pulls.
+fn wait_for_call_history_pulls(harness: &Harness, count: usize) -> Vec<String> {
+    let recorded = harness.simulated_phone().wait_for_recorded(
+        &format!("the app pulls cch {count} times"),
+        SYNC_DEADLINE,
+        |recorded| folder_pulls(recorded, "cch").len() >= count,
+    );
+    folder_pulls(&recorded, "cch")
 }
 
 #[test]
@@ -631,7 +636,7 @@ fn call_history_past_the_phones_50_entry_pulls_is_read_page_by_page() {
     harness.wait_for_app("the whole Call History is read", SYNC_DEADLINE, |state| {
         state.contacts.call_history == 120
     });
-    let pulls = folder_pulls(&harness, "cch");
+    let pulls = wait_for_call_history_pulls(&harness, 3);
     assert_eq!(pulls.len(), 3, "three pages: {pulls:?}");
     assert!(!pulls[0].contains("Offset"), "{}", pulls[0]);
     assert!(
@@ -661,7 +666,7 @@ fn after_a_call_only_the_newest_page_is_pulled_and_older_calls_are_kept() {
     harness.wait_for_app("the whole Call History is read", SYNC_DEADLINE, |state| {
         state.contacts.call_history == 120
     });
-    let pulled_at_sync = folder_pulls(&harness, "cch").len();
+    let pulled_at_sync = wait_for_call_history_pulls(&harness, 3).len();
     // The Call that ends goes on top.
     phone.set_pbap_folder(
         "cch",
@@ -679,7 +684,7 @@ fn after_a_call_only_the_newest_page_is_pulled_and_older_calls_are_kept() {
     harness.wait_for_app("the new Call is on top", SYNC_DEADLINE, |state| {
         state.contacts.call_history == 121
     });
-    let pulls = folder_pulls(&harness, "cch");
+    let pulls = wait_for_call_history_pulls(&harness, pulled_at_sync + 1);
     assert_eq!(pulls.len(), pulled_at_sync + 1, "one page: {pulls:?}");
     assert!(!pulls[pulled_at_sync].contains("Offset"));
     let history = harness.call_history();

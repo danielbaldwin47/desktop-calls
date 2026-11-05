@@ -17,6 +17,9 @@ const BANNER_DEADLINE: Duration = Duration::from_secs(1);
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
 /// How long the Call audio may take to reach the Desktop after Answer.
 const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
+/// How long something the Phone must not be asked is watched for, after the
+/// app has settled.
+const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
 
@@ -100,13 +103,13 @@ fn while_ringing_the_keybinding_focuses_the_banner_and_a_answers_on_the_desktop(
         |state| is_live(state, call) && state.audio_location == "desktop",
     );
     assert!(!state.ringing);
-    assert!(
-        harness
-            .simulated_phone()
-            .recorded_method_calls()
-            .iter()
-            .any(|recorded| recorded.path == path && recorded.member == "Answer")
-    );
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Call is answered", DEADLINE, |recorded| {
+            recorded
+                .iter()
+                .any(|recorded| recorded.path == path && recorded.member == "Answer")
+        });
 }
 
 #[test]
@@ -124,13 +127,14 @@ fn while_ringing_the_keybinding_focuses_the_banner_and_d_declines() {
         state.calls.is_empty() && state.surface("banner").is_none()
     });
     assert!(!state.ringing);
-    let calls = harness.simulated_phone().recorded_method_calls();
-    assert!(
-        calls
-            .iter()
-            .any(|recorded| recorded.path == path && recorded.member == "Hangup"),
-        "{calls:#?}"
-    );
+    let calls =
+        harness
+            .simulated_phone()
+            .wait_for_recorded("the Call is hung up", DEADLINE, |recorded| {
+                recorded
+                    .iter()
+                    .any(|recorded| recorded.path == path && recorded.member == "Hangup")
+            });
     assert!(
         !calls.iter().any(|recorded| recorded.member == "Answer"),
         "{calls:#?}"
@@ -213,13 +217,11 @@ fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_leaves_t
     harness.app_holds("the Call stays live", Duration::from_millis(500), |state| {
         is_live(state, call)
     });
-    assert!(
-        !harness
-            .simulated_phone()
-            .recorded_method_calls()
-            .iter()
-            .any(|recorded| recorded.member == "Hangup")
-    );
+    harness
+        .simulated_phone()
+        .recorded_holds("the Desktop never hangs up", HOLD, |recorded| {
+            !recorded.iter().any(|recorded| recorded.member == "Hangup")
+        });
 }
 
 #[test]

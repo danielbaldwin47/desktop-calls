@@ -266,7 +266,11 @@ fn clicking_answer_answers_and_the_call_window_shows_the_audio_here_and_a_timer(
 
     let calls: Vec<_> = harness
         .simulated_phone()
-        .recorded_method_calls()
+        .wait_for_recorded("the transport is activated", DEADLINE, |recorded| {
+            recorded
+                .iter()
+                .any(|recorded| recorded.bus == "session" && recorded.member == "Activate")
+        })
         .into_iter()
         .filter(|recorded| recorded.bus == "session")
         .collect();
@@ -302,13 +306,13 @@ fn clicking_decline_declines_and_closes_the_banner() {
     });
     assert!(!state.ringing);
     assert_eq!(call_window(&state), None);
-    assert!(
-        harness
-            .simulated_phone()
-            .recorded_method_calls()
-            .iter()
-            .any(|recorded| recorded.path == path && recorded.member == "Hangup")
-    );
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Call is hung up", DEADLINE, |recorded| {
+            recorded
+                .iter()
+                .any(|recorded| recorded.path == path && recorded.member == "Hangup")
+        });
 }
 
 #[test]
@@ -334,18 +338,21 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     harness.wait_for_app("the Call Window closes", DEADLINE, |state| {
         call_window(state).is_none()
     });
-    let calls = harness.simulated_phone().recorded_method_calls();
-    let asked_at = calls
-        .iter()
-        .position(|recorded| recorded.path == path && recorded.member == "Hangup")
-        .expect("the Phone was asked to hang up");
-    assert!(
-        calls[asked_at..]
-            .iter()
-            .any(|recorded| recorded.member == "Set"
-                && recorded.arguments.contains("RejectSCO")
-                && recorded.arguments.contains("true")),
-        "RejectSCO was not set back to true: {calls:#?}"
+    harness.simulated_phone().wait_for_recorded(
+        "the Call is hung up, then RejectSCO is set back to true",
+        DEADLINE,
+        |recorded| {
+            recorded
+                .iter()
+                .position(|recorded| recorded.path == path && recorded.member == "Hangup")
+                .is_some_and(|asked_at| {
+                    recorded[asked_at..].iter().any(|recorded| {
+                        recorded.member == "Set"
+                            && recorded.arguments.contains("RejectSCO")
+                            && recorded.arguments.contains("true")
+                    })
+                })
+        },
     );
 }
 

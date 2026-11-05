@@ -590,7 +590,7 @@ impl PhoneLink {
 }
 
 /// Carries out each batch of Phone commands in order, one D-Bus call at a
-/// time, and reports the first failure of each batch.
+/// time, and reports each command done, or the first failure of each batch.
 async fn execute(
     session: &Connection,
     mut batches: UnboundedReceiver<Vec<Resolved>>,
@@ -614,11 +614,14 @@ async fn execute(
                 PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
             };
             match result {
-                Ok(()) => tracing::debug!(
-                    event_kind = %EventKind::PhoneCommandSent,
-                    command = ?command,
-                    "The Phone did {command:?}"
-                ),
+                Ok(()) => {
+                    tracing::debug!(
+                        event_kind = %EventKind::PhoneCommandSent,
+                        command = ?command,
+                        "The Phone did {command:?}"
+                    );
+                    let _ = inputs.unbounded_send(Input::PhoneCommandDone(command));
+                }
                 Err(error) => {
                     tracing::warn!(
                         event_kind = %EventKind::PhoneCommandFailed,

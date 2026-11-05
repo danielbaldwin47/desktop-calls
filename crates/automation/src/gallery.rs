@@ -110,11 +110,16 @@ const STATES: &[State] = &[
             harness.simulated_phone().set_codec(2);
             let call = ring(harness);
             harness.answer(call);
-            harness.wait_for_app("the Call Window shows HD", DEADLINE, |state| {
-                state.surface("call-window").is_some_and(|window| {
-                    window.contains_key("hd") && window.contains_key("audio-location")
-                })
-            });
+            harness.wait_for_app(
+                "the Call Window shows HD audio on this computer",
+                DEADLINE,
+                |state| {
+                    state.audio_location == "desktop"
+                        && state.surface("call-window").is_some_and(|window| {
+                            window.contains_key("hd") && window.contains_key("audio-location")
+                        })
+                },
+            );
         },
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
@@ -125,11 +130,19 @@ const STATES: &[State] = &[
             connect(harness);
             let call = ring(harness);
             harness.answer(call);
-            harness.wait_for_app("the Call Window offers Mute", DEADLINE, |state| {
-                state
-                    .surface("call-window")
-                    .is_some_and(|window| window.get("mute").is_some_and(|mute| mute == "Mute"))
-            });
+            // The Call Window opens, reading "Mute", before the audio reaches
+            // the Desktop, and Mute is refused until it has.
+            harness.wait_for_app(
+                "the audio is on the Desktop and the Call Window offers Mute",
+                DEADLINE,
+                |state| {
+                    state.audio_location == "desktop"
+                        && state.surface("call-window").is_some_and(|window| {
+                            window.get("mute").is_some_and(|mute| mute == "Mute")
+                                && !window.contains_key("mute-unavailable")
+                        })
+                },
+            );
             harness
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));

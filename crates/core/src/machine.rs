@@ -67,6 +67,8 @@ pub enum Input {
     Activate,
     /// The user let go of the surface that has keyboard focus (Escape).
     ReleaseFocus,
+    /// The Phone did this command.
+    PhoneCommandDone(PhoneCommand),
     /// The Phone refused, or never answered, this command.
     PhoneCommandFailed(PhoneCommand),
     /// A timer started by [`Effect::StartTimer`] ran out.
@@ -200,11 +202,23 @@ pub enum Mute {
 }
 
 /// Whether the Desktop muted the microphone, and the gain to put back.
+///
+/// Mute shows only what the Phone has done: a change it hasn't confirmed
+/// yet shows as the state before it. Showing Muted while the other person
+/// can still hear would be the worst thing Mute could do.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Muting {
     #[default]
     Off,
+    /// The Phone was asked for a gain of 0 and hasn't confirmed: unmuted.
+    Silencing {
+        restore: u8,
+    },
     On {
+        restore: u8,
+    },
+    /// The Phone was asked for `restore` and hasn't confirmed: muted.
+    Restoring {
         restore: u8,
     },
 }
@@ -231,6 +245,9 @@ struct EndedCall {
 pub struct State {
     phone: Option<Phone>,
     connection: ConnectionState,
+    /// The Phone connected, and was asked to keep the next Call's audio on
+    /// the Phone; it shows as connected once it has.
+    keeping_audio_on_phone: bool,
     calls: Vec<Call>,
     transport: Transport,
     /// The Phone's latest codec report, whatever the transport is doing.
@@ -343,15 +360,17 @@ impl State {
     /// Whether the Desktop has muted its microphone for the Call.
     #[must_use]
     pub fn muted(&self) -> bool {
-        matches!(self.muting, Muting::On { .. })
+        matches!(self.muting, Muting::On { .. } | Muting::Restoring { .. })
     }
 
     /// What the Call Window's Mute control offers.
     fn mute(&self) -> Mute {
-        match self.muting {
-            Muting::On { .. } => Mute::On,
-            Muting::Off if self.audio_location() == Some(AudioLocation::Desktop) => Mute::Off,
-            Muting::Off => Mute::Unavailable,
+        if self.muted() {
+            Mute::On
+        } else if self.audio_location() == Some(AudioLocation::Desktop) {
+            Mute::Off
+        } else {
+            Mute::Unavailable
         }
     }
 
@@ -419,7 +438,13 @@ impl State {
 
     /// Whether the Phone is here and hasn't refused to share Contacts.
     fn may_sync_contacts(&self) -> bool {
-        self.connection == ConnectionState::Connected && self.contacts_sync != ContactsState::Denied
+        self.phone_is_here() && self.contacts_sync != ContactsState::Denied
+    }
+
+    /// Whether hands-free is up, including while the Phone is still being
+    /// asked to keep the next Call's audio before it shows as connected.
+    fn phone_is_here(&self) -> bool {
+        self.connection == ConnectionState::Connected || self.keeping_audio_on_phone
     }
 
     /// Why the Desktop refuses `input` now, if it does. The control
@@ -485,7 +510,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     // Mute is the Desktop's microphone. Once the audio leaves the Desktop,
     // or the Call ends, the Phone's microphone must not stay silenced.
     if state.audio_location() != Some(AudioLocation::Desktop) {
-        unmute(&mut state, &mut effects);
+        release_mute(&mut state, &mut effects);
     }
     (state, effects)
 }
@@ -524,9 +549,7 @@ fn contacts_sync(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
         }
         // A sync cut short by the Phone leaving isn't a failure to report;
         // what was synced before still names callers.
-        Input::ContactsSyncFailed(SyncFailure::Unavailable(reason))
-            if state.connection == ConnectionState::Connected =>
-        {
+        Input::ContactsSyncFailed(SyncFailure::Unavailable(reason)) if state.phone_is_here() => {
             state.contacts_sync = ContactsState::Unavailable(reason);
         }
         _ => {}
@@ -534,15 +557,31 @@ fn contacts_sync(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
 }
 
 fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
-    state.connection = ConnectionState::Connected;
     // Every connect syncs, so the Desktop catches up with changes made on
     // the Phone while apart.
     state.contacts_sync = ContactsState::Syncing;
     effects.push(Effect::SyncContacts);
-    // A crash or a dropped link mid-Call must never leave the next Call's
-    // audio jumping to the Desktop.
-    if !state.has_desktop_audio() {
+    if state.has_desktop_audio() {
+        state.connection = ConnectionState::Connected;
+    } else {
+        // A crash or a dropped link mid-Call must never leave the next
+        // Call's audio jumping to the Desktop. Connected means ready for
+        // Calls, so it waits until the Phone has done this.
+        state.keeping_audio_on_phone = true;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
+/// Hands-free dropped. A Phone that never showed as connected stays
+/// Connecting, as before it came into range.
+fn phone_disconnected(state: &mut State) {
+    if state.phone_is_here() {
+        state.contacts_sync = state.held_contacts_state();
+    }
+    state.keeping_audio_on_phone = false;
+    if state.connection == ConnectionState::Connected {
+        state.connection = ConnectionState::Disconnected;
+        state.transport = Transport::Idle;
     }
 }
 
@@ -563,12 +602,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
             phone_connected(&mut state, &mut effects);
         }
-        Input::PhoneDisconnected { address }
-            if state.is_our_phone(&address) && state.connection == ConnectionState::Connected =>
-        {
-            state.connection = ConnectionState::Disconnected;
-            state.transport = Transport::Idle;
-            state.contacts_sync = state.held_contacts_state();
+        Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
+            phone_disconnected(&mut state);
         }
         Input::CallAdded {
             call,
@@ -636,6 +671,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
         Input::Activate => activate(&mut state, &mut effects),
         Input::ReleaseFocus => state.focus = Focus::None,
+        Input::PhoneCommandDone(command) => command_done(&mut state, &command),
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::TimerFired(Timer::CloseCallWindow(call)) => {
             if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
@@ -678,27 +714,58 @@ fn send_tones(state: &State, typed: String, effects: &mut Vec<Effect>) {
 }
 
 fn mute(state: &mut State, effects: &mut Vec<Effect>) {
-    if state.muted() {
+    if matches!(state.muting, Muting::Silencing { .. } | Muting::On { .. }) {
         return;
     }
     if let Some(failure) = state.refusal(&Input::SetMuted(true)) {
         effects.push(Effect::ReportError(failure));
         return;
     }
-    // A gain of 0, or PipeWire's 255 for "the Phone hasn't said", would
-    // leave the microphone silent after unmuting.
-    let restore = match state.microphone_volume {
-        Some(volume @ 1..=MAX_MICROPHONE_VOLUME) => volume,
-        _ => DEFAULT_MICROPHONE_VOLUME,
+    let restore = match state.muting {
+        Muting::Restoring { restore } => restore,
+        // A gain of 0, or PipeWire's 255 for "the Phone hasn't said", would
+        // leave the microphone silent after unmuting.
+        _ => match state.microphone_volume {
+            Some(volume @ 1..=MAX_MICROPHONE_VOLUME) => volume,
+            _ => DEFAULT_MICROPHONE_VOLUME,
+        },
     };
-    state.muting = Muting::On { restore };
+    state.muting = Muting::Silencing { restore };
     effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(0)));
 }
 
+/// The user asked to unmute.
 fn unmute(state: &mut State, effects: &mut Vec<Effect>) {
-    if let Muting::On { restore } = state.muting {
-        state.muting = Muting::Off;
+    if let Muting::Silencing { restore } | Muting::On { restore } = state.muting {
+        state.muting = Muting::Restoring { restore };
         effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(restore)));
+    }
+}
+
+/// The audio left the Desktop, or the Call ended: the gain goes back at
+/// once, as there is no Mute left to show.
+fn release_mute(state: &mut State, effects: &mut Vec<Effect>) {
+    if let Muting::Silencing { restore } | Muting::On { restore } = state.muting {
+        effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(restore)));
+    }
+    state.muting = Muting::Off;
+}
+
+fn command_done(state: &mut State, command: &PhoneCommand) {
+    match (command, state.muting) {
+        (PhoneCommand::KeepAudioOnPhone, _) if state.keeping_audio_on_phone => {
+            state.keeping_audio_on_phone = false;
+            state.connection = ConnectionState::Connected;
+        }
+        (PhoneCommand::SetMicrophoneVolume(0), Muting::Silencing { restore }) => {
+            state.muting = Muting::On { restore };
+        }
+        (PhoneCommand::SetMicrophoneVolume(volume), Muting::Restoring { restore })
+            if *volume == restore =>
+        {
+            state.muting = Muting::Off;
+        }
+        _ => {}
     }
 }
 
@@ -805,19 +872,27 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
             effects.push(Effect::ReportError(Failure::AudioNotMoved));
         }
         // The shell has logged it; the next Call end or connect tries again.
-        PhoneCommand::KeepAudioOnPhone => {}
+        // The Phone is there all the same, so it shows as connected.
+        PhoneCommand::KeepAudioOnPhone => {
+            if state.keeping_audio_on_phone {
+                state.keeping_audio_on_phone = false;
+                state.connection = ConnectionState::Connected;
+            }
+        }
         PhoneCommand::SendTones(_) => effects.push(Effect::ReportError(Failure::TonesNotSent)),
         PhoneCommand::SetMicrophoneVolume(0) => {
-            if state.muted() {
+            if let Muting::Silencing { .. } = state.muting {
                 state.muting = Muting::Off;
                 effects.push(Effect::ReportError(Failure::MuteFailed));
             }
         }
-        PhoneCommand::SetMicrophoneVolume(restore) => {
+        PhoneCommand::SetMicrophoneVolume(_) => {
             // Unmuting the user asked for failed: the microphone is still
             // silent, so say so. An unmute because the audio left the
             // Desktop or the Call ended has no Mute left to show.
-            if !state.muted() && state.audio_location() == Some(AudioLocation::Desktop) {
+            if let Muting::Restoring { restore } = state.muting
+                && state.audio_location() == Some(AudioLocation::Desktop)
+            {
                 state.muting = Muting::On { restore };
                 effects.push(Effect::ReportError(Failure::UnmuteFailed));
             }

@@ -34,9 +34,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use clap::Parser;
 use futures_util::StreamExt as _;
 use zbus::object_server::SignalEmitter;
-use zbus::{Connection, MessageStream, OwnedObjectPath, OwnedVariant, interface};
+use zbus::{Connection, Message, MessageStream, OwnedObjectPath, OwnedVariant, interface};
 
-use crate::objects::{MethodCall, ObjectTree, PROPERTIES, interfaces_added_body};
+use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply, interfaces_added_body};
 use crate::scenario::Step;
 
 const CONTROL_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone";
@@ -215,15 +215,23 @@ async fn serve(
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
-        let (reply, signals, later) = {
+        let (reply, signals, later, slow) = {
             let mut world = lock(&world);
             world.recorded.push((service.bus(), call.clone()));
             let world = &mut *world;
+            let slow = matches!(service, Service::Telephony)
+                && call.interface == PROPERTIES
+                && call.member == "Set"
+                && world
+                    .behaviour
+                    .quirks
+                    .contains(&telephony::Quirk::SlowPropertyWrites);
             match service {
                 Service::Bluez => (
                     bluez::answer(&world.bluez, &call, &message),
                     Vec::new(),
                     None,
+                    slow,
                 ),
                 Service::Telephony => {
                     let (reply, signals) = telephony::answer(
@@ -233,24 +241,44 @@ async fn serve(
                         &call,
                         &message,
                     );
-                    (reply, signals, None)
+                    (reply, signals, None, slow)
                 }
                 Service::Obex => {
                     let answer =
                         obex::answer(&mut world.obex, &world.phone_address, &call, &message);
-                    (answer.reply, answer.signals, answer.later)
+                    (answer.reply, answer.signals, answer.later, slow)
                 }
             }
         };
-        reply.send(&connection, &message.header()).await?;
-        // As the real service, which replies once the Phone confirms, and
-        // then reports the change the Phone makes.
-        for signal in signals {
-            signal.emit(&connection).await?;
+        if slow {
+            // The calls that follow are answered meanwhile.
+            let connection = connection.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(telephony::SLOW_REPLY);
+                zbus::block_on(answer(&connection, &message, reply, signals))
+            });
+            continue;
         }
+        answer(&connection, &message, reply, signals).await?;
         if let Some((after, later)) = later {
             run_obex_later(world.clone(), connection.clone(), message, after, later);
         }
+    }
+    Ok(())
+}
+
+/// Sends `reply` to `message`, then emits `signals`: as the real service,
+/// which replies once the Phone confirms, and then reports the change the
+/// Phone makes.
+async fn answer(
+    connection: &Connection,
+    message: &Message,
+    reply: Reply,
+    signals: Vec<telephony::Signal>,
+) -> zbus::Result<()> {
+    reply.send(connection, &message.header()).await?;
+    for signal in signals {
+        signal.emit(connection).await?;
     }
     Ok(())
 }
@@ -268,13 +296,7 @@ fn run_obex_later(
     std::thread::spawn(move || {
         std::thread::sleep(after);
         let (reply, signals) = obex::run_later(&mut lock(&world).obex, later);
-        zbus::block_on(async {
-            reply.send(&connection, &message.header()).await?;
-            for signal in signals {
-                signal.emit(&connection).await?;
-            }
-            Ok::<_, zbus::Error>(())
-        })
+        zbus::block_on(answer(&connection, &message, reply, signals))
     });
 }
 
@@ -435,11 +457,12 @@ impl Control {
     }
 
     /// Switches on a quirk other Phones, or other moments, show:
-    /// `"call1-hangup-missing"` or `"hangup-too-few-arguments"`.
+    /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
+    /// `"slow-property-writes"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing and hangup-too-few-arguments"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments and slow-property-writes"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

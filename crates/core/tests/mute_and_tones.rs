@@ -85,22 +85,37 @@ fn mute_control(state: &State) -> Option<Mute> {
 }
 
 #[test]
-fn muting_sets_the_microphone_volume_to_zero() {
+fn muting_sets_the_microphone_volume_to_zero_and_shows_muted_once_the_phone_has() {
     let (state, effects) = run(live_on_desktop(11), [Input::SetMuted(true)]);
 
     assert_eq!(
         effects,
         [Effect::Phone(PhoneCommand::SetMicrophoneVolume(0))]
     );
+    // The other person may still hear until the Phone confirms.
+    assert!(!state.muted());
+    assert_eq!(mute_control(&state), Some(Mute::Off));
+
+    let (state, _) = run(
+        state,
+        [Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(
+            0,
+        ))],
+    );
+
     assert!(state.muted());
     assert_eq!(mute_control(&state), Some(Mute::On));
 }
 
 #[test]
-fn unmuting_restores_the_volume_from_before() {
+fn unmuting_restores_the_volume_from_before_and_shows_unmuted_once_the_phone_has() {
     let (state, effects) = run(
         live_on_desktop(11),
-        [Input::SetMuted(true), Input::SetMuted(false)],
+        [
+            Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
+            Input::SetMuted(false),
+        ],
     );
 
     assert_eq!(
@@ -110,8 +125,41 @@ fn unmuting_restores_the_volume_from_before() {
             Effect::Phone(PhoneCommand::SetMicrophoneVolume(11)),
         ]
     );
+    // The other person may not hear yet until the Phone confirms.
+    assert!(state.muted());
+    assert_eq!(mute_control(&state), Some(Mute::On));
+
+    let (state, _) = run(
+        state,
+        [Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(
+            11,
+        ))],
+    );
+
     assert!(!state.muted());
     assert_eq!(mute_control(&state), Some(Mute::Off));
+}
+
+#[test]
+fn muting_again_while_an_unmute_is_on_its_way_keeps_the_gain_to_restore() {
+    let (state, effects) = run(
+        live_on_desktop(11),
+        [
+            Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
+            Input::SetMuted(false),
+            Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(11)),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
+            Input::SetMuted(false),
+        ],
+    );
+
+    assert_eq!(
+        effects.last(),
+        Some(&Effect::Phone(PhoneCommand::SetMicrophoneVolume(11)))
+    );
+    assert!(state.muted(), "muted until the Phone confirms the unmute");
 }
 
 #[test]
@@ -298,6 +346,7 @@ fn an_unmute_the_phone_refuses_is_reported_and_still_shows_muted() {
         live_on_desktop(11),
         [
             Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
             Input::SetMuted(false),
             Input::PhoneCommandFailed(PhoneCommand::SetMicrophoneVolume(11)),
         ],

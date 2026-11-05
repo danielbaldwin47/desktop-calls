@@ -14,6 +14,9 @@ const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
 /// How long the Desktop may lag behind a Call that stopped ringing on the
 /// Phone, from the moment the Phone confirms the Call is gone.
 const KEEP_UP_DEADLINE: Duration = Duration::from_millis(200);
+/// How long something the Phone must not be asked is watched for, after the
+/// app has settled.
+const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
@@ -56,15 +59,42 @@ fn is_live_on_desktop(state: &AppState, call: u32) -> bool {
             .any(|known| known.id == call && known.state == "active")
 }
 
-/// The method calls the Phone received on the Telephony service after the
-/// first `skip`.
-fn telephony_calls(harness: &Harness) -> Vec<RecordedMethodCall> {
+/// The method calls among `recorded` that went to the Telephony service.
+fn telephony(recorded: &[RecordedMethodCall]) -> Vec<RecordedMethodCall> {
+    recorded
+        .iter()
+        .filter(|call| call.bus == "session" && call.path.starts_with("/org/pipewire/Telephony"))
+        .cloned()
+        .collect()
+}
+
+/// Waits until the method calls the Phone received on the Telephony service
+/// satisfy `condition`, and returns them.
+fn wait_for_telephony(
+    harness: &Harness,
+    description: &str,
+    condition: impl Fn(&[RecordedMethodCall]) -> bool,
+) -> Vec<RecordedMethodCall> {
+    let recorded = harness
+        .simulated_phone()
+        .wait_for_recorded(description, DEADLINE, |recorded| {
+            condition(&telephony(recorded))
+        });
+    telephony(&recorded)
+}
+
+/// Checks that the method calls the Phone received on the Telephony service
+/// satisfy `condition` for a while.
+fn telephony_holds(
+    harness: &Harness,
+    description: &str,
+    condition: impl Fn(&[RecordedMethodCall]) -> bool,
+) {
     harness
         .simulated_phone()
-        .recorded_method_calls()
-        .into_iter()
-        .filter(|call| call.bus == "session" && call.path.starts_with("/org/pipewire/Telephony"))
-        .collect()
+        .recorded_holds(description, HOLD, |recorded| {
+            condition(&telephony(recorded))
+        });
 }
 
 fn is_reject_sco(call: &RecordedMethodCall, value: bool) -> bool {
@@ -92,9 +122,26 @@ fn connecting_rejects_desktop_audio_until_a_call_is_answered_here() {
     let harness = connected();
     let audio_gateway = harness.simulated_phone().audio_gateway();
 
-    let calls = telephony_calls(&harness);
-    position(&calls, "set RejectSCO=true on connect", |call| {
-        call.path == audio_gateway && is_reject_sco(call, true)
+    wait_for_reject_sco_on(&harness, &audio_gateway);
+}
+
+#[test]
+fn the_phone_shows_connected_only_once_desktop_audio_is_rejected() {
+    let harness = Harness::start();
+    harness
+        .simulated_phone()
+        .enable_quirk("slow-property-writes");
+
+    harness.simulated_phone().connect();
+
+    let audio_gateway = harness.simulated_phone().audio_gateway();
+    wait_for_reject_sco_on(&harness, &audio_gateway);
+    // The Phone holds its reply for a second. Until then a Call could still
+    // open its audio on the Desktop, so the Phone isn't ready for Calls.
+    let state = harness.app_state();
+    assert_eq!(state.connection_state, "connecting", "{state:?}");
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
     });
 }
 
@@ -145,7 +192,11 @@ fn answering_answers_then_clears_reject_sco_then_activates_in_order() {
     assert_eq!(state.calls[0].direction, "incoming");
     assert_ne!(state.calls[0].active_since_ms, 0);
 
-    let calls = telephony_calls(&harness);
+    let calls = wait_for_telephony(&harness, "the transport is activated", |calls| {
+        calls
+            .iter()
+            .any(|recorded| recorded.interface == TRANSPORT && recorded.member == "Activate")
+    });
     let answer = position(&calls, "answer the Call", |recorded| {
         recorded.path == path && recorded.member == "Answer"
     });
@@ -173,9 +224,10 @@ fn declining_hangs_up_the_ringing_call() {
     let state = harness.wait_for_app("the Call is gone", DEADLINE, |state| state.calls.is_empty());
     assert!(!state.ringing);
     assert_eq!(state.audio_location, "");
-    let calls = telephony_calls(&harness);
-    position(&calls, "hang up the ringing Call", |recorded| {
-        recorded.path == path && recorded.member == "Hangup"
+    let calls = wait_for_telephony(&harness, "the ringing Call is hung up", |calls| {
+        calls
+            .iter()
+            .any(|recorded| recorded.path == path && recorded.member == "Hangup")
     });
     assert!(
         !calls.iter().any(|recorded| recorded.member == "Answer"),
@@ -187,15 +239,15 @@ fn declining_hangs_up_the_ringing_call() {
 fn hanging_up_ends_the_call_and_rejects_desktop_audio_again() {
     let harness = connected();
     let (path, call) = answered(&harness);
-    let before = telephony_calls(&harness).len();
 
     harness.hang_up(call);
 
     let state = harness.wait_for_app("the Call is gone", DEADLINE, |state| state.calls.is_empty());
     assert_eq!(state.audio_location, "");
-    let calls = telephony_calls(&harness);
-    position(&calls[before..], "hang up the Call", |recorded| {
-        recorded.path == path && recorded.member == "Hangup"
+    wait_for_telephony(&harness, "the Call is hung up", |calls| {
+        calls
+            .iter()
+            .any(|recorded| recorded.path == path && recorded.member == "Hangup")
     });
     wait_for_reject_sco_after(&harness, "Hangup");
     assert!(
@@ -239,12 +291,17 @@ fn hanging_up_falls_back_to_ofono_when_call1_hangup_does_not_exist() {
     harness.hang_up(call);
 
     harness.wait_for_app("the Call is gone", DEADLINE, |state| state.calls.is_empty());
-    let calls = telephony_calls(&harness);
-    position(&calls, "hang up through org.ofono.VoiceCall", |recorded| {
-        recorded.path == path
-            && recorded.interface == "org.ofono.VoiceCall"
-            && recorded.member == "Hangup"
-    });
+    wait_for_telephony(
+        &harness,
+        "the Call is hung up through org.ofono.VoiceCall",
+        |calls| {
+            calls.iter().any(|recorded| {
+                recorded.path == path
+                    && recorded.interface == "org.ofono.VoiceCall"
+                    && recorded.member == "Hangup"
+            })
+        },
+    );
     assert!(
         harness.app_errors().is_empty(),
         "{:?}",
@@ -342,7 +399,6 @@ fn without_an_audio_server_ringing_fails_quietly_and_the_app_keeps_going() {
 fn answered_on_the_phone_the_audio_stays_on_the_phone() {
     let harness = connected();
     let (path, call) = ring(&harness);
-    let before = telephony_calls(&harness).len();
 
     harness.simulated_phone().answer_on_phone(&path);
 
@@ -361,7 +417,11 @@ fn answered_on_the_phone_the_audio_stays_on_the_phone() {
         |state| state.audio_location == "phone",
     );
     // The Desktop leaves the audio alone: RejectSCO=true keeps it on the Phone.
-    assert_left_audio_alone(&telephony_calls(&harness)[before..]);
+    telephony_holds(
+        &harness,
+        "the Desktop leaves the audio alone",
+        leaves_audio_alone,
+    );
 }
 
 #[test]
@@ -374,7 +434,6 @@ fn after_a_call_on_the_desktop_the_next_call_answered_on_the_phone_stays_on_the_
     });
     wait_for_reject_sco_after(&harness, "Hangup");
     let (path, second) = ring(&harness);
-    let before = telephony_calls(&harness).len();
 
     harness.simulated_phone().answer_on_phone(&path);
 
@@ -390,14 +449,24 @@ fn after_a_call_on_the_desktop_the_next_call_answered_on_the_phone_stays_on_the_
         Duration::from_millis(500),
         |state| state.audio_location == "phone",
     );
-    assert_left_audio_alone(&telephony_calls(&harness)[before..]);
+    // The first Call ended with the Desktop's Hangup; the second is after it.
+    telephony_holds(
+        &harness,
+        "the Desktop leaves the second Call's audio alone",
+        |calls| {
+            let hung_up = calls
+                .iter()
+                .rposition(|recorded| recorded.member == "Hangup")
+                .unwrap_or_else(|| panic!("the first Call was never hung up: {calls:#?}"));
+            leaves_audio_alone(&calls[hung_up..])
+        },
+    );
 }
 
 #[test]
 fn declined_on_the_phone_the_desktop_stops_ringing_at_once() {
     let harness = connected();
     let (path, _) = ring(&harness);
-    let before = telephony_calls(&harness).len();
 
     harness.simulated_phone().decline_on_phone(&path);
 
@@ -405,13 +474,9 @@ fn declined_on_the_phone_the_desktop_stops_ringing_at_once() {
         !state.ringing && state.calls.is_empty()
     });
     assert_eq!(state.audio_location, "");
-    let calls = telephony_calls(&harness);
-    assert!(
-        !calls[before..]
-            .iter()
-            .any(|recorded| recorded.member == "Hangup"),
-        "{calls:#?}"
-    );
+    telephony_holds(&harness, "the Desktop never hangs up", |calls| {
+        !calls.iter().any(|recorded| recorded.member == "Hangup")
+    });
 }
 
 #[test]
@@ -432,58 +497,43 @@ fn the_caller_hanging_up_while_ringing_stops_the_desktop_ringing_at_once() {
 }
 
 /// Waits until the Phone has been asked to set `RejectSCO=true` after the
-/// last `member` call it received. The app sends it on its own connection,
-/// so it can reach the Phone after the test's next step otherwise.
+/// last `member` call it received.
 fn wait_for_reject_sco_after(harness: &Harness, member: &str) {
-    let started = std::time::Instant::now();
-    loop {
-        let calls = telephony_calls(harness);
-        let after = calls
-            .iter()
-            .rposition(|recorded| recorded.member == member)
-            .unwrap_or_else(|| panic!("the Phone was never asked to {member}: {calls:#?}"));
-        if calls[after..]
-            .iter()
-            .any(|recorded| is_reject_sco(recorded, true))
-        {
-            return;
-        }
-        assert!(
-            started.elapsed() < DEADLINE,
-            "RejectSCO=true never followed {member}: {calls:#?}"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_for_telephony(
+        harness,
+        &format!("RejectSCO=true follows {member}"),
+        |calls| {
+            calls
+                .iter()
+                .rposition(|recorded| recorded.member == member)
+                .is_some_and(|after| {
+                    calls[after..]
+                        .iter()
+                        .any(|recorded| is_reject_sco(recorded, true))
+                })
+        },
+    );
 }
 
 /// Waits until the Phone has been asked to set `RejectSCO=true` on the
 /// AudioGateway at `audio_gateway`.
 fn wait_for_reject_sco_on(harness: &Harness, audio_gateway: &str) {
-    let started = std::time::Instant::now();
-    loop {
-        let calls = telephony_calls(harness);
-        if calls
-            .iter()
-            .any(|recorded| recorded.path == audio_gateway && is_reject_sco(recorded, true))
-        {
-            return;
-        }
-        assert!(
-            started.elapsed() < DEADLINE,
-            "RejectSCO=true was never set on {audio_gateway}: {calls:#?}"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_for_telephony(
+        harness,
+        &format!("RejectSCO=true is set on {audio_gateway}"),
+        |calls| {
+            calls
+                .iter()
+                .any(|recorded| recorded.path == audio_gateway && is_reject_sco(recorded, true))
+        },
+    );
 }
 
-/// Checks that the Desktop neither answered nor asked for the Call's audio.
-fn assert_left_audio_alone(calls: &[RecordedMethodCall]) {
-    assert!(
-        !calls.iter().any(|recorded| {
-            recorded.member == "Answer"
-                || (recorded.interface == TRANSPORT && recorded.member == "Activate")
-                || is_reject_sco(recorded, false)
-        }),
-        "{calls:#?}"
-    );
+/// Whether the Desktop neither answered nor asked for the Call's audio.
+fn leaves_audio_alone(calls: &[RecordedMethodCall]) -> bool {
+    !calls.iter().any(|recorded| {
+        recorded.member == "Answer"
+            || (recorded.interface == TRANSPORT && recorded.member == "Activate")
+            || is_reject_sco(recorded, false)
+    })
 }

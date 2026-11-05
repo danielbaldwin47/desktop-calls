@@ -15,6 +15,9 @@ const DEADLINE: Duration = Duration::from_secs(5);
 /// How long the screen may take to show a change. One capture takes up to a
 /// second on a slow runner.
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
+/// How long something the Phone must not be asked is watched for, after the
+/// app has settled.
+const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
@@ -140,7 +143,12 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
 
     harness.pointer().click(x, y);
 
-    let state = harness.wait_for_app("Muted is true", DEADLINE, |state| state.muted);
+    // The Call Window reports what it shows on its own, after the state.
+    let state = harness.wait_for_app(
+        "Muted is true and the Call Window shows it",
+        DEADLINE,
+        |state| state.muted && shown(state, "muted").is_some(),
+    );
     assert_eq!(shown(&state, "muted").as_deref(), Some("Microphone muted"));
     assert_eq!(shown(&state, "mute").as_deref(), Some("Unmute"));
     // Orange on the Mute button, and on a strip below Hang up as wide as
@@ -201,13 +209,11 @@ fn every_action_in_the_call_window_is_reachable_by_the_shortcut_it_shows() {
 
     harness.keyboard().press_with_control('h');
     harness.wait_for_app("Ctrl+H hangs up", DEADLINE, |state| state.calls.is_empty());
-    assert!(
-        harness
-            .simulated_phone()
-            .recorded_method_calls()
-            .iter()
-            .any(|recorded| recorded.member == "Hangup")
-    );
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Call is hung up", DEADLINE, |recorded| {
+            recorded.iter().any(|recorded| recorded.member == "Hangup")
+        });
 }
 
 #[test]
@@ -225,13 +231,11 @@ fn escape_leaves_the_call_live() {
             state.calls.iter().any(|call| call.state == "active") && call_window(state).is_some()
         },
     );
-    assert!(
-        !harness
-            .simulated_phone()
-            .recorded_method_calls()
-            .iter()
-            .any(|recorded| recorded.member == "Hangup")
-    );
+    harness
+        .simulated_phone()
+        .recorded_holds("the Desktop never hangs up", HOLD, |recorded| {
+            !recorded.iter().any(|recorded| recorded.member == "Hangup")
+        });
 }
 
 #[test]
@@ -327,10 +331,11 @@ fn with_the_audio_on_the_phone_mute_is_disabled_and_says_why() {
     harness.app_holds("Muted stays false", Duration::from_secs(1), |state| {
         !state.muted
     });
-    assert_eq!(
-        microphone_volumes_set(&harness.simulated_phone().recorded_method_calls()),
-        Vec::<String>::new()
-    );
+    harness
+        .simulated_phone()
+        .recorded_holds("no MicrophoneVolume is set", HOLD, |recorded| {
+            microphone_volumes_set(recorded).is_empty()
+        });
     let screenshot = harness.screenshot("call-window-mute-unavailable");
     assert_eq!(find(&screenshot, ORANGE), None);
 }

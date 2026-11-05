@@ -1583,8 +1583,13 @@ impl SimulatedPhone<'_> {
         .unwrap_or_else(|error| panic!("answer the Call at {call} on the Phone: {error}"));
     }
 
-    /// Waits until the method calls the Simulated Phone has received satisfy
-    /// `condition`, and returns them.
+    /// Waits until the method calls the Simulated Phone has received, in
+    /// order, satisfy `condition`, and returns them.
+    ///
+    /// The app sends its Phone commands on a connection of its own, so a
+    /// call can reach the Phone after the app's state has moved on. That is
+    /// why there is no snapshot of the calls to assert on: every check of
+    /// what the Phone was asked waits, here or in [`Self::recorded_holds`].
     ///
     /// # Panics
     ///
@@ -1606,6 +1611,34 @@ impl SimulatedPhone<'_> {
                 started.elapsed() < deadline,
                 "\"{description}\" did not happen within {deadline:?}; the Simulated Phone received {recorded:#?}"
             );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Checks that the method calls the Simulated Phone has received satisfy
+    /// `condition` for the whole of `window`, for something the Phone must
+    /// not be asked, such as to hang up. Returns the calls at the end.
+    ///
+    /// # Panics
+    ///
+    /// At the first check that fails `condition`, naming `description` and
+    /// every call received.
+    pub fn recorded_holds(
+        &self,
+        description: &str,
+        window: Duration,
+        condition: impl Fn(&[RecordedMethodCall]) -> bool,
+    ) -> Vec<RecordedMethodCall> {
+        let started = Instant::now();
+        loop {
+            let recorded = self.recorded_method_calls();
+            assert!(
+                condition(&recorded),
+                "\"{description}\" stopped holding; the Simulated Phone received {recorded:#?}"
+            );
+            if started.elapsed() >= window {
+                return recorded;
+            }
             thread::sleep(Duration::from_millis(20));
         }
     }
@@ -1658,12 +1691,9 @@ impl SimulatedPhone<'_> {
     }
 
     /// Every method call the Simulated Phone received so far, in order.
-    ///
-    /// # Panics
-    ///
-    /// If the Simulated Phone doesn't answer.
-    #[must_use]
-    pub fn recorded_method_calls(&self) -> Vec<RecordedMethodCall> {
+    /// Private, so no test can assert on a snapshot: see
+    /// [`Self::wait_for_recorded`].
+    fn recorded_method_calls(&self) -> Vec<RecordedMethodCall> {
         zbus::block_on(async { self.proxy().await?.recorded_method_calls().await })
             .expect("read the Simulated Phone's recorded method calls")
             .into_iter()

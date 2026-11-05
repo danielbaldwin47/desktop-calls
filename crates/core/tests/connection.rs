@@ -1,6 +1,6 @@
 //! The Call state machine's connection states, at its public interface.
 
-use desktop_calls_core::{ConnectionState, Effect, Input, Phone, State, step};
+use desktop_calls_core::{ConnectionState, Effect, Input, Phone, PhoneCommand, State, step};
 
 fn pixel() -> Phone {
     Phone {
@@ -46,15 +46,56 @@ fn a_paired_phone_is_attached_and_connecting() {
 }
 
 #[test]
-fn hands_free_up_means_connected() {
-    let (state, _) = run([
+fn hands_free_up_is_connected_once_the_phone_keeps_call_audio() {
+    let (state, effects) = run([
         Input::PhonePaired(pixel()),
         Input::PhoneConnected {
             address: "AA:BB:CC:DD:EE:FF".to_owned(),
         },
     ]);
 
+    // Until then a Call arriving could open its audio on the Desktop.
+    assert_eq!(state.connection_state(), &ConnectionState::Connecting);
+    assert_eq!(
+        effects.last(),
+        Some(&Effect::Phone(PhoneCommand::KeepAudioOnPhone))
+    );
+
+    let (state, _) = step(
+        state,
+        Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+    );
+
     assert_eq!(state.connection_state(), &ConnectionState::Connected);
+}
+
+#[test]
+fn hands_free_up_is_connected_even_if_the_phone_refuses_to_keep_call_audio() {
+    let (state, _) = run([
+        Input::PhonePaired(pixel()),
+        Input::PhoneConnected {
+            address: "AA:BB:CC:DD:EE:FF".to_owned(),
+        },
+        Input::PhoneCommandFailed(PhoneCommand::KeepAudioOnPhone),
+    ]);
+
+    assert_eq!(state.connection_state(), &ConnectionState::Connected);
+}
+
+#[test]
+fn hands_free_dropping_before_the_phone_keeps_call_audio_is_not_connected() {
+    let (state, _) = run([
+        Input::PhonePaired(pixel()),
+        Input::PhoneConnected {
+            address: "AA:BB:CC:DD:EE:FF".to_owned(),
+        },
+        Input::PhoneDisconnected {
+            address: "AA:BB:CC:DD:EE:FF".to_owned(),
+        },
+        Input::PhoneCommandFailed(PhoneCommand::KeepAudioOnPhone),
+    ]);
+
+    assert_eq!(state.connection_state(), &ConnectionState::Connecting);
 }
 
 #[test]
@@ -64,6 +105,7 @@ fn hands_free_down_means_disconnected_but_the_phone_is_remembered() {
         Input::PhoneConnected {
             address: "AA:BB:CC:DD:EE:FF".to_owned(),
         },
+        Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
         Input::PhoneDisconnected {
             address: "AA:BB:CC:DD:EE:FF".to_owned(),
         },
@@ -131,6 +173,7 @@ fn addresses_match_whatever_their_case() {
         Input::PhoneConnected {
             address: "aa:bb:cc:dd:ee:ff".to_owned(),
         },
+        Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
     ]);
 
     assert_eq!(state.connection_state(), &ConnectionState::Connected);

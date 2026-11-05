@@ -8,6 +8,9 @@ use test_harness::{AppState, Harness, RecordedMethodCall};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
+/// How long something the Phone must not be asked is watched for, after the
+/// app has settled.
+const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
@@ -45,26 +48,41 @@ fn is_live(state: &AppState) -> bool {
     state.calls.iter().any(|call| call.state == "active")
 }
 
-/// The `MicrophoneVolume` values the Phone was asked to set, in order.
-fn microphone_volumes_set(harness: &Harness) -> Vec<String> {
-    harness
-        .simulated_phone()
-        .recorded_method_calls()
-        .into_iter()
+/// The `MicrophoneVolume` values among `recorded`, in order.
+fn microphone_volumes_set(recorded: &[RecordedMethodCall]) -> Vec<String> {
+    recorded
+        .iter()
         .filter(|call| {
             call.member == "Set"
                 && call.arguments.contains(AUDIO_GATEWAY)
                 && call.arguments.contains("MicrophoneVolume")
         })
-        .map(|call| call.arguments)
+        .map(|call| call.arguments.clone())
         .collect()
 }
 
-/// The tones the Phone was asked to send, one `SendTones` each, in order.
-fn tones_sent(harness: &Harness) -> Vec<String> {
-    sent(&harness.simulated_phone().recorded_method_calls())
+/// Waits until the Phone has been asked to set as many `MicrophoneVolume`
+/// values as `expected` has, and checks they are those, in order.
+fn wait_for_microphone_volumes(harness: &Harness, expected: &[String]) {
+    let recorded = harness.simulated_phone().wait_for_recorded(
+        &format!("{} MicrophoneVolume values are set", expected.len()),
+        DEADLINE,
+        |recorded| microphone_volumes_set(recorded).len() >= expected.len(),
+    );
+    assert_eq!(microphone_volumes_set(&recorded), expected);
 }
 
+/// Checks for a while that the Phone is never asked to set a
+/// `MicrophoneVolume`.
+fn no_microphone_volume_is_set(harness: &Harness) {
+    harness
+        .simulated_phone()
+        .recorded_holds("no MicrophoneVolume is set", HOLD, |recorded| {
+            microphone_volumes_set(recorded).is_empty()
+        });
+}
+
+/// The tones among `recorded`, one `SendTones` each, in order.
 fn sent(recorded: &[RecordedMethodCall]) -> Vec<String> {
     recorded
         .iter()
@@ -95,14 +113,40 @@ fn set_muted_sets_the_microphone_volume_to_zero_and_back() {
     harness.set_muted(true).expect("SetMuted(true) is accepted");
 
     harness.wait_for_app("Muted is true", DEADLINE, |state| state.muted);
-    assert_eq!(microphone_volumes_set(&harness), [set_to(0)]);
+    wait_for_microphone_volumes(&harness, &[set_to(0)]);
 
     harness
         .set_muted(false)
         .expect("SetMuted(false) is accepted");
 
     harness.wait_for_app("Muted is false", DEADLINE, |state| !state.muted);
-    assert_eq!(microphone_volumes_set(&harness), [set_to(0), set_to(9)]);
+    wait_for_microphone_volumes(&harness, &[set_to(0), set_to(9)]);
+}
+
+#[test]
+fn muted_shows_only_what_the_phone_has_done() {
+    let harness = connected();
+    answered_on_desktop(&harness);
+    harness
+        .simulated_phone()
+        .enable_quirk("slow-property-writes");
+
+    harness.set_muted(true).expect("SetMuted(true) is accepted");
+
+    wait_for_microphone_volumes(&harness, &[set_to(0)]);
+    // The Phone holds its reply for a second: until then the other person
+    // may still hear, so the Desktop must not say Muted.
+    assert!(!harness.app_state().muted, "{:?}", harness.app_state());
+    harness.wait_for_app("Muted is true", DEADLINE, |state| state.muted);
+
+    harness
+        .set_muted(false)
+        .expect("SetMuted(false) is accepted");
+
+    wait_for_microphone_volumes(&harness, &[set_to(0), set_to(15)]);
+    // Until the Phone replies, the other person may not hear yet.
+    assert!(harness.app_state().muted, "{:?}", harness.app_state());
+    harness.wait_for_app("Muted is false", DEADLINE, |state| !state.muted);
 }
 
 #[test]
@@ -119,7 +163,7 @@ fn unmuting_after_a_microphone_volume_of_minus_one_restores_the_default_not_minu
         .expect("SetMuted(false) is accepted");
     harness.wait_for_app("Muted is false", DEADLINE, |state| !state.muted);
 
-    assert_eq!(microphone_volumes_set(&harness), [set_to(0), set_to(15)]);
+    wait_for_microphone_volumes(&harness, &[set_to(0), set_to(15)]);
 }
 
 #[test]
@@ -140,7 +184,7 @@ fn with_the_audio_on_the_phone_set_muted_returns_a_plain_error() {
         "Mute works only while the Call's audio is on this computer; mute on your phone instead."
     );
     assert!(!harness.app_state().muted);
-    assert_eq!(microphone_volumes_set(&harness), Vec::<String>::new());
+    no_microphone_volume_is_set(&harness);
 }
 
 #[test]
@@ -157,7 +201,7 @@ fn desktop_calls_mute_toggles_mute() {
 
     assert!(unmuted.status.success(), "{unmuted:?}");
     harness.wait_for_app("Muted is false", DEADLINE, |state| !state.muted);
-    assert_eq!(microphone_volumes_set(&harness), [set_to(0), set_to(15)]);
+    wait_for_microphone_volumes(&harness, &[set_to(0), set_to(15)]);
 }
 
 #[test]
@@ -185,12 +229,13 @@ fn send_tones_plays_each_tone_on_the_phone_in_order() {
 
     // A Pixel takes one tone per AT+VTS, so each goes in a SendTones of its
     // own (docs/research/2026-11-04-mute-and-keypad.md).
-    harness
-        .simulated_phone()
-        .wait_for_recorded("five tones are sent", DEADLINE, |recorded| {
-            sent(recorded).len() >= 5
-        });
-    assert_eq!(tones_sent(&harness), ["1", "2", "3", "4", "#"]);
+    let recorded =
+        harness
+            .simulated_phone()
+            .wait_for_recorded("five tones are sent", DEADLINE, |recorded| {
+                sent(recorded).len() >= 5
+            });
+    assert_eq!(sent(&recorded), ["1", "2", "3", "4", "#"]);
     assert!(
         harness.app_errors().is_empty(),
         "{:?}",
@@ -211,5 +256,9 @@ fn send_tones_with_letters_returns_a_plain_error() {
         refused.message,
         "Only digits, * and # can be sent as tones."
     );
-    assert_eq!(tones_sent(&harness), Vec::<String>::new());
+    harness
+        .simulated_phone()
+        .recorded_holds("no tone is sent", HOLD, |recorded| {
+            sent(recorded).is_empty()
+        });
 }

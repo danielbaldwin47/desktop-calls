@@ -7,6 +7,9 @@ use test_harness::{AppState, Harness, PhoneIdentity};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
+/// How long something the Phone must not be asked is watched for, after the
+/// app has settled.
+const HOLD: Duration = Duration::from_millis(300);
 
 #[test]
 fn simulated_phone_connects() {
@@ -43,26 +46,29 @@ fn the_phone_link_finds_audio_gateways_only_through_the_object_manager() {
         state.connection_state == "connected"
     });
 
-    let telephony_calls: Vec<_> = harness
-        .simulated_phone()
-        .recorded_method_calls()
-        .into_iter()
-        .filter(|call| call.bus == "session" && call.path.starts_with("/org/pipewire/Telephony"))
-        .collect();
-
-    assert!(
-        telephony_calls
-            .iter()
-            .any(|call| call.path == "/org/pipewire/Telephony"
-                && call.interface == "org.freedesktop.DBus.ObjectManager"
-                && call.member == "GetManagedObjects"),
-        "the app never listed the Telephony objects: {telephony_calls:#?}"
+    harness.simulated_phone().wait_for_recorded(
+        "the app lists the Telephony objects",
+        DEADLINE,
+        |recorded| {
+            recorded.iter().any(|call| {
+                call.bus == "session"
+                    && call.path == "/org/pipewire/Telephony"
+                    && call.interface == "org.freedesktop.DBus.ObjectManager"
+                    && call.member == "GetManagedObjects"
+            })
+        },
     );
-    assert!(
-        !telephony_calls
-            .iter()
-            .any(|call| call.member == "Introspect"),
-        "PipeWire's Introspect lists no children, so walking it can't work: {telephony_calls:#?}"
+    // PipeWire's Introspect lists no children, so walking it can't work.
+    harness.simulated_phone().recorded_holds(
+        "the app never introspects Telephony",
+        HOLD,
+        |recorded| {
+            !recorded.iter().any(|call| {
+                call.bus == "session"
+                    && call.path.starts_with("/org/pipewire/Telephony")
+                    && call.member == "Introspect"
+            })
+        },
     );
 }
 

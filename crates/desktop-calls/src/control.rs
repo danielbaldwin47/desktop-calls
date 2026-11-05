@@ -45,6 +45,10 @@ pub enum Refused {
     NoLiveCall(String),
     MuteUnavailable(String),
     InvalidTones(String),
+    /// `HoldAndAnswer` or `EndAndAnswer` with no Call waiting.
+    NoWaitingCall(String),
+    /// `Swap` with no Call on hold.
+    NoHeldCall(String),
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
@@ -60,6 +64,8 @@ impl From<Failure> for Refused {
             Failure::NoLiveCall => Self::NoLiveCall(text),
             Failure::MuteUnavailable => Self::MuteUnavailable(text),
             Failure::InvalidTones => Self::InvalidTones(text),
+            Failure::NoWaitingCall => Self::NoWaitingCall(text),
+            Failure::NoHeldCall => Self::NoHeldCall(text),
             Failure::Undialable
             | Failure::PhoneNotSetUp
             | Failure::PhoneConnecting
@@ -268,6 +274,28 @@ impl ControlInterface {
     /// Hangs up the Call with this id.
     fn hang_up(&self, call: u32) {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
+    }
+
+    /// Puts the live Call on hold and answers the waiting Call, its audio on
+    /// the Desktop. It returns once the Phone is asked; the Calls' states
+    /// change when the Phone has done it, and `Error` says so if it refuses.
+    /// Fails with the reason while no Call is waiting.
+    fn hold_and_answer(&self) -> Result<(), Refused> {
+        self.pass_on(Input::HoldAndAnswer)
+    }
+
+    /// Ends the live Call and answers the waiting Call, as `HoldAndAnswer`
+    /// does otherwise.
+    fn end_and_answer(&self) -> Result<(), Refused> {
+        self.pass_on(Input::EndAndAnswer)
+    }
+
+    /// Puts the live Call on hold and makes the held Call live again; with
+    /// only a held Call, makes it live again. It returns once the Phone is
+    /// asked, and `Error` says so if it refuses. Fails with the reason while
+    /// no Call is on hold.
+    fn swap(&self) -> Result<(), Refused> {
+        self.pass_on(Input::Swap)
     }
 
     /// Calls `number`, a number as typed or a `tel:` link, with the audio on

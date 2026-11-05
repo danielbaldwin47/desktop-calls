@@ -5,6 +5,7 @@ use super::audio::{
     ask_once_more, audio_not_moved, bring_audio_here, call_back, end_handoff_to_phone,
     restore_audio, to_phone_timed_out,
 };
+use super::call_waiting::{dismiss_notice, hold_and_answer};
 use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
@@ -111,6 +112,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
                 ask_once_more(state, effects);
             }
         }
+        Timer::DismissCallWaitingNotice(notice) => dismiss_notice(state, notice),
         Timer::CloseCallWindow(call) => {
             if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
                 state.ended = None;
@@ -154,6 +156,7 @@ pub(super) fn call_changed(
     at: Timestamp,
     effects: &mut Vec<Effect>,
 ) {
+    state.waiting_notice = None;
     let Some(known) = state.call_mut(call) else {
         return;
     };
@@ -188,6 +191,15 @@ pub(super) fn caller_changed(state: &mut State, call: CallId, caller: Caller) {
 }
 
 pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    // Answering a waiting Call keeps the connected one, on hold: the choice
+    // that loses nothing.
+    if state
+        .waiting_call()
+        .is_some_and(|waiting| waiting.id == call)
+    {
+        hold_and_answer(state, effects);
+        return;
+    }
     match state.call_mut(call) {
         Some(known) if known.rings_here() => {
             known.request = Request::Answer;
@@ -274,6 +286,7 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         return;
     };
     let ended = state.calls.remove(index);
+    state.waiting_notice = None;
     if state.unwanted == Some(call) {
         state.unwanted = None;
     } else if ended.has_call_window() {

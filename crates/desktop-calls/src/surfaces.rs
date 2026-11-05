@@ -13,7 +13,8 @@
 //!   left of Omarchy's notification-toast column, as wide as Hyprland says
 //!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
 //!   It is unmapped whenever nothing rings: a mapped overlay surface stops
-//!   Hyprland scanning a fullscreen window out directly.
+//!   Hyprland scanning a fullscreen window out directly. While the Call
+//!   Window shows too, for a waiting Call, the Banner sits below it.
 //! - The Call Window is on the top layer, so fullscreen windows cover it, in
 //!   the same corner, and takes keyboard focus only when clicked or when the
 //!   keybinding asks; Escape gives it back. Each of its actions has a
@@ -76,6 +77,9 @@ const MUTE_SHORTCUT: &str = "m";
 const KEYPAD_SHORTCUT: &str = "k";
 const HANG_UP_SHORTCUT: &str = "<Control>h";
 const HANDOFF_SHORTCUT: &str = "a";
+/// With two Calls, Swap, and Hang up for the one on hold.
+const SWAP_SHORTCUT: &str = "s";
+const HANG_UP_HELD_SHORTCUT: &str = "<Control><Shift>h";
 
 /// The keypad's buttons, row by row, as on a phone.
 const KEYPAD: [[&str; 3]; 4] = [
@@ -164,6 +168,13 @@ impl Surfaces {
             _theme: theme,
         };
         surfaces.place_beside_toasts();
+        let (banner, call_window) = (
+            surfaces.banner.surface.window.clone(),
+            surfaces.call_window.surface.window.clone(),
+        );
+        surfaces
+            .call_window
+            .on_resized(move || stack(&banner, &call_window));
         surfaces
     }
 
@@ -184,6 +195,10 @@ impl Surfaces {
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
         self.dialer.render(view.dialer.as_ref());
+        stack(
+            &self.banner.surface.window,
+            &self.call_window.surface.window,
+        );
     }
 
     /// Asks Hyprland, off the main thread, how wide the toast column is, and
@@ -210,6 +225,24 @@ impl Surfaces {
                 }
             }
         });
+    }
+}
+
+/// With call waiting the Banner and the Call Window show at once, in the
+/// same corner: the Banner goes below the Call Window, so the Call Window
+/// never moves under the pointer and the Banner never covers it.
+fn stack(banner: &gtk::Window, call_window: &gtk::Window) {
+    if !gtk4_layer_shell::is_supported() {
+        return;
+    }
+    let top = if call_window.is_visible() {
+        let (_, height, _, _) = call_window.measure(gtk::Orientation::Vertical, WIDTH);
+        GAP + height + GAP
+    } else {
+        GAP
+    };
+    if banner.margin(Edge::Top) != top {
+        banner.set_margin(Edge::Top, top);
     }
 }
 

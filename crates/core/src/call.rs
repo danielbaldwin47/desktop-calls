@@ -247,10 +247,11 @@ impl Call {
         self.active_since
     }
 
-    /// Ringing on the Desktop: incoming, and neither answered nor declined
-    /// here yet.
+    /// Ringing on the Desktop: incoming, ringing or waiting, and neither
+    /// answered nor declined here yet.
     pub(crate) fn rings_here(&self) -> bool {
-        self.state == CallState::Ringing && self.request == Request::None
+        matches!(self.state, CallState::Ringing | CallState::Waiting)
+            && self.request == Request::None
     }
 
     /// Incoming, never connected, and not declined: once it ends, it may be

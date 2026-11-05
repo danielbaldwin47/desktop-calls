@@ -7,7 +7,9 @@ use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4_layer_shell::{KeyboardMode, Layer};
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 /// The Incoming Call Banner.
 pub(super) struct Banner {
@@ -16,6 +18,17 @@ pub(super) struct Banner {
     caller: gtk::Label,
     detail: gtk::Label,
     answer: gtk::Button,
+    /// The call-waiting options, shown instead of Answer for a waiting Call.
+    waiting: WaitingButtons,
+}
+
+/// Hold & answer, on a row of its own as the choice that loses nothing, and
+/// End & answer beside Decline.
+struct WaitingButtons {
+    hold_and_answer: gtk::Button,
+    end_and_answer: gtk::Button,
+    /// Whether they are shown, so H and E work only then.
+    shown: Rc<Cell<bool>>,
 }
 
 impl Banner {
@@ -37,13 +50,24 @@ impl Banner {
         let detail = detail_label();
         let decline = surface.button(Label::Decline, "decline", intents, Input::Decline);
         let answer = surface.button(Label::Answer, "answer", intents, Input::Answer);
+        let waiting = WaitingButtons {
+            hold_and_answer: surface.button(Label::HoldAndAnswer, "answer", intents, |_| {
+                Input::HoldAndAnswer
+            }),
+            end_and_answer: surface.button(Label::EndAndAnswer, "end-and-answer", intents, |_| {
+                Input::EndAndAnswer
+            }),
+            shown: Rc::default(),
+        };
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         buttons.append(&decline);
         buttons.append(&answer);
+        buttons.append(&waiting.end_and_answer);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.append(&heading);
         content.append(&caller);
         content.append(&detail);
+        content.append(&waiting.hold_and_answer);
         content.append(&buttons);
         surface.window.set_child(Some(&content));
         let banner = Self {
@@ -52,20 +76,28 @@ impl Banner {
             caller,
             detail,
             answer,
+            waiting,
         };
         banner.on_letters(intents);
         banner
     }
 
-    /// While the Banner has keyboard focus, A answers and D declines.
+    /// While the Banner has keyboard focus, A answers and D declines; for a
+    /// waiting Call, H holds and answers and E ends and answers too.
     fn on_letters(&self, intents: &UnboundedSender<Input>) {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let (call, intents) = (self.surface.call.clone(), intents.clone());
+        let (call, intents, waiting) = (
+            self.surface.call.clone(),
+            intents.clone(),
+            self.waiting.shown.clone(),
+        );
         keys.connect_key_pressed(move |_, key, _, modifiers| {
             let make: fn(CallId) -> Input = match key.to_lower() {
                 gtk::gdk::Key::a => Input::Answer,
                 gtk::gdk::Key::d => Input::Decline,
+                gtk::gdk::Key::h if waiting.get() => |_| Input::HoldAndAnswer,
+                gtk::gdk::Key::e if waiting.get() => |_| Input::EndAndAnswer,
                 _ => return glib::Propagation::Proceed,
             };
             if has_command_modifier(modifiers) {
@@ -88,23 +120,41 @@ impl Banner {
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);
         // While focused, the heading says which keys do what.
-        let heading = messages::label(if view.focused {
-            Label::BannerKeys
-        } else {
-            Label::IncomingCall
+        let heading = messages::label(match (view.waiting, view.focused) {
+            (false, true) => Label::BannerKeys,
+            (false, false) => Label::IncomingCall,
+            (true, true) => Label::CallWaitingKeys,
+            (true, false) => Label::CallWaiting,
         });
+        self.waiting.shown.set(view.waiting);
+        self.answer.set_visible(!view.waiting);
+        self.waiting.hold_and_answer.set_visible(view.waiting);
+        self.waiting.end_and_answer.set_visible(view.waiting);
         self.heading.set_text(heading);
         self.surface.call.set(Some(view.call));
         let mut content = BTreeMap::from([
             ("call".to_owned(), view.call.to_string()),
             ("heading".to_owned(), heading.to_owned()),
         ]);
+        if view.waiting {
+            content.insert(
+                "options".to_owned(),
+                [Label::HoldAndAnswer, Label::EndAndAnswer, Label::Decline]
+                    .map(messages::label)
+                    .join(", "),
+            );
+        }
         who.report(&mut content);
         self.surface.show(content);
         self.surface.focus(view.focused);
         if view.focused {
-            // Enter and Space then answer, never decline.
-            self.answer.grab_focus();
+            // Enter and Space then answer, never decline, and never end a
+            // Call.
+            if view.waiting {
+                self.waiting.hold_and_answer.grab_focus();
+            } else {
+                self.answer.grab_focus();
+            }
         }
     }
 }

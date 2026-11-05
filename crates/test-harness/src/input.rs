@@ -184,17 +184,26 @@ impl SyntheticInput {
         self.sync()
     }
 
-    /// Presses and releases `character`'s key while holding Control.
+    /// Presses and releases `character`'s key while holding Control, and
+    /// Shift too where the character needs it: `'H'` is Ctrl+Shift+H.
     pub fn press_with_control(&mut self, character: char) -> Result<(), String> {
-        let (code, false) = character_key(character)
-            .ok_or_else(|| format!("the harness can't type {character:?}"))?
-        else {
-            return Err(format!("{character:?} needs Shift as well as Control"));
+        let (code, shifted) = character_key(character)
+            .ok_or_else(|| format!("the harness can't type {character:?}"))?;
+        let mask = if shifted {
+            CONTROL_MASK | SHIFT_MASK
+        } else {
+            CONTROL_MASK
         };
         self.key(KEY_LEFTCTRL, true);
-        self.keyboard.modifiers(CONTROL_MASK, 0, 0, 0);
+        if shifted {
+            self.key(KEY_LEFTSHIFT, true);
+        }
+        self.keyboard.modifiers(mask, 0, 0, 0);
         self.key(code, true);
         self.key(code, false);
+        if shifted {
+            self.key(KEY_LEFTSHIFT, false);
+        }
         self.key(KEY_LEFTCTRL, false);
         self.keyboard.modifiers(0, 0, 0, 0);
         self.sync()

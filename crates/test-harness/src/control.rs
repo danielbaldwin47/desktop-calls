@@ -443,6 +443,34 @@ impl Harness {
         self.try_app_method("SendTones", &(tones,))
     }
 
+    /// Asks the app to put the live Call on hold and answer the waiting
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn hold_and_answer(&self) -> Result<(), AppError> {
+        self.try_app_method("HoldAndAnswer", &())
+    }
+
+    /// Asks the app to end the live Call and answer the waiting one.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn end_and_answer(&self) -> Result<(), AppError> {
+        self.try_app_method("EndAndAnswer", &())
+    }
+
+    /// Asks the app to swap the live Call and the Call on hold.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn swap(&self) -> Result<(), AppError> {
+        self.try_app_method("Swap", &())
+    }
+
     fn try_app_method<B>(&self, member: &str, body: &B) -> Result<(), AppError>
     where
         B: zbus::export::serde::Serialize + zbus::DynamicType,

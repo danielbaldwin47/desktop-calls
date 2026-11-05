@@ -478,7 +478,8 @@ impl Control {
 
     /// Rings the Phone from `number`, as a caller does: PipeWire registers an
     /// incoming Call on the AudioGateway and announces it. Returns the Call's
-    /// object path. Fails while hands-free is down. With the
+    /// object path. During a live Call the new one is `waiting`, as with
+    /// `+CCWA`. Fails while hands-free is down. With the
     /// `late-line-identification` quirk the Call appears with no number,
     /// and the number follows a moment later, while it still rings.
     async fn ring(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
@@ -647,12 +648,12 @@ impl Control {
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
     /// `"get-calls-empty-while-dialling"`, `"slow-property-writes"`,
     /// `"activate-ignored"`, `"activate-ignored-once"`,
-    /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"` or
-    /// `"late-line-identification"`.
+    /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"`,
+    /// `"late-line-identification"` or `"hold-refused"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused and late-line-identification"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, late-line-identification and hold-refused"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

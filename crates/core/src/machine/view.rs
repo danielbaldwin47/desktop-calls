@@ -40,6 +40,9 @@ pub struct BannerView {
     pub focused: bool,
     /// The Contact the caller is, if Contacts say.
     pub contact: Option<ContactMatch>,
+    /// The Call rings while another is connected, so the Banner offers Hold
+    /// & answer, End & answer and Decline instead of Answer and Decline.
+    pub waiting: bool,
 }
 
 /// The Call Window's content.
@@ -58,6 +61,18 @@ pub struct CallWindowView {
     pub notice: Option<Failure>,
     /// The Call Window has keyboard focus.
     pub focused: bool,
+    /// The other connected Call, on hold, while there are two: listed below
+    /// the live one, which Swap makes live again.
+    pub held: Option<HeldCall>,
+}
+
+/// A Call on hold behind the one the Call Window shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldCall {
+    pub call: CallId,
+    pub caller: Caller,
+    /// The Contact the other party is, if Contacts say.
+    pub contact: Option<ContactMatch>,
 }
 
 /// What the Call Window says about the Call's audio, and so what its
@@ -82,6 +97,9 @@ pub enum CallWindowPhase {
     Ringing,
     /// Placing it failed; the notice says why, and the window closes shortly.
     NotPlaced,
+    /// Connected, and on hold, with no live Call beside it: Swap makes it
+    /// live again.
+    OnHold { active_since: Timestamp },
     /// Connected: the timer runs from `active_since`.
     Live {
         active_since: Timestamp,
@@ -139,6 +157,7 @@ impl State {
             audio: None,
             notice: Some(Failure::ConnectionLost),
             focused: self.focus == Focus::CallWindow,
+            held: None,
         })
     }
 
@@ -156,6 +175,9 @@ impl State {
                 caller: call.caller.clone(),
                 focused: self.focus == Focus::Banner,
                 contact: self.contact(&call.caller),
+                waiting: self
+                    .waiting_call()
+                    .is_some_and(|waiting| waiting.id == call.id),
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.
@@ -164,30 +186,11 @@ impl State {
             .as_ref()
             .filter(|notice| notice.not_placed.is_none())
             .map(|notice| notice.failure)
+            .or(self.waiting_notice)
             .or(self.audio_notice);
         let call_window = self
             .lost_call_window()
-            .or_else(|| {
-                self.calls
-                    .iter()
-                    .find(|call| call.has_call_window() && self.unwanted != Some(call.id))
-                    .map(|call| CallWindowView {
-                        call: Some(call.id),
-                        caller: call.caller.clone(),
-                        contact: self.contact(&call.caller),
-                        phase: phase(
-                            call,
-                            self.codec.is_some_and(Codec::is_wideband),
-                            self.mute(),
-                        ),
-                        audio: call.state.is_live().then(|| CallAudio {
-                            location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                            moving: self.audio_moving_to(),
-                        }),
-                        notice,
-                        focused: self.focus == Focus::CallWindow,
-                    })
-            })
+            .or_else(|| self.calls_window(notice))
             .or_else(|| {
                 let dialling = self
                     .dialling
@@ -202,6 +205,7 @@ impl State {
                     phase: CallWindowPhase::Calling,
                     notice,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
                 })
             })
             .or_else(|| {
@@ -213,6 +217,7 @@ impl State {
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
                 })
             })
             .or_else(|| {
@@ -226,6 +231,7 @@ impl State {
                     phase: CallWindowPhase::NotPlaced,
                     notice: Some(notice.failure),
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
                 })
             })
             .or_else(|| {
@@ -237,6 +243,7 @@ impl State {
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
                 })
             });
         Surfaces {
@@ -244,6 +251,50 @@ impl State {
             call_window,
             dialer: self.dialer_view(),
         }
+    }
+
+    /// The Call Window for the Phone's Calls, with `notice` beside them.
+    fn calls_window(&self, notice: Option<Failure>) -> Option<CallWindowView> {
+        let (call, held) = self.call_window_calls()?;
+        Some(CallWindowView {
+            call: Some(call.id),
+            caller: call.caller.clone(),
+            contact: self.contact(&call.caller),
+            phase: phase(
+                call,
+                self.codec.is_some_and(Codec::is_wideband),
+                self.mute(),
+            ),
+            audio: call.state.is_live().then(|| CallAudio {
+                location: self.audio_location().unwrap_or(AudioLocation::Phone),
+                moving: self.audio_moving_to(),
+            }),
+            notice,
+            focused: self.focus == Focus::CallWindow,
+            held: held.map(|held| HeldCall {
+                call: held.id,
+                caller: held.caller.clone(),
+                contact: self.contact(&held.caller),
+            }),
+        })
+    }
+
+    /// The Calls the Call Window shows: the live one, or failing that the
+    /// first it has, and the other Call on hold, if there is one.
+    fn call_window_calls(&self) -> Option<(&Call, Option<&Call>)> {
+        let shown: Vec<&Call> = self
+            .calls
+            .iter()
+            .filter(|call| call.has_call_window() && self.unwanted != Some(call.id))
+            .collect();
+        let call = shown
+            .iter()
+            .find(|call| call.state == CallState::Active)
+            .or_else(|| shown.first())?;
+        let held = shown
+            .iter()
+            .find(|other| other.id != call.id && other.state == CallState::Held);
+        Some((call, held.copied()))
     }
 
     fn dialer_view(&self) -> Option<DialerView> {
@@ -260,6 +311,7 @@ impl State {
 /// Where `call` is, as the Call Window shows it.
 fn phase(call: &Call, wideband: bool, mute: Mute) -> CallWindowPhase {
     match (call.active_since, call.state) {
+        (Some(active_since), CallState::Held) => CallWindowPhase::OnHold { active_since },
         (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
             active_since,
             wideband,

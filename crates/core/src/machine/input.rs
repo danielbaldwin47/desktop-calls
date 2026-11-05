@@ -67,6 +67,14 @@ pub enum Input {
     Decline(CallId),
     /// The user asked to hang up this Call.
     HangUp(CallId),
+    /// The user asked to put the live Call on hold and answer the waiting
+    /// Call.
+    HoldAndAnswer,
+    /// The user asked to end the live Call and answer the waiting Call.
+    EndAndAnswer,
+    /// The user asked to swap the live Call and the Call on hold: the live
+    /// one goes on hold and the held one is live again.
+    Swap,
     /// The user asked to Call this number or `tel:` link, as typed.
     Dial(String),
     /// The user hung up the Call they placed before the Phone reported it.
@@ -146,6 +154,12 @@ pub enum PhoneCommand {
     Answer(CallId),
     /// Hang up this Call; for a ringing Call, that declines it.
     HangUp(CallId),
+    /// Put the live Call on hold and answer this waiting Call.
+    HoldAndAnswer(CallId),
+    /// End the live Call and answer this waiting Call.
+    EndAndAnswer(CallId),
+    /// Put the live Call on hold and make the held Call live again.
+    Swap,
     /// Bring the live Call's audio to the Desktop.
     MoveAudioToDesktop,
     /// Send the live Call's audio back to the Phone, by dropping hands-free
@@ -234,6 +248,9 @@ pub enum Timer {
     /// The Call Window has said for long enough, by the loss with this
     /// number, that the connection to the Phone was lost.
     ConnectionLost(u32),
+    /// The Call Window has said for long enough why the Phone refused Hold &
+    /// answer, End & answer or Swap, by the refusal with this number.
+    DismissCallWaitingNotice(u32),
 }
 
 /// Something the shell adapters must do.

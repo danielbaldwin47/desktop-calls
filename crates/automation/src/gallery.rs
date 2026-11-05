@@ -35,6 +35,8 @@ struct State {
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
+/// A second caller, for call waiting.
+const SECOND_NUMBER: &str = "+447700900456";
 
 /// The stock Answer button's green, the stock Decline and Hang up buttons'
 /// red, and the orange that marks the microphone muted under every look.
@@ -228,6 +230,35 @@ const STATES: &[State] = &[
         shown: |screenshot, look| {
             !shows(screenshot, look.red()) && app_region(screenshot).is_some()
         },
+    },
+    State {
+        name: "call-waiting-banner",
+        title: "A second Call waiting: the Banner, with Hold & answer, below the Call Window",
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            waiting(harness);
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
+        name: "call-window-held",
+        title: "The Call Window with two Calls: the answered one live, the first on hold",
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            waiting(harness);
+            if let Err(error) = harness.hold_and_answer() {
+                panic!("Hold & answer: {error:?}");
+            }
+            harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
+                state
+                    .surface("call-window")
+                    .is_some_and(|window| window.contains_key("held-caller"))
+                    && state.surface("banner").is_none()
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
         name: "call-window-calling",
@@ -499,6 +530,27 @@ fn ring(harness: &Harness) -> u32 {
         state.surface("banner").is_some()
     });
     state.calls.first().map_or(0, |call| call.id)
+}
+
+/// Rings the Phone, answers here and waits until the Call is live.
+fn on_a_call(harness: &Harness) {
+    let call = ring(harness);
+    harness.answer(call);
+    harness.wait_for_app("the Call is live", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.contains_key("audio-location"))
+    });
+}
+
+/// A second caller rings during the Call: waits for its Banner.
+fn waiting(harness: &Harness) {
+    let _path = harness.simulated_phone().ring(SECOND_NUMBER);
+    harness.wait_for_app("the waiting Call's Banner shows", DEADLINE, |state| {
+        state
+            .surface("banner")
+            .is_some_and(|banner| banner.contains_key("options"))
+    });
 }
 
 /// Where the app's surfaces are: everything that is neither the black

@@ -2,6 +2,7 @@
 //! asks: ringing, Calls placed or answered on the Phone, volumes, and
 //! `WirePlumber` restarting.
 
+use super::call_waiting::{has_live_call, waiting_rings};
 use super::methods::{bring_audio_up, rejects_sco};
 use super::tree::{
     announce_call, call_state, end_call, find_call, insert_call, open_audio_link, register_call,
@@ -54,7 +55,13 @@ pub fn ring(
     call.insert("IncomingLine".into(), OwnedVariant::from(Str::from("")));
     call.insert("Name".into(), OwnedVariant::from(Str::from("")));
     call.insert("Multiparty".into(), OwnedVariant::from(false));
-    call.insert("State".into(), OwnedVariant::from(Str::from("incoming")));
+    // During a Call, a second one waits (`+CCWA`) instead of ringing.
+    let state = if has_live_call(tree, audio_gateway) {
+        "waiting"
+    } else {
+        "incoming"
+    };
+    call.insert("State".into(), OwnedVariant::from(Str::from(state)));
     let path = register_call(tree, audio_gateway, call.clone())?;
     let mut signals = announce_call(audio_gateway, &path, call);
     if transport_state(tree, audio_gateway).as_deref() == Some("idle") {
@@ -344,5 +351,7 @@ pub fn end_call_on_phone(
     if ringing_only && !matches!(state.as_str(), "incoming" | "waiting") {
         return Err(format!("the Call at {call} is {state}, not ringing"));
     }
-    Ok(end_call(tree, audio_gateway, &path))
+    let mut signals = end_call(tree, audio_gateway, &path);
+    signals.extend(waiting_rings(tree, audio_gateway));
+    Ok(signals)
 }

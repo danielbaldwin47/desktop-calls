@@ -194,27 +194,33 @@ pub const GROUPS: &[Group] = &[
         number: 4,
         title: "Call waiting",
         before: &[
-            "A helper with a second phone who can call you.",
+            "Two helpers: one to take your Call on the Test Number's phone, and one with another phone who can call you during it.",
             "The Test Number already given to the agent.",
         ],
         steps: &[
             Step {
                 id: "4.1",
-                title: "Call the Test Number from the Desktop while the helper calls you: Hold & answer, then Swap, then hang up one",
+                title: "Call the Test Number from the Desktop while the second helper calls you: Hold & answer, then Swap, then hang up one; the other stays live",
                 script: None,
                 lands_with: &[10, 16],
             },
             Step {
                 id: "4.2",
-                title: "Repeat with End & answer",
+                title: "Repeat with End & answer: your Call ends and the second helper's connects",
                 script: None,
                 lands_with: &[10, 16],
             },
             Step {
                 id: "4.3",
-                title: "Repeat with Decline",
+                title: "Repeat with Decline: only the second helper's Call ends",
                 script: None,
                 lands_with: &[10, 16],
+            },
+            Step {
+                id: "4.4",
+                title: "Repeat, leaving the second helper's Call to ring out: a Missed Call notification appears",
+                script: None,
+                lands_with: &[16],
             },
         ],
     },

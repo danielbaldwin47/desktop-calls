@@ -49,6 +49,9 @@
 //!   the whole string in one `AT+VTS`, and Android accepts exactly one tone
 //!   per `AT+VTS`, answering anything longer with `+CME ERROR: 25`, so a
 //!   longer string fails with `CME` here too.
+//! - A Call that rings during a live one is `waiting`, and `HoldAndAnswer`,
+//!   `ReleaseAndAnswer` and `SwapCalls` act on the Calls as PipeWire's
+//!   `AT+CHLD` does (`telephony/call_waiting.rs`).
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -60,6 +63,7 @@ use crate::objects::{
     interfaces_added_body,
 };
 
+mod call_waiting;
 pub mod hands_free;
 mod methods;
 mod phone;
@@ -140,6 +144,10 @@ pub enum Quirk {
     /// is still ringing (`backend-native.c`). A withheld caller's `+CLIP`
     /// fails PipeWire's parse, so that Call never gets a number.
     LateLineIdentification,
+    /// `HoldAndAnswer` and `SwapCalls` fail with `InvalidState` whatever the
+    /// Calls' states, as a network or Phone without call hold refuses
+    /// `AT+CHLD=2`: both Calls stay as they were.
+    HoldRefused,
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
@@ -164,6 +172,7 @@ impl Quirk {
             "earbuds-keep-audio" => Some(Self::EarbudsKeepAudio),
             "disconnect-profile-refused" => Some(Self::DisconnectProfileRefused),
             "late-line-identification" => Some(Self::LateLineIdentification),
+            "hold-refused" => Some(Self::HoldRefused),
             _ => None,
         }
     }

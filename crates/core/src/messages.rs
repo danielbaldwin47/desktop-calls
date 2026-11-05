@@ -75,6 +75,19 @@ pub enum Failure {
     TonesNotSent,
     /// The Call History row the user chose has a withheld number.
     WithheldNumber,
+    /// No Call is waiting to be answered with Hold & answer or End & answer.
+    NoWaitingCall,
+    /// No Call is on hold for Swap to swap to.
+    NoHeldCall,
+    /// The Phone didn't hold the live Call and answer the waiting one; both
+    /// are as they were.
+    HoldAndAnswerFailed,
+    /// The Phone didn't end the live Call and answer the waiting one; both
+    /// are as they were.
+    EndAndAnswerFailed,
+    /// The Phone didn't swap the live Call and the held one; both are as
+    /// they were.
+    SwapFailed,
 }
 
 impl Failure {
@@ -111,6 +124,11 @@ impl Failure {
             Self::InvalidTones => "invalid-tones",
             Self::TonesNotSent => "tones-not-sent",
             Self::WithheldNumber => "withheld-number",
+            Self::NoWaitingCall => "no-waiting-call",
+            Self::NoHeldCall => "no-held-call",
+            Self::HoldAndAnswerFailed => "hold-and-answer-failed",
+            Self::EndAndAnswerFailed => "end-and-answer-failed",
+            Self::SwapFailed => "swap-failed",
         }
     }
 }
@@ -131,6 +149,10 @@ pub struct Message {
 
 /// What to tell the user about `failure`.
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per Failure: the sentences read best side by side, as one table"
+)]
 pub fn failure(failure: Failure) -> Message {
     let (text, next_action) = match failure {
         Failure::ServiceNotRunning => (
@@ -225,6 +247,20 @@ pub fn failure(failure: Failure) -> Message {
         Failure::TonesNotSent => ("Your phone didn't send the tones; try again.", None),
         Failure::WithheldNumber => (
             "That caller withheld their number, so it can't be called back.",
+            None,
+        ),
+        Failure::NoWaitingCall => ("There's no waiting Call to answer.", None),
+        Failure::NoHeldCall => ("There's no Call on hold to swap to.", None),
+        Failure::HoldAndAnswerFailed => (
+            "Your phone didn't put your Call on hold, so both Calls are as they were; answer on your phone instead.",
+            None,
+        ),
+        Failure::EndAndAnswerFailed => (
+            "Your phone didn't end your Call, so both Calls are as they were; end it on your phone instead.",
+            None,
+        ),
+        Failure::SwapFailed => (
+            "Your phone didn't swap the Calls, so both are as they were; swap them on your phone instead.",
             None,
         ),
     };
@@ -455,6 +491,25 @@ pub enum Label {
     Dismiss,
     /// The Missed Call notification's click, for desktops that label it.
     ShowInDialer,
+    /// The Incoming Call Banner's heading for a Call ringing while another
+    /// is connected.
+    CallWaiting,
+    /// The same heading while the Banner has keyboard focus: the keys that
+    /// work.
+    CallWaitingKeys,
+    /// The Banner's button that holds the live Call and answers the waiting
+    /// one.
+    HoldAndAnswer,
+    /// The Banner's button that ends the live Call and answers the waiting
+    /// one.
+    EndAndAnswer,
+    /// The Call Window's button that swaps the live Call and the held one.
+    Swap,
+    /// The same button with only a Call on hold: it makes that Call live
+    /// again.
+    Resume,
+    /// What the Call Window says of a Call on hold.
+    OnHold,
 }
 
 /// The text of `label`.
@@ -492,6 +547,15 @@ pub fn label(label: Label) -> &'static str {
         Label::CallBack => "Call back",
         Label::Dismiss => "Dismiss",
         Label::ShowInDialer => "Show in Dialer",
+        Label::CallWaiting => "Call waiting",
+        Label::CallWaitingKeys => {
+            "Press H to hold and answer, E to end and answer, or D to decline"
+        }
+        Label::HoldAndAnswer => "Hold & answer",
+        Label::EndAndAnswer => "End & answer",
+        Label::Swap => "Swap",
+        Label::Resume => "Resume",
+        Label::OnHold => "On hold",
     }
 }
 

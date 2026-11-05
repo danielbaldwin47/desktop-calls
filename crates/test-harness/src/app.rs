@@ -304,58 +304,58 @@ fn collect_signal<T: Send + 'static>(
     signals
 }
 
-/// The app's `Calls` and `Surfaces` as published just after one of its
-/// `PropertiesChanged` signals that carried either.
+/// What the app had published just after one of its signals: its `Calls`,
+/// `Surfaces` and `ConnectionState` as the last `PropertiesChanged` carrying
+/// them left them, and every `Error` and `MissedCall` signal sent so far.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Published {
     /// `Calls`, oldest first.
     pub calls: Vec<AppCall>,
     /// `Surfaces`: each shown surface with its key content.
     pub surfaces: ShownSurfaces,
+    /// `ConnectionState`.
+    pub connection_state: String,
+    /// Every `Error` signal sent so far, oldest first.
+    pub errors: Vec<AppError>,
+    /// Every `MissedCall` signal sent so far, oldest first.
+    pub missed_calls: Vec<MissedCall>,
 }
 
-/// Collects, from now on, the app's `Calls` and `Surfaces` after each of its
-/// `PropertiesChanged` signals that carries either, in the order the app
-/// sent them.
+impl Published {
+    /// What the app has published before it sends anything: no Calls, no
+    /// surfaces, and a Phone that isn't set up.
+    #[must_use]
+    pub fn at_start() -> Self {
+        Self {
+            connection_state: "not-set-up".to_owned(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Collects, from now on, what the app has published after each of its
+/// `PropertiesChanged` signals that carries `Calls`, `Surfaces` or
+/// `ConnectionState`, and after each `Error` and `MissedCall` signal, in the
+/// order the app sent them. One subscription gets them all, so the bus's
+/// order is kept.
 pub(super) fn collect_published(session: &Connection) -> Arc<Mutex<Vec<Published>>> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let stream = zbus::block_on(async {
         let rule = MatchRule::builder()
             .msg_type(Type::Signal)
             .path(APP_PATH)
-            .interface("org.freedesktop.DBus.Properties")
-            .member("PropertiesChanged")
             .build()?;
         MessageStream::for_match_rule(rule, session, None).await
     })
-    .expect("subscribe to the app's PropertiesChanged");
+    .expect("subscribe to the app's signals");
     let collected = seen.clone();
     thread::spawn(move || {
         zbus::block_on(async move {
             let mut stream = stream;
-            let mut published = Published::default();
+            let mut published = Published::at_start();
             while let Some(Ok(message)) = stream.next().await {
-                let Ok((_, mut changed, _)) = message.body().deserialize::<(
-                    String,
-                    std::collections::HashMap<String, zbus::OwnedVariant>,
-                    Vec<String>,
-                )>() else {
+                if !publish(&mut published, &message) {
                     continue;
-                };
-                let calls = changed
-                    .remove("Calls")
-                    .and_then(|calls| read_calls(calls).ok());
-                let surfaces = changed
-                    .remove("Surfaces")
-                    .and_then(|surfaces| ShownSurfaces::try_from(surfaces).ok());
-                if calls.is_none() && surfaces.is_none() {
-                    continue;
-                }
-                if let Some(calls) = calls {
-                    published.calls = calls;
-                }
-                if let Some(surfaces) = surfaces {
-                    published.surfaces = surfaces;
                 }
                 collected
                     .lock()
@@ -365,4 +365,74 @@ pub(super) fn collect_published(session: &Connection) -> Arc<Mutex<Vec<Published
         });
     });
     seen
+}
+
+/// Applies the app's signal `message` to `published`. Returns whether it
+/// changed anything that `Published` records.
+fn publish(published: &mut Published, message: &zbus::Message) -> bool {
+    let header = message.header();
+    let (Some(interface), Some(member)) = (header.interface(), header.member()) else {
+        return false;
+    };
+    if interface.as_str() == APP_INTERFACE {
+        match member.as_str() {
+            "Error" => {
+                let Ok((kind, message)) = message.body().deserialize::<(String, String)>() else {
+                    return false;
+                };
+                published.errors.push(AppError { kind, message });
+                true
+            }
+            "MissedCall" => {
+                let Ok((call, number, display_name, count, at_ms)) =
+                    message
+                        .body()
+                        .deserialize::<(u32, String, String, u32, u64)>()
+                else {
+                    return false;
+                };
+                published.missed_calls.push(MissedCall {
+                    call,
+                    number,
+                    display_name,
+                    count,
+                    at_ms,
+                });
+                true
+            }
+            _ => false,
+        }
+    } else if interface.as_str() == "org.freedesktop.DBus.Properties"
+        && member.as_str() == "PropertiesChanged"
+    {
+        let Ok((_, mut changed, _)) = message.body().deserialize::<(
+            String,
+            std::collections::HashMap<String, zbus::OwnedVariant>,
+            Vec<String>,
+        )>() else {
+            return false;
+        };
+        let calls = changed
+            .remove("Calls")
+            .and_then(|calls| read_calls(calls).ok());
+        let surfaces = changed
+            .remove("Surfaces")
+            .and_then(|surfaces| ShownSurfaces::try_from(surfaces).ok());
+        let connection_state = changed
+            .remove("ConnectionState")
+            .and_then(|state| String::try_from(state).ok());
+        let carried = calls.is_some() || surfaces.is_some() || connection_state.is_some();
+        if let Some(calls) = calls {
+            published.calls = calls;
+        }
+        if let Some(surfaces) = surfaces {
+            published.surfaces = surfaces;
+        }
+        if let Some(connection_state) = connection_state {
+            published.connection_state = connection_state;
+        }
+        carried
+    } else {
+        false
+    }
 }

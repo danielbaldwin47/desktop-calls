@@ -5,14 +5,16 @@
 //! through [`GlibRuntime`]; the BlueZ client, the Phone link, the control
 //! interface, the Contacts sync and the surfaces turn what happens into
 //! inputs; the Call state machine decides; this module carries out its effects,
-//! publishes the state on the control interface, then renders the surfaces.
+//! publishes the state on the control interface, renders the surfaces, then
+//! signals the `Error` and `MissedCall` the step caused.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use desktop_calls_core::{
-    AudioLocation, ConnectionState, DialProgress, Effect, Input, State, messages, step,
+    AudioLocation, ConnectionState, DialProgress, Effect, Input, MissedCallNotice, State, messages,
+    step,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
@@ -21,7 +23,9 @@ use futures_util::stream;
 use glib::MainContext;
 use zbus::Connection;
 
-use crate::control::{DialRequest, DialVerdict, Publisher, ShownSurfaces, publish_failed};
+use crate::control::{
+    DialRequest, DialVerdict, Published, Publisher, ShownSurfaces, publish_failed,
+};
 use crate::do_not_disturb::DoNotDisturb;
 use crate::glib_runtime::GlibRuntime;
 use crate::indicator::Indicator;
@@ -246,6 +250,15 @@ async fn publish_surfaces(mut reports: UnboundedReceiver<ShownSurfaces>, publish
     }
 }
 
+/// An effect that says something about the Call state its step reaches, so
+/// it waits until that state is published.
+enum Announcement {
+    /// An `Error` signal.
+    Error(messages::Failure),
+    /// A Missed Call: its notification, then its `MissedCall` signal.
+    MissedCall(MissedCallNotice),
+}
+
 /// What carries out the Call state machine's effects.
 struct Shell {
     /// Where timers report back.
@@ -265,8 +278,12 @@ struct Shell {
 }
 
 impl Shell {
-    async fn carry_out(&mut self, effects: Vec<Effect>) {
+    /// Carries out `effects`, except the ones that announce something about
+    /// the new state, which it hands back for [`Shell::announce`] to carry
+    /// out once that state is published.
+    fn carry_out(&mut self, effects: Vec<Effect>) -> Vec<Announcement> {
         let mut phone_commands = Vec::new();
+        let mut announcements = Vec::new();
         for effect in effects {
             match effect {
                 Effect::AttachPhone { address } => {
@@ -297,7 +314,9 @@ impl Shell {
                     self.contacts_command(contacts::Command::RefreshCallHistory);
                 }
                 Effect::ForgetContacts => self.contacts_command(contacts::Command::Forget),
-                Effect::NotifyMissedCall(notice) => self.notifier.notify(notice),
+                Effect::NotifyMissedCall(notice) => {
+                    announcements.push(Announcement::MissedCall(notice));
+                }
                 Effect::Phone(command) => phone_commands.push(command),
                 Effect::StartRinging => self.ringer.start(),
                 Effect::StopRinging => self.ringer.stop(),
@@ -316,22 +335,36 @@ impl Shell {
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
-                Effect::ReportError(failure) => {
-                    tracing::info!(
-                        event_kind = %EventKind::ErrorReported,
-                        error_kind = failure.as_str(),
-                        "Told the user: {}",
-                        desktop_calls_core::messages::failure(failure).text
-                    );
-                    if let Err(error) = self.publisher.report_error(failure).await {
-                        publish_failed(&error);
-                    }
-                }
+                Effect::ReportError(failure) => announcements.push(Announcement::Error(failure)),
             }
         }
         // One step's Phone commands run in order, as one batch.
         if !phone_commands.is_empty() {
             self.command(Command::Run(phone_commands));
+        }
+        announcements
+    }
+
+    /// Tells the user and the control interface's clients what `announcements`
+    /// say, once the state they describe is `published`: an `Error` or a
+    /// `MissedCall` signal never comes before the Call state it follows from
+    /// (ticket #116). A Missed Call's notification waits for it too.
+    async fn announce(&self, announcements: Vec<Announcement>, published: &Published) {
+        for announcement in announcements {
+            match announcement {
+                Announcement::MissedCall(notice) => self.notifier.notify(notice, published),
+                Announcement::Error(failure) => {
+                    tracing::info!(
+                        event_kind = %EventKind::ErrorReported,
+                        error_kind = failure.as_str(),
+                        "Told the user: {}",
+                        messages::failure(failure).text
+                    );
+                    if let Err(error) = self.publisher.report_error(failure, published).await {
+                        publish_failed(&error);
+                    }
+                }
+            }
         }
     }
 
@@ -348,7 +381,8 @@ impl Shell {
 }
 
 /// Feeds every input to the Call state machine, carries out its effects,
-/// publishes the new state, then renders the surfaces. A Dial request's
+/// publishes the new state, renders the surfaces, then signals the `Error`
+/// and `MissedCall` the step caused. A Dial request's
 /// verdict waits for what the Call state machine says became of its dial
 /// attempt: placed, or not placed and why.
 async fn decide(
@@ -375,7 +409,7 @@ async fn decide(
             !next.calls().is_empty() || shown.banner.is_some() || shown.call_window.is_some(),
         );
         pass_on_dial_progress(&effects, verdict, &mut waiting);
-        shell.carry_out(effects).await;
+        let announcements = shell.carry_out(effects);
         let next_run = next.for_next_run();
         if next_run != state.for_next_run() {
             earlier_run::save(&next_run);
@@ -413,6 +447,8 @@ async fn decide(
         {
             indicator_failed(&error);
         }
+        // After the surfaces, which the user is waiting to see.
+        shell.announce(announcements, &published).await;
         state = next;
     }
 }

@@ -264,6 +264,7 @@ const STATES: &[State] = &[
     State {
         name: "call-waiting-banner",
         title: "A second Call waiting: the Banner, with Hold & answer, below the Call Window",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -274,6 +275,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-held",
         title: "The Call Window with two Calls: the answered one live, the first on hold",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);

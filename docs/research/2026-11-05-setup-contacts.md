@@ -50,8 +50,11 @@ For #22. Labels: **[V]** verified here, against the Simulated Phone and simulate
 
 ## Real-Phone Checklist
 
-Group 1 already has the steps for this:
-- Step 1.2 pairs, allows Contacts, adds the keybinding and places a first Call to the Test Number.
-- Step 1.3 turns Contacts access off, uses Try again, lets the prompt time out once, then allows it.
+Group 1 has scripted steps for this, in `crates/automation/src/checklist/steps/first_run.rs`:
+- Step 1.1 forgets the pairing on both sides and runs `just install`, and checks that the Setup Window opens by itself.
+- Step 1.2 pairs, allows Contacts, adds the keybinding and places a first Call to the Test Number. It measures `pairing_to_first_call_ms` against the 3-minute target.
+- Step 1.3 turns Contacts access off and pairs afresh, so the Pixel asks again. It lets the prompt time out once (measured as `prompt_lasted_ms`), uses Try again, then allows it.
+
+The demo plays all three against the Simulated Phone. **[V]** by `group_1_pairs_afresh_to_a_first_call_lets_the_contacts_prompt_time_out_and_reads_a_second_page_of_call_history`. For the demo, the Simulated Phone now lists a Phone removed while in range for discovery again. **[I]** that turning off Contacts access and pairing afresh makes Android ask again rather than refuse.
 
 Running them settles the **[I]** items above. After this merges, the preflight line "the Setup Window offers one once #22 lands" can drop "once #22 lands".

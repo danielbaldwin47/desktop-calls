@@ -403,7 +403,8 @@ fn an_interrupted_run_resumes_at_the_failed_step_and_keeps_what_passed() {
 }
 
 #[test]
-fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_honours_paging() {
+fn group_1_pairs_afresh_to_a_first_call_lets_the_contacts_prompt_time_out_and_reads_a_second_page_of_call_history()
+ {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
     let questions = runner.play(|_| "y".to_owned());
@@ -421,14 +422,20 @@ fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_hon
     assert_eq!(measured["page_2_entries_also_on_page_1"], 0, "{paging:#}");
     assert_eq!(measured["page_2_older_than_page_1"], true, "{paging:#}");
     for id in ["1.1", "1.2", "1.3"] {
-        assert_eq!(step(&result, id)["result"], "skipped", "{result:#}");
+        assert_eq!(step(&result, id)["result"], "pass", "{result:#}");
     }
-    // 1.1 doesn't use #22's feature: it waits only on 1.2, which does.
+    // The first run, timed from the Setup Window's first step to the Call.
+    let first_call = &step(&result, "1.2")["measurements"]["pairing_to_first_call_ms"];
     assert!(
-        says(
-            step(&result, "1.1"),
-            "runs together with 1.2, which lands with #22"
-        ),
+        first_call.as_u64().is_some_and(|ms| ms <= 180_000),
+        "{result:#}"
+    );
+    // The Phone's prompt, left unanswered, timed out on its own deadline.
+    let prompt = &step(&result, "1.3")["measurements"]["prompt_lasted_ms"];
+    assert!(
+        prompt
+            .as_u64()
+            .is_some_and(|ms| (25_000..=40_000).contains(&ms)),
         "{result:#}"
     );
 }

@@ -14,6 +14,7 @@ use super::watch::AppState;
 
 mod audio_location;
 mod during_a_call;
+mod first_run;
 mod incoming;
 mod keyboard_and_look;
 mod missed_calls;
@@ -21,6 +22,7 @@ mod range_and_power;
 
 use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
 use during_a_call::{keypad_tones, mute};
+use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
     do_not_disturb, keybinding,
@@ -53,10 +55,10 @@ pub struct Step {
 }
 
 /// Steps without a script of their own that run only together with
-/// another step, as (step, the step it runs with). 1.1 leaves the Phone
-/// unpaired, so it is runnable only with 1.2, which pairs it again.
-/// `tools/checklist_tickets.py` reads this table.
-pub const RUNS_WITH: &[(&str, &str)] = &[("1.1", "1.2")];
+/// another step, as (step, the step it runs with). None does now: 1.1,
+/// which leaves the Phone unpaired, has its script, and 1.2 after it pairs
+/// it again. `tools/checklist_tickets.py` reads this table.
+pub const RUNS_WITH: &[(&str, &str)] = &[];
 
 /// The polish scorecard's targets (`docs/wiki/polish-scorecard.md`).
 const BANNER_TARGET: Duration = Duration::from_secs(1);
@@ -101,24 +103,22 @@ pub const GROUPS: &[Group] = &[
                 id: "1.1",
                 needs: &[],
                 title: "Forget the pairing on both the Pixel and the Desktop, then install and start Desktop Calls",
-                script: None,
-                // It leaves the Phone unpaired, so it runs only with 1.2:
-                // see RUNS_WITH.
+                script: Some(forget_and_install),
                 lands_with: &[],
             },
             Step {
                 id: "1.2",
                 needs: &[TEST_NUMBER, PIXEL_IN_HAND],
                 title: "Pair through the Setup Window, allow Contacts access, add the keybinding, and place a first Call to the Test Number (timed)",
-                script: None,
-                lands_with: &[22],
+                script: Some(pair_to_first_call),
+                lands_with: &[],
             },
             Step {
                 id: "1.3",
                 needs: &[PIXEL_IN_HAND],
                 title: "Turn Contacts access off on the Pixel, use Try again and let the prompt time out once, then allow it",
-                script: None,
-                lands_with: &[22],
+                script: Some(prompt_times_out_then_allowed),
+                lands_with: &[],
             },
             Step {
                 id: "1.4",

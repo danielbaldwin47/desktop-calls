@@ -31,10 +31,11 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # `changes` decides whether the change touches code. If it does, the suite
-# runs in parallel, on several runners: everything but the harness's
-# scenarios, with `just check`; and the harness's scenarios, split into
-# shards. If it touches only docs that no code reads, they are all skipped.
-# "CI passed" needs every job, so it appears only once they have all finished.
+# runs in parallel, on several runners: `just lint`; every test but the
+# harness's scenarios; and the harness's scenarios, split into shards. The
+# test jobs build every target between them, as `just check` does. If it
+# touches only docs that no code reads, they are all skipped. "CI passed"
+# needs every job, so it appears only once they have all finished.
 jobs:
   changes:
     name: Code changed?
@@ -55,8 +56,37 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
 
+  # `just check` is `just lint` and then a build of every target. CI runs
+  # `just lint` in a job of its own, beside the tests rather than before
+  # them: the test jobs build every target between them, so its build would
+  # be a third one, a minute spent on the harness's tests, which this job
+  # never ran (#118).
+  lint:
+    name: just lint (just check but its build, which the test jobs do)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      # The system libraries the -sys crates' build scripts look for, but
+      # none of the scenarios' tools.
+      - name: Install system packages
+        run: >-
+          pacman -Syu --noconfirm --needed
+          gcc pkgconf git rustup just cargo-deny python
+          gtk4 gtk4-layer-shell libadwaita dbus
+      - uses: actions/checkout@v5
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
+      - name: just lint
+        run: just lint
+
   check:
-    name: just check, and every test but the harness's
+    name: just test, all but the harness's scenarios
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -100,9 +130,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
-
-      - name: just check
-        run: just check
 
       # The package gives sway the file capability cap_sys_nice, which is
       # outside this container's bounding set, so exec fails with EPERM.
@@ -231,14 +258,14 @@ jobs:
   ci-passed:
     name: CI passed
     if: ${{ !cancelled() }}
-    needs: [changes, check, scenarios]
+    needs: [changes, lint, check, scenarios]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed, or was skipped for a docs-only change
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          HALVES: ${{ needs.check.result }} ${{ needs.scenarios.result }}
+          HALVES: ${{ needs.lint.result }} ${{ needs.check.result }} ${{ needs.scenarios.result }}
         run: |
           echo "changes: $CHANGES, code changed: $CODE, halves: $HALVES"
           [ "$CHANGES" = success ] || exit 1

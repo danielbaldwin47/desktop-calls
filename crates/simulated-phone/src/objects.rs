@@ -39,10 +39,10 @@ pub struct ObjectTree {
     /// Interfaces each object has beyond those holding properties (such as
     /// `ObjectManager`), by path.
     extra_interfaces: BTreeMap<String, Vec<&'static str>>,
-    /// `Introspect` replies captured from the real service, by path, used
-    /// verbatim in place of generated ones.
+    /// `Introspect` replies captured from the real service, by path, used in
+    /// place of generated ones. Where the service lists child nodes, the
+    /// capture has none, and the tree adds its own.
     captured_introspection: BTreeMap<String, &'static str>,
-    schemas: &'static [InterfaceSchema],
     /// Whether `Introspect` lists child nodes. BlueZ does; PipeWire doesn't.
     introspect_lists_children: bool,
 }
@@ -146,12 +146,11 @@ impl Reply {
 }
 
 impl ObjectTree {
-    pub fn new(schemas: &'static [InterfaceSchema], introspect_lists_children: bool) -> Self {
+    pub fn new(introspect_lists_children: bool) -> Self {
         Self {
             objects: BTreeMap::new(),
             extra_interfaces: BTreeMap::new(),
             captured_introspection: BTreeMap::new(),
-            schemas,
             introspect_lists_children,
         }
     }
@@ -168,8 +167,8 @@ impl ObjectTree {
             .insert(path.to_string(), extra_interfaces);
     }
 
-    /// Makes `Introspect` on `path` answer exactly `xml`, as captured from the
-    /// real service.
+    /// Makes `Introspect` on `path` answer `xml`, as captured from the real
+    /// service, plus the child nodes if the service lists them.
     pub fn capture_introspection(&mut self, path: &OwnedObjectPath, xml: &'static str) {
         self.captured_introspection.insert(path.to_string(), xml);
     }
@@ -257,31 +256,66 @@ impl ObjectTree {
                 .is_some_and(|extra| extra.contains(&interface))
     }
 
-    /// Every object strictly below `path`, as `GetManagedObjects` returns them.
-    fn managed_objects_below(&self, path: &str) -> ManagedObjects {
+    /// Every object strictly below `path`, with its interfaces.
+    pub fn objects_below(&self, path: &str) -> Vec<(OwnedObjectPath, &Interfaces)> {
         let prefix = child_prefix(path);
         self.objects
             .iter()
-            .filter(|(child, _)| child.starts_with(&prefix))
+            .filter(|(child, _)| child.as_str() != path && child.starts_with(&prefix))
             .filter_map(|(child, interfaces)| {
-                let interfaces = interfaces
-                    .iter()
-                    .map(|(name, properties)| {
-                        (name.clone(), properties.clone().into_iter().collect())
-                    })
-                    .collect();
                 Some((OwnedObjectPath::try_from(child.as_str()).ok()?, interfaces))
             })
             .collect()
     }
 
+    /// The objects the `ObjectManager` at `path` manages, as
+    /// `GetManagedObjects` returns them: every object below it, except those
+    /// below a nearer `ObjectManager`. So PipeWire's manager lists the
+    /// AudioGateways, and each AudioGateway its own Calls.
+    fn managed_objects_below(&self, path: &str) -> ManagedObjects {
+        let managers: Vec<String> = self
+            .objects_below(path)
+            .into_iter()
+            .filter(|(child, _)| self.has_interface(child.as_str(), OBJECT_MANAGER))
+            .map(|(child, _)| child_prefix(child.as_str()))
+            .collect();
+        self.objects_below(path)
+            .into_iter()
+            .filter(|(child, _)| {
+                !managers
+                    .iter()
+                    .any(|manager| child.as_str().starts_with(manager.as_str()))
+            })
+            .map(|(child, interfaces)| (child, interfaces_added_body(interfaces)))
+            .collect()
+    }
+
     fn introspect(&self, path: &str) -> String {
-        if let Some(xml) = self.captured_introspection.get(path) {
-            return (*xml).to_owned();
+        let mut xml = if let Some(captured) = self.captured_introspection.get(path) {
+            let captured = captured.trim_end();
+            captured
+                .strip_suffix("</node>")
+                .unwrap_or(captured)
+                .to_owned()
+        } else {
+            self.generated_introspection(path)
+        };
+        if self.introspect_lists_children {
+            for child in self.children(path) {
+                let _ = write!(xml, "<node name=\"{child}\"/>");
+            }
         }
+        xml.push_str("</node>");
+        xml
+    }
+
+    /// Introspection data for an object nobody captured, up to but not
+    /// including the child nodes and the closing `</node>`. Only objects
+    /// with nothing but the standard interfaces are left uncaptured.
+    fn generated_introspection(&self, path: &str) -> String {
         let mut xml = String::from(
             "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n\
-             \"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node>\n",
+             \"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n<node>",
         );
         let mut names: Vec<&str> = self
             .objects
@@ -291,20 +325,16 @@ impl ObjectTree {
         if let Some(extra) = self.extra_interfaces.get(path) {
             names.extend(extra.iter().copied());
         }
-        let schemas = STANDARD_SCHEMAS.iter().chain(self.schemas);
-        for schema in schemas.filter(|schema| names.contains(&schema.name)) {
-            let _ = writeln!(
+        for schema in STANDARD_SCHEMAS
+            .iter()
+            .filter(|schema| names.contains(&schema.name))
+        {
+            let _ = write!(
                 xml,
-                " <interface name=\"{}\">\n{}\n </interface>",
+                "<interface name=\"{}\">\n{}\n</interface>",
                 schema.name, schema.members
             );
         }
-        if self.introspect_lists_children {
-            for child in self.children(path) {
-                let _ = writeln!(xml, " <node name=\"{child}\"/>");
-            }
-        }
-        xml.push_str("</node>\n");
         xml
     }
 

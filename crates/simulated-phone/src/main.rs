@@ -1,16 +1,22 @@
 //! The Simulated Phone: a stand-in for the Phone that the Desktop cannot tell
 //! apart from a real one.
 //!
-//! It serves `org.bluez` on the system bus and `org.pipewire.Telephony` on the
-//! session bus, shaped like the real Pixel 9a behind PipeWire 1.6.9, on
-//! whichever buses `DBUS_SYSTEM_BUS_ADDRESS` and `DBUS_SESSION_BUS_ADDRESS`
-//! name. Tests act as the Phone through its control interface,
+//! It serves `org.bluez` on the system bus, and `org.pipewire.Telephony` and
+//! `org.bluez.obex` on the session bus, shaped like the real Pixel 9a behind
+//! PipeWire 1.6.9 and BlueZ 5.87, on whichever buses `DBUS_SYSTEM_BUS_ADDRESS`
+//! and `DBUS_SESSION_BUS_ADDRESS` name. Each service has a connection of its
+//! own, as each real service is a process of its own. Tests act as the Phone
+//! through its control interface,
 //! `io.github.danielbaldwin47.DesktopCalls.SimulatedPhone1` on the session bus,
-//! and read back every method call it received.
+//! and read back every method call it received. A conformance test
+//! (`crates/test-harness/tests/conformance.rs`) holds it to the snapshot of
+//! the real objects.
 //!
-//! So far it can only be a paired Phone whose hands-free link comes and goes.
+//! So far it can be a paired Phone whose hands-free link comes and goes, that
+//! rings, and that opens a PBAP session.
 
 mod bluez;
+mod obex;
 mod objects;
 mod telephony;
 
@@ -60,13 +66,33 @@ impl Bus {
     }
 }
 
+/// Which real service a connection stands in for.
+#[derive(Clone, Copy)]
+enum Service {
+    Bluez,
+    Telephony,
+    Obex,
+}
+
+impl Service {
+    fn bus(self) -> Bus {
+        match self {
+            Self::Bluez => Bus::System,
+            Self::Telephony | Self::Obex => Bus::Session,
+        }
+    }
+}
+
 /// Everything the Simulated Phone is and has been asked.
 struct World {
     phone_address: String,
     bluez: ObjectTree,
     telephony: ObjectTree,
+    obex: obex::Obex,
     next_audio_gateway_index: u32,
     audio_gateway: Option<OwnedObjectPath>,
+    /// N in the next Call's path, `agM/callN`. Each AudioGateway starts at 1.
+    next_call_index: u32,
     recorded: Vec<(Bus, MethodCall)>,
 }
 
@@ -91,9 +117,11 @@ async fn run(arguments: Arguments) -> zbus::Result<()> {
     let world = Arc::new(Mutex::new(World {
         bluez: bluez::new_tree(&arguments.name, &arguments.address)?,
         telephony: telephony::new_tree()?,
+        obex: obex::new()?,
         phone_address: arguments.address,
         next_audio_gateway_index: arguments.first_audio_gateway_index,
         audio_gateway: None,
+        next_call_index: 1,
         recorded: Vec::new(),
     }));
 
@@ -104,6 +132,10 @@ async fn run(arguments: Arguments) -> zbus::Result<()> {
     let session = zbus::connection::Builder::session().build().await?;
     let session_calls = MessageStream::from(&session);
     session.request_name(telephony::SERVICE).await?;
+
+    let obex = zbus::connection::Builder::session().build().await?;
+    let obex_calls = MessageStream::from(&obex);
+    obex.request_name(obex::SERVICE).await?;
 
     // The control name comes last, so a test that sees it can rely on the rest.
     let _control = zbus::connection::Builder::session()
@@ -119,19 +151,20 @@ async fn run(arguments: Arguments) -> zbus::Result<()> {
         .build()
         .await?;
 
-    futures_util::future::try_join(
-        serve(system, system_calls, Bus::System, world.clone()),
-        serve(session, session_calls, Bus::Session, world),
+    futures_util::future::try_join3(
+        serve(system, system_calls, Service::Bluez, world.clone()),
+        serve(session, session_calls, Service::Telephony, world.clone()),
+        serve(obex, obex_calls, Service::Obex, world),
     )
     .await?;
     Ok(())
 }
 
-/// Answers every method call that arrives on one bus, and records it.
+/// Answers every method call that arrives for one service, and records it.
 async fn serve(
     connection: Connection,
     mut messages: MessageStream,
-    bus: Bus,
+    service: Service,
     world: SharedWorld,
 ) -> zbus::Result<()> {
     while let Some(message) = messages.next().await {
@@ -139,18 +172,35 @@ async fn serve(
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
-        let reply = {
+        let (reply, added) = {
             let mut world = lock(&world);
-            world.recorded.push((bus, call.clone()));
-            match bus {
-                Bus::System => bluez::answer(&world.bluez, &call, &message),
-                Bus::Session => {
+            world.recorded.push((service.bus(), call.clone()));
+            match service {
+                Service::Bluez => (bluez::answer(&world.bluez, &call, &message), None),
+                Service::Telephony => {
                     let audio_gateways: Vec<OwnedObjectPath> =
                         world.audio_gateway.iter().cloned().collect();
-                    telephony::answer(&world.telephony, &audio_gateways, &call, &message)
+                    let reply =
+                        telephony::answer(&world.telephony, &audio_gateways, &call, &message);
+                    (reply, None)
+                }
+                Service::Obex => {
+                    let world = &mut *world;
+                    obex::answer(&mut world.obex, &world.phone_address, &call, &message)
                 }
             }
         };
+        if let Some((object, interfaces)) = added {
+            connection
+                .emit_signal(
+                    None::<&str>,
+                    "/",
+                    objects::OBJECT_MANAGER,
+                    "InterfacesAdded",
+                    &(object, interfaces_added_body(&interfaces)),
+                )
+                .await?;
+        }
         reply.send(&connection, &message.header()).await?;
     }
     Ok(())
@@ -189,6 +239,7 @@ impl Control {
             let address = world.phone_address.clone();
             let interfaces = telephony::add_audio_gateway(&mut world.telephony, &gateway, &address);
             world.audio_gateway = Some(gateway.clone());
+            world.next_call_index = 1;
             (device, gateway, interfaces)
         };
         emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", true).await?;
@@ -212,11 +263,18 @@ impl Control {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (device, gateway) = {
+        let (device, gateway, calls) = {
             let mut world = lock(&self.world);
             let Some(gateway) = world.audio_gateway.take() else {
                 return Ok(());
             };
+            let calls: Vec<OwnedObjectPath> = telephony::calls(&world.telephony, &gateway)
+                .into_iter()
+                .map(|(call, _)| call)
+                .collect();
+            for call in &calls {
+                world.telephony.remove(call);
+            }
             world.telephony.remove(&gateway);
             let device = bluez::device_path(&world.phone_address)?;
             world.bluez.set(
@@ -225,8 +283,30 @@ impl Control {
                 "Connected",
                 OwnedVariant::from(false),
             );
-            (device, gateway)
+            (device, gateway, calls)
         };
+        // As PipeWire does when hands-free drops mid-Call: each Call goes
+        // first, then the AudioGateway.
+        for call in calls {
+            self.session
+                .emit_signal(
+                    None::<&str>,
+                    gateway.as_str(),
+                    objects::OBJECT_MANAGER,
+                    "InterfacesRemoved",
+                    &(&call, vec![telephony::CALL]),
+                )
+                .await?;
+            self.session
+                .emit_signal(
+                    None::<&str>,
+                    gateway.as_str(),
+                    telephony::VOICE_CALL_MANAGER,
+                    "CallRemoved",
+                    &(&call,),
+                )
+                .await?;
+        }
         self.session
             .emit_signal(
                 None::<&str>,
@@ -239,6 +319,46 @@ impl Control {
         emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", false).await?;
         self.audio_gateway_changed(&emitter).await?;
         Ok(())
+    }
+
+    /// Rings the Phone from `number`, as a caller does: PipeWire registers an
+    /// incoming Call on the AudioGateway and announces it. Returns the Call's
+    /// object path. Fails while hands-free is down.
+    async fn ring(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
+        let (gateway, call, interfaces) = {
+            let mut world = lock(&self.world);
+            let Some(gateway) = world.audio_gateway.clone() else {
+                return Err(zbus::fdo::Error::Failed(
+                    "hands-free is not connected, so the Phone cannot ring".to_owned(),
+                ));
+            };
+            let index = world.next_call_index;
+            world.next_call_index += 1;
+            let (call, interfaces) =
+                telephony::add_incoming_call(&mut world.telephony, &gateway, index, &number)?;
+            (gateway, call, interfaces)
+        };
+        let body = interfaces_added_body(&interfaces);
+        self.session
+            .emit_signal(
+                None::<&str>,
+                gateway.as_str(),
+                objects::OBJECT_MANAGER,
+                "InterfacesAdded",
+                &(&call, &body),
+            )
+            .await?;
+        let properties = body.get(telephony::CALL).cloned().unwrap_or_default();
+        self.session
+            .emit_signal(
+                None::<&str>,
+                gateway.as_str(),
+                telephony::VOICE_CALL_MANAGER,
+                "CallAdded",
+                &(&call, properties),
+            )
+            .await?;
+        Ok(call)
     }
 
     /// The current AudioGateway's object path, or `/` while there is none.

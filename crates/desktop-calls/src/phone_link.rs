@@ -729,7 +729,11 @@ impl PhoneLink {
                 | PhoneCommand::AllowAudioOnDesktop
                 | PhoneCommand::Dial(_)
                 | PhoneCommand::SetMicrophoneVolume(_)
-                | PhoneCommand::SendTones(_) => self.connected.clone().map(Target::Object),
+                | PhoneCommand::SendTones(_)
+                | PhoneCommand::HoldAndAnswer(_)
+                | PhoneCommand::EndAndAnswer(_)
+                | PhoneCommand::AnswerBesideHeld(_)
+                | PhoneCommand::Swap => self.connected.clone().map(Target::Object),
             };
             match target {
                 Some(target) => batch.push(Resolved { command, target }),

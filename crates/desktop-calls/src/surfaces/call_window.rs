@@ -2,8 +2,8 @@
 //! their shortcuts.
 
 use super::{
-    HANDOFF_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT, MUTE_SHORTCUT, SharedReport,
-    Surface, Who, detail_label, seconds_since,
+    HANDOFF_SHORTCUT, HANG_UP_HELD_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT,
+    MUTE_SHORTCUT, SWAP_SHORTCUT, SharedReport, Surface, Who, detail_label, seconds_since,
 };
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
@@ -17,6 +17,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
+
+mod held;
+
+use held::HeldRow;
 
 /// The Call Window.
 pub(super) struct CallWindow {
@@ -32,6 +36,8 @@ pub(super) struct CallWindow {
     mute_label: gtk::Label,
     keypad_shown: gtk::ToggleButton,
     hang_up: gtk::Button,
+    /// The other Call, on hold, with Swap.
+    held: HeldRow,
     /// Why a Call placed here failed or was refused.
     notice: gtk::Label,
     /// The strip that says the microphone is muted.
@@ -49,6 +55,9 @@ pub(super) struct CallWindow {
     /// The once-a-second update of the Call timer, while it runs.
     ticker: RefCell<Option<SourceId>>,
     view: Rc<RefCell<Option<CallWindowView>>>,
+    /// Called whenever the window may have changed height, so the Banner
+    /// stays below it.
+    resized: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl CallWindow {
@@ -61,14 +70,7 @@ impl CallWindow {
             intents,
             report,
         );
-        let caller = gtk::Label::new(None);
-        caller.add_css_class("caller");
-        caller.set_xalign(0.0);
-        let hd = gtk::Label::new(Some(messages::label(Label::Hd)));
-        hd.add_css_class("hd");
-        let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        heading.append(&caller);
-        heading.append(&hd);
+        let (heading, caller, hd) = heading();
         let detail = detail_label();
         let status = gtk::Label::new(None);
         status.add_css_class("numeric");
@@ -106,6 +108,7 @@ impl CallWindow {
             ),
         );
 
+        let held = HeldRow::new(intents);
         let notice = notice_label();
         let (microphone_muted, mute_unavailable) = mute_notices();
         let (tones, keypad) = keypad();
@@ -119,6 +122,7 @@ impl CallWindow {
         // never moves under the pointer.
         content.append(&controls);
         content.append(&hang_up);
+        content.append(&held.row);
         content.append(&notice);
         content.append(&microphone_muted);
         content.append(&mute_unavailable);
@@ -147,6 +151,7 @@ impl CallWindow {
             mute_label,
             keypad_shown,
             hang_up,
+            held,
             notice,
             microphone_muted,
             mute_unavailable,
@@ -156,6 +161,7 @@ impl CallWindow {
             writing_tones: Cell::new(false),
             ticker: RefCell::default(),
             view: Rc::default(),
+            resized: RefCell::default(),
         });
         window.connect();
         window
@@ -212,11 +218,13 @@ impl CallWindow {
         // Before any control sees the key, so M and K never reach the tone
         // entry.
         shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let actions: [(&str, gtk::Widget); 4] = [
+        let actions: [(&str, gtk::Widget); 6] = [
             (MUTE_SHORTCUT, self.mute.clone().upcast()),
             (KEYPAD_SHORTCUT, self.keypad_shown.clone().upcast()),
             (HANDOFF_SHORTCUT, self.audio.handoff.clone().upcast()),
             (HANG_UP_SHORTCUT, self.hang_up.clone().upcast()),
+            (SWAP_SHORTCUT, self.held.swap.clone().upcast()),
+            (HANG_UP_HELD_SHORTCUT, self.held.hang_up.clone().upcast()),
         ];
         for (accelerator, control) in actions {
             // Disabled controls ignore it, and the key is still taken.
@@ -311,6 +319,7 @@ fn status_label(phase: &CallWindowPhase) -> Label {
         CallWindowPhase::Ringing => Label::Ringing,
         CallWindowPhase::NotPlaced => Label::CallNotPlaced,
         CallWindowPhase::Ended => Label::CallEnded,
+        CallWindowPhase::OnHold { .. } => Label::OnHold,
     }
 }
 
@@ -380,6 +389,20 @@ fn hang_up_button(surface: &Surface, intents: &UnboundedSender<Input>) -> gtk::B
         let _ = intents.unbounded_send(intent);
     });
     hang_up
+}
+
+/// The heading row: the caller, and HD beside it. Returns the row, the
+/// caller and HD.
+fn heading() -> (gtk::Box, gtk::Label, gtk::Label) {
+    let caller = gtk::Label::new(None);
+    caller.add_css_class("caller");
+    caller.set_xalign(0.0);
+    let hd = gtk::Label::new(Some(messages::label(Label::Hd)));
+    hd.add_css_class("hd");
+    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    heading.append(&caller);
+    heading.append(&hd);
+    (heading, caller, hd)
 }
 
 /// Why a Call placed here failed or was refused, hidden.
@@ -509,10 +532,15 @@ impl CallWindow {
             .set_text(audio_location.unwrap_or_default());
         let handoff = self.show_handoff(view.audio);
         self.hd.set_visible(wideband);
-        self.hang_up.set_sensitive(!matches!(
-            view.phase,
-            CallWindowPhase::Ended | CallWindowPhase::NotPlaced
-        ));
+        // While a Call is on hold and a Waiting Call rings, the Phone would
+        // answer or decline the Waiting Call instead; the held row says so.
+        self.hang_up.set_sensitive(
+            !view.waiting_first
+                && !matches!(
+                    view.phase,
+                    CallWindowPhase::Ended | CallWindowPhase::NotPlaced
+                ),
+        );
         let notice = view.notice.map(|failure| messages::failure(failure).text);
         self.notice.set_text(notice.unwrap_or_default());
         self.notice.set_visible(notice.is_some());
@@ -527,6 +555,10 @@ impl CallWindow {
         }
         who.report(&mut content);
         content.extend(self.shortcuts.clone());
+        if view.waiting_first {
+            // Greyed out, Hang up has no shortcut to report.
+            content.remove("hang-up-shortcut");
+        }
         if let Some(audio_location) = audio_location {
             content.insert("audio-location".to_owned(), audio_location.to_owned());
             content.insert("handoff".to_owned(), handoff.to_owned());
@@ -559,7 +591,16 @@ impl CallWindow {
         if !tones.is_empty() {
             content.insert("tones".to_owned(), tones.to_string());
         }
+        self.held.update(&view, &mut content);
         self.surface.show(content);
+        if let Some(resized) = self.resized.borrow().as_ref() {
+            resized();
+        }
+    }
+
+    /// Calls `resized` whenever the window may have changed height.
+    pub(super) fn on_resized(&self, resized: impl Fn() + 'static) {
+        *self.resized.borrow_mut() = Some(Box::new(resized));
     }
 
     /// Brings the Handoff button up to date with the Call's audio, `None`

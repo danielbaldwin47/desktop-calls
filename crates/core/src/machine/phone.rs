@@ -2,6 +2,7 @@
 //! an earlier run left, and how the Phone answers commands.
 
 use super::audio::{activated, ask_once_more, audio_not_moved_to_phone};
+use super::call_waiting::{call_waiting_failed, placing_hang_up_failed};
 use super::dialling::{dial_failed, refresh_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::presence::{
@@ -170,6 +171,7 @@ pub(super) fn command_failed(state: &mut State, command: &PhoneCommand, effects:
             {
                 known.request = Request::None;
             }
+            placing_hang_up_failed(state);
             effects.push(Effect::ReportError(Failure::HangUpFailed));
         }
         PhoneCommand::MoveAudioToDesktop => ask_once_more(state, effects),
@@ -188,6 +190,12 @@ pub(super) fn command_failed(state: &mut State, command: &PhoneCommand, effects:
             }
         }
         PhoneCommand::SendTones(_) => effects.push(Effect::ReportError(Failure::TonesNotSent)),
+        PhoneCommand::HoldAndAnswer(_)
+        | PhoneCommand::EndAndAnswer(_)
+        | PhoneCommand::AnswerBesideHeld(_)
+        | PhoneCommand::Swap => {
+            call_waiting_failed(state, command, effects);
+        }
         PhoneCommand::SetMicrophoneVolume(0) => {
             if let Muting::Silencing { .. } = state.muting {
                 state.muting = Muting::Off;

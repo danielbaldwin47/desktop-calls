@@ -74,6 +74,19 @@ pub(super) async fn execute(
                     set_microphone_volume(session, &path, *volume).await
                 }
                 PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
+                // PipeWire's AT+CHLD=2, AT+CHLD=1 and AT+CHLD=2 again: each
+                // acts on whichever Calls are active, held and waiting.
+                PhoneCommand::HoldAndAnswer(_) => {
+                    call(session, &path, AUDIO_GATEWAY, "HoldAndAnswer", &()).await
+                }
+                PhoneCommand::EndAndAnswer(_) => {
+                    call(session, &path, AUDIO_GATEWAY, "ReleaseAndAnswer", &()).await
+                }
+                // With only a held Call besides the Waiting Call, AT+CHLD=2
+                // accepts the Waiting Call and keeps the held one.
+                PhoneCommand::Swap | PhoneCommand::AnswerBesideHeld(_) => {
+                    call(session, &path, AUDIO_GATEWAY, "SwapCalls", &()).await
+                }
                 // Resolved to the Phone itself, above.
                 PhoneCommand::MoveAudioToPhone | PhoneCommand::ConnectHandsFree => Ok(()),
             };

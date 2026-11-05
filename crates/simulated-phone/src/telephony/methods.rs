@@ -1,5 +1,8 @@
 //! Answering method calls on the Telephony service, as PipeWire does.
 
+use super::call_waiting::{
+    after_hang_up, hold_and_answer, hung_up_call, release_and_answer, swap_calls,
+};
 use super::phone::{calls, set_volume};
 use super::tree::{
     call_state, end_call, find_call, set_call_state, set_transport, transport_state,
@@ -97,6 +100,15 @@ pub fn answer(
         }
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SendTones", Some(gateway), _) => {
             (send_tones(tree, gateway, message), Vec::new())
+        }
+        (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "HoldAndAnswer", Some(gateway), _) => {
+            hold_and_answer(tree, gateway, behaviour)
+        }
+        (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "ReleaseAndAnswer", Some(gateway), _) => {
+            release_and_answer(tree, gateway, behaviour)
+        }
+        (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SwapCalls", Some(gateway), _) => {
+            swap_calls(tree, gateway, behaviour)
         }
         (AUDIO_GATEWAY_TRANSPORT, "Activate", Some(gateway), _)
             if !behaviour.activate_delay.is_zero() =>
@@ -314,13 +326,16 @@ fn hang_up(
     let Some((path, properties)) = find_call(tree, audio_gateway, &call.path) else {
         return (Reply::unknown_method(call), Vec::new());
     };
+    let state = call_state(&properties);
     if !matches!(
-        call_state(&properties).as_str(),
+        state.as_str(),
         "incoming" | "waiting" | "active" | "dialing" | "alerting" | "held"
     ) {
         return (invalid_state(), Vec::new());
     }
-    let signals = end_call(tree, audio_gateway, &path);
+    let ended = hung_up_call(tree, audio_gateway, path, &state);
+    let mut signals = end_call(tree, audio_gateway, &ended);
+    signals.extend(after_hang_up(tree, audio_gateway, &state));
     let reply = if behaviour.quirks.contains(&Quirk::HangupTooFewArguments) {
         Reply::Error(
             "org.freedesktop.DBus.Error.InvalidArgs",

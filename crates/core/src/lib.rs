@@ -30,9 +30,9 @@ pub use earlier_run::{EarlierCall, EarlierRun};
 pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView};
 pub use machine::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, ConnectFailure, DialProgress,
-    DialerView, Effect, Input, Mute, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
-    RingingCaller, SetupNotice, SetupStep, SetupWindowView, State, Surfaces, Timer, keypad_tones,
-    step,
+    DialerView, Effect, HeldCall, Input, Mute, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
+    RingingCaller, SetupNotice, SetupStep, SetupWindowView, State, Surfaces, Timer, WaitingOptions,
+    keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

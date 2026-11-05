@@ -453,6 +453,19 @@ impl Control {
         lock(&self.world).range.reachable = true;
     }
 
+    /// Comes back into range `delay_ms` from now, as [`return_to_range`]
+    /// does: a Phone that answers the Desktop's page only after a while.
+    /// Returns at once.
+    ///
+    /// [`return_to_range`]: Self::return_to_range
+    fn return_to_range_after(&self, delay_ms: u32) {
+        let world = self.world.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(delay_ms)));
+            lock(&world).range.reachable = true;
+        });
+    }
+
     /// The person holding the Phone forgets the Desktop in its Bluetooth
     /// settings: the Phone drops the connection, as out of range, and fails
     /// each `Connect` from then on with `"br-connection-key-missing"`.

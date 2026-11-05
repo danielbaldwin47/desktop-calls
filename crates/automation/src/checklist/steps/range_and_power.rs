@@ -32,28 +32,33 @@ fn logged(
     logged_since(sitting, from_us, LOG_DEADLINE, wanted, |_| false)
 }
 
-/// Waits for the Phone to be connected again, then times, by the app's
-/// log, how long it took from `start` (an app-logged line) to the app
-/// logging it connected, recording it as `name`. `since` says what `start`
-/// was, for the evidence.
+/// Waits, for up to [`BACK_DEADLINE`], for the app to log the Phone
+/// connected after `after_us` (the Phone having left by then), and times
+/// how long it took from `start` (an app-logged line), recording it as
+/// `name`. `since` says what `start` was, for the evidence. Reading the log,
+/// not the app's state, means the state from before the Phone left can't
+/// pass for it being back.
 fn connected_again(
     sitting: &mut Sitting,
     start: &LogLine,
+    after_us: u64,
     name: &str,
     since: &str,
 ) -> Result<(), Stop> {
-    sitting.wait_for("the Phone connecting again", BACK_DEADLINE, |state| {
-        state.connection_state == "connected"
-    })?;
-    let Some(connected) = logged(
+    let Some(connected) = logged_since(
         sitting,
-        start.at_us,
+        after_us,
+        BACK_DEADLINE,
         connection_logged(|state| state == "connected"),
+        |_| false,
     )?
     else {
         sitting.check(
             false,
-            format!("Couldn't measure the reconnect: the app logged no connection after {since}."),
+            format!(
+                "The Phone wasn't connected again within {} of {since}.",
+                seconds(BACK_DEADLINE)
+            ),
         );
         return Ok(());
     };
@@ -118,6 +123,7 @@ pub(super) fn out_of_range_and_back(sitting: &mut Sitting) -> Result<(), Stop> {
     connected_again(
         sitting,
         &present,
+        present.at_us,
         "reconnect_ms",
         "the Phone's Bluetooth link came back",
     )
@@ -125,7 +131,9 @@ pub(super) fn out_of_range_and_back(sitting: &mut Sitting) -> Result<(), Stop> {
 
 /// 6.2: suspend the Desktop for a minute, then resume. The Phone leaves
 /// with the Desktop's Bluetooth, and the reconnect is timed from the app's
-/// `desktop-resumed` line.
+/// `desktop-resumed` line to the first connection it logs after the Phone
+/// left. Real `BlueZ` may tell the app the Phone left only after resume,
+/// so a leaving logged either side of `desktop-resumed` counts.
 pub(super) fn suspend_and_resume(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     let from_us = unix_micros();
@@ -146,30 +154,32 @@ pub(super) fn suspend_and_resume(sitting: &mut Sitting) -> Result<(), Stop> {
         return Ok(());
     };
     sitting.observed("The app saw the Desktop suspend and resume.".to_owned());
-    let left = logged(
+    let Some(left) = logged_since(
         sitting,
         from_us,
+        BACK_DEADLINE,
         connection_logged(|state| state != "connected"),
-    )?;
-    if left.is_none_or(|left| left.at_us > resumed.at_us) {
+        |_| false,
+    )?
+    else {
         sitting.check(
             false,
-            "Couldn't measure the reconnect: the app never logged the Phone leaving while the Desktop slept."
+            "Couldn't measure the reconnect: the app never logged the Phone leaving as the Desktop slept and woke."
                 .to_owned(),
         );
         return Ok(());
-    }
+    };
     connected_again(
         sitting,
         &resumed,
+        left.at_us.max(resumed.at_us),
         "reconnect_after_resume_ms",
         "the Desktop resumed",
     )
 }
 
-/// 6.3: restart `WirePlumber` while idle. The app sees Telephony's audio
-/// gateway go and come back, and the Phone is connected again, timed from
-/// the app logging the Phone gone.
+/// 6.3: restart `WirePlumber` while idle. The Phone leaves with Telephony
+/// and is connected again, timed from the app logging the Phone gone.
 pub(super) fn wireplumber_restart(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     let from_us = unix_micros();
@@ -199,15 +209,8 @@ pub(super) fn wireplumber_restart(sitting: &mut Sitting) -> Result<(), Stop> {
     connected_again(
         sitting,
         &gone,
+        gone.at_us,
         "reconnect_after_wireplumber_ms",
         "the app logged the Phone gone",
-    )?;
-    let removed = sitting
-        .log_since(from_us)
-        .iter()
-        .any(|line| line.event_kind == "audio-gateway-removed");
-    if removed {
-        sitting.observed("The app logged the audio gateway going and coming back.".to_owned());
-    }
-    Ok(())
+    )
 }

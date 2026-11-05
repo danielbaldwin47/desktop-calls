@@ -474,10 +474,14 @@ impl Sitting {
 /// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
 ///   Omarchy's bell records it; `suspend`, `resume`, as logind announces
 ///   them, with the Phone leaving on suspend and returning after resume as
-///   the Pixel does; `restart-wireplumber`, as Telephony leaves and returns;
+///   the Pixel does; `resume-slowly`, with the Phone answering the
+///   Desktop's page only a few seconds after resume; `restart-wireplumber`, as Telephony leaves and returns;
 /// - the user's keyboard and Call Window, beyond the above:
-///   `type-test-number`, `type-wrong-number` (one digit off, as a slip
-///   would be), `ctrl-h`, `move-audio-to-phone`, `move-audio-here`;
+///   `type-test-number`, `type-wrong-number` (the last digit off, as a
+///   slip would be), `type-wrong-first-digit` (the first digit after the
+///   country code off), `type-wrong-country` (another country code),
+///   `ctrl-h`, `move-audio-to-phone`, `move-audio-here`,
+///   `move-audio-to-phone-and-back` (each move waited for);
 /// - the Phone and its surroundings: `callee-answers` (the Test Number
 ///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
@@ -506,6 +510,21 @@ const DEMO_TEST_NUMBER: &str = "+447700900999";
 
 /// The demo's Test Number with its last digit slipped.
 const DEMO_WRONG_NUMBER: &str = "+447700900998";
+
+/// The demo's Test Number with its first digit after the country code
+/// slipped.
+const DEMO_WRONG_FIRST_DIGIT: &str = "+448700900999";
+
+/// The demo's Test Number's national number under another country code.
+const DEMO_WRONG_COUNTRY: &str = "+337700900999";
+
+/// How long the demo waits for the audio to move.
+const AUDIO_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long the demo's Phone takes to answer the Desktop's page after
+/// `resume-slowly`: longer than the runner reads the log for a line the
+/// app logs at once.
+const SLOW_RETURN: Duration = Duration::from_secs(4);
 
 /// How long Telephony is off the bus when the demo restarts `WirePlumber`.
 const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
@@ -655,6 +674,8 @@ impl Demo {
             "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
             "type-test-number" => self.harness.keyboard().type_text(DEMO_TEST_NUMBER),
             "type-wrong-number" => self.harness.keyboard().type_text(DEMO_WRONG_NUMBER),
+            "type-wrong-first-digit" => self.harness.keyboard().type_text(DEMO_WRONG_FIRST_DIGIT),
+            "type-wrong-country" => self.harness.keyboard().type_text(DEMO_WRONG_COUNTRY),
             "ctrl-h" => self.harness.keyboard().press_with_control('h'),
             "callee-answers" => self.harness.simulated_phone().callee_answers(),
             "earbuds-on" => self.harness.simulated_phone().set_earbuds(true),
@@ -670,10 +691,17 @@ impl Demo {
                 self.harness.simulated_phone().prepare_for_sleep(false);
                 self.harness.simulated_phone().return_to_range();
             }
+            "resume-slowly" => {
+                self.harness.simulated_phone().prepare_for_sleep(false);
+                self.harness
+                    .simulated_phone()
+                    .return_to_range_after(SLOW_RETURN);
+            }
             "restart-wireplumber" => self
                 .harness
                 .simulated_phone()
                 .restart_telephony(WIREPLUMBER_GAP),
+            "move-audio-to-phone-and-back" => self.move_audio_to_phone_and_back(),
             "move-audio-to-phone" | "move-audio-here" => {
                 let to = if action == "move-audio-here" {
                     "desktop"
@@ -687,6 +715,33 @@ impl Demo {
             other => self.act_on_call(other, call),
         }
         flush();
+    }
+
+    /// Moves the audio to the Phone and, once it is there, straight back,
+    /// returning once it is back: an audio change the runner sees only in
+    /// the app's published states, while it is still reading the log.
+    fn move_audio_to_phone_and_back(&self) {
+        // The Call Window offers each way back once the Handoff before it
+        // has settled (ADR-0005).
+        for (location, back) in [
+            ("phone", "Move audio here"),
+            ("desktop", "Move audio to phone"),
+        ] {
+            if let Err(error) = self.harness.move_audio(location) {
+                println!("  demo: {}", error.message);
+                return;
+            }
+            self.harness
+                .wait_for_app("the Handoff settling", AUDIO_DEADLINE, |state| {
+                    state.audio_location == location
+                        && state.connection_state == "connected"
+                        && state
+                            .surfaces
+                            .get("call-window")
+                            .and_then(|window| window.get("handoff"))
+                            .is_some_and(|label| label == back)
+                });
+        }
     }
 
     fn act_on_call(&self, action: &str, call: Option<u32>) {
@@ -734,8 +789,10 @@ impl Demo {
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
                      click-notification, enter, phone-dials, indicator-click, indicator-mute, \
                      indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-wrong-number, \
-                     ctrl-h, callee-answers, earbuds-on, out-of-range, return-to-range, suspend, \
-                     resume, restart-wireplumber, move-audio-to-phone, move-audio-here, \
+                     type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
+                     earbuds-on, out-of-range, return-to-range, suspend, resume, resume-slowly, \
+                     restart-wireplumber, move-audio-to-phone, move-audio-here, \
+                     move-audio-to-phone-and-back, \
                      quirk NAME; or skip, or quit."
                 ),
             },

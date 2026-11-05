@@ -194,7 +194,7 @@ pub(super) fn ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
         sitting.check(false, "Enter placed no Call.".to_owned());
         return Ok(());
     };
-    let same_number = !missed.withheld && back.number == missed.number;
+    let same_number = !missed.withheld && back.number.is(&missed.number);
     sitting.check(
         same_number,
         if same_number {

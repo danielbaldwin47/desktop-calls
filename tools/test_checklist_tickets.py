@@ -153,6 +153,35 @@ class MergeGate(unittest.TestCase):
             self.gate(steps_rs(step("1.2", "None", "22")), [], ask=unreachable)
         self.assertIn("Next: check the network and `gh auth status`", str(refused.exception))
 
+    def test_just_merge_runs_the_gate_before_it_merges(self):
+        pr = {**self.PR, "headRefName": "ticket/22", "baseRefName": "main"}
+        asked = []
+
+        def gh(*arguments):
+            asked.append(arguments[:2])
+            return "{}"
+
+        def gate(checked, *_):
+            self.assertEqual(checked, pr)
+            raise merge.Refused("a step waits on #22")
+
+        with contextlib.ExitStack() as stack:
+            for name, stand_in in {
+                "pull_request": lambda number: pr,
+                "require_open": lambda pr: None,
+                "require_contains_base": lambda pr: None,
+                "wait_for_checks": lambda pr, seconds: None,
+                "require_checks_passed": lambda pr, minutes: None,
+                "require_mergeable": lambda pr: pr,
+                "require_no_step_waits_on_a_closed_ticket": gate,
+                "gh": gh,
+            }.items():
+                stack.enter_context(mock.patch.object(merge, name, stand_in))
+            with self.assertRaises(merge.Refused) as refused:
+                merge.merge(7, 1)
+        self.assertIn("a step waits on #22", str(refused.exception))
+        self.assertNotIn(("pr", "merge"), asked)
+
 
 if __name__ == "__main__":
     unittest.main()

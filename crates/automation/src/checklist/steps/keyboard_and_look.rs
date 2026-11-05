@@ -9,7 +9,11 @@ use super::{
     no_call_left,
 };
 use crate::checklist::results::unix_micros;
-use crate::checklist::sitting::{Sitting, Stop};
+use crate::checklist::sitting::{Sitting, Stop, seconds};
+use crate::checklist::watch::AppState;
+
+/// How long a Call the runner hung up may take to leave the app's state.
+const HANG_UP_DEADLINE: Duration = Duration::from_secs(2);
 
 /// 7.1: place a Call to the Test Number and end it with the keyboard alone:
 /// the keybinding opens the Dialer, Enter places the Call, the keybinding
@@ -43,19 +47,35 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
         return Err(Stop::TimedOut("your Call being placed".to_owned()));
     };
     let call = placed.id;
-    if placed.number != test_number {
-        let hung_up = sitting.hang_up(call);
-        sitting.check(
-            false,
-            format!(
-                "The Call went to a number that isn't the Test Number, so the runner {}.",
-                if hung_up.is_ok() {
-                    "hung it up at once"
-                } else {
-                    "tried to hang it up: end it on the Pixel now"
-                }
-            ),
-        );
+    if !placed.number.is(&test_number) {
+        // `HangUp` only queues the request: the Call leaving the app's
+        // state is what shows it ended.
+        let asked = sitting.hang_up(call).is_ok();
+        let ended = asked
+            && sitting
+                .happens_within("the wrong Call ending", HANG_UP_DEADLINE, |state| {
+                    state.call(call).is_none()
+                })?
+                .is_some();
+        if ended {
+            sitting.check(
+                false,
+                "The Call went to a number that isn't the Test Number, so the runner hung it up, and it ended."
+                    .to_owned(),
+            );
+        } else {
+            sitting.say(
+                "End this Call on the Pixel now: it went to a number that isn't the Test Number.",
+                &[],
+            );
+            sitting.check(
+                false,
+                format!(
+                    "The Call went to a number that isn't the Test Number, and it was still going {} after the runner tried to hang it up.",
+                    seconds(HANG_UP_DEADLINE)
+                ),
+            );
+        }
         return Ok(());
     }
     sitting.observed("The Call went to the Test Number.".to_owned());
@@ -73,15 +93,25 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
         "Once it rings or connects, press the keybinding again to bring up the Call Window, then Ctrl+H to hang up.",
         &["callee-answers", "keybinding", "ctrl-h"],
     )?;
-    // The keybinding must move the keyboard to the Call Window: focus it
-    // had all along proves nothing.
+    // The keybinding must move the keyboard to the Call Window while the
+    // Call goes on: focus it had from the moment it showed proves nothing,
+    // and neither does the ended Call's window taking it. The app publishes
+    // a Call before the surfaces that follow from it (#107), so the Call
+    // Window must be seen shown without the keyboard first.
+    let during = |state: &AppState| state.call(call).is_some() && state.shows("call-window");
+    let moved_focus = sitting.seen_in_order(
+        focus_mark,
+        |state| during(state) && !state.focused("call-window"),
+        |state| during(state) && state.focused("call-window"),
+    );
     sitting.check(
-        sitting.seen_in_order(
-            focus_mark,
-            |state| !state.focused("call-window"),
-            |state| state.focused("call-window"),
-        ),
-        "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned(),
+        moved_focus,
+        if moved_focus {
+            "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned()
+        } else {
+            "The Call Window never went from showing without the keyboard to having it while the Call went on."
+                .to_owned()
+        },
     );
     let keyboard_only =
         sitting.ask("Did you place and end the Call without touching the mouse?")?;

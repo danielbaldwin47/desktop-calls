@@ -23,6 +23,8 @@ pub struct LogLine {
     pub message: String,
     /// The Call the line is about, if any.
     pub call_id: Option<u64>,
+    /// The surface the line is about, if any, such as "dialer".
+    pub surface: Option<String>,
 }
 
 impl LogLine {
@@ -95,6 +97,7 @@ fn journal_line(text: &str) -> Option<LogLine> {
         event_kind: value["EVENT_KIND"].as_str().unwrap_or_default().to_owned(),
         message: value["MESSAGE"].as_str().unwrap_or_default().to_owned(),
         call_id: value["CALL_ID"].as_str().and_then(|id| id.parse().ok()),
+        surface: value["SURFACE"].as_str().map(str::to_owned),
     })
 }
 
@@ -112,5 +115,6 @@ fn file_line(text: &str) -> Option<LogLine> {
         event_kind: value["event_kind"].as_str().unwrap_or_default().to_owned(),
         message: value["message"].as_str().unwrap_or_default().to_owned(),
         call_id: value["call_id"].as_u64(),
+        surface: value["surface"].as_str().map(str::to_owned),
     })
 }

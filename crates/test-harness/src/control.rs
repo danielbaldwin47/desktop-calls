@@ -17,6 +17,11 @@ use super::app::{
 };
 use super::{APP_BUS_NAME, APP_INTERFACE, APP_PATH, DESKTOP_FILE, Harness, within};
 
+/// How long after a moment a `main-loop-stalled` event about it may come:
+/// the app's stall watch ticks every 20 ms and notices a held-up main loop
+/// on the first tick after it is free again.
+const STALL_REPORT: Duration = Duration::from_millis(200);
+
 impl Harness {
     /// Reads the app's state from its control interface.
     ///
@@ -124,7 +129,7 @@ impl Harness {
     ///
     /// If `deadline` passes first.
     pub fn wait_for_app_log(&self, needle: &str, deadline: Duration) -> String {
-        let log = self.directory.join("state/desktop-calls/desktop-calls.log");
+        let log = self.app_log_path();
         let started = std::time::Instant::now();
         loop {
             if let Some(line) = fs::read_to_string(&log)
@@ -148,8 +153,7 @@ impl Harness {
     /// has logged anything.
     #[must_use]
     pub fn app_log(&self) -> String {
-        fs::read_to_string(self.directory.join("state/desktop-calls/desktop-calls.log"))
-            .unwrap_or_default()
+        fs::read_to_string(self.app_log_path()).unwrap_or_default()
     }
 
     /// How long the app took, by its own log, from its first event matching
@@ -165,17 +169,10 @@ impl Harness {
     ///
     /// If `deadline` passes first, or a log line isn't JSON.
     pub fn app_took(&self, from: &AppEvent, to: &AppEvent, deadline: Duration) -> Duration {
-        let log = self.directory.join("state/desktop-calls/desktop-calls.log");
+        let log = self.app_log_path();
         let started = std::time::Instant::now();
         loop {
-            let events: Vec<serde_json::Value> = fs::read_to_string(&log)
-                .unwrap_or_default()
-                .lines()
-                .map(|line| {
-                    serde_json::from_str(line)
-                        .unwrap_or_else(|error| panic!("{line:?} isn't JSON: {error}"))
-                })
-                .collect();
+            let events = self.app_events();
             let first = events
                 .iter()
                 .find(|event| from.matches(event))
@@ -203,6 +200,73 @@ impl Harness {
             );
             thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// Waits until the app has done its first-frame work: drawn, offscreen
+    /// and while idle, each kind of thing the surfaces draw, so the first
+    /// Banner and the first Dialer draw as fast as later ones (ticket #47).
+    /// A person's first Call or Dialer comes long after the app started at
+    /// login; a scenario that times a first frame waits for this to be the
+    /// same.
+    ///
+    /// # Panics
+    ///
+    /// If the app doesn't log `first-frames-prepared` within `deadline`.
+    pub fn wait_for_first_frames_prepared(&self, deadline: Duration) {
+        let _ = self.wait_for_app_log(r#""event_kind":"first-frames-prepared""#, deadline);
+    }
+
+    /// How long, in milliseconds, each `main-loop-stalled` event the app
+    /// logged from its first event matching `from` to its first event
+    /// matching `to` at or after it says the main loop was held up. Waits up
+    /// to 5 s for both. A stall logged within 200 ms after `to`
+    /// counts too: the app notices a held-up loop only once it is free
+    /// again.
+    ///
+    /// # Panics
+    ///
+    /// If the app doesn't log both within 5 s.
+    pub fn app_stalls_between(&self, from: &AppEvent, to: &AppEvent) -> Vec<u64> {
+        let _ = self.app_took(from, to, Duration::from_secs(5));
+        thread::sleep(STALL_REPORT);
+        let events = self.app_events();
+        let Some(first) = events
+            .iter()
+            .find(|event| from.matches(event))
+            .and_then(timestamp_us)
+        else {
+            return Vec::new();
+        };
+        let Some(last) = events
+            .iter()
+            .filter_map(|event| Some((event, timestamp_us(event)?)))
+            .find(|(event, at)| *at >= first && to.matches(event))
+            .map(|(_, at)| at)
+        else {
+            return Vec::new();
+        };
+        let until = last + u64::try_from(STALL_REPORT.as_micros()).unwrap_or(u64::MAX);
+        events
+            .iter()
+            .filter(|event| AppEvent::kind("main-loop-stalled").matches(event))
+            .filter(|event| timestamp_us(event).is_some_and(|at| (first..=until).contains(&at)))
+            .filter_map(|event| event["stalled_ms"].as_u64())
+            .collect()
+    }
+
+    fn app_log_path(&self) -> std::path::PathBuf {
+        self.directory.join("state/desktop-calls/desktop-calls.log")
+    }
+
+    /// Every event in the app's log so far.
+    fn app_events(&self) -> Vec<serde_json::Value> {
+        self.app_log()
+            .lines()
+            .map(|line| {
+                serde_json::from_str(line)
+                    .unwrap_or_else(|error| panic!("{line:?} isn't JSON: {error}"))
+            })
+            .collect()
     }
 
     /// Checks the app took no longer than `target` from `from` to `to`, by

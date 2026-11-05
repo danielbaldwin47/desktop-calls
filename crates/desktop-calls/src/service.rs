@@ -11,7 +11,9 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use desktop_calls_core::{AudioLocation, DialProgress, Effect, Input, State, messages, step};
+use desktop_calls_core::{
+    AudioLocation, ConnectionState, DialProgress, Effect, Input, State, messages, step,
+};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::select;
@@ -384,6 +386,11 @@ async fn decide(
             audio_moved(to);
         }
         if let Some(surfaces) = &shell.surfaces {
+            surfaces.prepare_first_frames(
+                *next.connection_state() == ConnectionState::Connected
+                    && next.calls().is_empty()
+                    && shown == desktop_calls_core::Surfaces::default(),
+            );
             surfaces.render(&shown);
         }
         if let Some(indicator) = &shell.indicator

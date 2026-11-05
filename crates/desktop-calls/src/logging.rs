@@ -115,6 +115,9 @@ pub enum EventKind {
     EarlierRunLoaded,
     EarlierRunFailed,
     MainLoopStalled,
+    FirstFramesPrepared,
+    FirstFramesUnprepared,
+    FirstFramesAbandoned,
 }
 
 impl EventKind {
@@ -188,6 +191,9 @@ impl EventKind {
             Self::EarlierRunLoaded => "earlier-run-loaded",
             Self::EarlierRunFailed => "earlier-run-failed",
             Self::MainLoopStalled => "main-loop-stalled",
+            Self::FirstFramesPrepared => "first-frames-prepared",
+            Self::FirstFramesUnprepared => "first-frames-unprepared",
+            Self::FirstFramesAbandoned => "first-frames-abandoned",
         }
     }
 }

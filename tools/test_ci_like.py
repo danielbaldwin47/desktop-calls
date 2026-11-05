@@ -125,6 +125,7 @@ def run_confined(arguments: list[str], temporary: pathlib.Path, unit: str) -> in
         os.environ,
         TMPDIR=str(temporary),
         RUST_TEST_THREADS=TEST_THREADS,
+        DESKTOP_CALLS_CI_LIKE="1",
         SHM_SIZE=SHM_SIZE,
         OUTER_UID=str(os.getuid()),
         OUTER_GID=str(os.getgid()),

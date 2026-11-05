@@ -5,7 +5,8 @@
 use std::time::Duration;
 
 use test_harness::{
-    AppState, BAR_COLOUR, BAR_HEIGHT, Builder, Harness, Key, LAYOUT_SIZE, Region, Screenshot,
+    AppEvent, AppState, BAR_COLOUR, BAR_HEIGHT, Builder, Harness, Key, LAYOUT_SIZE, Region,
+    Screenshot,
 };
 
 /// How long the app may take to notice a change on the Phone.
@@ -22,6 +23,8 @@ const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
 /// stretches it even when the app is fast (ticket #83); the targets are
 /// asserted on the app's log instead.
 const ROUND_TRIP: Duration = Duration::from_secs(3);
+/// How long the app may take to do its first-frame work after it starts.
+const FIRST_FRAMES_DEADLINE: Duration = Duration::from_secs(15);
 
 const NUMBER: &str = "+447700900123";
 const FORMATTED: &str = "+44 7700 900123";
@@ -159,10 +162,13 @@ fn call_window(state: &AppState) -> Option<&std::collections::BTreeMap<String, S
 #[test]
 fn nothing_is_on_screen_while_nothing_rings() {
     let harness = connected_on_screen();
+    // Including while the app prepares the surfaces' first frames.
+    harness.wait_for_first_frames_prepared(FIRST_FRAMES_DEADLINE);
 
     let state = harness.app_state();
 
     assert!(state.surfaces.is_empty(), "{:?}", state.surfaces);
+    assert_eq!(harness.surfaces_seen(), Vec::new());
     let screenshot = harness.screenshot("idle");
     assert_eq!(
         app_region(&screenshot),
@@ -183,6 +189,36 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
     assert_eq!(banner.get("caller").map(String::as_str), Some(FORMATTED));
     assert!(state.ringing);
     assert_eq!(call_window(&state), None);
+}
+
+/// A timing judged one scenario at a time, as on the Desktop, which runs one
+/// app (issue #47). CI runs it alone, after the whole run. With four
+/// scenarios at once on one CPU quota, as in a
+/// whole run, the Banner window's own first paint held the main loop up for
+/// 175 ms in 2 of 4 runs; one scenario at a time under `just test-ci-like`,
+/// the whole first frame took 63 to 64 ms in 5 of 5.
+#[test]
+#[ignore = "one scenario at a time: just test-ci-like -p test-harness --test incoming_call_surfaces -- --ignored the_first_banner"]
+fn the_first_banner_shows_without_holding_up_the_main_loop() {
+    let harness = connected_on_screen();
+    // As for a person's first Call, which comes long after login.
+    harness.wait_for_first_frames_prepared(FIRST_FRAMES_DEADLINE);
+
+    let (_, call) = ring_until_banner(&harness);
+
+    let (appeared, shown) = (
+        AppEvent::kind("call-added").with("call_id", call),
+        AppEvent::kind("surface-shown").with("surface", "banner"),
+    );
+    let stalls = harness.app_stalls_between(&appeared, &shown);
+    eprintln!(
+        "first Banner drawn {:?} after the Call appeared; main loop held up for {stalls:?} ms",
+        harness.app_took(&appeared, &shown, DEADLINE)
+    );
+    assert!(
+        stalls.is_empty(),
+        "the main loop was held up for {stalls:?} ms while the first Banner appeared"
+    );
 }
 
 #[test]

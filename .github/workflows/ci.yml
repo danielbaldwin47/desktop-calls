@@ -175,6 +175,15 @@ jobs:
           --exclude desktop-calls --exclude desktop-calls-core
           --exclude simulated-phone --exclude automation
 
+      # First-frame timings, judged one scenario at a time as on the Desktop,
+      # which runs one app (issue #47). In the whole run above, every
+      # scenario's app at once slows each first paint past its target.
+      - name: just test, first-frame timings one scenario at a time
+        run: >-
+          cargo test -p test-harness --locked
+          --test dialer_surface --test incoming_call_surfaces
+          -- --ignored --test-threads=1
+
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots
         if: always()

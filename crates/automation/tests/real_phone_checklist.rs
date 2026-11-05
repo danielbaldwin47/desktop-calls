@@ -415,4 +415,18 @@ fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
     ] {
         assert!(evidence.contains(seen), "{seen}: {indicator:#}");
     }
+
+    // Step 7.4 times the Dialer by the app's log; whether it meets 150 ms is
+    // judged on the user's Desktop, not in this demo.
+    let dialer = step(&result, "7.4");
+    assert!(
+        dialer["measurements"]["dialer_first_frame_ms"].is_u64(),
+        "{dialer:#}"
+    );
+    assert!(
+        dialer["evidence"]
+            .to_string()
+            .contains("drew its first frame"),
+        "{dialer:#}"
+    );
 }

@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 /// The Dialer.
 pub(super) struct Dialer {
-    surface: Surface,
+    pub(super) surface: Surface,
     entry: gtk::Entry,
     list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,

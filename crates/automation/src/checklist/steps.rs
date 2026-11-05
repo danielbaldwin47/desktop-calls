@@ -21,7 +21,7 @@ use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
     do_not_disturb, keybinding,
 };
-use keyboard_and_look::{banner_beside_a_notification, indicator_in_the_bar};
+use keyboard_and_look::{banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar};
 use missed_calls::{ring_out, withheld_ring_out};
 
 /// A step's script. It returns once the step is done; whether it passed is
@@ -47,6 +47,11 @@ pub struct Step {
 /// The polish scorecard's targets (`docs/wiki/polish-scorecard.md`).
 const BANNER_TARGET: Duration = Duration::from_secs(1);
 const AUDIO_TARGET: Duration = Duration::from_millis(1_500);
+/// The Dialer's first frame after the keybinding: spec story 100, judged on
+/// the user's Desktop (ticket #47).
+const DIALER_TARGET: Duration = Duration::from_millis(150);
+/// How long the app may take to log what it has just shown.
+const LOG_DEADLINE: Duration = Duration::from_secs(2);
 
 /// How long the helper may take to call.
 const CALL_DEADLINE: Duration = Duration::from_secs(180);
@@ -287,6 +292,12 @@ pub const GROUPS: &[Group] = &[
                 id: "7.3",
                 title: "The Indicator in Omarchy's bar: pinned, it opens the Dialer and its menu runs a Call",
                 script: Some(indicator_in_the_bar),
+                lands_with: &[],
+            },
+            Step {
+                id: "7.4",
+                title: "The Dialer draws its first frame within 150 ms of the keybinding",
+                script: Some(dialer_first_frame),
                 lands_with: &[],
             },
         ],

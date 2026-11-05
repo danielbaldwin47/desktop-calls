@@ -50,10 +50,12 @@ use crate::theme::Theme;
 mod banner;
 mod call_window;
 mod dialer;
+mod first_frames;
 
 use banner::Banner;
 use call_window::CallWindow;
 use dialer::Dialer;
+use first_frames::FirstFrames;
 
 /// How wide Omarchy's notification-toast column is taken to be when
 /// Hyprland can't say. Omarchy 4.5's is 394.
@@ -109,6 +111,7 @@ pub struct Surfaces {
     banner: Banner,
     call_window: Rc<CallWindow>,
     dialer: Rc<Dialer>,
+    first_frames: FirstFrames,
     _theme: Option<Theme>,
 }
 
@@ -152,14 +155,24 @@ impl Surfaces {
             shown: ShownSurfaces::new(),
             reports,
         }));
+        let dialer = Dialer::new(intents, report.clone());
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
-            call_window: CallWindow::new(intents, report.clone()),
-            dialer: Dialer::new(intents, report),
+            call_window: CallWindow::new(intents, report),
+            first_frames: FirstFrames::new(dialer.surface.window.clone()),
+            dialer,
             _theme: theme,
         };
         surfaces.place_beside_toasts();
         surfaces
+    }
+
+    /// Does the surfaces' first-frame work once the app is `quiet` (the
+    /// Phone Connected, no Call, nothing shown), and abandons it for good
+    /// the moment it is not. Called before `render`, so nothing shows while
+    /// a piece of it is still to run.
+    pub fn prepare_first_frames(&self, quiet: bool) {
+        self.first_frames.while_quiet(quiet);
     }
 
     /// Shows, updates or hides each surface to match `view`.

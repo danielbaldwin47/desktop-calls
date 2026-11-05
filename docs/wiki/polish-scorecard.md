@@ -16,3 +16,9 @@ Agreed with the user on 2026-11-04 (grilling round 2) as the definition of "poli
 8. A screenshot-review agent finds no visual defects.
 
 - 2026-11-05 (#83): the Dialer's first frame measured 306 to 319 ms after `Activate`, cold, on the Desktop, and misses the 150 ms target (spec story 100, issue #11). The tests hold only GTK's map to 150 ms. Tracked in #47. Each keystroke is held to 50 ms up to the frame that shows its rows.
+- 2026-11-05 (#47): the app now does the first-frame work while idle, once the Phone is Connected. The Dialer's drawn first frame after `Activate`, warm, is held to:
+  - 150 ms locally and under `just test-ci-like`, one scenario at a time. Measured 97 to 102 ms there.
+  - 250 ms in CI, run alone. CI's runner paints in software and took 150.4 ms even alone. 250 ms still catches shaders compiling cold, which took 306 ms and more.
+  - 150 ms on the user's Desktop, which is where the target is judged: Real-Phone Checklist step 7.4 reads the app-logged time.
+
+  The cold first open, without that work, measured 306 to 319 ms on the Desktop and 186 to 320 ms under `just test-ci-like`. See [first frames](../research/2026-11-05-first-frames.md).

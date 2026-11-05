@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use super::incoming::audio_reaches_the_desktop;
 use super::{
-    ACT_DEADLINE, STAYS_ON_PHONE, call_ends, handled_on_desktop, helper_calls, logged_since,
-    stopped_ringing, unix_micros_at,
+    ACT_DEADLINE, LOG_DEADLINE, STAYS_ON_PHONE, call_ends, handled_on_desktop, helper_calls,
+    logged_since, stopped_ringing,
 };
 use crate::checklist::results::unix_micros;
 use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
@@ -40,7 +40,8 @@ fn answered_here(sitting: &mut Sitting) -> Result<Option<(u32, Seen)>, Stop> {
 
 /// Asks the user to move the Call's audio to `location`, waits for the
 /// app to ask the Phone, then for the audio to arrive, and records how
-/// long the Handoff took. Returns whether the audio got there.
+/// long the Handoff took by the app's log, from `handoff-requested` to
+/// `audio-moved` (#80, #83, #99). Returns whether the audio got there.
 fn audio_moves(
     sitting: &mut Sitting,
     call: u32,
@@ -52,12 +53,15 @@ fn audio_moves(
     sitting.say(request, &[demo_action]);
     let requested = logged_since(
         sitting,
-        "handoff-requested",
         from_us,
         ACT_DEADLINE,
+        |line| {
+            line.event_kind == "handoff-requested"
+                && line.audio_location.as_deref() == Some(location)
+        },
         |state| state.call(call).is_none(),
     )?;
-    let Some(requested_us) = requested else {
+    let Some(requested) = requested else {
         sitting.check(
             false,
             "The app never logged a Handoff request (handoff-requested).".to_owned(),
@@ -74,11 +78,30 @@ fn audio_moves(
     };
     match moved {
         Some(moved) if moved.state.audio_location == location => {
-            let took = Duration::from_micros(unix_micros_at(moved.at).saturating_sub(requested_us));
-            sitting.observed(format!(
-                "The audio moved to the {place} {} after the Handoff was asked for.",
-                seconds(took)
-            ));
+            let arrived = logged_since(
+                sitting,
+                requested.at_us,
+                LOG_DEADLINE,
+                |line| {
+                    line.event_kind == "audio-moved"
+                        && line.audio_location.as_deref() == Some(location)
+                },
+                |_| false,
+            )?;
+            match arrived {
+                Some(arrived) => sitting.observed(format!(
+                    "The audio moved to the {place} {} after the Handoff was asked for, by the app's log.",
+                    seconds(Duration::from_micros(
+                        arrived.at_us.saturating_sub(requested.at_us)
+                    ))
+                )),
+                None => sitting.check(
+                    false,
+                    format!(
+                        "The audio moved to the {place}, but the app logged no audio-moved line, so the Handoff couldn't be timed."
+                    ),
+                ),
+            }
             // A Handoff to the Phone bounces hands-free (ADR-0005): the
             // Call Window offers the way back only once it has returned.
             let back = if location == "phone" {

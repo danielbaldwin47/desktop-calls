@@ -13,9 +13,18 @@ use crate::checklist::sitting::{Sitting, Stop};
 
 /// 7.1: place a Call to the Test Number and end it with the keyboard alone:
 /// the keybinding opens the Dialer, Enter places the Call, the keybinding
-/// focuses the Call Window and Ctrl+H hangs up.
+/// focuses the Call Window and Ctrl+H hangs up. A Call to any other number,
+/// a digit mistyped, is hung up at once: it would ring a stranger.
 pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
+    let Some(test_number) = sitting.test_number() else {
+        sitting.check(
+            false,
+            "No Test Number is set up in ~/.config/desktop-calls/test-number, so the runner won't have you place a Call."
+                .to_owned(),
+        );
+        return Ok(());
+    };
     let mark = sitting.mark();
     sitting.say(
         "From here on, use only the keyboard. Press your Desktop Calls keybinding, type the Test Number, and press Enter.",
@@ -24,15 +33,32 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     let placed = sitting.wait_for("your Call being placed", CALL_DEADLINE, |state| {
         state.calls.iter().any(|call| call.direction == "outgoing")
     })?;
-    let Some(call) = placed
+    let Some(placed) = placed
         .state
         .calls
         .iter()
         .find(|call| call.direction == "outgoing")
-        .map(|call| call.id)
+        .cloned()
     else {
         return Err(Stop::TimedOut("your Call being placed".to_owned()));
     };
+    let call = placed.id;
+    if placed.number != test_number {
+        let hung_up = sitting.hang_up(call);
+        sitting.check(
+            false,
+            format!(
+                "The Call went to a number that isn't the Test Number, so the runner {}.",
+                if hung_up.is_ok() {
+                    "hung it up at once"
+                } else {
+                    "tried to hang it up: end it on the Pixel now"
+                }
+            ),
+        );
+        return Ok(());
+    }
+    sitting.observed("The Call went to the Test Number.".to_owned());
     sitting.check(
         sitting
             .seen_since(mark, |state| state.focused("dialer"))
@@ -47,10 +73,14 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
         "Once it rings or connects, press the keybinding again to bring up the Call Window, then Ctrl+H to hang up.",
         &["callee-answers", "keybinding", "ctrl-h"],
     )?;
+    // The keybinding must move the keyboard to the Call Window: focus it
+    // had all along proves nothing.
     sitting.check(
-        sitting
-            .seen_since(focus_mark, |state| state.focused("call-window"))
-            .is_some(),
+        sitting.seen_in_order(
+            focus_mark,
+            |state| !state.focused("call-window"),
+            |state| state.focused("call-window"),
+        ),
         "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned(),
     );
     let keyboard_only =

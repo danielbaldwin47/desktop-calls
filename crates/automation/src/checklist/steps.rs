@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use super::app_log::LogLine;
 use super::sitting::{Seen, Sitting, Stop, seconds};
 use super::watch::AppState;
 
@@ -50,6 +51,12 @@ pub struct Step {
     /// The tickets whose features the step waits on, while it has no script.
     pub lands_with: &'static [u32],
 }
+
+/// Steps without a script of their own that run only together with
+/// another step, as (step, the step it runs with). 1.1 leaves the Phone
+/// unpaired, so it is runnable only with 1.2, which pairs it again.
+/// `tools/checklist_tickets.py` reads this table.
+pub const RUNS_WITH: &[(&str, &str)] = &[("1.1", "1.2")];
 
 /// The polish scorecard's targets (`docs/wiki/polish-scorecard.md`).
 const BANNER_TARGET: Duration = Duration::from_secs(1);
@@ -95,8 +102,9 @@ pub const GROUPS: &[Group] = &[
                 needs: &[],
                 title: "Forget the pairing on both the Pixel and the Desktop, then install and start Desktop Calls",
                 script: None,
-                // It leaves the Phone unpaired, so it runs only with 1.2.
-                lands_with: &[22],
+                // It leaves the Phone unpaired, so it runs only with 1.2:
+                // see RUNS_WITH.
+                lands_with: &[],
             },
             Step {
                 id: "1.2",
@@ -423,28 +431,34 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
 /// How often the runner reads the app's log while it waits on a line.
 const LOG_POLL: Duration = Duration::from_millis(200);
 
-/// Waits up to `deadline` for the app to log `event_kind` after `from_us`,
-/// still reading skip and quit meanwhile, and returns when it was logged.
-/// `give_up` ends the wait early, for example when the Call has ended.
+/// Waits until the app logs a line after `from_us` that `wanted` accepts,
+/// still reading skip and quit, and returns the first such line. `None` if
+/// `deadline` passes, or `give_up` holds for the app's state, first. The
+/// timeline's cursor stays put, so the step's next wait still sees every
+/// state published meanwhile.
 fn logged_since(
     sitting: &mut Sitting,
-    event_kind: &str,
     from_us: u64,
     deadline: Duration,
+    wanted: impl Fn(&LogLine) -> bool,
     give_up: impl Fn(&AppState) -> bool,
-) -> Result<Option<u64>, Stop> {
+) -> Result<Option<LogLine>, Stop> {
     let end = Instant::now() + deadline;
     loop {
-        let logged = sitting
-            .log_since(from_us)
-            .iter()
-            .rfind(|line| line.event_kind == event_kind)
-            .map(|line| line.at_us);
+        let logged = sitting.log_since(from_us).into_iter().find(&wanted);
         if logged.is_some() || Instant::now() >= end || give_up(&sitting.now()) {
             return Ok(logged);
         }
-        // A wait that never matches: it reads what the user types meanwhile.
-        sitting.happens_within("nothing", LOG_POLL, |_| false)?;
+        sitting.pause(LOG_POLL)?;
+    }
+}
+
+/// A line logging the Phone's connection state changing to one `wanted`
+/// accepts.
+fn connection_logged(wanted: impl Fn(&str) -> bool) -> impl Fn(&LogLine) -> bool {
+    move |line| {
+        line.event_kind == "connection-state-changed"
+            && line.connection_state.as_deref().is_some_and(&wanted)
     }
 }
 

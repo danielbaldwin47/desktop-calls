@@ -138,6 +138,7 @@ uninstall:
 [private]
 [no-exit-message]
 _checklist-waits-on-open-tickets:
+    @python3 tools/test_checklist_tickets.py --quiet
     @python3 tools/checklist_tickets.py
 
 # The core does no I/O and knows no GTK, D-Bus or logging, so none of those

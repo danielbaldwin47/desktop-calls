@@ -69,10 +69,20 @@ pub struct AppCall {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fingerprint(u64);
 
+/// How many of a number's last digits its fingerprint keeps: enough to
+/// tell numbers apart, few enough that `07700 900999` and
+/// `+44 7700 900999`, the same number written two ways, match.
+const SIGNIFICANT_DIGITS: usize = 9;
+
 impl Fingerprint {
-    fn of(number: &str) -> Self {
+    pub fn of(number: &str) -> Self {
+        let digits: Vec<char> = number.chars().filter(char::is_ascii_digit).collect();
         let mut hasher = DefaultHasher::new();
-        number.hash(&mut hasher);
+        if digits.is_empty() {
+            number.hash(&mut hasher);
+        } else {
+            digits[digits.len().saturating_sub(SIGNIFICANT_DIGITS)..].hash(&mut hasher);
+        }
         Self(hasher.finish())
     }
 }

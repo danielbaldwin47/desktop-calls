@@ -40,6 +40,9 @@ struct Runner {
     transcript: Vec<String>,
     /// The step at whose start the user types `quit`, if any.
     quit_at: Option<&'static str>,
+    /// A demo action the user does instead of one the runner suggests, as
+    /// (suggested, done instead): a slip, such as a mistyped number.
+    instead: Option<(&'static str, &'static str)>,
 }
 
 impl Runner {
@@ -72,6 +75,7 @@ impl Runner {
             printed,
             transcript: Vec::new(),
             quit_at: None,
+            instead: None,
         }
     }
 
@@ -100,6 +104,10 @@ impl Runner {
             {
                 self.type_line("quit");
             } else if let Some(action) = line.trim_start().strip_prefix("demo> ") {
+                let action = match self.instead {
+                    Some((suggested, done)) if suggested == action => done,
+                    _ => action,
+                };
                 self.type_line(action);
             } else if line.starts_with("Press Enter") {
                 self.type_line("");
@@ -390,6 +398,14 @@ fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_hon
     for id in ["1.1", "1.2", "1.3"] {
         assert_eq!(step(&result, id)["result"], "skipped", "{result:#}");
     }
+    // 1.1 doesn't use #22's feature: it waits only on 1.2, which does.
+    assert!(
+        says(
+            step(&result, "1.1"),
+            "runs together with 1.2, which lands with #22"
+        ),
+        "{result:#}"
+    );
 }
 
 #[test]
@@ -527,9 +543,10 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_rest
         assert!(
             record["measurements"][measurement]
                 .as_u64()
-                .is_some_and(|ms| ms <= 10_000),
+                .is_some_and(|ms| ms > 0 && ms <= 10_000),
             "{record:#}"
         );
+        assert!(says(record, "by the app's log"), "{record:#}");
     }
     assert!(
         says(step(&result, "6.2"), "saw the Desktop suspend and resume"),
@@ -661,4 +678,32 @@ fn with_no_home_the_results_have_nowhere_to_go_so_it_says_why_and_writes_nothing
         .expect("read the directory")
         .collect();
     assert!(written.is_empty(), "{written:?}");
+
+#[test]
+fn step_7_1_hangs_up_at_once_a_call_to_a_number_that_isnt_the_test_number() {
+    // A digit mistyped would ring a stranger: the runner ends that Call
+    // itself, fails the step, and never prints either number.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    runner.instead = Some(("type-test-number", "type-wrong-number"));
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(
+        says(
+            keyboard,
+            "isn't the Test Number, so the runner hung it up at once"
+        ),
+        "{keyboard:#}"
+    );
+    assert!(
+        !says(keyboard, "keyboard alone"),
+        "it went on after the wrong Call: {keyboard:#}"
+    );
+    let transcript = runner.transcript.join("\n");
+    for number in ["900999", "900998"] {
+        assert!(!transcript.contains(number), "{transcript}");
+    }
 }

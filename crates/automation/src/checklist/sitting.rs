@@ -23,7 +23,7 @@ use zbus::Connection;
 use zbus::Variant;
 
 use super::app_log::{AppLog, LogLine};
-use super::watch::{AppState, Timeline};
+use super::watch::{AppState, Fingerprint, Timeline};
 
 /// What reaches the sitting: a change on the control interface, or a line
 /// the user typed.
@@ -209,6 +209,74 @@ impl Sitting {
             Err(Stop::TimedOut(_)) => Ok(None),
             Err(stop) => Err(stop),
         }
+    }
+
+    /// Lets `window` pass while still reading what the user types, without
+    /// moving where the next wait starts: for polling something outside the
+    /// timeline, such as the app's log.
+    pub fn pause(&mut self, window: Duration) -> Result<(), Stop> {
+        let end = Instant::now() + window;
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(());
+            }
+            match self.next_event(left.min(TICK))? {
+                Some(Event::Line(line)) => self.handle_line(&line)?,
+                Some(Event::Closed) => return Err(Stop::Quit),
+                Some(Event::Changed) | None => {}
+            }
+        }
+    }
+
+    /// Whether, since `mark`, the app published a state satisfying `first`
+    /// and then, after it, one satisfying `then`: a change, not a state
+    /// that held all along.
+    pub fn seen_in_order(
+        &self,
+        mark: usize,
+        first: impl Fn(&AppState) -> bool,
+        then: impl Fn(&AppState) -> bool,
+    ) -> bool {
+        let timeline = self
+            .timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut states = timeline.iter().skip(mark).map(|(_, state)| state);
+        states.any(first) && states.any(then)
+    }
+
+    /// Asks the app to hang up `call`, as the Call Window's Hang up does.
+    pub fn hang_up(&self, call: u32) -> zbus::Result<()> {
+        zbus::block_on(self.bus.call_method(
+            Some(super::watch::BUS_NAME),
+            super::watch::PATH,
+            Some(super::watch::INTERFACE),
+            "HangUp",
+            &(call,),
+        ))
+        .map(drop)
+    }
+
+    /// The Test Number's fingerprint, from
+    /// `~/.config/desktop-calls/test-number`, or `None` if it isn't set up.
+    /// The number itself is never kept or printed.
+    pub fn test_number(&self) -> Option<Fingerprint> {
+        if self.demo.is_some() {
+            return Some(Fingerprint::of(DEMO_TEST_NUMBER));
+        }
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|config| config.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .filter(|home| home.is_absolute())
+                    .map(|home| home.join(".config"))
+            })?;
+        let number = fs::read_to_string(config.join("desktop-calls/test-number")).ok()?;
+        let number = number.trim();
+        (!number.is_empty()).then(|| Fingerprint::of(number))
     }
 
     /// Asks a yes-or-no question only the user can answer, and returns the
@@ -405,9 +473,11 @@ impl Sitting {
 ///   `click-notification`, `enter`;
 /// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
 ///   Omarchy's bell records it; `suspend`, `resume`, as logind announces
-///   them; `restart-wireplumber`, as Telephony leaves and returns;
+///   them, with the Phone leaving on suspend and returning after resume as
+///   the Pixel does; `restart-wireplumber`, as Telephony leaves and returns;
 /// - the user's keyboard and Call Window, beyond the above:
-///   `type-test-number`, `ctrl-h`, `move-audio-to-phone`, `move-audio-here`;
+///   `type-test-number`, `type-wrong-number` (one digit off, as a slip
+///   would be), `ctrl-h`, `move-audio-to-phone`, `move-audio-here`;
 /// - the Phone and its surroundings: `callee-answers` (the Test Number
 ///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
@@ -433,6 +503,9 @@ const DEMO_NUMBER: &str = "+447700900461";
 /// The demo's Test Number, for the PBAP probe to redact: another Ofcom
 /// drama number.
 const DEMO_TEST_NUMBER: &str = "+447700900999";
+
+/// The demo's Test Number with its last digit slipped.
+const DEMO_WRONG_NUMBER: &str = "+447700900998";
 
 /// How long Telephony is off the bus when the demo restarts `WirePlumber`.
 const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
@@ -581,13 +654,22 @@ impl Demo {
             "do-not-disturb-on" => self.harness.set_do_not_disturb(true),
             "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
             "type-test-number" => self.harness.keyboard().type_text(DEMO_TEST_NUMBER),
+            "type-wrong-number" => self.harness.keyboard().type_text(DEMO_WRONG_NUMBER),
             "ctrl-h" => self.harness.keyboard().press_with_control('h'),
             "callee-answers" => self.harness.simulated_phone().callee_answers(),
             "earbuds-on" => self.harness.simulated_phone().set_earbuds(true),
             "out-of-range" => self.harness.simulated_phone().disconnect(),
             "return-to-range" => self.harness.simulated_phone().return_to_range(),
-            "suspend" => self.harness.simulated_phone().prepare_for_sleep(true),
-            "resume" => self.harness.simulated_phone().prepare_for_sleep(false),
+            // The Desktop's Bluetooth sleeps with it, so the Phone leaves,
+            // and comes back only once the Desktop is awake.
+            "suspend" => {
+                self.harness.simulated_phone().prepare_for_sleep(true);
+                self.harness.simulated_phone().disconnect();
+            }
+            "resume" => {
+                self.harness.simulated_phone().prepare_for_sleep(false);
+                self.harness.simulated_phone().return_to_range();
+            }
             "restart-wireplumber" => self
                 .harness
                 .simulated_phone()
@@ -651,7 +733,7 @@ impl Demo {
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
                      click-notification, enter, phone-dials, indicator-click, indicator-mute, \
-                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, \
+                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-wrong-number, \
                      ctrl-h, callee-answers, earbuds-on, out-of-range, return-to-range, suspend, \
                      resume, restart-wireplumber, move-audio-to-phone, move-audio-here, \
                      quirk NAME; or skip, or quit."

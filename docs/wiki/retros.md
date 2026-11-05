@@ -18,3 +18,11 @@ Retros on subagent sessions, with what was pursued. Per chief-of-staff practice,
   - #42's remaining criterion replaced by a deterministic capture test.
 
   Not pursued: none.
+
+## 2026-11-05, #43 implementer (diagnosable CI)
+
+- 221 tool calls in about 73 minutes; shipped #73, #74 and #77 (#75 was superseded). Source: the session transcript, analysed by a retro subagent.
+- Local full-suite runs cost about 15 minutes, all repeated by CI. Applied: the brief's Finishing step 1 now runs `just check` plus the touched test files, and tickets say "CI passes" (practice page).
+- The brief named two CI watchers (`just ci-wait` and `gh run watch`), and the agent ran both at once: 12 waits cut off, 8 TaskStops. Applied: Finishing step 5 names only `just ci-wait`.
+- Reading `crates/test-harness/src/lib.rs` (2,442 lines as of `5f24008`) whole took 88k of the 276k characters before the context was compacted. Filed as a ticket: split it, and add a file-length check.
+

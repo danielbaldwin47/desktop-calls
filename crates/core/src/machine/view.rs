@@ -82,6 +82,10 @@ pub struct CallWindowView {
     /// up aren't offered, as the Phone would answer or decline the Waiting
     /// Call instead (`AT+CHLD`).
     pub waiting_first: bool,
+    /// The Desktop has lost contact with the Calls shown, which carry on on
+    /// the Phone: nothing in the window acts on them, and Hang up says to
+    /// hang up on the Phone.
+    pub connection_lost: bool,
 }
 
 /// What the Banner offers for a Waiting Call, besides Decline.
@@ -180,7 +184,8 @@ impl State {
     /// the Phone, while it says so: the Call as it was, with nothing to do
     /// to it from here.
     fn lost_call_window(&self) -> Option<CallWindowView> {
-        let lost = &self.connection_lost.as_ref()?.call;
+        let connection_lost = self.connection_lost.as_ref()?;
+        let lost = &connection_lost.call;
         Some(CallWindowView {
             call: Some(lost.id),
             caller: lost.caller.clone(),
@@ -189,8 +194,13 @@ impl State {
             audio: None,
             notice: Some(Failure::ConnectionLost),
             focused: self.focus == Focus::CallWindow,
-            held: None,
+            held: connection_lost.held.as_ref().map(|held| HeldCall {
+                call: held.id,
+                caller: held.caller.clone(),
+                contact: self.contact(&held.caller),
+            }),
             waiting_first: false,
+            connection_lost: true,
         })
     }
 
@@ -214,7 +224,7 @@ impl State {
         let banner = self
             .calls
             .iter()
-            .filter(|_| !self.presence.absent())
+            .filter(|_| !self.calls_out_of_reach())
             .find(|call| call.rings_here())
             .map(|call| BannerView {
                 call: call.id,
@@ -253,6 +263,7 @@ impl State {
                     focused: self.focus == Focus::CallWindow,
                     held: None,
                     waiting_first: false,
+                    connection_lost: false,
                 })
             })
             .or_else(|| {
@@ -266,6 +277,7 @@ impl State {
                     focused: self.focus == Focus::CallWindow,
                     held: None,
                     waiting_first: false,
+                    connection_lost: false,
                 })
             })
             .or_else(|| {
@@ -281,6 +293,7 @@ impl State {
                     focused: self.focus == Focus::CallWindow,
                     held: None,
                     waiting_first: false,
+                    connection_lost: false,
                 })
             })
             .or_else(|| {
@@ -294,6 +307,7 @@ impl State {
                     focused: self.focus == Focus::CallWindow,
                     held: None,
                     waiting_first: false,
+                    connection_lost: false,
                 })
             });
         Surfaces {
@@ -328,12 +342,13 @@ impl State {
                 contact: self.contact(&held.caller),
             }),
             waiting_first: self.has_waiting_call() && self.has_held_call(),
+            connection_lost: false,
         })
     }
 
     /// The Calls the Call Window shows: the live one, or failing that the
     /// first it has, and the other Call on hold, if there is one.
-    fn call_window_calls(&self) -> Option<(&Call, Option<&Call>)> {
+    pub(super) fn call_window_calls(&self) -> Option<(&Call, Option<&Call>)> {
         let shown: Vec<&Call> = self
             .calls
             .iter()

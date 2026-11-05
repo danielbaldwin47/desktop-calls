@@ -48,10 +48,19 @@ pub enum IndicatorStatus {
     NotConnected(Phone),
     Connected(Phone),
     OutOfRange(Phone),
+    /// In range, and hands-free didn't come back after a Handoff to the
+    /// Phone: the Desktop is connecting it again.
+    ConnectionLost(Phone),
     /// A Call rings here from this caller, as the Banner says it.
     Ringing(RingingCaller),
     /// A Call with this other party is live or being placed.
     InCall {
+        caller: Caller,
+        contact: Option<ContactMatch>,
+    },
+    /// The Desktop lost contact with the Call with this other party, which
+    /// carries on on the Phone, as the Call Window says.
+    CallOnPhone {
         caller: Caller,
         contact: Option<ContactMatch>,
     },
@@ -69,6 +78,9 @@ pub enum IndicatorEntry {
     Separator,
     /// Hangs up the Call in the Call Window, or stops placing it (`None`).
     HangUp(Option<CallId>),
+    /// Says where to hang up the Call the Desktop lost contact with: on the
+    /// Phone. Disabled, as the Call Window's Hang up is.
+    HangUpOnPhone,
     /// Mutes or unmutes the microphone, ticked while muted; unavailable while
     /// the audio is on the Phone.
     Mute(Mute),
@@ -101,6 +113,7 @@ impl IndicatorEntry {
             Self::MoveAudio { to, moving: false } => Some(Input::MoveAudio(*to)),
             Self::Status
             | Self::Separator
+            | Self::HangUpOnPhone
             | Self::Mute(Mute::Unavailable)
             | Self::MoveAudio { moving: true, .. }
             | Self::Problem(_) => None,
@@ -113,7 +126,9 @@ impl IndicatorEntry {
     pub fn enabled(&self) -> bool {
         !matches!(
             self,
-            Self::Mute(Mute::Unavailable) | Self::MoveAudio { moving: true, .. }
+            Self::HangUpOnPhone
+                | Self::Mute(Mute::Unavailable)
+                | Self::MoveAudio { moving: true, .. }
         )
     }
 }
@@ -142,11 +157,14 @@ impl State {
                 IndicatorStatus::Ringing(banner.caller.clone()),
             )
         } else if let Some(window) = call_window {
+            let caller = window.caller.clone();
+            let contact = window.contact.clone();
             (
                 IndicatorLook::InCall,
-                IndicatorStatus::InCall {
-                    caller: window.caller.clone(),
-                    contact: window.contact.clone(),
+                if window.connection_lost {
+                    IndicatorStatus::CallOnPhone { caller, contact }
+                } else {
+                    IndicatorStatus::InCall { caller, contact }
                 },
             )
         } else {
@@ -158,6 +176,10 @@ impl State {
                         IndicatorLook::Problem
                     },
                     IndicatorStatus::Connected(phone),
+                ),
+                (ConnectionState::Disconnected, Some(phone)) if self.hands_free_lost() => (
+                    IndicatorLook::Disconnected,
+                    IndicatorStatus::ConnectionLost(phone),
                 ),
                 (ConnectionState::Disconnected, Some(phone)) => (
                     IndicatorLook::Disconnected,
@@ -181,7 +203,11 @@ impl State {
             IndicatorEntry::OpenDialer,
             IndicatorEntry::ConnectPhone,
         ];
-        if let Some(window) = call_window {
+        if call_window.is_some_and(|window| window.connection_lost) {
+            // Nothing acts on the Call from here: only where to hang up.
+            menu.push(IndicatorEntry::Separator);
+            menu.push(IndicatorEntry::HangUpOnPhone);
+        } else if let Some(window) = call_window {
             menu.push(IndicatorEntry::Separator);
             menu.push(IndicatorEntry::HangUp(window.call));
             if let CallWindowPhase::Live { mute, .. } = window.phase {

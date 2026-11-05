@@ -329,7 +329,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-connection-lost",
-        title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        title: "The Call Window, after the audio went to the phone and hands-free didn't come back: Hang up says to hang up on the phone, and nothing is red",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -355,7 +355,7 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+        shown: |shot, look| !shows(shot, look.red()) && !shows(shot, look.green()),
     },
     State {
         name: "call-window-calling",

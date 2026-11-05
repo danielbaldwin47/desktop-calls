@@ -61,6 +61,14 @@ pbap-probe *args:
 merge pr *args:
     @python3 tools/merge.py "$@"
 
+# Wait on one CI run (default: the latest for this branch). If it passed,
+# print one line. If not, print each failed test's panic and download the
+# scenario logs into target/ci/<run-id>/. `just ci-wait --help`.
+[positional-arguments]
+[no-exit-message]
+ci-wait *args:
+    @python3 tools/ci_wait.py "$@"
+
 # Walk through the Real-Phone Checklist one step at a time: all groups, or
 # one (`just real-phone-checklist 2`). Results go to docs/real-phone-checklist/;
 # a rerun resumes at the first step that didn't pass. `--demo` runs it

@@ -115,7 +115,7 @@ pub struct Surfaces {
     dialer: Rc<Dialer>,
     setup_window: Rc<SetupWindow>,
     first_frames: FirstFrames,
-    _theme: Option<Theme>,
+    theme: Option<Theme>,
 }
 
 /// What the surfaces show, and where it is reported.
@@ -165,10 +165,23 @@ impl Surfaces {
             setup_window: SetupWindow::new(intents, report),
             first_frames: FirstFrames::new(dialer.surface.window.clone()),
             dialer,
-            _theme: theme,
+            theme,
         };
+        if let Some(theme) = &surfaces.theme {
+            theme.when_switched(theme_shown_when_drawn(surfaces.windows()));
+        }
         surfaces.place_beside_toasts();
         surfaces
+    }
+
+    /// Each surface's name and window.
+    fn windows(&self) -> [(&'static str, gtk::Window); 3] {
+        [
+            &self.banner.surface,
+            &self.call_window.surface,
+            &self.dialer.surface,
+        ]
+        .map(|surface| (surface.name, surface.window.clone()))
     }
 
     /// Does the surfaces' first-frame work once the app is `quiet` (the
@@ -301,6 +314,45 @@ fn surface_shown(name: &str) {
     );
 }
 
+/// What to do once a theme switch has been applied: log `theme-shown` for
+/// each surface on screen once it has drawn its next frame, the first in
+/// the new theme (ticket #99). A hidden surface draws nothing, so it logs
+/// nothing.
+fn theme_shown_when_drawn(
+    surfaces: [(&'static str, gtk::Window); 3],
+) -> impl Fn(Option<&'static str>) + 'static {
+    move |mode| {
+        for &(name, ref window) in &surfaces {
+            if window.is_mapped() {
+                after_next_frame(window, move || theme_shown(name, mode));
+            }
+        }
+    }
+}
+
+/// When a surface's first frame in a newly switched theme reached the
+/// compositor.
+fn theme_shown(name: &str, mode: Option<&str>) {
+    tracing::info!(
+        event_kind = %EventKind::ThemeShown,
+        surface = name,
+        mode,
+        "Drew the {name} surface in the new theme"
+    );
+}
+
+/// When GTK unmapped a surface: the moment the control interface's
+/// `Surfaces` stops listing it. GTK has told the compositor to take it off
+/// the screen by then, so a hidden surface has no frame left to wait for
+/// (ticket #99).
+fn surface_unmapped(name: &str) {
+    tracing::debug!(
+        event_kind = %EventKind::SurfaceUnmapped,
+        surface = name,
+        "Unmapped the {name} surface"
+    );
+}
+
 /// What a surface reports: its content, and `focused` while it has keyboard
 /// focus.
 fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMap<String, String> {
@@ -383,6 +435,7 @@ impl Surface {
         surface.window.connect_unmap(move |_| {
             mapped.set(false);
             report.borrow_mut().set(name, None);
+            surface_unmapped(name);
         });
         // Pre-warm: realising creates the window's renderer, which costs
         // GTK most of a second the first time (it probes Vulkan, then GL).

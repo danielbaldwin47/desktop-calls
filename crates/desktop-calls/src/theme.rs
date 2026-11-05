@@ -16,6 +16,9 @@
 //!   replaced.
 //! - Without Omarchy, stock Adwaita, light or dark as the settings portal
 //!   says. Without Hyprland, stock corners.
+//! - Once a switch has been applied, the hook given to
+//!   [`Theme::when_switched`] runs, so the surfaces can log when they reach
+//!   the screen in the new theme (ticket #99).
 
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -51,7 +54,7 @@ const READABLE: f64 = 4.5;
 
 /// Follows the look for as long as it lives.
 pub struct Theme {
-    _shared: Rc<Shared>,
+    shared: Rc<Shared>,
     /// Dropping the monitor would stop it.
     _monitor: Option<gio::FileMonitor>,
 }
@@ -66,7 +69,13 @@ struct Shared {
     css: RefCell<String>,
     /// The debounced reread, while one is due.
     reread: RefCell<Option<SourceId>>,
+    /// What runs once a theme switch has been applied.
+    switched: RefCell<Option<Switched>>,
 }
+
+/// What runs once a theme switch has been applied, given its mode:
+/// `"dark"` or `"light"`, or `None` when there is no Omarchy theme any more.
+type Switched = Box<dyn Fn(Option<&'static str>)>;
 
 impl Theme {
     /// Gives `display` the current look, and follows it from now on.
@@ -85,8 +94,9 @@ impl Theme {
             rounding: Cell::default(),
             css: RefCell::default(),
             reread: RefCell::default(),
+            switched: RefCell::default(),
         });
-        shared.reread_palette();
+        let _ = shared.reread_palette();
         shared.apply();
         let monitor = shared
             .current
@@ -94,15 +104,23 @@ impl Theme {
             .and_then(|current| watch(current, &shared));
         follow_rounding(&shared);
         Self {
-            _shared: shared,
+            shared,
             _monitor: monitor,
         }
+    }
+
+    /// Runs `then` each time a switch of Omarchy's theme has been applied:
+    /// once the new CSS is loaded, before it is drawn. `then` is given the
+    /// new theme's mode, `"dark"` or `"light"`, or `None` without one.
+    pub fn when_switched(&self, then: impl Fn(Option<&'static str>) + 'static) {
+        *self.shared.switched.borrow_mut() = Some(Box::new(then));
     }
 }
 
 impl Shared {
-    /// Reads Omarchy's current theme again, and logs a change.
-    fn reread_palette(&self) {
+    /// Reads Omarchy's current theme again, and logs a change. Returns
+    /// whether it changed.
+    fn reread_palette(&self) -> bool {
         let palette = self.current.as_deref().and_then(read_palette);
         let changed = *self.palette.borrow() != palette;
         if changed && let Some(palette) = &palette {
@@ -118,6 +136,16 @@ impl Shared {
             );
         }
         *self.palette.borrow_mut() = palette;
+        changed
+    }
+
+    /// The current theme's mode: `"dark"` or `"light"`, or `None` without
+    /// an Omarchy theme.
+    fn mode(&self) -> Option<&'static str> {
+        self.palette
+            .borrow()
+            .as_ref()
+            .map(|palette| if palette.dark { "dark" } else { "light" })
     }
 
     /// Brings the provider and the colour scheme up to date.
@@ -147,8 +175,11 @@ impl Shared {
             };
             // It has fired, so there is nothing left to remove.
             shared.reread.borrow_mut().take();
-            shared.reread_palette();
+            let changed = shared.reread_palette();
             shared.apply();
+            if changed && let Some(switched) = &*shared.switched.borrow() {
+                switched(shared.mode());
+            }
         });
         *self.reread.borrow_mut() = Some(due);
     }

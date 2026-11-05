@@ -7,6 +7,7 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
 - 2026-11-05 (retro on #43): a ticket's test criterion reads "CI passes on the PR", not "`just test` passes". The #43 agent spent about 15 minutes on local full-suite runs that CI repeated anyway.
 - 2026-11-05 (retro on #42): one shippable deliverable per ticket. #42 bundled `just merge` with a gallery fix, and the finished half waited an hour for the other.
 - 2026-11-05 (retro on #42): never make "passes N times in a row on the Desktop" an acceptance criterion. The Desktop is shared with other agents, so the count measures their load as much as the change. Prove repeat-run claims in CI (a repeat job) or with a deterministic harness test, for example "a state shown for 200 ms is captured".
+- 2026-11-05 (#47, `3def480`): a timing target for the Desktop gets two criteria: a regression bound that CI's software renderer can meet, and the real target judged on the Desktop by a Real-Phone Checklist step. #47's 150 ms Dialer target was unmeasurable on CI (150.4 ms run alone), so CI holds 250 ms and step 7.4 judges 150 ms. See [testing](testing.md).
 
 ## Batches
 

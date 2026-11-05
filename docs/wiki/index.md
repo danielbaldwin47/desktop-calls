@@ -18,6 +18,8 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated.
 
+- [testing](testing.md): the harness, CI timings against the Desktop, and the Real-Phone Checklist, dated (added 2026-11-05).
+
 ## Process
 
 - [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first.

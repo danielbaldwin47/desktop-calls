@@ -2,7 +2,16 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
-## 2026-11-05 late, batch 2 landed; #79 (file split) running alone (supersedes the entries below)
+## 2026-11-05 batch 3 landed (supersedes the entries below)
+
+- **Merged:** #17 (PR #105, `417411e`), #19 (PR #108, `6bf11cb`), #47 (PR #106, `3def480`), #101 (PR #110, `f7a35a6`; ADR-0005 note `83e378b`), #103 (PR #114, `f6ecaae`), #107 (PR #113, `7032137`). What each changed is on [product-shape](product-shape.md), [telephony-api-quirks](telephony-api-quirks.md), [hardware-and-stack](hardware-and-stack.md), [polish-scorecard](polish-scorecard.md) and the new [testing](testing.md) page.
+- **Decision on #47:** CI holds the Dialer's drawn first frame to 250 ms because CI paints in software, while `just test-ci-like` holds 150 ms. The 150 ms Desktop target is judged on the real Desktop at Real-Phone Checklist step 7.4.
+- **Tickets filed:** #107 (publish order, from #17's catch; merged in this batch), #109 (paging back-off: measure the cost of paging every 3 s on the real Desktop, needs-info), #111 (every surface says when a live Call is out of reach), #112 (the Phone drops hands-free mid-Call by itself, needs-info), #115 (the Indicator agrees with "Identifying caller…"; the gallery state can't silently show the wrong text), #116 (`Error` and `MissedCall` signals follow the Call state).
+- **Pause:** a 5-hour usage limit paused #16 (call waiting) and #21 (Setup Window) mid-work; both were resumed after the reset.
+- **Lesson:** a timing assertion that is right on the Desktop can be unmeasurable on CI's software renderer. Assert a regression bound in CI and judge the real target on the Desktop. Added to [chief-of-staff-practice](chief-of-staff-practice.md).
+- Waiting on the user: Real-Phone Checklist step 2.7 (first real run) and step 7.4, and the out-of-range checks listed on [testing](testing.md).
+
+## 2026-11-05 late, batch 2 landed; #79 (file split) running alone (superseded above)
 
 - Merged, each with green CI through `just merge`: #55 (PR #57, faster CI), #13 (PR #72 `7076845`, which contained #69), #11 (PR #71 `02fc5ca`, which contained #68), #43 (PRs #73 and #74, then #77 `5f24008`, which contained #75), #20 (PR #81 `01bece2`), #53 (PR #87 `8775ed9`), #12 (PR #82), #70 and #80 (PR #76 `8989cbc`), #18 (PR #84 `7566141`).
 - Lesson: #12, #18 and #20 all edited `machine.rs` and `surfaces.rs`. Each merge made the next PR conflict, which cost 5 extra agent rounds and CI runs. The practice page already said never two tickets on the same file. #79 splits the oversized files so that rule is easier to keep. See [chief-of-staff-practice](chief-of-staff-practice.md).

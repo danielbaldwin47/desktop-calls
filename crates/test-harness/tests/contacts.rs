@@ -13,8 +13,14 @@ use test_harness::{AppState, Harness, RecordedMethodCall, Screenshot};
 const DEADLINE: Duration = Duration::from_secs(5);
 /// How long a whole sync may take.
 const SYNC_DEADLINE: Duration = Duration::from_secs(15);
-/// How long the Banner may take to show after the Phone rings.
+/// How long the Banner may take to show after the Phone rings: from the
+/// Call appearing to its first frame, by the app's log (scorecard item 1).
 const BANNER_DEADLINE: Duration = Duration::from_secs(1);
+/// How long the tests' own round trip may take: the Phone ringing, and the
+/// change coming back on the control interface. Looser than the scorecard
+/// target because a loaded CI runner stretches it even when the app is fast
+/// (ticket #83); the target is asserted on the app's log.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long a pull of a few hundred Contacts takes on the Pixel.
 const REAL_PULL: Duration = Duration::from_secs(5);
 
@@ -563,9 +569,10 @@ fn with_5000_contacts_the_banner_still_shows_within_a_second() {
         state.contacts.state == "syncing"
     });
     let _call = phone.ring(ALICE_CALLING);
-    let state = harness.wait_for_app("the Banner shows", BANNER_DEADLINE, |state| {
+    let state = harness.wait_for_app("the Banner shows", ROUND_TRIP, |state| {
         state.surface("banner").is_some()
     });
+    harness.assert_banner_within(state.calls[0].id, BANNER_DEADLINE);
     assert_eq!(
         state.contacts.state, "syncing",
         "the Banner showed while the Contacts were still being pulled"
@@ -582,9 +589,10 @@ fn with_5000_contacts_the_banner_still_shows_within_a_second() {
 
     // And again once they are indexed: the Banner names her.
     let _call = phone.ring(ALICE_CALLING);
-    let state = harness.wait_for_app("the Banner names Alice", BANNER_DEADLINE, |state| {
+    let state = harness.wait_for_app("the Banner names Alice", ROUND_TRIP, |state| {
         shown(state.surface("banner"), "caller") == Some("Alice Smith")
     });
+    harness.assert_banner_within(state.calls[0].id, BANNER_DEADLINE);
     assert_eq!(state.contacts.contacts, 5_001);
 }
 

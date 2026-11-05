@@ -10,8 +10,14 @@ use test_harness::{AppCall, AppState, Builder, Harness};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long the Call audio may take to reach the Desktop after Answer.
+/// How long the Call audio may take to reach the Desktop after Answer
+/// reaches the app, by its log (polish scorecard item 2).
 const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
+/// How long the tests' own round trip may take: the request reaching the
+/// app, and the change coming back on the control interface. Looser than
+/// the scorecard targets because a loaded CI runner stretches it even when
+/// the app is fast (ticket #83); the targets are asserted on the app's log.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long the Call runs before the crash, so its timer shows it.
 const TALKING: Duration = Duration::from_millis(1_200);
 
@@ -38,9 +44,10 @@ fn answered_here(harness: &Harness) -> AppCall {
     harness.answer(call);
     let state = harness.wait_for_app(
         "the Call is live with its audio on the Desktop",
-        TRANSPORT_DEADLINE,
+        ROUND_TRIP,
         |state| is_live(state) && state.audio_location == "desktop",
     );
+    harness.assert_answered_audio_within(call, TRANSPORT_DEADLINE);
     state.calls[0].clone()
 }
 

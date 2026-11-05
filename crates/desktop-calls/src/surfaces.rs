@@ -237,6 +237,50 @@ struct Surface {
     releasing: Rc<Cell<bool>>,
 }
 
+/// Runs `then` once `window` has drawn its next frame and handed it to the
+/// compositor, so the app can log when a change reached the screen (ticket
+/// #83). An unrealized window draws nothing, so `then` never runs.
+fn after_next_frame(window: &impl IsA<gtk::Widget>, then: impl FnOnce() + 'static) {
+    let Some(clock) = window.frame_clock() else {
+        return;
+    };
+    let then = Cell::new(Some(then));
+    let handler = Rc::new(RefCell::new(None));
+    let disconnect = handler.clone();
+    let id = clock.connect_after_paint(move |clock| {
+        if let Some(then) = then.take() {
+            then();
+        }
+        if let Some(id) = disconnect.borrow_mut().take() {
+            clock.disconnect(id);
+        }
+    });
+    *handler.borrow_mut() = Some(id);
+    // A frame is drawn even if nothing else asked for one.
+    window.queue_draw();
+}
+
+/// When GTK mapped a surface: the moment the control interface's `Surfaces`
+/// lists it, before its first frame is drawn. The gap to `surface-shown` is
+/// GTK's first paint, which on a cold shader cache is most of the time
+/// (ticket #83).
+fn surface_mapped(name: &str) {
+    tracing::debug!(
+        event_kind = %EventKind::SurfaceMapped,
+        surface = name,
+        "Mapped the {name} surface"
+    );
+}
+
+/// When a surface's first frame since it was mapped reached the compositor.
+fn surface_shown(name: &str) {
+    tracing::info!(
+        event_kind = %EventKind::SurfaceShown,
+        surface = name,
+        "Drew the {name} surface's first frame"
+    );
+}
+
 /// What a surface reports: its content, and `focused` while it has keyboard
 /// focus.
 fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMap<String, String> {
@@ -295,6 +339,8 @@ impl Surface {
             report
                 .borrow_mut()
                 .set(name, Some(reported(&content.borrow(), window)));
+            surface_mapped(name);
+            after_next_frame(window, move || surface_shown(name));
         });
         let (content, mapped, report, releasing) = (
             surface.content.clone(),

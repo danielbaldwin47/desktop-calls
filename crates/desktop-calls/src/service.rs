@@ -316,9 +316,7 @@ async fn decide(
     // Dial requests waiting for the Phone, by dial attempt.
     let mut waiting = BTreeMap::new();
     while let Some((input, verdict)) = inputs.next().await {
-        if let Input::MoveAudio(location) = &input {
-            handoff_requested(*location);
-        }
+        requested(&input);
         let (next, effects, shown) = stall_watch::timed("deciding", || {
             let (next, effects) = step(state.clone(), input);
             let shown = next.surfaces();
@@ -401,9 +399,25 @@ fn indicator_failed(error: &zbus::Error) {
     );
 }
 
-/// When a Handoff was asked for, from the control interface or the Call
-/// Window alike, so its own time can be told apart from its client's
-/// start-up (ticket #80).
+/// When the user asked for something the polish scorecard times, from the
+/// control interface or a surface alike, so the app's own time can be told
+/// apart from its client's start-up (tickets #80 and #83).
+fn requested(input: &Input) {
+    match input {
+        Input::MoveAudio(location) => handoff_requested(*location),
+        Input::Answer(call) => tracing::info!(
+            event_kind = %EventKind::AnswerRequested,
+            call_id = call.0,
+            "Asked to answer Call {call}"
+        ),
+        Input::Activate => tracing::info!(
+            event_kind = %EventKind::ActivateRequested,
+            "Asked to activate, as the keybinding does"
+        ),
+        _ => {}
+    }
+}
+
 fn handoff_requested(location: AudioLocation) {
     tracing::info!(
         event_kind = %EventKind::HandoffRequested,

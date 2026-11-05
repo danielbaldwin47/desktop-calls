@@ -64,7 +64,7 @@ pub use app::{
 };
 pub use builder::Builder;
 pub use client::TestClient;
-pub use control::{PendingDial, RunningCli};
+pub use control::{AppEvent, PendingDial, RunningCli};
 pub use desktop::{Clipboard, Keyboard, Notifications, Pointer, Tray};
 pub use input::Key;
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};

@@ -9,8 +9,14 @@ use test_harness::{AppState, Harness};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long the Banner may take to show after the Phone rings.
+/// How long the Banner may take to show after the Phone rings: from the
+/// Call appearing to its first frame, by the app's log (scorecard item 1).
 const BANNER_DEADLINE: Duration = Duration::from_secs(1);
+/// How long the tests' own round trip may take: the request reaching the
+/// app, and the change coming back on the control interface. Looser than
+/// the scorecard targets because a loaded CI runner stretches it even when
+/// the app is fast (ticket #83); the targets are asserted on the app's log.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long a surface may take to be drawn on screen. Each capture and its
 /// scan take over a second on a busy CI runner, so this allows several.
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
@@ -41,9 +47,10 @@ fn connected_on_screen() -> Harness {
 /// change on the Phone that arrived then waited behind it.
 fn ring_until_banner(harness: &Harness) -> String {
     let path = harness.simulated_phone().ring(NUMBER);
-    harness.wait_for_app("the Banner shows", BANNER_DEADLINE, |state| {
+    let state = harness.wait_for_app("the Banner shows", ROUND_TRIP, |state| {
         state.ringing && state.surface("banner").is_some()
     });
+    harness.assert_banner_within(state.calls[0].id, BANNER_DEADLINE);
     let _ = harness.screenshot_when("banner", SCREEN_DEADLINE, shows_green);
     path
 }

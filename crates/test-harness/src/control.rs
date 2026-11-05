@@ -144,6 +144,114 @@ impl Harness {
         }
     }
 
+    /// How long the app took, by its own log, from its first event matching
+    /// `from` to its first event matching `to` at or after it. Waits up to
+    /// `deadline` for both.
+    ///
+    /// Scorecard times are asserted on this, not on the tests' clock: a
+    /// round trip from a test also counts getting the request to the app and
+    /// the change back, which a loaded CI runner stretches past the targets
+    /// even when the app is fast (tickets #80 and #83).
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first, or a log line isn't JSON.
+    pub fn app_took(&self, from: &AppEvent, to: &AppEvent, deadline: Duration) -> Duration {
+        let log = self.directory.join("state/desktop-calls/desktop-calls.log");
+        let started = std::time::Instant::now();
+        loop {
+            let events: Vec<serde_json::Value> = fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .map(|line| {
+                    serde_json::from_str(line)
+                        .unwrap_or_else(|error| panic!("{line:?} isn't JSON: {error}"))
+                })
+                .collect();
+            let first = events
+                .iter()
+                .find(|event| from.matches(event))
+                .and_then(timestamp_us);
+            let then = first.and_then(|first| {
+                events
+                    .iter()
+                    .filter_map(|event| Some((event, timestamp_us(event)?)))
+                    .find(|(event, at)| *at >= first && to.matches(event))
+                    .map(|(_, at)| at)
+            });
+            if let (Some(first), Some(then)) = (first, then) {
+                return Duration::from_micros(then - first);
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the app logged {} within {deadline:?}; see {}{}",
+                if first.is_some() {
+                    format!("{from} but no {to} after it")
+                } else {
+                    format!("no {from}")
+                },
+                log.display(),
+                self.timeline.render()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Checks the app took no longer than `target` from `from` to `to`, by
+    /// its log as [`Harness::app_took`] reads it, and returns how long it
+    /// took. `what` names the wait in the panic, such as "the Banner to
+    /// show once the Call appeared".
+    ///
+    /// # Panics
+    ///
+    /// If it took longer, or the app didn't log both within 5 s.
+    pub fn assert_app_within(
+        &self,
+        what: &str,
+        from: &AppEvent,
+        to: &AppEvent,
+        target: Duration,
+    ) -> Duration {
+        let took = self.app_took(from, to, Duration::from_secs(5));
+        assert!(
+            took <= target,
+            "the app took {took:?} for {what}, against {target:?} (from {from} to {to} in its log)"
+        );
+        took
+    }
+
+    /// Checks the app drew the Incoming Call Banner's first frame within
+    /// `target` of the Call with id `call` appearing, by its log (polish
+    /// scorecard item 1).
+    ///
+    /// # Panics
+    ///
+    /// If it took longer.
+    pub fn assert_banner_within(&self, call: u32, target: Duration) -> Duration {
+        self.assert_app_within(
+            "the Banner to show once the Call appeared",
+            &AppEvent::kind("call-added").with("call_id", call),
+            &AppEvent::kind("surface-shown").with("surface", "banner"),
+            target,
+        )
+    }
+
+    /// Checks the Call audio reached the Desktop within `target` of Answer
+    /// for the Call with id `call` reaching the app, by its log (polish
+    /// scorecard item 2).
+    ///
+    /// # Panics
+    ///
+    /// If it took longer.
+    pub fn assert_answered_audio_within(&self, call: u32, target: Duration) -> Duration {
+        self.assert_app_within(
+            "the audio to reach the Desktop once Answer reached the app",
+            &AppEvent::kind("answer-requested").with("call_id", call),
+            &AppEvent::kind("audio-moved").with("audio_location", "desktop"),
+            target,
+        )
+    }
+
     /// Asks the app to answer the Call with this id, as any client of the
     /// control interface could.
     ///
@@ -590,4 +698,52 @@ impl RunningCli {
             .wait_with_output()
             .expect("read what the CLI printed")
     }
+}
+
+/// Which of the app's log events to look for: one `event_kind`, and the
+/// fields it must carry.
+#[derive(Clone, Debug)]
+pub struct AppEvent {
+    kind: &'static str,
+    fields: Vec<(&'static str, serde_json::Value)>,
+}
+
+impl AppEvent {
+    /// Any event of this `event_kind`, such as `"call-added"`.
+    #[must_use]
+    pub fn kind(kind: &'static str) -> Self {
+        Self {
+            kind,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Only those whose `field` is `value`.
+    #[must_use]
+    pub fn with(mut self, field: &'static str, value: impl Into<serde_json::Value>) -> Self {
+        self.fields.push((field, value.into()));
+        self
+    }
+
+    fn matches(&self, event: &serde_json::Value) -> bool {
+        event["event_kind"] == self.kind
+            && self
+                .fields
+                .iter()
+                .all(|(field, value)| event.get(field) == Some(value))
+    }
+}
+
+impl std::fmt::Display for AppEvent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.kind)?;
+        for (field, value) in &self.fields {
+            write!(formatter, " {field}={value}")?;
+        }
+        Ok(())
+    }
+}
+
+fn timestamp_us(event: &serde_json::Value) -> Option<u64> {
+    event["timestamp_us"].as_u64()
 }

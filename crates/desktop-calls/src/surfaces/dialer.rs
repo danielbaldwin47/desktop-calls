@@ -2,9 +2,10 @@
 
 use super::call_window::notice_label;
 use super::{
-    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, has_command_modifier,
-    now, utc_offset_seconds,
+    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame,
+    has_command_modifier, now, utc_offset_seconds,
 };
+use crate::logging::EventKind;
 use desktop_calls_core::matching::{DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{CallHistoryKind, DialerView, Input, Timestamp};
@@ -28,6 +29,9 @@ pub(super) struct Dialer {
     writing: Cell<bool>,
     /// Which opening of the Dialer is shown, while it is.
     opened: Cell<Option<u32>>,
+    /// The query the rows are for, so the frame that first shows the rows
+    /// for a new one can be logged.
+    query: RefCell<String>,
     /// The rows the list shows.
     rows: RefCell<Vec<DialerRow>>,
 }
@@ -81,6 +85,7 @@ impl Dialer {
             notice,
             writing: Cell::new(false),
             opened: Cell::default(),
+            query: RefCell::default(),
             rows: RefCell::default(),
         });
         dialer.connect(intents);
@@ -94,7 +99,13 @@ impl Dialer {
         let typed = intents.clone();
         self.entry.connect_changed(move |entry| {
             if weak.upgrade().is_some_and(|dialer| !dialer.writing.get()) {
-                let _ = typed.unbounded_send(Input::DialerQuery(entry.text().to_string()));
+                let query = entry.text().to_string();
+                tracing::debug!(
+                    event_kind = %EventKind::DialerQueryTyped,
+                    query_chars = query.chars().count(),
+                    "Typed into the Dialer"
+                );
+                let _ = typed.unbounded_send(Input::DialerQuery(query));
             }
         });
         let chosen = intents.clone();
@@ -139,6 +150,17 @@ impl Dialer {
             return;
         };
         let opening = self.opened.replace(Some(view.opened)) != Some(view.opened);
+        let followed = self.query.replace(view.query.clone()) != view.query;
+        if followed && !opening {
+            let query_chars = view.query.chars().count();
+            after_next_frame(&self.surface.window, move || {
+                tracing::debug!(
+                    event_kind = %EventKind::DialerQueryShown,
+                    query_chars,
+                    "Drew the Dialer's rows for what was typed"
+                );
+            });
+        }
         if opening {
             // Afresh: what the Dialer opened with. After that the entry is
             // the user's, and only follows them.

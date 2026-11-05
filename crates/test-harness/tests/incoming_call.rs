@@ -9,8 +9,14 @@ use test_harness::{AppState, Harness, RecordedMethodCall};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long the Call audio may take to reach the Desktop after Answer.
+/// How long the Call audio may take to reach the Desktop after Answer
+/// reaches the app, by its log (polish scorecard item 2).
 const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
+/// How long the tests' own round trip may take: the request reaching the
+/// app, and the change coming back on the control interface. Looser than
+/// the scorecard targets because a loaded CI runner stretches it even when
+/// the app is fast (ticket #83); the targets are asserted on the app's log.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long the Desktop may lag behind a Call that stopped ringing on the
 /// Phone, from the moment the Phone confirms the Call is gone.
 const KEEP_UP_DEADLINE: Duration = Duration::from_millis(200);
@@ -45,9 +51,10 @@ fn answered(harness: &Harness) -> (String, u32) {
     harness.answer(call);
     harness.wait_for_app(
         "the Call is active with its audio on the Desktop",
-        TRANSPORT_DEADLINE,
+        ROUND_TRIP,
         |state| is_live_on_desktop(state, call),
     );
+    harness.assert_answered_audio_within(call, TRANSPORT_DEADLINE);
     (path, call)
 }
 
@@ -184,9 +191,10 @@ fn answering_answers_then_clears_reject_sco_then_activates_in_order() {
 
     let state = harness.wait_for_app(
         "the Call is active with its audio on the Desktop",
-        TRANSPORT_DEADLINE,
+        ROUND_TRIP,
         |state| is_live_on_desktop(state, call),
     );
+    harness.assert_answered_audio_within(call, TRANSPORT_DEADLINE);
     assert!(!state.ringing);
     // The Phone reports an answered incoming Call as active; it stays incoming.
     assert_eq!(state.calls[0].direction, "incoming");
@@ -347,9 +355,10 @@ fn consecutive_calls_on_the_same_path_are_different_calls() {
     harness.answer(second);
     harness.wait_for_app(
         "the second Call is active on the Desktop",
-        TRANSPORT_DEADLINE,
+        ROUND_TRIP,
         |state| is_live_on_desktop(state, second),
     );
+    harness.assert_answered_audio_within(second, TRANSPORT_DEADLINE);
 }
 
 #[test]
@@ -388,11 +397,10 @@ fn without_an_audio_server_ringing_fails_quietly_and_the_app_keeps_going() {
 
     harness.wait_for_app_log("ringing-failed", DEADLINE);
     harness.answer(call);
-    harness.wait_for_app(
-        "the Call is active on the Desktop",
-        TRANSPORT_DEADLINE,
-        |state| is_live_on_desktop(state, call),
-    );
+    harness.wait_for_app("the Call is active on the Desktop", ROUND_TRIP, |state| {
+        is_live_on_desktop(state, call)
+    });
+    harness.assert_answered_audio_within(call, TRANSPORT_DEADLINE);
 }
 
 #[test]

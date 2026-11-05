@@ -10,10 +10,18 @@ use test_harness::{
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long the Banner may take to show after the Phone rings.
+/// How long the Banner may take to show after the Phone rings: from the
+/// Call appearing to the Banner's first frame, by the app's log.
 const BANNER_DEADLINE: Duration = Duration::from_secs(1);
-/// How long the Call audio may take to reach the Desktop after Answer.
+/// How long the Call audio may take to reach the Desktop after Answer: from
+/// the request reaching the app to the audio on the Desktop, by its log.
 const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
+/// How long the tests' own round trip may take: the Phone or the test's
+/// request reaching the app, and the change coming back on the control
+/// interface. Looser than the targets above because a loaded CI runner
+/// stretches it even when the app is fast (ticket #83); the targets are
+/// asserted on the app's log instead.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 
 const NUMBER: &str = "+447700900123";
 const FORMATTED: &str = "+44 7700 900123";
@@ -45,10 +53,30 @@ fn connected(builder: Builder) -> Harness {
 /// and id.
 fn ring_until_banner(harness: &Harness) -> (String, u32) {
     let path = harness.simulated_phone().ring(NUMBER);
-    let state = harness.wait_for_app("the Banner shows", BANNER_DEADLINE, |state| {
+    let state = wait_for_banner(harness);
+    (path, state.calls[0].id)
+}
+
+/// Waits until the Banner shows for the ringing Call, and checks the app
+/// drew it within [`BANNER_DEADLINE`] of the Call appearing.
+fn wait_for_banner(harness: &Harness) -> AppState {
+    let state = harness.wait_for_app("the Banner shows", ROUND_TRIP, |state| {
         state.ringing && state.surface("banner").is_some()
     });
-    (path, state.calls[0].id)
+    harness.assert_banner_within(state.calls[0].id, BANNER_DEADLINE);
+    state
+}
+
+/// Waits until the Call is live with its audio on the Desktop, and checks
+/// the app took no longer than [`TRANSPORT_DEADLINE`] from Answer.
+fn wait_for_audio_here(harness: &Harness, call: u32) -> AppState {
+    let state = harness.wait_for_app(
+        "the Call is active with its audio on the Desktop",
+        ROUND_TRIP,
+        |state| is_live_on_desktop(state, call),
+    );
+    harness.assert_answered_audio_within(call, TRANSPORT_DEADLINE);
+    state
 }
 
 fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
@@ -150,9 +178,7 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
 
     let _call = harness.simulated_phone().ring(NUMBER);
 
-    let state = harness.wait_for_app("the Banner shows", BANNER_DEADLINE, |state| {
-        state.surface("banner").is_some()
-    });
+    let state = wait_for_banner(&harness);
     let banner = state.surface("banner").expect("the Banner shows");
     assert_eq!(banner.get("caller").map(String::as_str), Some(FORMATTED));
     assert!(state.ringing);
@@ -242,11 +268,7 @@ fn clicking_answer_answers_and_the_call_window_shows_the_audio_here_and_a_timer(
 
     click(&harness, answer);
 
-    let state = harness.wait_for_app(
-        "the Call is active with its audio on the Desktop",
-        TRANSPORT_DEADLINE,
-        |state| is_live_on_desktop(state, call),
-    );
+    let state = wait_for_audio_here(&harness, call);
     assert!(!state.ringing);
     let state = harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
         state.surface("banner").is_none()

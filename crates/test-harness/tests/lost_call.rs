@@ -128,9 +128,21 @@ fn acts_on_calls(recorded: &[RecordedMethodCall]) -> usize {
         .count()
 }
 
+/// Checks the Call Window of a Call with contact intact offers the tone
+/// entry and the keypad toggle.
+fn assert_offers_tones(state: &AppState) {
+    let window = state
+        .surface("call-window")
+        .unwrap_or_else(|| panic!("no Call Window: {state:#?}"));
+    for key in ["tone-entry", "keypad-toggle"] {
+        assert!(window.contains_key(key), "{key} is not offered: {window:#?}");
+    }
+}
+
 /// Checks the lost Call Window offers nothing as if it worked: Hang up says
-/// to hang up on the Phone, no control has a shortcut, and Mute has no hint
-/// beside the lost message.
+/// to hang up on the Phone, no control has a shortcut, Mute has no hint
+/// beside the lost message, and neither the tone entry, the keypad toggle nor
+/// the keypad shows, as no tone can be sent.
 fn assert_offers_nothing(state: &AppState) {
     let window = state
         .surface("call-window")
@@ -148,6 +160,10 @@ fn assert_offers_nothing(state: &AppState) {
         "swap-shortcut",
         "hang-up-held-shortcut",
         "mute-unavailable",
+        "tone-entry",
+        "keypad-toggle",
+        "keypad",
+        "tones",
     ] {
         assert!(!window.contains_key(key), "{key} is offered: {window:#?}");
     }
@@ -223,6 +239,18 @@ fn assert_lost_menu(menu: &[MenuEntry], status: &str) {
 fn with_hands_free_lost_the_call_window_offers_neither_hang_up_nor_mute() {
     let harness = connected();
     let (_, bob) = on_a_call(&harness);
+    assert_offers_tones(&harness.app_state());
+    // With the keypad open and a tone typed, none of it shows once lost.
+    harness.activate();
+    harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
+        call_window(state, "focused").as_deref() == Some("true")
+    });
+    harness.keyboard().type_text("12");
+    harness.keyboard().type_text("k");
+    harness.wait_for_app("the keypad shows with the tones typed", DEADLINE, |state| {
+        call_window(state, "keypad").as_deref() == Some("shown")
+            && call_window(state, "tones").as_deref() == Some("12")
+    });
     lose_hands_free(&harness);
 
     let state = wait_lost(&harness);
@@ -322,6 +350,7 @@ fn with_a_held_call_both_calls_stay_listed_and_neither_can_be_acted_on() {
     assert!(call_window(&state, "hang-up-shortcut").is_some(), "{state:#?}");
     assert!(call_window(&state, "hang-up-held-shortcut").is_some(), "{state:#?}");
     assert_eq!(call_window(&state, "hang-up"), None);
+    assert_offers_tones(&state);
     // The Hang up refused while contact was lost was not kept for later.
     // The Phone's Calls have new paths since hands-free came back.
     let mut on_phone: Vec<String> = harness
@@ -412,6 +441,7 @@ fn when_contact_comes_back_hang_up_works_again_and_the_refused_one_is_not_kept()
     assert_eq!(state.calls.len(), 1, "{state:#?}");
     assert_eq!(state.calls[0].number, BOB);
     assert_eq!(call_window(&state, "hang-up"), None);
+    assert_offers_tones(&state);
     assert_eq!(
         call_window(&state, "mute-unavailable").as_deref(),
         Some(MUTE_UNAVAILABLE),

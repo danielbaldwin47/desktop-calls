@@ -176,9 +176,8 @@ impl CallWindow {
             }
         });
         let weak = Rc::downgrade(self);
-        self.keypad_shown.connect_toggled(move |toggle| {
+        self.keypad_shown.connect_toggled(move |_| {
             if let Some(window) = weak.upgrade() {
-                window.keypad.set_visible(toggle.is_active());
                 window.update();
             }
         });
@@ -572,7 +571,7 @@ impl CallWindow {
         // With contact lost, nothing in the window works; the notice says
         // why, without Mute's hint beside it.
         let mute = mute.filter(|_| !view.connection_lost);
-        let mute_text = self.show_controls(mute);
+        let mute_text = self.show_controls(mute, view.connection_lost);
 
         let mut content = BTreeMap::from([("status".to_owned(), status)]);
         if let Some(call) = view.call {
@@ -607,11 +606,19 @@ impl CallWindow {
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
-        if self.keypad_shown.is_active() {
+        for (key, shown) in [
+            ("tone-entry", WidgetExt::is_visible(&self.tones)),
+            ("keypad-toggle", WidgetExt::is_visible(&self.keypad_shown)),
+        ] {
+            if shown {
+                content.insert(key.to_owned(), "shown".to_owned());
+            }
+        }
+        if WidgetExt::is_visible(&self.keypad) {
             content.insert("keypad".to_owned(), "shown".to_owned());
         }
         let tones = self.tones.text();
-        if !tones.is_empty() {
+        if WidgetExt::is_visible(&self.tones) && !tones.is_empty() {
             content.insert("tones".to_owned(), tones.to_string());
         }
         self.held.update(&view, &mut content);
@@ -683,8 +690,11 @@ impl CallWindow {
     }
 
     /// Brings Mute, its notices and the keypad up to date with `mute`, which
-    /// is `None` with no live Call, and returns Mute's label.
-    fn show_controls(&self, mute: Option<Mute>) -> &'static str {
+    /// is `None` with no live Call, and returns Mute's label. While the
+    /// Desktop has lost contact with the Call, the tone entry, the keypad
+    /// toggle and the keypad are hidden: no tone can be sent, and they sit
+    /// below Hang up, so nothing the user holds moves.
+    fn show_controls(&self, mute: Option<Mute>, connection_lost: bool) -> &'static str {
         let live = mute.is_some();
         let mute_text = messages::label(if mute == Some(Mute::On) {
             Label::Unmute
@@ -702,9 +712,19 @@ impl CallWindow {
         self.microphone_muted.set_visible(mute == Some(Mute::On));
         self.mute_unavailable
             .set_visible(mute == Some(Mute::Unavailable));
+        let contact_back = !connection_lost && !WidgetExt::is_visible(&self.tones);
+        self.keypad_shown.set_visible(!connection_lost);
+        self.tones.set_visible(!connection_lost);
+        self.keypad
+            .set_visible(!connection_lost && self.keypad_shown.is_active());
         self.keypad_shown.set_sensitive(live);
         self.tones.set_sensitive(live);
         self.keypad.set_sensitive(live);
+        if live && contact_back {
+            // Once enabled, as when the Call went live: the keyboard
+            // returns to the tone entry.
+            self.tones.grab_focus();
+        }
         mute_text
     }
 

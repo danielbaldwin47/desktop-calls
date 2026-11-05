@@ -173,15 +173,16 @@ jobs:
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 
-  # The harness's scenarios, in SHARDS shards on as many runners at once.
-  # cargo-nextest pools every test binary's scenarios, rather than running
-  # the binaries one after another and each waiting on its slowest scenario,
-  # and `--partition count:k/SHARDS` gives each shard every SHARDS-th one, so
-  # a new scenario lands in a shard without anyone listing it. In run
-  # 42034428129, one runner took 326 s under `cargo test` and 231 s under
-  # nextest, with two at a time either way (#118).
+  # The harness's scenarios, in one shard per matrix entry, on as many runners
+  # at once. cargo-nextest pools every scenario, rather than one slow
+  # scenario holding the other CPUs idle, and `--partition count:k/N` gives
+  # shard k every N-th one, so a new scenario lands in a shard without anyone
+  # listing it. N is the matrix's size, so adding or dropping a shard keeps
+  # every scenario in one; "CI passed" checks that the shards' counts add up.
+  # In run 42034428129, one runner took 326 s under `cargo test` and 231 s
+  # under nextest, with two at a time either way (#118).
   scenarios:
-    name: just test, the harness's scenarios (shard ${{ matrix.shard }} of 4)
+    name: just test, the harness's scenarios (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -219,21 +220,43 @@ jobs:
       - name: Build the binaries the scenarios run
         run: cargo build --workspace --bins --locked
 
-      - name: just test, the harness's scenarios, shard ${{ matrix.shard }} of 4
+      - name: just test, the harness's scenarios, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
         run: >-
           cargo nextest run -p test-harness --locked --no-fail-fast
-          --partition count:${{ matrix.shard }}/4
+          --partition count:${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # How many scenarios this shard ran and, from the first, how many there
+      # are, for "CI passed" to check that the shards ran every one.
+      - name: Count this shard's scenarios
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: |
+          mkdir -p target/shard-counts
+          cargo nextest list -p test-harness --locked --message-format oneline \
+            --partition "count:$SHARD/$SHARDS" | wc -l > "target/shard-counts/shard-$SHARD"
+          if [ "$SHARD" = 1 ]; then
+            cargo nextest list -p test-harness --locked --message-format oneline \
+              | wc -l > target/shard-counts/every-scenario
+          fi
+          cat target/shard-counts/*
+
+      - name: Keep this shard's count
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-count-${{ matrix.shard }}
+          path: target/shard-counts
 
       # First-frame timings, judged one scenario at a time as on the Desktop,
       # which runs one app (issue #47). In the whole run above, every
       # scenario's app at once slows each first paint past its target. Only
-      # the first shard runs them.
+      # the first shard runs them. `just test-file` fails if a file has no
+      # ignored scenario left, rather than run nothing.
       - name: just test, first-frame timings one scenario at a time
         if: matrix.shard == 1
-        run: >-
-          cargo test -p test-harness --locked --test scenarios
-          -- --ignored --test-threads=1
-          dialer_surface:: incoming_call_surfaces::
+        run: |
+          just test-file dialer_surface --ignored --test-threads=1
+          just test-file incoming_call_surfaces --ignored --test-threads=1
 
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots
@@ -276,3 +299,21 @@ jobs:
               [ "$result" = skipped ] || exit 1
             fi
           done
+
+      # A shard that didn't run, or a partition that left scenarios out, would
+      # otherwise pass by running fewer.
+      - name: Fetch the shards' counts
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-count-*
+          merge-multiple: true
+          path: shard-counts
+
+      - name: The shards ran every scenario
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          every=$(cat shard-counts/every-scenario)
+          ran=$(cat shard-counts/shard-* | awk '{ sum += $1 } END { print sum + 0 }')
+          echo "The shards ran $ran of $every scenarios."
+          [ "$ran" -eq "$every" ]

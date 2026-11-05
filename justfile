@@ -13,7 +13,7 @@ check: lint
 # CI runs this rather than `just check`: its test jobs build every target
 # between them, and building them again cost a minute (#118).
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
-lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo deny --locked check
@@ -143,6 +143,11 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# The repo's Python tools pass their own tests, tools/*_test.py.
+[private]
+_tools-pass-their-tests:
+    python3 -B -m unittest discover --start-directory tools --pattern '*_test.py' --quiet
 
 # An agent that reads a whole oversized file spends its context on it: the
 # harness's 2,442-line lib.rs took 88k of the 276k characters one agent read

@@ -7,7 +7,7 @@ default:
     @just --list
 
 # Check formatting, lints, the build, dependencies and file lengths. CI runs this.
-check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit
+check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo build --workspace --all-targets --locked
@@ -222,5 +222,61 @@ _real-phone-tools-use-system-python:
     if found:
         print("Real-Phone tools must run under /usr/bin/python3, the only Python with", file=sys.stderr)
         print("dbus-python (ticket #54). Use `#!/usr/bin/python3` and `/usr/bin/python3 tools/real-phone/...`:", file=sys.stderr)
+        print("\n".join(found), file=sys.stderr)
+        sys.exit(1)
+
+# The repository is public, so no file in it, tracked or new, may carry:
+# - a Bluetooth address that isn't a placeholder. Placeholders are
+#   AA:BB:CC:DD:EE:FF, 00:11:22:33:44:55, 11:22:33:44:55:66, all zeros, all
+#   Fs, and any address whose 4th and 5th octets are 00 (the Simulated
+#   Phone's `XX:XX:XX:00:00:NN`), with `:`, `_` or `-` between octets;
+# - a home directory (`/home/<user>`, or `-home-<user>-` in a Claude path);
+# - the Test Number, when ~/.config/desktop-calls/test-number exists. It
+#   matches the last 7 digits with any separators, and never prints them.
+# It asks git for the file list, trusting the checkout so CI's container
+# (another user owns it) doesn't refuse with "dubious ownership".
+[private]
+[no-exit-message]
+_no-personal-data:
+    #!/usr/bin/env python3
+    import os, pathlib, re, subprocess, sys
+    names = subprocess.run(
+        ["git", "-c", "safe.directory=*", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, check=True, text=True).stdout.split("\0")
+    # Six hex octets joined by one separator, used throughout. Written out,
+    # because just reads a doubled brace as its own interpolation.
+    octet = "[0-9A-Fa-f][0-9A-Fa-f]"
+    address = re.compile(r"(?<![0-9A-Za-z])" + octet + r"([:_-])" + (r"(?:" + octet + r"\1)") * 4 + octet + r"(?![0-9A-Za-z])")
+    placeholders = {"AA:BB:CC:DD:EE:FF", "00:11:22:33:44:55", "11:22:33:44:55:66", "00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF"}
+    home = re.compile(r"(?<![\w.])/home/(?!user\b|<user>)[A-Za-z0-9_][\w.-]*|-home-[a-z_][a-z0-9_]*-")
+    config = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    number_file = pathlib.Path(config) / "desktop-calls" / "test-number"
+    test_number = None
+    if number_file.is_file():
+        digits = re.sub(r"\D", "", number_file.read_text())[-7:]
+        if len(digits) == 7:
+            test_number = re.compile(r"[\s.()/-]{0,2}".join(digits) + r"(?!\d)")
+    found = []
+    for name in filter(None, names):
+        path = pathlib.Path(name)
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            continue
+        def line_of(match):
+            return f"{name}:{text.count(chr(10), 0, match.start()) + 1}"
+        for match in address.finditer(text):
+            octets = re.split(r"[:_-]", match.group(0).upper())
+            if ":".join(octets) not in placeholders and octets[3:5] != ["00", "00"]:
+                found.append(f"  {line_of(match)}: Bluetooth address {match.group(0)} (use AA:BB:CC:DD:EE:FF)")
+        for match in home.finditer(text):
+            found.append(f"  {line_of(match)}: home directory (use ~ or /home/<user>)")
+        if test_number:
+            for match in test_number.finditer(text):
+                found.append(f"  {line_of(match)}: the Test Number (never commit it)")
+    if found:
+        print("Personal data in a public repository; replace each with a placeholder:", file=sys.stderr)
         print("\n".join(found), file=sys.stderr)
         sys.exit(1)

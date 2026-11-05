@@ -3,7 +3,7 @@
 
 use desktop_calls_core::{
     AudioLocation, CallId, CallState, Caller, IndicatorEntry, IndicatorLook, IndicatorView, Input,
-    Mute, Phone, PhoneCommand, State, SyncFailure, Timestamp, Transport, messages, step,
+    Mute, Phone, PhoneCommand, State, SyncFailure, Timer, Timestamp, Transport, messages, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -127,6 +127,31 @@ fn the_tooltip_says_the_state_in_words() {
         tooltip(&denied()),
         "My Pixel connected · Contacts not shared"
     );
+}
+
+/// A Call that rang with no number, while the Phone may still report one.
+fn ringing_with_no_number_yet() -> State {
+    run(
+        connected(),
+        [Input::CallAdded {
+            call: CALL,
+            state: CallState::Ringing,
+            caller: Caller::Withheld,
+            at: Timestamp(1_000),
+        }],
+    )
+}
+
+#[test]
+fn while_the_caller_is_identified_the_tooltip_says_what_the_banner_says() {
+    let identifying = ringing_with_no_number_yet();
+    let withheld = run(
+        identifying.clone(),
+        [Input::TimerFired(Timer::NumberLate(CALL))],
+    );
+
+    assert_eq!(tooltip(&identifying), "Identifying caller…");
+    assert_eq!(tooltip(&withheld), "Call from Withheld number");
 }
 
 #[test]

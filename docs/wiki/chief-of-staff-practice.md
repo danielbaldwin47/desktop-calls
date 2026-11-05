@@ -16,6 +16,21 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
 
 ## Merging
 
+- 2026-11-05, decided with the user after a 5-PR trial: every PR gets two cold reviews before `just merge`, run alongside CI. Both follow [`docs/agents/reviewer-brief.md`](../agents/reviewer-brief.md):
+  - **Sonnet** covers both axes, Standards and Spec.
+  - **Opus** covers the Spec axis only.
+
+  Any FAIL, or any minor finding that is a real defect, goes back to the PR's agent. After 2 failed rounds, the user decides.
+  - **Trial results:** without review, all 5 PRs (#129, #130, #132, #134, #135) would have merged on green CI, and review sent all 5 back.
+  - **Serious finds:**
+    - Holding one Call, with one live and a third waiting: Hang up on the held Call sent CHLD=0, which declined the waiting caller (#129, Opus).
+    - Checklist step 7.1 could ring a stranger on a mistyped digit (#134, Sonnet).
+    - The 6.2 timing test passed without ever measuring (#134, Opus).
+  - **Each model caught things the other missed:**
+    - Opus: protocol bugs, vacuous tests, log-cursor races.
+    - Sonnet: glossary rules, safety gaps, stale text.
+  - Planned next: move this review to GitHub Actions as the first task of a software factory, after v1.
+
 - 2026-11-05: confirm checks with `gh pr checks <n> --watch` and that the PR head contains `origin/main`, then merge with `--match-head-commit <full sha>` (a short SHA is rejected). Use `just merge <n>` once #56 lands. Never merge with CI pending: see the #40 incident in [retros](retros.md).
 - 2026-11-05: a PR that contains another open PR (#72 contained #69, #71 contained #68) can be merged alone; close the contained PR as superseded. That saves a CI round. Stacked part PRs (#75 on #74) conflict once the lower part is squash-merged, so the implementer brief now forbids stacking.
 - 2026-11-05 (retro on #42): never tell an agent to wait for another PR to land before pushing. Let it push and reply. The merge step asks for a branch update if it's needed.

@@ -37,17 +37,26 @@ pub struct DialerView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BannerView {
     pub call: CallId,
-    pub caller: Caller,
+    pub caller: RingingCaller,
     /// The Banner has keyboard focus, so A answers and D declines.
     pub focused: bool,
-    /// The Contact the caller is, if Contacts say.
-    pub contact: Option<ContactMatch>,
     /// What the Banner offers for a Waiting Call in place of Answer, or
     /// `None` for the only Call ringing.
     pub waiting: Option<WaitingOptions>,
+}
+
+/// Who a ringing Call is from, as the Banner and the Indicator both say it.
+/// Worked out once, here, so the two can't disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RingingCaller {
     /// The Call rang with no number, and the Phone may still report one,
-    /// so the Banner doesn't yet say the number is withheld.
-    pub awaiting_number: bool,
+    /// so nothing yet says the number is withheld.
+    Identifying,
+    Known {
+        caller: Caller,
+        /// The Contact the caller is, if Contacts say.
+        contact: Option<ContactMatch>,
+    },
 }
 
 /// The Call Window's content.
@@ -179,6 +188,19 @@ impl State {
         })
     }
 
+    /// Who the ringing `call` is from: while it has no number and the Phone
+    /// may still report one, nobody yet.
+    fn ringing_caller(&self, call: &Call) -> RingingCaller {
+        if call.caller == Caller::Withheld && self.awaiting_number.contains(&call.id) {
+            RingingCaller::Identifying
+        } else {
+            RingingCaller::Known {
+                caller: call.caller.clone(),
+                contact: self.contact(&call.caller),
+            }
+        }
+    }
+
     /// What the Desktop surfaces show.
     #[must_use]
     pub fn surfaces(&self) -> Surfaces {
@@ -190,15 +212,12 @@ impl State {
             .find(|call| call.rings_here())
             .map(|call| BannerView {
                 call: call.id,
-                caller: call.caller.clone(),
+                caller: self.ringing_caller(call),
                 focused: self.focus == Focus::Banner,
-                contact: self.contact(&call.caller),
                 waiting: self
                     .waiting_call()
                     .filter(|waiting| waiting.id == call.id)
                     .map(|_| self.waiting_options()),
-                awaiting_number: call.caller == Caller::Withheld
-                    && self.awaiting_number.contains(&call.id),
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.

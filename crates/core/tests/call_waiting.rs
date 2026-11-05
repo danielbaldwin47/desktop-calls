@@ -3,8 +3,8 @@
 //! Swap, and the Phone refusing them.
 
 use desktop_calls_core::{
-    CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone, PhoneCommand, State,
-    Timestamp, Transport, WaitingOptions, messages::Failure, step,
+    CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone, PhoneCommand,
+    RingingCaller, State, Timestamp, Transport, WaitingOptions, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -117,7 +117,13 @@ fn a_waiting_call_shows_the_banner_with_the_call_waiting_options_and_never_rings
     assert!(!effects.contains(&Effect::StartRinging));
     let banner = state.surfaces().banner.expect("the Banner shows");
     assert_eq!(banner.call, SECOND);
-    assert_eq!(banner.caller, alice());
+    assert_eq!(
+        banner.caller,
+        RingingCaller::Known {
+            caller: alice(),
+            contact: None
+        }
+    );
     assert_eq!(banner.waiting, Some(WaitingOptions::HoldOrEnd));
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.call, Some(FIRST));

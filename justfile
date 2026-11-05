@@ -65,11 +65,23 @@ demo scenario="crates/simulated-phone/scenarios/demo.scenario":
     @target/debug/automation demo {{scenario}}
 
 # Place one real Call to the Test Number, run HOOK during it, always hang up.
+# Stops the installed desktop-calls.service for the run and starts it again
+# afterwards, so HOOK may start a dev run of the app (ADR-0006).
 # `just test-call --help` for options. Exits 2 if a Call may still be live.
 [positional-arguments]
 [no-exit-message]
 test-call *args:
     @/usr/bin/python3 tools/real-phone/test_call.py "$@"
+
+# Run this checkout's app on the real Phone until Ctrl-C: a dev run, in place
+# of the installed desktop-calls.service, which is stopped for the run and
+# started again afterwards, even if the run is killed (ADR-0006). Refuses
+# while the Phone has a Call. `just run --help`.
+[positional-arguments]
+[no-exit-message]
+run *args:
+    @cargo build --quiet --locked -p desktop-calls
+    @/usr/bin/python3 tools/real-phone/run.py target/debug/desktop-calls "$@"
 
 # Read the Phone's Contacts and Call History over PBAP and report only their
 # shape, never a name or number. Places no Call. Have the Phone unlocked and

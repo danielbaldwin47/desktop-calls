@@ -44,6 +44,8 @@ enum Failure {
     SystemBusUnreachable,
     /// Another copy of Desktop Calls owns the control interface's name.
     AlreadyRunning,
+    /// The control interface couldn't be served for any other reason.
+    ControlInterfaceUnavailable,
 }
 
 impl Failure {
@@ -52,6 +54,7 @@ impl Failure {
             Self::SessionBusUnreachable => "session-bus-unreachable",
             Self::SystemBusUnreachable => "system-bus-unreachable",
             Self::AlreadyRunning => "already-running",
+            Self::ControlInterfaceUnavailable => "control-interface-unavailable",
         }
     }
 }
@@ -120,15 +123,23 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .await
         .map_err(|error| raw_failure(Failure::SystemBusUnreachable, &error))?;
     let (input_sender, inputs) = unbounded();
+    let (dial_sender, dials) = unbounded();
+    // First, so a copy started beside another stops before it reads or
+    // touches anything.
+    let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
+        .await
+        .map_err(|error| {
+            let failure = match error {
+                zbus::Error::NameTaken => Failure::AlreadyRunning,
+                _ => Failure::ControlInterfaceUnavailable,
+            };
+            raw_failure(failure, &error)
+        })?;
     // Before anything the Phone reports, so its Calls are known for what
     // they were before a crash.
     if let Some(earlier) = earlier_run::load() {
         let _ = input_sender.unbounded_send(Input::EarlierRun(earlier));
     }
-    let (dial_sender, dials) = unbounded();
-    let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
-        .await
-        .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
 
     let (command_sender, commands) = unbounded();
     let (contacts_sender, contacts_commands) = unbounded();
@@ -335,6 +346,7 @@ impl Shell {
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
+                Effect::EarlierCallsForgotten(calls) => earlier_run::forgotten(calls),
                 Effect::ReportError(failure) => announcements.push(Announcement::Error(failure)),
             }
         }

@@ -18,6 +18,7 @@ use desktop_calls_core::{
 };
 use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
+use zbus::fdo::RequestNameFlags;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, DBusError, interface};
 
@@ -514,6 +515,12 @@ pub struct Publisher {
 impl Publisher {
     /// Serves the control interface on `session`, sending its intents to
     /// `intents` and its Dial requests to `dials`, and claims its bus name.
+    ///
+    /// Only while no other copy of Desktop Calls holds the name: the claim
+    /// neither takes it from that copy nor lets a later one take it, so two
+    /// copies never follow the same Phone (ticket #123). zbus's default
+    /// claim did both, and a second copy silently took the name from the
+    /// first, which carried on beside it.
     pub async fn serve(
         session: &Connection,
         intents: UnboundedSender<Input>,
@@ -528,7 +535,9 @@ impl Publisher {
         };
         server.at(PATH, control).await?;
         let interface = server.interface::<_, ControlInterface>(PATH).await?;
-        session.request_name(BUS_NAME).await?;
+        session
+            .request_name_with_flags(BUS_NAME, RequestNameFlags::DO_NOT_QUEUE)
+            .await?;
         Ok(Self { interface })
     }
 

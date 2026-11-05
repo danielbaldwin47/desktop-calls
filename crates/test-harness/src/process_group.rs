@@ -49,6 +49,12 @@ impl ProcessGroup {
         Self { guard, id }
     }
 
+    /// The group's ID, for a process started from a [`Command`] built
+    /// elsewhere.
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+
     /// Makes `command` start its process in this group.
     pub fn adopt<'command>(&self, command: &'command mut Command) -> &'command mut Command {
         command.process_group(self.id)

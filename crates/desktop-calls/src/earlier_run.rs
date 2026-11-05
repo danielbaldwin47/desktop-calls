@@ -2,12 +2,24 @@
 //! started after a crash picks up the Calls as they were (see
 //! [`desktop_calls_core::EarlierRun`]).
 //!
-//! It is one JSON file, `$XDG_RUNTIME_DIR/desktop-calls/earlier-run.json`:
-//! the runtime directory is the user's alone and goes at logout, as do the
-//! Calls it describes. The directory is 0700 and the file 0600, since it
-//! holds the other party's number. The file is written whole to a temporary
-//! file and renamed over the old one, so a crash leaves one or the other.
-//! With nothing to keep, the file goes.
+//! It is one JSON file, `earlier-run.json`, in the run's runtime directory:
+//!
+//! - The installed service keeps it in the directory systemd makes for it,
+//!   which systemd passes as `$RUNTIME_DIRECTORY` (`RuntimeDirectory=` in
+//!   the unit, `$XDG_RUNTIME_DIR/desktop-calls-service`). It outlives a crash and
+//!   a restart, and goes when the service stops, as do the Calls it
+//!   describes.
+//! - A run systemd didn't start, such as a developer's `cargo run`, keeps
+//!   it in `$XDG_RUNTIME_DIR/desktop-calls-dev`, which goes at logout.
+//!
+//! So neither picks up Calls the other left: on 2026-11-05 the installed
+//! service picked up a Call from a dev run stopped mid-Call (ticket #123,
+//! ADR-0006).
+//!
+//! The directory is 0700 and the file 0600, since it holds the other
+//! party's number. The file is written whole to a temporary file and renamed
+//! over the old one, so a crash leaves one or the other. With nothing to
+//! keep, the file goes.
 
 use std::fs::{self, DirBuilder, OpenOptions, Permissions};
 use std::io::{self, Write as _};
@@ -22,11 +34,18 @@ use crate::logging::EventKind;
 /// Bumped when the file's shape changes; other versions are ignored.
 const VERSION: u64 = 1;
 
+/// Where a run systemd didn't start keeps its file, under `XDG_RUNTIME_DIR`.
+const UNMANAGED_DIRECTORY: &str = "desktop-calls-dev";
+
 fn file() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .map(|runtime| runtime.join("desktop-calls/earlier-run.json"))
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    absolute("RUNTIME_DIRECTORY")
+        .or_else(|| absolute("XDG_RUNTIME_DIR").map(|runtime| runtime.join(UNMANAGED_DIRECTORY)))
+        .map(|directory| directory.join("earlier-run.json"))
 }
 
 /// What the run before this one kept, if anything.
@@ -51,10 +70,20 @@ pub fn load() -> Option<EarlierRun> {
         event_kind = %EventKind::EarlierRunLoaded,
         calls = earlier.calls.len(),
         muted = earlier.restore_microphone_volume.is_some(),
-        "Picking up {} Call(s) from before this run started",
+        "{} Call(s) from before this run started may be continuing; picking them up if the Phone still has them",
         earlier.calls.len()
     );
     Some(earlier)
+}
+
+/// Logs that `calls` Calls from before this run started never showed
+/// again, and so were forgotten.
+pub fn forgotten(calls: usize) {
+    tracing::info!(
+        event_kind = %EventKind::EarlierRunForgotten,
+        calls,
+        "Forgot {calls} Call(s) from before this run started: the Phone never showed them again, so they had ended"
+    );
 }
 
 /// Keeps `next` for the next run, replacing what was kept.

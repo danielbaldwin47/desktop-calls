@@ -412,7 +412,8 @@ fn wait_for_audio_put_right(harness: &Harness) {
 }
 
 /// Presses Set up audio once the Problem shows, and waits until setting up
-/// is done: `WirePlumber` restarted and no Problem left.
+/// is done: `WirePlumber` restarted, its job ended `done` and no Problem
+/// left.
 fn set_up_audio_and_wait_until_done(harness: &Harness) {
     wait_for_problems(harness, "audio-not-set-up", STARTUP);
     wait_for_phone_listed(harness);
@@ -423,18 +424,20 @@ fn set_up_audio_and_wait_until_done(harness: &Harness) {
         restarts_wireplumber,
     );
     no_problems_shown(harness);
+    wait_for_audio_put_right(harness);
 }
 
-/// A permission mode the default umask can't produce: files made with a
-/// umask of 022 get 0644, and 077 gives 0600.
-const GROUP_READABLE: u32 = 0o640;
+/// A permission mode no umask gives a new file: owner and others may read
+/// it, the group may not. A umask of 022 gives 0644, 027 gives 0640, 077
+/// gives 0600.
+const NOT_FROM_ANY_UMASK: u32 = 0o604;
 
 #[test]
 fn setting_up_audio_keeps_the_permissions_of_a_drop_in_it_rewrites() {
     let harness = Harness::builder()
         .headless_screen()
         .phone_unpaired()
-        .wireplumber_config_with_mode("51-music.conf", ROLES_WITHOUT_HANDS_FREE, GROUP_READABLE)
+        .wireplumber_config_with_mode("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
         .start();
 
     set_up_audio_and_wait_until_done(&harness);
@@ -446,7 +449,7 @@ fn setting_up_audio_keeps_the_permissions_of_a_drop_in_it_rewrites() {
     );
     assert_eq!(
         harness.wireplumber_drop_in_mode("51-music.conf"),
-        GROUP_READABLE
+        NOT_FROM_ANY_UMASK
     );
 }
 
@@ -462,7 +465,7 @@ monitor.bluez.properties = {
     let harness = Harness::builder()
         .headless_screen()
         .phone_unpaired()
-        .wireplumber_config_with_mode(DROP_IN, EARLIER, 0o660)
+        .wireplumber_config_with_mode(DROP_IN, EARLIER, NOT_FROM_ANY_UMASK)
         .start();
 
     set_up_audio_and_wait_until_done(&harness);
@@ -472,7 +475,7 @@ monitor.bluez.properties = {
         EARLIER,
         "the drop-in was rewritten"
     );
-    assert_eq!(harness.wireplumber_drop_in_mode(DROP_IN), 0o660);
+    assert_eq!(harness.wireplumber_drop_in_mode(DROP_IN), NOT_FROM_ANY_UMASK);
 }
 
 #[test]
@@ -480,7 +483,7 @@ fn setting_up_audio_rewrites_the_file_a_linked_drop_in_points_to_and_keeps_its_p
     let harness = Harness::builder()
         .headless_screen()
         .phone_unpaired()
-        .wireplumber_config_linked("51-music.conf", ROLES_WITHOUT_HANDS_FREE, GROUP_READABLE)
+        .wireplumber_config_linked("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
         .start();
 
     set_up_audio_and_wait_until_done(&harness);
@@ -496,7 +499,7 @@ fn setting_up_audio_rewrites_the_file_a_linked_drop_in_points_to_and_keeps_its_p
     );
     assert_eq!(
         harness.wireplumber_drop_in_mode("51-music.conf"),
-        GROUP_READABLE
+        NOT_FROM_ANY_UMASK
     );
 }
 

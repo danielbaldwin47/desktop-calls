@@ -139,25 +139,6 @@ fn tool_output(harness: &Harness, name: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
-/// The process ID of `child`'s guard: the child process it started to
-/// clean up after it.
-fn guard_of(child: &Child) -> u32 {
-    let children = format!("/proc/{0}/task/{0}/children", child.id());
-    let children =
-        fs::read_to_string(&children).unwrap_or_else(|error| panic!("read {children}: {error}"));
-    children
-        .split_whitespace()
-        .filter_map(|pid| pid.parse::<u32>().ok())
-        .find(|pid| {
-            fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
-                cmdline
-                    .split(|byte| *byte == 0)
-                    .any(|word| word == b"--guard")
-            })
-        })
-        .unwrap_or_else(|| panic!("process {} has no guard", child.id()))
-}
-
 /// Every `ActiveState` of a service that was stopped once and started
 /// once again, after starting as the scenario began.
 const STOPPED_AND_STARTED_ONCE: [&str; 6] = [
@@ -238,7 +219,7 @@ fn a_killed_test_call_still_starts_the_installed_service_again() {
 }
 
 #[test]
-fn test_call_leaves_a_stopped_service_stopped() {
+fn test_call_starts_a_service_that_was_stopped_before_it() {
     let harness = Harness::builder().phone_connected().installed().start();
 
     let mut test_call = start_test_call(&harness, &["--max-seconds", "30", "true"]);
@@ -246,7 +227,59 @@ fn test_call_leaves_a_stopped_service_stopped() {
 
     let status = wait_for_exit(&harness, &mut test_call, "test_call.py");
     assert!(status.success(), "test_call.py: {status}");
-    assert_eq!(harness.service_history(), Vec::<&str>::new());
+    assert_eq!(harness.service_state(), "active", "the service runs after the run");
+    assert_eq!(harness.service_history(), ["activating", "active"]);
+}
+
+#[test]
+fn test_call_ends_with_the_service_running_when_something_started_it_meanwhile() {
+    let harness = service_running();
+    // A hook that starts no app, so the service can come back mid-run, as
+    // D-Bus activation or the user might bring it back.
+    let hook = format!(
+        "until [ -e {done} ]; do sleep 0.1; done",
+        done = done_file(&harness).display()
+    );
+    let mut test_call = start_test_call(&harness, &["--max-seconds", "30", &hook]);
+    callee_answers(&harness);
+    wait_until("the service is stopped for the run", || {
+        harness.service_state() == "inactive"
+    });
+    harness.start_service();
+    let started_meanwhile = harness.service_process_id();
+    fs::write(done_file(&harness), "").expect("end the hook");
+
+    let status = wait_for_exit(&harness, &mut test_call, "test_call.py");
+    assert!(status.success(), "test_call.py: {status}");
+    assert_eq!(harness.service_state(), "active");
+    assert_eq!(
+        harness.service_process_id(),
+        started_meanwhile,
+        "the running service was left alone"
+    );
+    never_two_apps(&harness);
+}
+
+#[test]
+fn a_killed_test_call_whose_hang_up_fails_still_starts_the_service() {
+    let harness = service_running();
+    let service = harness.service_process_id();
+    let hook = dev_run_hook(&harness);
+    let mut test_call = start_test_call(&harness, &["--max-seconds", "30", &hook]);
+    callee_answers(&harness);
+    dev_run_on_bus(&harness, service);
+    // The guard can't read the Test Number, so its hang-up fails at once.
+    let number = harness.directory().join("config/desktop-calls/test-number");
+    fs::remove_file(&number).expect("remove the Test Number");
+
+    test_call.kill().expect("kill test_call.py");
+    let _ = test_call.wait();
+
+    harness.wait_for_service_restart(service);
+    wait_until("the service is on the bus", || {
+        harness.app_process_id() == harness.service_process_id()
+    });
+    never_two_apps(&harness);
 }
 
 /// Starts `just run`'s script on the scenario's app binary.
@@ -335,7 +368,7 @@ fn just_run_refuses_without_the_phones_hands_free_link() {
 }
 
 #[test]
-fn just_run_leaves_a_stopped_service_stopped() {
+fn just_run_starts_a_service_that_was_stopped_before_it() {
     let harness = Harness::builder().phone_connected().installed().start();
     let mut run = start_run(&harness);
     dev_run_on_bus(&harness, None);
@@ -343,7 +376,8 @@ fn just_run_leaves_a_stopped_service_stopped() {
     send(&harness, &run, "-INT");
 
     wait_for_exit(&harness, &mut run, "run.py");
-    assert_eq!(harness.service_history(), Vec::<&str>::new());
+    assert_eq!(harness.service_state(), "active", "the service runs after the run");
+    assert_eq!(harness.app_process_id(), harness.service_process_id());
 }
 
 #[test]
@@ -355,7 +389,8 @@ fn just_run_ended_by_sigterm_starts_the_installed_service_again() {
 
     send(&harness, &run, "-TERM");
 
-    wait_for_exit(&harness, &mut run, "run.py");
+    let status = wait_for_exit(&harness, &mut run, "run.py");
+    assert_eq!(status.code(), Some(130), "run.py: {status}");
     assert_eq!(harness.service_state(), "active");
     assert_eq!(harness.app_process_id(), harness.service_process_id());
     never_two_apps(&harness);
@@ -372,7 +407,8 @@ fn test_call_ended_by_sigterm_hangs_up_and_starts_the_installed_service_again() 
 
     send(&harness, &test_call, "-TERM");
 
-    wait_for_exit(&harness, &mut test_call, "test_call.py");
+    let status = wait_for_exit(&harness, &mut test_call, "test_call.py");
+    assert_eq!(status.code(), Some(130), "test_call.py: {status}");
     assert_eq!(harness.service_state(), "active");
     assert_eq!(harness.app_process_id(), harness.service_process_id());
     assert!(harness.simulated_phone().calls_on_phone().is_empty());
@@ -380,53 +416,15 @@ fn test_call_ended_by_sigterm_hangs_up_and_starts_the_installed_service_again() 
 }
 
 #[test]
-fn the_next_run_starts_a_service_that_a_killed_run_and_its_guard_left_stopped() {
+fn a_run_that_ends_while_another_has_its_dev_run_up_leaves_the_service_to_it() {
     let harness = service_running();
     let service = harness.service_process_id();
     let mut run = start_run(&harness);
     dev_run_on_bus(&harness, service);
     let dev_run = harness.app_process_id();
 
-    // Everything dies at once: the guard, the run, and its dev run.
-    let guard = guard_of(&run);
-    for pid in [Some(guard), dev_run].into_iter().flatten() {
-        let killed = harness
-            .external_command("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status()
-            .unwrap_or_else(|error| panic!("kill {pid}: {error}"));
-        assert!(killed.success());
-    }
-    run.kill().expect("kill run.py");
-    let _ = run.wait();
-    wait_until("the dev run is off the bus", || {
-        harness.app_process_id().is_none()
-    });
-    assert_eq!(harness.service_state(), "inactive", "nothing started it");
-
-    let mut next = start_run(&harness);
-    dev_run_on_bus(&harness, None);
-    send(&harness, &next, "-INT");
-
-    wait_for_exit(&harness, &mut next, "the next run.py");
-    assert_eq!(harness.service_state(), "active", "the next run started it");
-    assert!(
-        tool_output(&harness, "run").contains("an earlier run left desktop-calls.service stopped"),
-        "the next run said why it started the service"
-    );
-    never_two_apps(&harness);
-}
-
-#[test]
-fn two_runs_at_once_stop_the_installed_service_once_and_the_last_starts_it() {
-    let harness = service_running();
-    let service = harness.service_process_id();
-    let mut run = start_run(&harness);
-    dev_run_on_bus(&harness, service);
-    let dev_run = harness.app_process_id();
-
-    // A test-call while `just run` is up ends first: the service stays
-    // stopped for the dev run.
+    // A test-call while `just run` is up ends first: it doesn't start the
+    // service beside the dev run, and `just run` starts it when it ends.
     let mut test_call = start_test_call(&harness, &["--max-seconds", "30", "true"]);
     callee_answers(&harness);
     let status = wait_for_exit(&harness, &mut test_call, "test_call.py");

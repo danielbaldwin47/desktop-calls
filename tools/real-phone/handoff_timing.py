@@ -117,13 +117,14 @@ class Watch:
 
 
 def app_property(bus: dbus.Bus, name: str) -> Any:
-    """One of the app's properties; None while no copy of the app owns its
-    name, which is asked first so the installed service is never started
-    through D-Bus activation."""
+    """One of the app's properties; None while no copy of the app is on the
+    bus. Sent to the copy's unique name, so it never starts the installed
+    service through D-Bus activation."""
     try:
-        if not rp.app_on_bus(bus):
+        owner = rp.app_owner(bus)
+        if owner is None:
             return None
-        return rp.call(bus, APP_NAME, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
+        return rp.call(bus, owner, APP_PATH, rp.PROPERTIES_IF, "Get", APP_IF, name,
                        signature="ss", timeout=1.0)
     except dbus.DBusException:
         return None

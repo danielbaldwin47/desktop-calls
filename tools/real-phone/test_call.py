@@ -23,12 +23,10 @@ process, even if this process is killed outright.
 
 The installed desktop-calls.service never runs beside the run (ADR-0006):
 if it is running, it is stopped before dialling, so the hook has the Phone
-to itself and may start a dev run of the app. It is started again after
-hanging up, in all the cases above, the guard's included, unless another
-run (`just run`, another test-call) still needs it stopped: the last one
-to end starts it. A service that wasn't running stays stopped. If an
-earlier run and its guard were both killed while the service was stopped,
-this run starts it first.
+to itself and may start a dev run of the app. It is started after hanging
+up, in all the cases above, the guard's included, whether or not it ran
+before, unless a `just run` started meanwhile still has its dev run up:
+that run starts it when it ends.
 
 With --desktop-audio it sets RejectSCO=false before dialling, as the app
 does for a Call placed on the Desktop, logs every change of the
@@ -72,12 +70,11 @@ class TestCallFailed(Exception):
 # ------------------------------------------------------------------ guard
 #
 # A separate process, in its own session so Ctrl-C and a closed terminal do
-# not reach it. It reads lines from a pipe: "service-hold <process ID>",
-# "dialled", "call <path>", "hook <process group>", "done". If the pipe
-# closes without "done", the parent died without finishing, so the guard
-# stops the hook, hangs up the Call to the Test Number itself, and gives
-# back the parent's hold on the installed service, whatever else fails.
-# `just run` uses it too.
+# not reach it. It reads lines from a pipe: "service", "dialled",
+# "call <path>", "hook <process group>", "done". If the pipe closes without
+# "done", the parent died without finishing, so the guard stops the hook,
+# hangs up the Call to the Test Number itself, and starts the installed
+# service, whatever else fails. `just run` uses it too.
 
 
 class Guard:
@@ -114,13 +111,13 @@ def guard_main() -> int:
     for s in (signal.SIGINT, signal.SIGHUP):
         signal.signal(s, signal.SIG_IGN)
     dialled, call_path, hook_group, desktop_audio = False, None, None, False
-    service_holder: int | None = None
+    start_service = False
     for line in sys.stdin:
         word, _, rest = line.strip().partition(" ")
         if word == "done":
             return EXIT_OK
-        if word == "service-hold":
-            service_holder = int(rest)
+        if word == "service":
+            start_service = True
         elif word == "dialled":
             dialled = True
         elif word == "call":
@@ -141,19 +138,11 @@ def guard_main() -> int:
         outcome = EXIT_CALL_REMAINS
     finally:
         # Whatever happened to the hang-up, a missing Test Number included.
-        if service_holder is not None and not guard_give_back(service_holder):
-            outcome = outcome or EXIT_SERVICE_STOPPED
+        if start_service:
+            log("GUARD", "the run ended without starting the installed service")
+            if not start_installed_service(rp.InstalledService()):
+                outcome = outcome or EXIT_SERVICE_STOPPED
     return outcome
-
-
-def guard_give_back(holder: int) -> bool:
-    """Give back the dead run's hold on the installed service."""
-    log("GUARD", "the run ended without giving back its hold on the installed service")
-    try:
-        return rp.ServiceHold(rp.InstalledService(), holder).give_back()
-    except (dbus.DBusException, rp.ServiceError) as e:
-        log("GUARD", f"could not give the installed service back: {e}")
-        return False
 
 
 def guard_hang_up(call_path: str | None, desktop_audio: bool) -> int:
@@ -303,14 +292,14 @@ def place_test_call(
     return tel.test_call_path
 
 
-def give_back(hold: rp.ServiceHold) -> bool:
-    """End this run's hold on the installed service. False if the service
-    should run again and can't be started."""
+def start_installed_service(service: rp.InstalledService) -> bool:
+    """Start the installed service at the end of a run. False if it can't
+    be started; `start` has told the user how to start it."""
     try:
-        return hold.give_back()
-    except (dbus.DBusException, rp.ServiceError) as e:
-        log("ALERT", f"could not give back {rp.INSTALLED_UNIT}: {e}. Start it with "
-                     f"`systemctl --user start {rp.INSTALLED_UNIT}`.")
+        return service.start()
+    except dbus.DBusException as e:
+        log("ALERT", f"could not start {rp.INSTALLED_UNIT}: {e.get_dbus_name()}. Start it "
+                     f"with `systemctl --user start {rp.INSTALLED_UNIT}`.")
         return False
 
 
@@ -339,16 +328,15 @@ def run(args: argparse.Namespace) -> int:
         return EXIT_FAILED
     log("PHONE", f"{tel.phone_address}, AudioGateway {gateway}, no Calls")
 
-    hold = rp.ServiceHold(rp.InstalledService(tel.session))
-    if not hold.recover():
-        return EXIT_SERVICE_STOPPED
+    service = rp.InstalledService(tel.session)
     guard = Guard()
     hook: Hook | None = None
     outcome = EXIT_FAILED
     transport = TransportLog(tel, gateway) if args.desktop_audio else None
     try:
-        guard.tell(f"service-hold {hold.holder}")
-        hold.take()
+        guard.tell("service")
+        if service.running():
+            service.stop()
         if transport is not None:
             guard.tell("desktop-audio")
             transport.poll()
@@ -393,7 +381,7 @@ def run(args: argparse.Namespace) -> int:
             if transport is not None:
                 reject_desktop_audio(tel)
             no_call_remains = rp.report_remaining(tel.remaining_calls())
-            service_started = give_back(hold)
+            service_started = start_installed_service(service)
             guard.done()
     if not no_call_remains:
         return EXIT_CALL_REMAINS

@@ -8,13 +8,10 @@ Usage (through just):
 
 It runs `BINARY service`, a dev run of the app, until the app exits or you
 press Ctrl-C. The app never runs beside the installed desktop-calls.service
-(ADR-0006): if the service is running, it is stopped first, and started
-again when the run ends: when the app exits, on Ctrl-C, SIGTERM or SIGHUP,
-and, through test_call.py's guard process, even if this process is killed
-outright. A `just test-call` running at the same time shares the stop: the
-last of them to end starts the service. A service that wasn't running stays
-stopped. If an earlier run and its guard were both killed while the service
-was stopped, this run starts it first.
+(ADR-0006): if the service is running, it is stopped first, and it is
+started when the run ends, whether or not it ran before: when the app
+exits, on Ctrl-C, SIGTERM or SIGHUP, and, through test_call.py's guard
+process, even if this process is killed outright.
 
 It refuses to start without the Phone's hands-free link, or while the Phone
 has a Call, so it never takes a Call away from the installed service. The dev run keeps its own runtime state
@@ -41,7 +38,13 @@ import dbus
 
 import real_phone as rp
 from real_phone import log
-from test_call import EXIT_FAILED, EXIT_INTERRUPTED, EXIT_SERVICE_STOPPED, Guard, give_back
+from test_call import (
+    EXIT_FAILED,
+    EXIT_INTERRUPTED,
+    EXIT_SERVICE_STOPPED,
+    Guard,
+    start_installed_service,
+)
 
 USAGE = "usage: just run (or /usr/bin/python3 tools/real-phone/run.py BINARY)"
 
@@ -80,15 +83,14 @@ def run(binary: Path) -> int:
         log("ERROR", f"refusing: {len(calls)} Call(s) on the Phone. Try again once they end.")
         return EXIT_FAILED
 
-    hold = rp.ServiceHold(rp.InstalledService(tel.session))
-    if not hold.recover():
-        return EXIT_SERVICE_STOPPED
+    service = rp.InstalledService(tel.session)
     guard = Guard()
     app: subprocess.Popen[bytes] | None = None
     outcome = EXIT_FAILED
     try:
-        guard.tell(f"service-hold {hold.holder}")
-        hold.take()
+        guard.tell("service")
+        if service.running():
+            service.stop()
         log("APP", f"starting a dev run: {binary} service (Ctrl-C to stop)")
         app = subprocess.Popen([str(binary), "service"], start_new_session=True)
         guard.tell(f"hook {app.pid}")
@@ -103,7 +105,7 @@ def run(binary: Path) -> int:
         with rp.interrupts_deferred():
             if app is not None:
                 stop_app(app)
-            service_started = give_back(hold)
+            service_started = start_installed_service(service)
             guard.done()
     return outcome if service_started else EXIT_SERVICE_STOPPED
 

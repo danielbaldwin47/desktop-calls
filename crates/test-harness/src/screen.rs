@@ -118,16 +118,54 @@ impl Screenshot {
         if left == usize::MAX {
             return None;
         }
-        let to_layout = |pixels: usize| {
-            let pixels = u32::try_from(pixels).expect("a screen coordinate");
-            f64::from(pixels) * LAYOUT_SIZE.0 / f64::from(SCREEN_SIZE.0)
-        };
         Some(Region {
             left: to_layout(left),
             top: to_layout(top),
             right: to_layout(right),
             bottom: to_layout(bottom),
         })
+    }
+
+    /// The colour at the layout point (`x`, `y`).
+    ///
+    /// # Panics
+    ///
+    /// If the screenshot can't be decoded, or the point is off the screen.
+    #[must_use]
+    pub fn colour_at(&self, x: f64, y: f64) -> [u8; 3] {
+        let pixels = Pixels::read(&self.path);
+        let at = to_pixel(y) * pixels.line_size + to_pixel(x) * pixels.channels;
+        [pixels.data[at], pixels.data[at + 1], pixels.data[at + 2]]
+    }
+
+    /// The runs, left to right, of pixels along the layout row `y` whose
+    /// colour is not within 4 of `background` in every channel, as layout
+    /// `(left, right)`. Runs less than `gap` layout units apart are one.
+    ///
+    /// # Panics
+    ///
+    /// If the screenshot can't be decoded, or the row is off the screen.
+    #[must_use]
+    pub fn runs_along_row(&self, y: f64, background: [u8; 3], gap: f64) -> Vec<(f64, f64)> {
+        let pixels = Pixels::read(&self.path);
+        let row = &pixels.data[to_pixel(y) * pixels.line_size..][..pixels.line_size];
+        let mut runs: Vec<(f64, f64)> = Vec::new();
+        for column in 0..pixels.width {
+            let pixel = &row[column * pixels.channels..column * pixels.channels + 3];
+            if pixel
+                .iter()
+                .zip(background)
+                .all(|(channel, wanted)| channel.abs_diff(wanted) <= 4)
+            {
+                continue;
+            }
+            let (left, right) = (to_layout(column), to_layout(column + 1));
+            match runs.last_mut() {
+                Some(run) if left - run.1 < gap => run.1 = right,
+                _ => runs.push((left, right)),
+            }
+        }
+        runs
     }
 
     /// Writes this screenshot to `path` as a PNG, and returns the copy.
@@ -160,6 +198,23 @@ impl Screenshot {
             ..self.clone()
         }
     }
+}
+
+/// The layout coordinate of a pixel column or row.
+fn to_layout(pixels: usize) -> f64 {
+    let pixels = u32::try_from(pixels).expect("a screen coordinate");
+    f64::from(pixels) * LAYOUT_SIZE.0 / f64::from(SCREEN_SIZE.0)
+}
+
+/// The pixel column or row of a layout coordinate.
+fn to_pixel(layout: f64) -> usize {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a layout coordinate on the screen is a small non-negative number"
+    )]
+    let pixel = (layout * f64::from(SCREEN_SIZE.0) / LAYOUT_SIZE.0) as usize;
+    pixel
 }
 
 /// A screenshot's decoded pixels: rows of `line_size` bytes, `channels`

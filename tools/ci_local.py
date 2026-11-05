@@ -316,6 +316,12 @@ def checkout(sha: str, scratch: pathlib.Path) -> None:
     """A clone of this repository at the commit, so git works inside the run
     as in CI, and the run tests exactly that commit's files."""
     git("clone", "--quiet", "--no-checkout", git("rev-parse", "--show-toplevel"), str(scratch))
+    # The clone's origin is this checkout; the checks that ask GitHub which
+    # repository this is (the Real-Phone Checklist's tickets) need the real one.
+    subprocess.run(
+        ["git", "-C", str(scratch), "remote", "set-url", "origin", git("remote", "get-url", "origin")],
+        check=True,
+    )
     subprocess.run(["git", "-C", str(scratch), "checkout", "--quiet", "--detach", sha], check=True)
 
 

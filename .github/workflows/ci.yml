@@ -31,9 +31,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # `changes` decides whether the change touches code. If it does, the suite
-# runs as two halves in parallel, on two runners: everything but the
-# harness's scenarios, with `just check`; and the harness's scenarios. If it
-# touches only docs that no code reads, both halves are skipped. "CI passed"
+# runs in parallel, on several runners: `just lint`; every test but the
+# harness's scenarios; and the harness's scenarios, split into shards. The
+# test jobs build every target between them, as `just check` does. If it
+# touches only docs that no code reads, they are all skipped. "CI passed"
 # needs every job, so it appears only once they have all finished.
 jobs:
   changes:
@@ -55,8 +56,37 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
 
+  # `just check` is `just lint` and then a build of every target. CI runs
+  # `just lint` in a job of its own, beside the tests rather than before
+  # them: the test jobs build every target between them, so its build would
+  # be a third one, a minute spent on the harness's tests, which this job
+  # never ran (#118).
+  lint:
+    name: just lint (just check but its build, which the test jobs do)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      # The system libraries the -sys crates' build scripts look for, but
+      # none of the scenarios' tools.
+      - name: Install system packages
+        run: >-
+          pacman -Syu --noconfirm --needed
+          gcc pkgconf git rustup just cargo-deny python
+          gtk4 gtk4-layer-shell libadwaita dbus
+      - uses: actions/checkout@v5
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
+      - name: just lint
+        run: just lint
+
   check:
-    name: just check, and every test but the harness's
+    name: just test, all but the harness's scenarios
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -74,13 +104,14 @@ jobs:
       # wl-clipboard its clipboard for pasting, and libnotify's notify-send a
       # client of the notification stand-in. python-dbus and python-gobject
       # let the Real-Phone Checklist's --demo run the PBAP probe
-      # (tools/real-phone) against the Simulated Phone. Both jobs run
-      # `just test`, so both install everything.
+      # (tools/real-phone) against the Simulated Phone. cargo-nextest runs
+      # the harness's shards. Every job runs scenarios, so each installs
+      # everything.
       - &install
         name: Install system packages
         run: >-
           pacman -Syu --noconfirm --needed
-          gcc pkgconf git rustup just cargo-deny
+          gcc pkgconf git rustup just cargo-deny cargo-nextest
           gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject
           sway grim wl-clipboard libnotify
 
@@ -96,13 +127,9 @@ jobs:
       # workspace's Cargo.toml. A change to its build profiles then restored
       # a cache that matched in name only: every dependency rebuilt, and the
       # cache was never saved again. Its hash goes in the key.
-      - &cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
-
-      - name: just check
-        run: just check
 
       # The package gives sway the file capability cap_sys_nice, which is
       # outside this container's bounding set, so exec fails with EPERM.
@@ -146,17 +173,37 @@ jobs:
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 
+  # The harness's scenarios, in one shard per matrix entry, on as many runners
+  # at once. cargo-nextest pools every scenario, rather than one slow
+  # scenario holding the other CPUs idle, and `--partition count:k/N` gives
+  # shard k every N-th one, so a new scenario lands in a shard without anyone
+  # listing it. N is the matrix's size, so adding or dropping a shard keeps
+  # every scenario in one; "CI passed" checks that the shards' counts add up.
+  # In run 42034428129, one runner took 326 s under `cargo test` and 231 s
+  # under nextest, with two at a time either way (#118).
   scenarios:
-    name: just test, the harness's scenarios
+    name: just test, the harness's scenarios (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container: *container
+    # A hung scenario fails after nextest's terminate-after (.config/nextest.toml),
+    # long before this; this only bounds a hang outside a test.
+    timeout-minutes: 20
+    strategy:
+      # Every shard reports, so one failure doesn't hide another's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - *install
       - *checkout
       - *toolchain
-      - *cache
+      # The shards share one cache, which only the first saves.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ matrix.shard == 1 }}
       - *sway
 
       # Records whether unprivileged user and mount namespaces work here. The
@@ -167,29 +214,56 @@ jobs:
           ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
           if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
 
-      # Every crate but the harness is excluded by name, so a new crate runs
-      # in both halves rather than in neither.
-      - name: just test, the harness's scenarios
+      # Scenarios run the built binaries, as in `just test`. As many at once
+      # as the runner has CPUs, as `cargo test` does: four at a time on two
+      # CPUs failed Banner and Handoff timings in run 42034428129.
+      - name: Build the binaries the scenarios run
+        run: cargo build --workspace --bins --locked
+
+      - name: just test, the harness's scenarios, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
         run: >-
-          just test
-          --exclude desktop-calls --exclude desktop-calls-core
-          --exclude simulated-phone --exclude automation
+          cargo nextest run -p test-harness --locked --no-fail-fast
+          --partition count:${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # How many scenarios this shard ran and, from the first, how many there
+      # are, for "CI passed" to check that the shards ran every one.
+      - name: Count this shard's scenarios
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: |
+          mkdir -p target/shard-counts
+          cargo nextest list -p test-harness --locked --message-format oneline \
+            --partition "count:$SHARD/$SHARDS" | wc -l > "target/shard-counts/shard-$SHARD"
+          if [ "$SHARD" = 1 ]; then
+            cargo nextest list -p test-harness --locked --message-format oneline \
+              | wc -l > target/shard-counts/every-scenario
+          fi
+          cat target/shard-counts/*
+
+      - name: Keep this shard's count
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-count-${{ matrix.shard }}
+          path: target/shard-counts
 
       # First-frame timings, judged one scenario at a time as on the Desktop,
       # which runs one app (issue #47). In the whole run above, every
-      # scenario's app at once slows each first paint past its target.
+      # scenario's app at once slows each first paint past its target. Only
+      # the first shard runs them. `just test-file` fails if a file has no
+      # ignored scenario left, rather than run nothing.
       - name: just test, first-frame timings one scenario at a time
-        run: >-
-          cargo test -p test-harness --locked
-          --test dialer_surface --test incoming_call_surfaces
-          -- --ignored --test-threads=1
+        if: matrix.shard == 1
+        run: |
+          just test-file dialer_surface --ignored --test-threads=1
+          just test-file incoming_call_surfaces --ignored --test-threads=1
 
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: screenshots-${{ matrix.shard }}
           path: target/screenshots
           if-no-files-found: ignore
 
@@ -197,7 +271,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scenario-logs
+          name: scenario-logs-${{ matrix.shard }}
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 
@@ -207,14 +281,14 @@ jobs:
   ci-passed:
     name: CI passed
     if: ${{ !cancelled() }}
-    needs: [changes, check, scenarios]
+    needs: [changes, lint, check, scenarios]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed, or was skipped for a docs-only change
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          HALVES: ${{ needs.check.result }} ${{ needs.scenarios.result }}
+          HALVES: ${{ needs.lint.result }} ${{ needs.check.result }} ${{ needs.scenarios.result }}
         run: |
           echo "changes: $CHANGES, code changed: $CODE, halves: $HALVES"
           [ "$CHANGES" = success ] || exit 1
@@ -225,3 +299,21 @@ jobs:
               [ "$result" = skipped ] || exit 1
             fi
           done
+
+      # A shard that didn't run, or a partition that left scenarios out, would
+      # otherwise pass by running fewer.
+      - name: Fetch the shards' counts
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-count-*
+          merge-multiple: true
+          path: shard-counts
+
+      - name: The shards ran every scenario
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          every=$(cat shard-counts/every-scenario)
+          ran=$(cat shard-counts/shard-* | awk '{ sum += $1 } END { print sum + 0 }')
+          echo "The shards ran $ran of $every scenarios."
+          [ "$ran" -eq "$every" ]

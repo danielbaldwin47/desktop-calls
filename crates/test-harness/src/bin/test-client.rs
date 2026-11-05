@@ -9,10 +9,20 @@
 //! - `key <code> pressed` or `key <code> released` (Linux key codes)
 //! - `modifiers <mask>`, whenever the depressed modifiers change
 //! - `pointer-enter <x> <y>`, `pointer-leave`
-//! - `button <code> pressed at <x> <y>` or `... released at ...`
+//! - `button <code> pressed at <x> <y> showing state <n>` or `... released
+//!   ...`, where `<n>` is the state the window last finished drawing
 //!
 //! The harness's self-tests drive it to prove that synthetic input arrives.
 //! With `--fullscreen` it asks to be fullscreen, as a video player does.
+//!
+//! With `--slow-redraw` it stands in for an app slow to redraw after a state
+//! change, as the app is on a loaded CI runner: each key pressed is a state
+//! change, numbered from 1, that it prints as `state <n>` at once, before
+//! redrawing. It then keeps the CPU busy for [`BUSY`], draws [`STEPS`]
+//! frames in [`DRAWING_PIXEL`], one each time the compositor shows the last,
+//! and only then the state itself: [`ODD_STATE_PIXEL`] for an odd state,
+//! [`PIXEL`] for an even one. The harness's self-tests use it to prove that
+//! an action straight after a state change waits for the redraw.
 //!
 //! With `--bar` it is instead a stand-in for Omarchy's bar: a layer-shell
 //! surface across the top of the output, [`BAR_HEIGHT`] tall, that reserves
@@ -22,11 +32,12 @@
 use std::io::Write as _;
 use std::os::fd::AsFd as _;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -37,6 +48,16 @@ const DEFAULT_SIZE: (i32, i32) = (640, 480);
 
 /// An opaque mid grey, in `ARGB8888` as little-endian bytes.
 const PIXEL: [u8; 4] = [0x80, 0x80, 0x80, 0xff];
+
+/// With `--slow-redraw`: how long the CPU is kept busy after a state change
+/// before the first frame, and how many frames come before the state's own.
+const BUSY: Duration = Duration::from_millis(300);
+const STEPS: u32 = 20;
+/// The colour of the frames drawn on the way to a state, RGB 0x40 0x40 0x40,
+/// and of an odd state, RGB 0x20 0x60 0xa0, in `ARGB8888` as little-endian
+/// bytes.
+const DRAWING_PIXEL: [u8; 4] = [0x40, 0x40, 0x40, 0xff];
+const ODD_STATE_PIXEL: [u8; 4] = [0xa0, 0x60, 0x20, 0xff];
 
 /// Omarchy's bar's height. Keep in step with `test_harness::BAR_HEIGHT`.
 const BAR_HEIGHT: u32 = 26;
@@ -116,6 +137,10 @@ fn run() -> Result<(), String> {
         pointer: None,
         modifiers: 0,
         pointer_position: (0.0, 0.0),
+        slow_redraw: std::env::args().any(|argument| argument == "--slow-redraw"),
+        state: 0,
+        shown: 0,
+        steps_left: 0,
         failure: None,
     };
     while client.failure.is_none() {
@@ -138,6 +163,13 @@ struct Client {
     pointer: Option<wl_pointer::WlPointer>,
     modifiers: u32,
     pointer_position: (f64, f64),
+    /// Whether each key pressed is a state change, redrawn slowly.
+    slow_redraw: bool,
+    /// The latest state, and the one the window last finished drawing.
+    state: u32,
+    shown: u32,
+    /// Frames still to draw before the latest state's own.
+    steps_left: u32,
     failure: Option<String>,
 }
 
@@ -154,6 +186,42 @@ impl Client {
             }
             Ok(()) => {}
             Err(error) => self.failure = Some(error),
+        }
+    }
+
+    /// With `--slow-redraw`, a key was pressed: a new state, printed at once
+    /// and then redrawn slowly.
+    fn change_state(&mut self, connection: &Connection, handle: &QueueHandle<Self>) {
+        self.state += 1;
+        print(&format!("state {}", self.state));
+        let busy_until = Instant::now() + BUSY;
+        while Instant::now() < busy_until {
+            std::hint::spin_loop();
+        }
+        self.steps_left = STEPS;
+        self.next_frame(connection, handle);
+    }
+
+    /// Draws the next frame on the way to the latest state, or the state
+    /// itself once there are no more.
+    fn next_frame(&mut self, connection: &Connection, handle: &QueueHandle<Self>) {
+        if self.steps_left == 0 {
+            self.pixel = if self.state % 2 == 1 {
+                ODD_STATE_PIXEL
+            } else {
+                PIXEL
+            };
+            self.shown = self.state;
+        } else {
+            self.steps_left -= 1;
+            self.pixel = DRAWING_PIXEL;
+            self.surface.frame(handle, ());
+        }
+        let drawn = self
+            .draw(handle)
+            .and_then(|()| connection.flush().map_err(|error| error.to_string()));
+        if let Err(error) = drawn {
+            self.failure = Some(error);
         }
     }
 
@@ -316,18 +384,19 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         _: &wl_keyboard::WlKeyboard,
         event: wl_keyboard::Event,
         (): &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
+        connection: &Connection,
+        handle: &QueueHandle<Self>,
     ) {
         match event {
             wl_keyboard::Event::Enter { .. } => print("keyboard-enter"),
             wl_keyboard::Event::Leave { .. } => print("keyboard-leave"),
             wl_keyboard::Event::Key { key, state, .. } => {
-                let state = match state {
-                    WEnum::Value(wl_keyboard::KeyState::Pressed) => "pressed",
-                    _ => "released",
-                };
+                let pressed = matches!(state, WEnum::Value(wl_keyboard::KeyState::Pressed));
+                let state = if pressed { "pressed" } else { "released" };
                 print(&format!("key {key} {state}"));
+                if pressed && client.slow_redraw {
+                    client.change_state(connection, handle);
+                }
             }
             wl_keyboard::Event::Modifiers { mods_depressed, .. }
                 if mods_depressed != client.modifiers =>
@@ -370,9 +439,28 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
                     _ => "released",
                 };
                 let (x, y) = client.pointer_position;
-                print(&format!("button {button} {state} at {x} {y}"));
+                print(&format!(
+                    "button {button} {state} at {x} {y} showing state {}",
+                    client.shown
+                ));
             }
             _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_callback::WlCallback, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        (): &(),
+        connection: &Connection,
+        handle: &QueueHandle<Self>,
+    ) {
+        // The compositor has shown the last frame: time for the next.
+        if let wl_callback::Event::Done { .. } = event {
+            client.next_frame(connection, handle);
         }
     }
 }

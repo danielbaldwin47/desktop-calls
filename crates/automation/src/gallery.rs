@@ -149,13 +149,10 @@ const STATES: &[State] = &[
             harness
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));
-            // Once the muted strip is drawn and the Call Window has grown to
-            // hold it, click the window, to give it the keyboard, then show
-            // the keypad and type tones. A click before the redraw can miss.
-            let screenshot =
-                harness.screenshot_when("call-window-before-keypad", DEADLINE, |screenshot| {
-                    shows(screenshot, ORANGE)
-                });
+            // Click the window, to give it the keyboard, then show the
+            // keypad and type tones. The screenshot and the click both wait
+            // for the muted Call Window to be drawn (#53).
+            let screenshot = harness.screenshot("call-window-before-keypad");
             let window = app_region(&screenshot);
             let _ = fs::remove_file(&screenshot.path);
             if let Some(window) = window {
@@ -413,10 +410,34 @@ fn shows(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
         .is_some()
 }
 
-/// `automation screenshot`: renders the gallery into `output`, or
-/// `target/screenshots/gallery`.
-pub fn run(output: Option<PathBuf>) -> ExitCode {
-    let output = if let Some(output) = output {
+/// What `automation screenshot` renders, and where.
+pub struct Options {
+    /// Where the gallery goes. Default: `target/screenshots/gallery`.
+    pub output: Option<PathBuf>,
+    /// Only this state, keeping the rest of the gallery.
+    pub only: Option<String>,
+    /// How many times to render it, at least once.
+    pub repeat: u32,
+}
+
+/// `automation screenshot`: renders the gallery, or with `only` one state
+/// of it, `repeat` times, into `output` or `target/screenshots/gallery`.
+pub fn run(options: &Options) -> ExitCode {
+    let states: Vec<&State> = match &options.only {
+        None => STATES.iter().collect(),
+        Some(only) => {
+            let Some(state) = STATES.iter().find(|state| state.name == only) else {
+                let names: Vec<&str> = STATES.iter().map(|state| state.name).collect();
+                eprintln!(
+                    "The gallery has no state {only:?}. Its states: {}.",
+                    names.join(", ")
+                );
+                return ExitCode::FAILURE;
+            };
+            vec![state]
+        }
+    };
+    let output = if let Some(output) = options.output.clone() {
         output
     } else {
         let Some(target) = crate::target_directory() else {
@@ -424,8 +445,11 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
             return ExitCode::FAILURE;
         };
         let default = target.join("screenshots/gallery");
-        // The default gallery is ours alone, so stale states go.
-        let _ = fs::remove_dir_all(&default);
+        // The default gallery is ours alone, so stale states go, unless
+        // only one state is being redone.
+        if options.only.is_none() {
+            let _ = fs::remove_dir_all(&default);
+        }
         default
     };
     if let Err(error) = fs::create_dir_all(&output) {
@@ -433,36 +457,55 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let mut shots = Vec::new();
-    for state in STATES {
-        for look in LOOKS {
-            let harness = look
-                .builder()
-                .headless_screen()
-                .omarchy_bar()
-                .screenshot_directory(output.clone())
-                .start();
-            (state.reach)(&harness);
-            let file = format!("{}-{}", state.name, look.as_str());
-            let screenshot = harness.screenshot_when(&file, DEADLINE, |screenshot| {
-                (state.shown)(screenshot, look)
-            });
-            shots.push((state, look, screenshot.path));
+    for repetition in 1..=options.repeat {
+        for state in &states {
+            for look in LOOKS {
+                let harness = look
+                    .builder()
+                    .headless_screen()
+                    .omarchy_bar()
+                    .screenshot_directory(output.clone())
+                    .start();
+                (state.reach)(&harness);
+                let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
+                    (state.shown)(screenshot, look)
+                });
+            }
+        }
+        if options.repeat > 1 {
+            println!("Rendered {repetition} of {} times.", options.repeat);
         }
     }
+
+    // Every state rendered, now or by an earlier run.
+    let shots: Vec<(&State, Look, PathBuf)> = STATES
+        .iter()
+        .flat_map(|state| LOOKS.map(|look| (state, look)))
+        .map(|(state, look)| {
+            let path = output.join(format!("{}.png", file_stem(state, look)));
+            (state, look, path)
+        })
+        .filter(|(_, _, path)| path.exists())
+        .collect();
 
     let index = output.join("index.html");
     if let Err(error) = fs::write(&index, index_html(&shots)) {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }
+    let states = shots.len() / LOOKS.len();
     println!(
-        "Gallery: {} screenshots of {} states, light and dark, stock and under Omarchy.",
+        "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy.",
         shots.len(),
-        STATES.len()
+        if states == 1 { "" } else { "s" }
     );
     println!("{}", index.display());
     ExitCode::SUCCESS
+}
+
+/// A state's file name under `look`, without `.png`.
+fn file_stem(state: &State, look: Look) -> String {
+    format!("{}-{}", state.name, look.as_str())
 }
 
 /// The gallery page: one row per state, stock light and dark, then Omarchy

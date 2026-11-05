@@ -47,6 +47,8 @@ pub(crate) struct Screen {
     pub wayland_display: String,
     /// The compositor's socket, for the harness's own connections.
     pub socket: PathBuf,
+    /// The compositor's process ID.
+    pub pid: u32,
     input: Mutex<SyntheticInput>,
 }
 
@@ -291,6 +293,7 @@ impl Screen {
                 stderr.display()
             );
         };
+        let pid = child.id();
         processes.push(("compositor", child));
         let runtime = environment
             .iter()
@@ -303,6 +306,7 @@ impl Screen {
         Self {
             wayland_display,
             socket,
+            pid,
             input: Mutex::new(input),
         }
     }

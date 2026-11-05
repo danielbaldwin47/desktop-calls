@@ -153,11 +153,12 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
     assert_eq!(shown(&state, "mute").as_deref(), Some("Unmute"));
     // Orange on the Mute button, and on a strip below Hang up as wide as
     // the window.
-    let screenshot = harness.screenshot_when("call-window-muted", SCREEN_DEADLINE, |screenshot| {
-        find(screenshot, ORANGE)
-            .is_some_and(|marked| marked.top < y && marked.bottom > hang_up.bottom)
-    });
+    let screenshot = harness.screenshot("call-window-muted");
     let marked = find(&screenshot, ORANGE).expect("orange is on screen");
+    assert!(
+        marked.top < y && marked.bottom > hang_up.bottom,
+        "orange marks neither Mute nor a strip below Hang up: {marked:?}"
+    );
     assert!(
         marked.right - marked.left >= hang_up.right - hang_up.left - 2.0,
         "the muted mark is too small to miss: {marked:?}"
@@ -173,9 +174,8 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
     harness.wait_for_app("Muted is false", DEADLINE, |state| {
         !state.muted && shown(state, "muted").is_none()
     });
-    let _unmuted = harness.screenshot_when("call-window-unmuted", SCREEN_DEADLINE, |screenshot| {
-        find(screenshot, ORANGE).is_none()
-    });
+    let unmuted = harness.screenshot("call-window-unmuted");
+    assert_eq!(find(&unmuted, ORANGE), None, "{}", unmuted.path.display());
     harness.simulated_phone().wait_for_recorded(
         "MicrophoneVolume is set back to 9",
         DEADLINE,
@@ -283,10 +283,9 @@ fn clicking_a_keypad_button_sends_its_tone() {
     harness.wait_for_app("K shows the keypad", DEADLINE, |state| {
         shown(state, "keypad").as_deref() == Some("shown")
     });
-    let screenshot = harness.screenshot_when("keypad-shown", SCREEN_DEADLINE, |screenshot| {
-        app_region(screenshot).is_some_and(|after| after.bottom > before.bottom)
-    });
-    let after = app_region(&screenshot).expect("the Call Window shows");
+    // The screenshot waits for the Call Window to finish growing (#53).
+    let after = app_region(&harness.screenshot("keypad-shown")).expect("the Call Window shows");
+    assert!(after.bottom > before.bottom, "the keypad isn't drawn");
     // The keypad is the new last row: 3 buttons across, 4 down, 1 2 3 first.
     let top = before.bottom - PADDING + ROW_GAP;
     let (left, right, bottom) = (

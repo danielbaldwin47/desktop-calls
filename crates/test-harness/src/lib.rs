@@ -45,6 +45,7 @@ use std::time::{Duration, Instant};
 mod client;
 mod input;
 mod process_group;
+mod redraw;
 mod screen;
 mod screencopy;
 mod stand_ins;
@@ -66,6 +67,7 @@ use zbus::proxy::CacheProperties;
 use zbus::{Connection, MatchRule, MessageStream, proxy};
 
 use crate::process_group::ProcessGroup;
+use crate::redraw::OnScreen;
 use crate::screen::{Screen, ScreenKind};
 use crate::screencopy::Recorder;
 use crate::stand_ins::StandIns;
@@ -93,25 +95,27 @@ const DESKTOP_FILE: &str = concat!(
 /// frame shows the screen as it is by then.
 const FRAMES_AHEAD: usize = 8;
 
-/// How long the screen must hold still after a frame satisfies
-/// `screenshot_when`'s `shown` for that frame to be the one returned: a few
-/// frames at 60 Hz, enough for a resize the frame caught midway to finish.
-const SETTLED: Duration = Duration::from_millis(100);
+/// How long the screen may take to finish redrawing before an action. The
+/// first frame of a new surface held the app for 0.6 s on a CI-like machine
+/// (`docs/research/2026-11-04-ci-banner-latency.md`); this allows for a
+/// loaded runner many times over.
+const REDRAW_DEADLINE: Duration = Duration::from_secs(10);
 
 /// The latest frame in the run of frames, starting with `found`, that
-/// satisfy `shown`, once no new frame comes for [`SETTLED`] or one doesn't
-/// satisfy `shown`. Frames passed over are deleted.
-fn settle(
+/// satisfy `shown`, up to the first that doesn't. Frames passed over, and
+/// any left in `frames`, are deleted.
+fn latest_shown(
     mut found: Screenshot,
     frames: &mpsc::Receiver<Screenshot>,
     shown: impl Fn(&Screenshot) -> bool,
 ) -> Screenshot {
-    while let Ok(frame) = frames.recv_timeout(SETTLED) {
-        if shown(&frame) {
+    let mut run_ended = false;
+    for frame in frames.try_iter() {
+        if !run_ended && shown(&frame) {
             let _ = fs::remove_file(std::mem::replace(&mut found, frame).path);
         } else {
+            run_ended = true;
             let _ = fs::remove_file(frame.path);
-            break;
         }
     }
     found
@@ -363,6 +367,9 @@ pub struct Harness {
     bar: Option<TestClient>,
     /// The Hyprland stand-in, if the scenario runs under one.
     hyprland: Option<stand_ins::Hyprland>,
+    /// The process IDs of the test clients started, which draw on the
+    /// screen as the app does. Some may have stopped since.
+    test_clients: Mutex<Vec<u32>>,
     screenshot_directory: PathBuf,
     /// Every `Error` signal the app has sent, in order.
     app_errors: Arc<Mutex<Vec<AppError>>>,
@@ -614,6 +621,7 @@ impl Builder {
             screen,
             bar: None,
             hyprland,
+            test_clients: Mutex::default(),
             screenshot_directory,
             app_errors,
             surfaces_seen,
@@ -662,14 +670,17 @@ impl Harness {
         Builder::default()
     }
 
-    /// Captures the screen as `<name>.png` in the screenshot directory.
+    /// Captures the screen as `<name>.png` in the screenshot directory, once
+    /// it has finished redrawing (see `redraw.rs`), so the capture shows
+    /// every state change reported so far.
     ///
     /// # Panics
     ///
-    /// If the scenario has no screen, or the capture fails.
+    /// If the scenario has no screen, the screen doesn't finish redrawing,
+    /// or the capture fails.
     #[must_use]
     pub fn screenshot(&self, name: &str) -> Screenshot {
-        self.screen();
+        self.wait_for_redraw();
         Screen::screenshot(
             &self.environment,
             &self.group,
@@ -680,14 +691,16 @@ impl Harness {
     /// Captures only `region` of the screen, as `<name>.png` in the
     /// screenshot directory. A small region takes a fraction of a full
     /// capture's time, for checks that are timed. The capture's own
-    /// coordinates start at the region's top-left corner.
+    /// coordinates start at the region's top-left corner. Like
+    /// [`Harness::screenshot`], it waits for the screen to finish redrawing.
     ///
     /// # Panics
     ///
-    /// If the scenario has no screen, or the capture fails.
+    /// If the scenario has no screen, the screen doesn't finish redrawing,
+    /// or the capture fails.
     #[must_use]
     pub fn screenshot_of(&self, name: &str, region: Region) -> Screenshot {
-        self.screen();
+        self.wait_for_redraw();
         Screen::screenshot_of(
             &self.environment,
             &self.group,
@@ -708,11 +721,13 @@ impl Harness {
     /// still caught, and a still screen costs no CPU that the app needs to
     /// draw. At most [`FRAMES_AHEAD`] frames wait for `shown` at a time.
     ///
-    /// The capture returned is the latest of the frames that satisfy `shown`
-    /// in a row, once the screen has held still for [`SETTLED`] or stopped
-    /// satisfying `shown`: a window can match while still mid-resize, and a
-    /// test that clicks where the capture shows a button needs where it ends
-    /// up.
+    /// Once a frame satisfies `shown`, this waits for the screen to finish
+    /// redrawing, as every action does (see `redraw.rs`): a window can match
+    /// while still mid-resize, and a test that clicks where the capture shows
+    /// a button needs where it ends up. It then returns a capture of the
+    /// redrawn screen if that still satisfies `shown`; otherwise the state
+    /// was brief and has gone, and it returns the latest frame of the run
+    /// that satisfied `shown`.
     ///
     /// # Panics
     ///
@@ -761,7 +776,8 @@ impl Harness {
                     }
                 };
                 if shown(&frame) {
-                    found = Some(settle(frame, &receiver, &shown));
+                    self.wait_for_redraw();
+                    found = Some(latest_shown(frame, &receiver, &shown));
                     break;
                 }
                 // Each frame is 25 MB; keep only the latest, for the panic.
@@ -783,7 +799,16 @@ impl Harness {
             capture.save_png(&self.screenshot_directory.join(format!("{name}.png")))
         };
         match (found, last) {
-            (Some(capture), _) => kept(&capture),
+            (Some(capture), _) => {
+                let redrawn = self.capture_now(&format!("{name}-redrawn.ppm"));
+                if shown(&redrawn) {
+                    let _ = fs::remove_file(&capture.path);
+                    kept(&redrawn)
+                } else {
+                    let _ = fs::remove_file(&redrawn.path);
+                    kept(&capture)
+                }
+            }
             (None, Some(capture)) => panic!(
                 "the screen never showed {name} within {deadline:?}; see {}{}",
                 kept(&capture).path.display(),
@@ -793,6 +818,46 @@ impl Harness {
                 "no capture of {name} was made within {deadline:?}{}",
                 self.timeline.render()
             ),
+        }
+    }
+
+    /// One frame of the screen as it is now, as a PPM under `captures/`.
+    fn capture_now(&self, file: &str) -> Screenshot {
+        let captures = self.directory.join("captures");
+        let path = captures.join(file);
+        let (width, height) = Recorder::connect(&self.screen().socket, &captures)
+            .and_then(|(mut recorder, _)| recorder.next_frame(&path))
+            .unwrap_or_else(|error| panic!("capture the screen: {error}"));
+        Screenshot {
+            path,
+            width,
+            height,
+        }
+    }
+
+    /// Waits until the screen has finished redrawing after every state
+    /// change so far. Every action that clicks, types or takes a screenshot
+    /// calls this first, so no scenario can race a redraw. See `redraw.rs`.
+    fn wait_for_redraw(&self) {
+        let compositor = self.screen().pid;
+        let on_screen = || {
+            let app = self
+                .processes
+                .iter()
+                .filter(|(name, _)| *name == "desktop-calls")
+                .map(|(_, app)| app.id());
+            let test_clients = self
+                .test_clients
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            OnScreen {
+                compositor,
+                clients: app.chain(test_clients).collect(),
+            }
+        };
+        if let Err(error) = redraw::wait_for_redraw(on_screen, REDRAW_DEADLINE) {
+            panic!("{error}{}", self.timeline.render());
         }
     }
 
@@ -876,9 +941,8 @@ impl Harness {
     /// If the scenario has no screen.
     #[must_use]
     pub fn keyboard(&self) -> Keyboard<'_> {
-        Keyboard {
-            screen: self.screen(),
-        }
+        self.screen();
+        Keyboard { harness: self }
     }
 
     /// Puts `text` on the screen's clipboard, as copying it in another app
@@ -927,9 +991,8 @@ impl Harness {
     /// If the scenario has no screen.
     #[must_use]
     pub fn pointer(&self) -> Pointer<'_> {
-        Pointer {
-            screen: self.screen(),
-        }
+        self.screen();
+        Pointer { harness: self }
     }
 
     /// Starts the harness's own client, which opens a window on the screen
@@ -954,6 +1017,18 @@ impl Harness {
         self.spawn_test_client(&["--fullscreen"])
     }
 
+    /// Starts the harness's test client as an app slow to redraw: each key
+    /// it gets is a state change, which it reports at once and draws only
+    /// after 300 ms of work and 20 frames. See `src/bin/test-client.rs`.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the client can't be started.
+    #[must_use]
+    pub fn start_slowly_redrawing_test_client(&self) -> TestClient {
+        self.spawn_test_client(&["--slow-redraw"])
+    }
+
     fn spawn_test_client(&self, arguments: &[&str]) -> TestClient {
         self.screen();
         let child = self
@@ -963,6 +1038,10 @@ impl Harness {
             .stderr(self.log_file("test-client.stderr"))
             .spawn()
             .expect("start test-client");
+        self.test_clients
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(child.id());
         TestClient::new(child, Arc::clone(&self.timeline))
     }
 
@@ -1772,9 +1851,10 @@ impl Tray<'_> {
     }
 }
 
-/// The screen's synthetic keyboard. See [`Harness::keyboard`].
+/// The screen's synthetic keyboard. See [`Harness::keyboard`]. Keys go to
+/// the screen as it is once it has finished redrawing (see `redraw.rs`).
 pub struct Keyboard<'harness> {
-    screen: &'harness Screen,
+    harness: &'harness Harness,
 }
 
 impl Keyboard<'_> {
@@ -1782,10 +1862,11 @@ impl Keyboard<'_> {
     ///
     /// # Panics
     ///
-    /// If `text` has a character the US layout can't type, or the compositor
-    /// is gone.
+    /// If `text` has a character the US layout can't type, the screen
+    /// doesn't finish redrawing, or the compositor is gone.
     pub fn type_text(&self, text: &str) {
-        if let Err(error) = self.screen.input().type_text(text) {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().type_text(text) {
             panic!("type {text:?}: {error}");
         }
     }
@@ -1794,9 +1875,10 @@ impl Keyboard<'_> {
     ///
     /// # Panics
     ///
-    /// If the compositor is gone.
+    /// If the screen doesn't finish redrawing, or the compositor is gone.
     pub fn press(&self, key: Key) {
-        if let Err(error) = self.screen.input().press(key) {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().press(key) {
             panic!("press {key:?}: {error}");
         }
     }
@@ -1805,10 +1887,11 @@ impl Keyboard<'_> {
     ///
     /// # Panics
     ///
-    /// If the US layout has no unshifted key for `character`, or the
-    /// compositor is gone.
+    /// If the US layout has no unshifted key for `character`, the screen
+    /// doesn't finish redrawing, or the compositor is gone.
     pub fn press_with_control(&self, character: char) {
-        if let Err(error) = self.screen.input().press_with_control(character) {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().press_with_control(character) {
             panic!("press Ctrl+{character}: {error}");
         }
     }
@@ -1829,9 +1912,10 @@ impl Drop for Clipboard {
 }
 
 /// The screen's synthetic pointer, in layout coordinates: the headless
-/// screen is [`LAYOUT_SIZE`]. See [`Harness::pointer`].
+/// screen is [`LAYOUT_SIZE`]. See [`Harness::pointer`]. It acts on the
+/// screen as it is once it has finished redrawing (see `redraw.rs`).
 pub struct Pointer<'harness> {
-    screen: &'harness Screen,
+    harness: &'harness Harness,
 }
 
 impl Pointer<'_> {
@@ -1839,22 +1923,32 @@ impl Pointer<'_> {
     ///
     /// # Panics
     ///
-    /// If the point is off the screen, or the compositor is gone.
+    /// If the point is off the screen, the screen doesn't finish redrawing,
+    /// or the compositor is gone.
     pub fn move_to(&self, x: f64, y: f64) {
-        if let Err(error) = self.screen.input().move_to(x, y, LAYOUT_SIZE) {
-            panic!("move the pointer to ({x}, {y}): {error}");
-        }
+        self.harness.wait_for_redraw();
+        self.move_now(x, y);
     }
 
     /// Moves the pointer to (`x`, `y`) and clicks the left button there.
+    /// Moving onto a button can redraw it (hover), so the click waits for
+    /// that redraw too.
     ///
     /// # Panics
     ///
-    /// If the point is off the screen, or the compositor is gone.
+    /// If the point is off the screen, the screen doesn't finish redrawing,
+    /// or the compositor is gone.
     pub fn click(&self, x: f64, y: f64) {
         self.move_to(x, y);
-        if let Err(error) = self.screen.input().click() {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().click() {
             panic!("click at ({x}, {y}): {error}");
+        }
+    }
+
+    fn move_now(&self, x: f64, y: f64) {
+        if let Err(error) = self.harness.screen().input().move_to(x, y, LAYOUT_SIZE) {
+            panic!("move the pointer to ({x}, {y}): {error}");
         }
     }
 }
@@ -2544,11 +2638,14 @@ fn environment(
     let runtime = path_of("runtime");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700))
         .expect("make XDG_RUNTIME_DIR private");
+    let config = path_of("config");
+    still_cursor(Path::new(&config));
     vec![
         ("DBUS_SYSTEM_BUS_ADDRESS", system_bus.to_owned()),
         ("DBUS_SESSION_BUS_ADDRESS", session_bus.to_owned()),
         ("HOME", path_of("home")),
-        ("XDG_CONFIG_HOME", path_of("config")),
+        ("XDG_CONFIG_HOME", config),
+        ("GSETTINGS_BACKEND", "keyfile".to_owned()),
         ("XDG_CACHE_HOME", path_of("cache")),
         ("XDG_STATE_HOME", path_of("state")),
         ("XDG_RUNTIME_DIR", runtime),
@@ -2556,6 +2653,30 @@ fn environment(
         ("RUST_LOG", "debug".to_owned()),
         ("RUST_BACKTRACE", "1".to_owned()),
     ]
+}
+
+/// Turns the text cursor's blinking off, as a Desktop setting, so a still
+/// surface leaves the screen still: GTK fades the cursor in and out over
+/// many frames, which would keep [`Harness`]'s actions waiting for the
+/// screen to settle for up to 10 s after every key. GTK reads the setting
+/// from `GSettings`, here kept in a key file in `config` (`GSETTINGS_BACKEND`
+/// is GLib's own variable, read by every GLib program), and from
+/// `gtk-4.0/settings.ini` where the `GSettings` schema is not installed.
+fn still_cursor(config: &Path) {
+    let write = |path: PathBuf, text: &str| {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create a settings directory");
+        }
+        fs::write(path, text).expect("write the Desktop's settings");
+    };
+    write(
+        config.join("glib-2.0/settings/keyfile"),
+        "[org/gnome/desktop/interface]\ncursor-blink=false\n",
+    );
+    write(
+        config.join("gtk-4.0/settings.ini"),
+        "[Settings]\ngtk-cursor-blink=false\n",
+    );
 }
 
 /// A locally administered, unicast Bluetooth address, different every run.

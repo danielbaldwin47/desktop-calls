@@ -95,6 +95,62 @@ fn a_synthetic_click_reaches_the_client_under_the_pointer() {
     );
 }
 
+/// The slowly redrawing test client's colour for state 1, and for the
+/// frames it draws on the way to a state.
+const STATE_1_BLUE: [u8; 3] = [0x20, 0x60, 0xa0];
+const DRAWING_GREY: [u8; 3] = [0x40; 3];
+
+/// The slowly redrawing test client, focused and drawn in state 0.
+fn slowly_redrawing_client(harness: &Harness) -> test_harness::TestClient {
+    let client = harness.start_slowly_redrawing_test_client();
+    client.wait_for("the test client has keyboard focus", DEADLINE, |line| {
+        line == "keyboard-enter"
+    });
+    client
+}
+
+/// A screenshot taken straight after a state change shows the surface
+/// redrawn for it, though the client reported the change 300 ms and 20
+/// frames before drawing it: the harness waits for the redraw (#53).
+#[test]
+fn a_screenshot_straight_after_a_state_change_shows_the_redrawn_surface() {
+    let harness = Harness::builder().headless_screen().start();
+    let client = slowly_redrawing_client(&harness);
+    harness.keyboard().type_text("s");
+    client.wait_for("state 1 is reported", DEADLINE, |line| line == "state 1");
+
+    let screenshot = harness.screenshot("state-1");
+
+    // State 1's colour, and neither state 0's nor that of a frame on the
+    // way. sway draws the window's title bar and border around it.
+    let shows = |colour: [u8; 3]| screenshot.region_where(|pixel| pixel == colour).is_some();
+    assert!(
+        shows(STATE_1_BLUE) && !shows(CLIENT_GREY) && !shows(DRAWING_GREY),
+        "the window isn't drawn in state 1; see {}",
+        screenshot.path.display()
+    );
+}
+
+/// A click straight after a state change reaches the surface once it is
+/// redrawn for the change, not while it still shows the last state.
+#[test]
+fn a_click_straight_after_a_state_change_acts_on_the_redrawn_surface() {
+    let harness = Harness::builder().headless_screen().start();
+    let client = slowly_redrawing_client(&harness);
+    harness.keyboard().type_text("s");
+    client.wait_for("state 1 is reported", DEADLINE, |line| line == "state 1");
+
+    harness.pointer().click(1200.0, 675.0);
+
+    let pressed = client.wait_for("the click is pressed", DEADLINE, |line| {
+        line.starts_with("button 272 pressed")
+    });
+    assert!(
+        pressed.ends_with("showing state 1"),
+        "the click came before the redraw: {pressed}"
+    );
+}
+
 /// How long the brief state stays on screen.
 const BRIEFLY: Duration = Duration::from_millis(200);
 

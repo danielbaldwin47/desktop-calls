@@ -54,6 +54,14 @@ enum Command {
         /// Where to write the gallery. Default: `target/screenshots/gallery`.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Render only this state, in every look, keeping the rest of the
+        /// gallery: to exercise a capture fix for one state in minutes.
+        #[arg(long, value_name = "STATE")]
+        only: Option<String>,
+        /// Render it this many times, stopping at the first failure.
+        #[arg(long, value_name = "N", default_value_t = 1,
+              value_parser = clap::value_parser!(u32).range(1..))]
+        repeat: u32,
     },
     /// Run the app against the Simulated Phone in a nested compositor window.
     Demo {
@@ -78,7 +86,15 @@ fn main() -> ExitCode {
             results,
             fresh,
         }),
-        Command::Screenshot { output } => gallery::run(output),
+        Command::Screenshot {
+            output,
+            only,
+            repeat,
+        } => gallery::run(&gallery::Options {
+            output,
+            only,
+            repeat,
+        }),
         Command::Demo { scenario } => demo::run(&scenario),
     }
 }

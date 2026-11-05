@@ -31,10 +31,13 @@ test-ci-like *args:
 
 # Render every surface in every state, light and dark, stock and under an
 # Omarchy theme, into the screenshot gallery at target/screenshots/gallery.
-# Needs sway and grim.
-screenshot:
+# Needs sway and grim. `just screenshot --only call-window-muted --repeat 5`
+# redoes one state five times. `just screenshot --help` for options.
+[positional-arguments]
+[no-exit-message]
+screenshot *args:
     cargo build --workspace --bins --locked
-    target/debug/automation screenshot
+    target/debug/automation screenshot "$@"
 
 # Report every polish-scorecard item with its status and evidence.
 scorecard:

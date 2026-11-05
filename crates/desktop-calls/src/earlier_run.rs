@@ -70,10 +70,20 @@ pub fn load() -> Option<EarlierRun> {
         event_kind = %EventKind::EarlierRunLoaded,
         calls = earlier.calls.len(),
         muted = earlier.restore_microphone_volume.is_some(),
-        "Picking up {} Call(s) from before this run started",
+        "{} Call(s) from before this run started may be continuing; picking them up if the Phone still has them",
         earlier.calls.len()
     );
     Some(earlier)
+}
+
+/// Logs that `calls` Calls from before this run started never showed
+/// again, and so were forgotten.
+pub fn forgotten(calls: usize) {
+    tracing::info!(
+        event_kind = %EventKind::EarlierRunForgotten,
+        calls,
+        "Forgot {calls} Call(s) from before this run started: the Phone never showed them again, so they had ended"
+    );
 }
 
 /// Keeps `next` for the next run, replacing what was kept.

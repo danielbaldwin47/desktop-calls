@@ -345,6 +345,9 @@ pub enum Effect {
     /// Delete the Contacts and Call History held for the attached Phone,
     /// on disk too.
     ForgetContacts,
+    /// This many Calls from the earlier run were forgotten: they never
+    /// showed again in the time allowed, so they had ended. For the log.
+    EarlierCallsForgotten(usize),
     /// Look for nearby Phones, make the Desktop discoverable, and take
     /// pairing requests, until [`Effect::StopSetup`]. Answered by
     /// [`Input::SetupReady`] or [`Input::SetupUnavailable`].

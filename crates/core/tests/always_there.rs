@@ -356,6 +356,34 @@ fn the_earlier_run_is_forgotten_once_its_calls_had_time_to_show() {
     assert_eq!(state.calls()[0].active_since(), Some(Timestamp(60_000)));
 }
 
+fn forgotten(effects: &[Effect]) -> Vec<usize> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::EarlierCallsForgotten(calls) => Some(*calls),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn forgetting_earlier_calls_that_never_showed_again_says_how_many() {
+    let (state, _) = run(State::default(), [earlier_run(None)]);
+
+    let (_, effects) = run(state, [Input::TimerFired(Timer::ForgetEarlierRun)]);
+
+    assert_eq!(forgotten(&effects), [1]);
+}
+
+#[test]
+fn earlier_calls_that_all_showed_again_leave_nothing_to_forget() {
+    let (state, _) = started_mid_call(earlier_run(None), 15);
+
+    let (_, effects) = run(state, [Input::TimerFired(Timer::ForgetEarlierRun)]);
+
+    assert_eq!(forgotten(&effects), [0usize; 0]);
+}
+
 #[test]
 fn an_earlier_run_that_had_muted_the_desktop_shows_muted_and_unmutes_to_its_gain() {
     let (state, _) = started_mid_call(earlier_run(Some(12)), 0);

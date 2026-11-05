@@ -337,6 +337,7 @@ impl Shell {
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
+                Effect::EarlierCallsForgotten(calls) => earlier_run::forgotten(calls),
                 Effect::ReportError(failure) => announcements.push(Announcement::Error(failure)),
             }
         }

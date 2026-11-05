@@ -30,12 +30,14 @@ jobs:
     steps:
       # sway is the screen harness's headless compositor, grim its screenshot
       # tool, wl-clipboard its clipboard for pasting, and libnotify's
-      # notify-send a client of the notification stand-in.
+      # notify-send a client of the notification stand-in. python-dbus and
+      # python-gobject let the Real-Phone Checklist's --demo run the PBAP
+      # probe (tools/real-phone) against the Simulated Phone.
       - name: Install system packages
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel git rustup just cargo-deny
-          gtk4 gtk4-layer-shell libadwaita dbus python
+          gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject
           sway grim wl-clipboard libnotify
 
       - uses: actions/checkout@v5

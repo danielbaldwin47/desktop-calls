@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Restart WirePlumber once during a test Call, then wait for the Call to return.
 
 Run only as the hook of `just test-call`, which hangs the Call up afterwards:
-  just test-call --max-seconds 90 'python3 tools/real-phone/wireplumber_restart_probe.py'
+  just test-call --max-seconds 90 '/usr/bin/python3 tools/real-phone/wireplumber_restart_probe.py'
 
 The user allows one WirePlumber restart during a short test Call, and only
 while no other audio stream is active (docs/wiki/user-preferences.md, Q30).

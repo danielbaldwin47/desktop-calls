@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Place one real Call to the Test Number, run a hook during it, hang up.
 
 Usage (through just):

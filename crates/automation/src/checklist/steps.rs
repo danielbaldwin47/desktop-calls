@@ -53,6 +53,7 @@ pub const GROUPS: &[Group] = &[
         before: &[
             "The Pixel charged and nearby.",
             "The Test Number already given to the agent.",
+            "The Pixel unlocked and in hand for 1.4: it may ask to allow access to contacts and call history.",
         ],
         steps: &[
             Step {
@@ -72,6 +73,12 @@ pub const GROUPS: &[Group] = &[
                 title: "Turn Contacts access off on the Pixel, use Try again and let the prompt time out once, then allow it",
                 script: None,
                 lands_with: &[22],
+            },
+            Step {
+                id: "1.4",
+                title: "Read a second page of Call History: the Pixel honours paging",
+                script: Some(call_history_paging),
+                lands_with: &[],
             },
         ],
     },
@@ -428,6 +435,43 @@ fn audio_reaches_the_desktop(
         }
     ));
     Ok(true)
+}
+
+/// 1.4: `just pbap-probe` pulls a second page of `cch` (Offset 50), which
+/// settles whether the Phone honours paging, as the Call History sync
+/// assumes (#9). The probe keeps only the shape of what it reads.
+fn call_history_paging(sitting: &mut Sitting) -> Result<(), Stop> {
+    sitting.say(
+        "Reading Contacts and Call History with `just pbap-probe`. If the Pixel asks to allow access to contacts and call history, allow it.",
+        &[],
+    );
+    let report = match sitting.pbap_probe()? {
+        Ok(report) => report,
+        Err(error) => {
+            sitting.check(false, error);
+            return Ok(());
+        }
+    };
+    let paging = &report["report"]["call history paging"];
+    for (name, key) in [
+        ("page_2_entries", "page 2 entries"),
+        (
+            "page_2_entries_also_on_page_1",
+            "page 2 entries also on page 1",
+        ),
+        ("page_2_older_than_page_1", "page 2 older than page 1"),
+        ("honours_offset", "honours offset"),
+    ] {
+        sitting.measure(name, paging[key].clone());
+    }
+    let verdict = paging["verdict"]
+        .as_str()
+        .unwrap_or("The probe's report has no paging verdict.")
+        .to_owned();
+    // The sync reads page after page from the newest Call, so both must hold.
+    let honoured = paging["honours offset"] == true && paging["page 2 older than page 1"] != false;
+    sitting.check(honoured, verdict);
+    Ok(())
 }
 
 /// 2.1: the helper calls, the user answers on the Desktop. Observes the

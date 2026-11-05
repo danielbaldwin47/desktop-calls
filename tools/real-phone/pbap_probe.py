@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """PBAP probe for the real Phone, from ticket #9 (Contacts sync).
 
 Opens one obexd PBAP session to the Phone, pulls each PBAP folder the app
@@ -11,8 +11,14 @@ other Contact value is ever printed or written: the pulled files are
 deleted as soon as they are read, and the Test Number is redacted from all
 output as in every probe.
 
+It then pulls a second page of `cch` (Offset 50, MaxCount 50), because the
+Pixel gives at most 50 Call History entries per pull, and reports whether
+the Phone honours paging as the Call History sync assumes (#9): page 2 is
+not page 1 again, and every entry on it is older than those on page 1.
+
 No Call is placed, and nothing on the Phone changes. obexd writes each
-pulled folder to a file in a private temporary directory.
+pulled folder to a file in a private directory under
+$XDG_CACHE_HOME/desktop-calls (~/.cache/desktop-calls), deleted at the end.
 
 Have the Phone unlocked and in hand: if it has not yet been told whether
 this Desktop may read Contacts, it asks ("Allow access to contacts and call
@@ -20,16 +26,20 @@ history?"). On 2026-11-04 CreateSession failed twice after about 10 s with
 `org.bluez.obex.Error.Failed: Timed out waiting for response` while nobody
 was at the Phone (docs/research/2026-11-04-contacts-sync.md).
 
-Usage:
-  python3 tools/real-phone/pbap_probe.py OUT.json
-      Write the D-Bus snapshot (obexd's client object, a session, a
-      Transfer1 during a pull) to OUT.json and print the shape report.
+Usage (through just, which runs it under /usr/bin/python3):
+  just pbap-probe [--out OUT.json]
+      Print what each pull gave and the paging verdict, and write the shape
+      report ("report") with the D-Bus snapshot ("dbus snapshot": obexd's
+      client object, a session, a Transfer1 during a pull) to OUT.json, by
+      default ~/.cache/desktop-calls/pbap-probe-<time>.json.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import tempfile
@@ -52,14 +62,32 @@ PHONEBOOK_IF = "org.bluez.obex.PhonebookAccess1"
 TRANSFER_IF = "org.bluez.obex.Transfer1"
 HFP_AG_UUID = "0000111f-0000-1000-8000-00805f9b34fb"
 BOOKS = ("pb", "cch", "ich", "och", "mch")
+# The second page of Call History: the Pixel caps each pull at 50 entries.
+PAGE_2 = {"Offset": 50, "MaxCount": 50}
 
-NUMBER = rp.read_test_number()
-REDACT = rp.install_redaction(NUMBER)
+# Set by connect(), after the arguments are parsed, so that --help needs
+# neither the Test Number nor a bus.
+REDACT: rp.Redactor
+CTX: Any
+SESSION: Any
+SYSTEM: Any
 
-dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-CTX = GLib.MainContext.default()
-SESSION = dbus.SessionBus()
-SYSTEM = dbus.SystemBus()
+
+def connect() -> None:
+    global REDACT, CTX, SESSION, SYSTEM
+    REDACT = rp.install_redaction(rp.read_test_number())
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    CTX = GLib.MainContext.default()
+    SESSION = dbus.SessionBus()
+    SYSTEM = dbus.SystemBus()
+
+
+def cache_directory() -> Path:
+    """$XDG_CACHE_HOME/desktop-calls, private to the user."""
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    directory = Path(cache) / "desktop-calls"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return directory
 
 # Transfer1 Status changes by transfer path, with seconds since the pull.
 STATUS: dict[str, list[tuple[float, str]]] = {}
@@ -162,8 +190,9 @@ def split_property(line: str) -> tuple[str, list[str], str]:
     return name.upper(), [p.upper() for p in params], value
 
 
-def book_report(text: str) -> tuple[dict[str, Any], set[str]]:
-    """The shape of one pulled book, and a hash per (number, time) entry."""
+def book_report(text: str) -> tuple[dict[str, Any], set[str], list[str]]:
+    """The shape of one pulled book, a hash per (number, time) entry, and
+    each entry's X-IRMC-CALL-DATETIME (empty if it has none)."""
     raw_lines = text.replace("\r\n", "\n").split("\n")
     report: dict[str, Any] = {
         "bytes": len(text.encode()),
@@ -184,6 +213,7 @@ def book_report(text: str) -> tuple[dict[str, Any], set[str]]:
     without_name = 0
     tels_per_entry: Counter[int] = Counter()
     keys: set[str] = set()
+    times: list[str] = []
     for card in found:
         tels, has_name, when = [], False, ""
         for line in card:
@@ -211,6 +241,7 @@ def book_report(text: str) -> tuple[dict[str, Any], set[str]]:
         without_name += not has_name
         digits = re.sub(r"\D", "", tels[0]) if tels else ""
         keys.add(hashlib.sha256(f"{digits}|{when}".encode()).hexdigest())
+        times.append(when)
     report.update({
         "versions": dict(versions),
         "properties": dict(properties),
@@ -223,13 +254,15 @@ def book_report(text: str) -> tuple[dict[str, Any], set[str]]:
         "call_datetime_parameters": dict(datetime_params),
         "call_datetime_shapes": dict(datetime_shapes),
     })
-    return report, keys
+    return report, keys, times
 
 
 # --------------------------------------------------------------- the probe
 
 
-def pull(session: str, book: str, directory: Path, snapshot: dict[str, Any]) -> dict[str, Any]:
+def pull(session: str, book: str, directory: Path, snapshot: dict[str, Any],
+         page: dict[str, int] | None = None, name: str = "") -> dict[str, Any]:
+    name = name or book
     result: dict[str, Any] = {}
     try:
         rp.call(SESSION, OBEX, session, PHONEBOOK_IF, "Select", "int", book, signature="ss")
@@ -241,15 +274,17 @@ def pull(session: str, book: str, directory: Path, snapshot: dict[str, Any]) -> 
         result["size"] = int(rp.call(SESSION, OBEX, session, PHONEBOOK_IF, "GetSize", signature=""))
     except dbus.DBusException as e:
         result["size_error"] = e.get_dbus_name()
-    target = directory / f"{book}.vcf"
+    target = directory / f"{name}.vcf"
+    filters = {"Format": dbus.String("vcard30")}
+    # Offset and MaxCount are `q` in obexd (obexd/client/pbap.c).
+    filters.update({key: dbus.UInt16(value) for key, value in (page or {}).items()})
     started = time.monotonic()
     try:
         transfer, properties = rp.call(SESSION, OBEX, session, PHONEBOOK_IF, "PullAll", str(target),
-                                       {"Format": dbus.String("vcard30")}, signature="sa{sv}",
-                                       timeout=60.0)
+                                       filters, signature="sa{sv}", timeout=60.0)
     except dbus.DBusException as e:
         result["pull_error"] = e.get_dbus_name()
-        log("PULL", f"{book}: {e.get_dbus_name()}")
+        log("PULL", f"{name}: {e.get_dbus_name()}")
         return result
     PULL_STARTED[transfer] = started
     result["pull_reply_seconds"] = round(time.monotonic() - started, 3)
@@ -274,9 +309,58 @@ def pull(session: str, book: str, directory: Path, snapshot: dict[str, Any]) -> 
         result["file_mode"] = oct(mode)
         text = target.read_bytes().decode("utf-8", errors="replace")
         target.unlink()
-        result["shape"], result["_keys"] = book_report(text)
-    log("PULL", f"{book}: {result['end']} in {result['seconds']}s, "
+        result["shape"], result["_keys"], result["_times"] = book_report(text)
+    log("PULL", f"{name}: {result['end']} in {result['seconds']}s, "
                 f"{result.get('shape', {}).get('entries', 0)} entries")
+    return result
+
+
+def paging(page_1: dict[str, Any], page_2: dict[str, Any]) -> dict[str, Any]:
+    """Whether the Phone honours Offset on `cch`, from its first two pages.
+
+    A Phone that ignores Offset gives page 1 again; one that counts Offset
+    from the newest Call, as PBAP says and the app assumes, gives entries
+    all older than page 1's. A Call made between the two pulls can shift
+    one entry onto both pages, so a page 2 that is mostly new still counts.
+    """
+    keys_1, keys_2 = page_1.get("_keys", set()), page_2.get("_keys", set())
+    entries_1 = page_1.get("shape", {}).get("entries", 0)
+    entries_2 = page_2.get("shape", {}).get("entries", 0)
+    times_1 = [t for t in page_1.get("_times", []) if t]
+    times_2 = [t for t in page_2.get("_times", []) if t]
+    result: dict[str, Any] = {
+        "page 2 filters": PAGE_2,
+        "cch size": page_1.get("size"),
+        "page 1 entries": entries_1,
+        "page 2 entries": entries_2,
+        "page 2 entries also on page 1": len(keys_1 & keys_2),
+        # X-IRMC-CALL-DATETIME is YYYYMMDDTHHMMSS, so it sorts as text.
+        "page 2 older than page 1": (max(times_2) <= min(times_1)) if times_1 and times_2 else None,
+    }
+    failed = next((page_2[k] for k in ("select_error", "pull_error") if k in page_2), None)
+    if failed or page_2.get("end") not in (None, "complete"):
+        result["honours offset"] = None
+        result["verdict"] = f"Inconclusive: the page 2 pull failed ({failed or page_2.get('end')})."
+    elif isinstance(result["cch size"], int) and result["cch size"] <= PAGE_2["Offset"]:
+        result["honours offset"] = None
+        result["verdict"] = (f"Inconclusive: cch holds only {result['cch size']} entries, "
+                             "so there is no page 2 to read.")
+    elif entries_2 == 0:
+        result["honours offset"] = False
+        result["verdict"] = "The Phone gave an empty page 2, though cch holds more than 50 entries."
+    elif result["page 2 entries also on page 1"] * 2 > entries_2:
+        result["honours offset"] = False
+        result["verdict"] = "The Phone ignores Offset: page 2 is page 1 again."
+    elif result["page 2 older than page 1"] is False:
+        result["honours offset"] = True
+        result["verdict"] = ("The Phone honours Offset, but page 2 is not all older than page 1, "
+                             "so Offset doesn't count from the newest Call.")
+    else:
+        result["honours offset"] = True
+        result["verdict"] = (f"The Phone honours Offset: page 2 gave {entries_2} entries, "
+                             f"{result['page 2 entries also on page 1']} of them on page 1 too, "
+                             + ("all older than page 1's." if result["page 2 older than page 1"]
+                                else "with no Call times to order them by."))
     return result
 
 
@@ -285,14 +369,23 @@ def scrub(value: Any, address: str) -> Any:
     text = json.dumps(value)
     text = text.replace(address, "FC:41:16:00:00:01")
     text = re.sub(r"\b([0-9A-F]{2}:){5}[0-9A-F]{2}\b", "00:00:00:00:00:00", text)
-    text = re.sub(r'"/tmp/[^"]*/([a-z]+\.vcf)"', r'"<targetfile \1>"', text)
+    text = re.sub(r'"/[^"]*/pbap-probe-[^"/]*/([a-z0-9-]+\.vcf)"', r'"<targetfile \1>"', text)
     return json.loads(REDACT(text))
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    out = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        prog="just pbap-probe",
+        description=__doc__.split("\n\n")[0].replace("\n", " "),
+        epilog="Have the Phone unlocked and in hand: it may ask to allow access to contacts "
+               "and call history.",
+    )
+    parser.add_argument("--out", type=Path, metavar="OUT.json",
+                        help="where to write the report and the D-Bus snapshot "
+                             "(default: ~/.cache/desktop-calls/pbap-probe-<time>.json)")
+    args = parser.parse_args()
+    connect()
+    out = args.out or cache_directory() / f"pbap-probe-{time.strftime('%Y%m%d-%H%M%S')}.json"
     address = phone_address()
     SESSION.add_signal_receiver(on_properties_changed, "PropertiesChanged", rp.PROPERTIES_IF, OBEX,
                                 path_keyword="path")
@@ -315,9 +408,10 @@ def main() -> int:
     log("SESSION", f"opened in {time.monotonic() - started:.2f}s")
     books: dict[str, Any] = {}
     try:
-        with tempfile.TemporaryDirectory(prefix="pbap-probe-") as directory:
+        with tempfile.TemporaryDirectory(prefix="pbap-probe-", dir=cache_directory()) as directory:
             for book in BOOKS:
                 books[book] = pull(session, book, Path(directory), snapshot)
+            page_2 = pull(session, "cch", Path(directory), snapshot, PAGE_2, "cch-page-2")
         try:
             rp.call(SESSION, OBEX, session, PHONEBOOK_IF, "Select", "int", "nosuchbook", signature="ss")
             books["select an unknown book"] = "accepted"
@@ -327,9 +421,16 @@ def main() -> int:
         rp.call(SESSION, OBEX, CLIENT_PATH, CLIENT_IF, "RemoveSession", dbus.ObjectPath(session),
                 signature="o")
         log("SESSION", "removed")
+    call_history_paging = paging(books.get("cch", {}), page_2)
+    log("PAGING", call_history_paging["verdict"])
+    for pulled in (*books.values(), page_2):
+        if isinstance(pulled, dict):
+            pulled.pop("_times", None)
     history = {b: books[b].pop("_keys", set()) for b in ("cch", "ich", "och", "mch")
                if isinstance(books.get(b), dict)}
     books.get("pb", {}).pop("_keys", None)
+    page_2.pop("_keys", None)
+    books["cch page 2"] = page_2
     split = set().union(*(history.get(b, set()) for b in ("ich", "och", "mch")))
     overlap = {
         "cch entries also in ich/och/mch": len(history.get("cch", set()) & split),
@@ -339,10 +440,12 @@ def main() -> int:
             if sum(key in history.get(b, set()) for b in ("ich", "och", "mch")) > 1),
     }
     snapshot["captured"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    report = scrub({"books": books, "history overlap": overlap,
+                    "call history paging": call_history_paging}, address)
+    out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
-        f.write(json.dumps(scrub(snapshot, address), indent=2) + "\n")
-    log("SNAPSHOT", f"wrote {out}")
-    print(json.dumps(scrub({"books": books, "history overlap": overlap}, address), indent=2))
+        f.write(json.dumps({"report": report, "dbus snapshot": scrub(snapshot, address)}, indent=2) + "\n")
+    log("REPORT", f"wrote {out}")
     return 0
 
 

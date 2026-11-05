@@ -327,3 +327,26 @@ fn an_interrupted_run_resumes_at_the_failed_step_and_keeps_what_passed() {
     }
     assert_eq!(after_second["started"], after_first["started"]);
 }
+
+#[test]
+fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_honours_paging() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    let questions = runner.play(|_| "y".to_owned());
+
+    // Paging is read from the Phone, not asked of the user.
+    assert!(questions.is_empty(), "{}", runner.transcript.join("\n"));
+    let result = result_file(results.path());
+    let paging = step(&result, "1.4");
+    assert_eq!(paging["result"], "pass", "{paging:#}");
+    // The demo's Phone holds 120 Calls, newest first, and serves at most 50
+    // per pull: Offset 50 gives entries 51 to 100, none of them on page 1,
+    // all older than page 1's.
+    let measured = &paging["measurements"];
+    assert_eq!(measured["page_2_entries"], 50, "{paging:#}");
+    assert_eq!(measured["page_2_entries_also_on_page_1"], 0, "{paging:#}");
+    assert_eq!(measured["page_2_older_than_page_1"], true, "{paging:#}");
+    for id in ["1.1", "1.2", "1.3"] {
+        assert_eq!(step(&result, id)["result"], "skipped", "{result:#}");
+    }
+}

@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Print org.pipewire.Telephony's object signals as they arrive. Read-only.
 
 Usage:
-  python3 tools/real-phone/watch_telephony.py [--seconds N]
+  /usr/bin/python3 tools/real-phone/watch_telephony.py [--seconds N]
 
 Prints one timestamped line per signal from any object under
 /org/pipewire/Telephony: ObjectManager.InterfacesAdded and

@@ -7,7 +7,7 @@ default:
     @just --list
 
 # Check formatting, lints, the build and dependencies. CI runs this.
-check: && _core-is-pure _dbus-set-is-signed
+check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo build --workspace --all-targets --locked
@@ -43,7 +43,15 @@ demo scenario="crates/simulated-phone/scenarios/demo.scenario":
 [positional-arguments]
 [no-exit-message]
 test-call *args:
-    @python3 tools/real-phone/test_call.py "$@"
+    @/usr/bin/python3 tools/real-phone/test_call.py "$@"
+
+# Read the Phone's Contacts and Call History over PBAP and report only their
+# shape, never a name or number. Places no Call. Have the Phone unlocked and
+# in hand. The report goes to ~/.cache/desktop-calls/. `just pbap-probe --help`.
+[positional-arguments]
+[no-exit-message]
+pbap-probe *args:
+    @/usr/bin/python3 tools/real-phone/pbap_probe.py "$@"
 
 # The only way to merge: GitHub can't enforce green checks on this repo.
 # `just merge --help` for options and the conditions it checks.
@@ -112,4 +120,37 @@ _dbus-set-is-signed:
         print("tools/real-phone/real_phone.py, or pass signature=\"ssv\"):", file=sys.stderr)
         for where in unsigned:
             print(f"  {where}", file=sys.stderr)
+        sys.exit(1)
+
+# The real-Phone tools need dbus-python and PyGObject, which only the system
+# Python has: a bare `python3` may be mise's or a virtualenv's, and fails with
+# `No module named 'dbus'` (ticket #54). So in the justfile and in every file
+# under tools/real-phone, a real-Phone tool runs only under /usr/bin/python3,
+# and every shebang there is `#!/usr/bin/python3`.
+[private]
+[no-exit-message]
+_real-phone-tools-use-system-python:
+    #!/usr/bin/env python3
+    import pathlib, re, sys
+    # A bare python3 (or python, or env python3) followed by a real-Phone tool:
+    # any python run on a real-Phone tool, unless it is /usr/bin/python3.
+    bare_run = re.compile(r"(?<!/usr/bin/)(?<![\w/.-])python3?(?:\.\d+)?\s+(?:\S*/)?tools/real-phone/")
+    files = [pathlib.Path("justfile"), *sorted(pathlib.Path("tools/real-phone").rglob("*"))]
+    found = []
+    for path in files:
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text().splitlines()
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(lines, 1):
+            wrong_shebang = (path.parent.name == "real-phone" and number == 1
+                             and line.startswith("#!") and line != "#!/usr/bin/python3")
+            if wrong_shebang or bare_run.search(line):
+                found.append(f"  {path}:{number}: {line.strip()}")
+    if found:
+        print("Real-Phone tools must run under /usr/bin/python3, the only Python with", file=sys.stderr)
+        print("dbus-python (ticket #54). Use `#!/usr/bin/python3` and `/usr/bin/python3 tools/real-phone/...`:", file=sys.stderr)
+        print("\n".join(found), file=sys.stderr)
         sys.exit(1)

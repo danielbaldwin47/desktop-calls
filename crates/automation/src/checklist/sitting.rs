@@ -6,8 +6,11 @@
 //! Simulated Phone, the demo actions act as the Phone, the helper and the
 //! user (see [`Demo`]).
 
+use std::fs;
 use std::io::{self, BufRead as _, Write as _};
 use std::panic::{self, AssertUnwindSafe};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -249,6 +252,52 @@ impl Sitting {
         .map(drop)
     }
 
+    /// Runs the PBAP probe on the Phone, as `just pbap-probe` does, its
+    /// progress shown as it goes,
+    /// and returns the report it wrote, or why there is none. Under the
+    /// Simulated Phone, it runs against the demo's buses and home. Ctrl-C
+    /// during the probe stops the run.
+    pub fn pbap_probe(&mut self) -> Result<Result<Value, String>, Stop> {
+        let prepared = match &self.demo {
+            Some(demo) => demo.pbap_probe_command(),
+            None => Ok((Command::new(SYSTEM_PYTHON), user_cache())),
+        };
+        let (mut command, cache) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => return Ok(Err(format!("Couldn't prepare the probe: {error}"))),
+        };
+        let out = cache.join("desktop-calls").join(format!(
+            "pbap-probe-checklist-{}.json",
+            super::results::unix_micros() / 1_000_000
+        ));
+        flush();
+        // Standard input stays with the runner, which reads skip and quit.
+        let status = command
+            .args([PBAP_PROBE, "--out"])
+            .arg(&out)
+            .stdin(Stdio::null())
+            .status();
+        if self.interrupted.load(Ordering::Relaxed) {
+            return Err(Stop::Quit);
+        }
+        let report = match status {
+            Err(error) => Err(format!(
+                "Couldn't run {SYSTEM_PYTHON} {PBAP_PROBE}: {error}."
+            )),
+            Ok(status) if !status.success() => Err(format!(
+                "The PBAP probe failed ({status}); its output is above."
+            )),
+            Ok(_) => fs::read_to_string(&out)
+                .map_err(|error| format!("Couldn't read {}: {error}.", out.display()))
+                .and_then(|text| {
+                    serde_json::from_str(&text).map_err(|error| {
+                        format!("{} isn't the probe's report: {error}.", out.display())
+                    })
+                }),
+        };
+        Ok(report)
+    }
+
     /// The app's log lines from `from_us` until now.
     pub fn log_since(&self, from_us: u64) -> Vec<LogLine> {
         self.log.lines(from_us, super::results::unix_micros())
@@ -341,6 +390,32 @@ pub struct Demo {
 /// The number the demo's helper calls from: an Ofcom drama number.
 const DEMO_NUMBER: &str = "+447700900461";
 
+/// The demo's Test Number, for the PBAP probe to redact: another Ofcom
+/// drama number.
+const DEMO_TEST_NUMBER: &str = "+447700900999";
+
+/// How many Calls the demo's Call History holds: more than the 50 the
+/// Pixel gives per pull, so there is a second page to read.
+const DEMO_CALL_HISTORY: usize = 120;
+
+/// What `just pbap-probe` runs. The real-Phone tools need the system
+/// Python, the only one with dbus-python (#54); `just` itself may be a
+/// version manager's shim, which fails in the demo's temporary home.
+const SYSTEM_PYTHON: &str = "/usr/bin/python3";
+const PBAP_PROBE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tools/real-phone/pbap_probe.py"
+);
+
+/// `$XDG_CACHE_HOME`, or `~/.cache`.
+fn user_cache() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .filter(|cache| !cache.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_default()
+}
+
 /// How long the keybinding's focus, or the user's window, may take to
 /// arrive in the demo.
 const FOCUS_DEADLINE: Duration = Duration::from_secs(5);
@@ -356,6 +431,24 @@ impl Demo {
             harness,
             call_path: None,
         }
+    }
+
+    /// The PBAP probe for the demo, and the cache directory it writes
+    /// to: the scenario's buses and home, a made-up Test Number for the
+    /// probe to redact, and a Call History longer than one pull gives.
+    fn pbap_probe_command(&self) -> io::Result<(Command, PathBuf)> {
+        let directory = self.harness.directory();
+        let config = directory.join("config/desktop-calls");
+        fs::create_dir_all(&config)?;
+        fs::write(config.join("test-number"), DEMO_TEST_NUMBER)?;
+        self.harness.simulated_phone().set_pbap_folder(
+            "cch",
+            &test_harness::vcards::call_history(DEMO_CALL_HISTORY),
+        );
+        Ok((
+            self.harness.external_command(SYSTEM_PYTHON),
+            directory.join("cache"),
+        ))
     }
 
     fn act(&mut self, action: &str, state: &AppState) {

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Handoff probe for the real Phone, from the ticket #3 prototype.
 
 Places a Call to the Test Number, brings its audio to the Desktop, then
@@ -7,13 +7,13 @@ from org.pipewire.Telephony and the Phone's org.bluez objects, plus
 `pactl subscribe`. Findings: docs/research/2026-11-04-handoff-to-phone-prototype.md.
 
 Usage:
-  python3 tools/real-phone/handoff_probe.py trial-a [--snapshot OUT.json] [--round-trip]
+  /usr/bin/python3 tools/real-phone/handoff_probe.py trial-a [--snapshot OUT.json] [--round-trip]
       Handoff to the Phone by bouncing the hands-free profile (ADR-0005).
-  python3 tools/real-phone/handoff_probe.py trial-b
+  /usr/bin/python3 tools/real-phone/handoff_probe.py trial-b
       Handoff by toggling the card profile off and back.
-  python3 tools/real-phone/handoff_probe.py activate-only
+  /usr/bin/python3 tools/real-phone/handoff_probe.py activate-only
       Only bring the Call's audio to the Desktop.
-  python3 tools/real-phone/handoff_probe.py pbap-snapshot OUT.json
+  /usr/bin/python3 tools/real-phone/handoff_probe.py pbap-snapshot OUT.json
       Capture an obexd PBAP Session1 and PhonebookAccess1 (no Call).
 Options:
   --trace      raise WirePlumber's bluez5 log level once the Call is active

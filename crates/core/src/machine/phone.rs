@@ -4,7 +4,10 @@
 use super::audio::{activated, ask_once_more, audio_not_moved_to_phone};
 use super::dialling::{dial_failed, refresh_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
-use super::presence::{pairing_found, wait_for_lost_call};
+use super::presence::{
+    hands_free_back, hands_free_connect_done, hands_free_connect_failed, pairing_found,
+    wait_for_lost_call,
+};
 use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
 use crate::call::{AudioLocation, Request, Transport};
 use crate::connection::{ConnectionState, Phone};
@@ -70,6 +73,7 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
 
 pub(super) fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
     pairing_found(state);
+    hands_free_back(state);
     wait_for_lost_call(state, effects);
     // Every connect syncs, so the Desktop catches up with changes made on
     // the Phone while apart.
@@ -140,6 +144,7 @@ pub(super) fn command_done(state: &mut State, command: &PhoneCommand, effects: &
             state.muting = Muting::Off;
         }
         (PhoneCommand::MoveAudioToDesktop, _) => activated(state, effects),
+        (PhoneCommand::ConnectHandsFree, _) => hands_free_connect_done(state, effects),
         _ => {}
     }
 }
@@ -169,6 +174,7 @@ pub(super) fn command_failed(state: &mut State, command: &PhoneCommand, effects:
         }
         PhoneCommand::MoveAudioToDesktop => ask_once_more(state, effects),
         PhoneCommand::MoveAudioToPhone => audio_not_moved_to_phone(state, effects),
+        PhoneCommand::ConnectHandsFree => hands_free_connect_failed(state, effects),
         // Without these the Phone never dialled.
         PhoneCommand::AllowAudioOnDesktop | PhoneCommand::Dial(_) => {
             dial_failed(state, Failure::DialFailed, effects);

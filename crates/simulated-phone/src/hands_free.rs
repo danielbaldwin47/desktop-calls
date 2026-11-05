@@ -23,7 +23,10 @@
 //! has replied, and its `ModemAdded` follows the AudioGateway's
 //! `InterfacesAdded`. With the
 //! `"disconnect-profile-refused"` quirk, `DisconnectProfile` fails and
-//! nothing changes.
+//! nothing changes. With `"connect-profile-fails"`, each `ConnectProfile`
+//! after the drop fails [`RECONNECT_REPLY`] later and hands-free stays down,
+//! with the Calls carrying on on the Phone; with
+//! `"connect-profile-fails-once"`, only the next one does.
 
 use std::time::Duration;
 
@@ -66,6 +69,21 @@ impl Dropped {
     /// What went with hands-free, and the device's `Battery1`.
     pub fn into_parts(self) -> (Away, Option<Properties>) {
         (self.away, self.battery)
+    }
+
+    /// The Calls carrying on on the Phone while hands-free is down, as
+    /// `(path's last part, State)`.
+    pub fn calls_away(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        self.away.calls.iter().map(|(call, properties)| {
+            (
+                call.as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+                crate::range::call_state(properties),
+            )
+        })
     }
 }
 
@@ -163,9 +181,12 @@ fn connect_profile(
     call: &MethodCall,
     message: &Message,
 ) -> zbus::Result<()> {
+    // BlueZ takes a while to give up, as it does to connect.
+    let mut slow = false;
     let reply = {
         let mut world = lock(world);
-        match refusal(&world, call, message)? {
+        let world = &mut *world;
+        match refusal(world, call, message)? {
             Some(reply) => Some(reply),
             None if world.audio_gateway.is_some() => Some(Reply::Error(
                 "org.bluez.Error.AlreadyConnected",
@@ -180,6 +201,13 @@ fn connect_profile(
                     "org.bluez.Error.InProgress",
                     "In Progress".to_owned(),
                 )),
+                Some(_) if fails(&mut world.behaviour.quirks) => {
+                    slow = true;
+                    Some(Reply::Error(
+                        "org.bluez.Error.Failed",
+                        "br-connection-refused".to_owned(),
+                    ))
+                }
                 Some(dropped) => {
                     dropped.reconnecting = true;
                     None
@@ -188,6 +216,9 @@ fn connect_profile(
         }
     };
     if let Some(reply) = reply {
+        if slow {
+            std::thread::sleep(RECONNECT_REPLY);
+        }
         return zbus::block_on(reply.send(system, &message.header()));
     }
     std::thread::sleep(RECONNECT_REPLY);
@@ -239,6 +270,12 @@ fn connect_profile(
         zbus::block_on(emit(telephony, signals))?;
     }
     Ok(())
+}
+
+/// Whether this `ConnectProfile` fails, by the quirks: every time, or this
+/// time only.
+fn fails(quirks: &mut std::collections::BTreeSet<Quirk>) -> bool {
+    quirks.contains(&Quirk::ConnectProfileFails) || quirks.remove(&Quirk::ConnectProfileFailsOnce)
 }
 
 /// Brings `Battery1` and the AudioGateway back, if hands-free is still

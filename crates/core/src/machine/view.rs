@@ -149,7 +149,7 @@ impl State {
         let banner = self
             .calls
             .iter()
-            .filter(|_| !self.presence.absent)
+            .filter(|_| !self.presence.absent())
             .find(|call| call.rings_here())
             .map(|call| BannerView {
                 call: call.id,

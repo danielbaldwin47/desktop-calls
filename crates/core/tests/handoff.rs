@@ -628,37 +628,16 @@ fn a_handoff_to_the_phone_that_never_starts_says_so_at_the_limit() {
     assert_eq!(state.calls().len(), 1);
 }
 
-#[test]
-fn if_hands_free_doesnt_come_back_the_phone_shows_disconnected() {
-    let (state, limit) = asked_for_phone(live_here());
-    let (state, _) = run(state, [dropped()]);
-
-    let (state, effects) = run(state, [Input::TimerFired(limit)]);
-
-    assert_eq!(reported(&effects), []);
-    assert_eq!(state.connection_state(), &ConnectionState::Disconnected);
-    assert_eq!(audio(&state), Some(ON_PHONE));
-
-    // Reconnecting failed outright: the same.
-    let (state, _) = asked_for_phone(live_here());
-    let (state, _) = run(
-        state,
-        [
-            dropped(),
-            Input::PhoneCommandFailed(PhoneCommand::MoveAudioToPhone),
-        ],
-    );
-    assert_eq!(state.connection_state(), &ConnectionState::Disconnected);
-}
+// Hands-free not coming back after the drop is in `handoff_recovery.rs`.
 
 #[test]
-fn the_call_ending_mid_handoff_to_the_phone_forgets_it() {
+fn the_phone_link_giving_up_on_the_call_mid_handoff_to_the_phone_ends_the_handoff() {
     let (state, limit) = asked_for_phone(live_here());
     let (state, _) = run(state, [dropped(), Input::CallEnded { call: CALL }]);
 
     let (state, effects) = run(state, [Input::TimerFired(limit)]);
     assert_eq!(effects, []);
-    // A later reconnect is an ordinary one.
+    // Hands-free coming back is then an ordinary connect.
     let (_, effects) = run(
         state,
         [Input::PhoneConnected {

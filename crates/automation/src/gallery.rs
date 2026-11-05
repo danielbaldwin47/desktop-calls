@@ -230,6 +230,34 @@ const STATES: &[State] = &[
         },
     },
     State {
+        name: "call-window-connection-lost",
+        title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        reach: |harness| {
+            connect(harness);
+            let call = ring(harness);
+            harness.answer(call);
+            harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
+                state.audio_location == "desktop"
+            });
+            harness
+                .simulated_phone()
+                .enable_quirk("connect-profile-fails");
+            harness
+                .move_audio("phone")
+                .unwrap_or_else(|error| panic!("move the audio to the phone: {error:?}"));
+            harness.wait_for_app(
+                "the Call Window says the connection is lost",
+                DEADLINE,
+                |state| {
+                    state
+                        .surface("call-window")
+                        .is_some_and(|window| window.contains_key("notice"))
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
         name: "call-window-calling",
         title: "The Call Window, placing a Call, before the other end rings",
         reach: |harness| {

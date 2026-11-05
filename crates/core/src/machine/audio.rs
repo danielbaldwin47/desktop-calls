@@ -4,6 +4,7 @@
 use super::dialling::{dial_failed, open_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::phone::{phone_connected, phone_disconnected};
+use super::presence::hands_free_lost;
 use super::view::CallWindowPhase;
 use super::{
     DEFAULT_MICROPHONE_VOLUME, Focus, HANDOFF_NOT_STARTED_MS, HANDOFF_TIMEOUT_MS,
@@ -240,8 +241,7 @@ pub(super) fn end_handoff_to_phone(state: &mut State) {
 
 /// The Phone link couldn't drop hands-free, or couldn't connect it again.
 /// Before the drop, the audio stayed here and the user is told how to move
-/// it on the Phone; after it, the Phone is disconnected until hands-free
-/// comes back by itself.
+/// it on the Phone; after it, hands-free is lost.
 pub(super) fn audio_not_moved_to_phone(state: &mut State, effects: &mut Vec<Effect>) {
     match state.moving_to_phone {
         Some(moving) if !moving.dropped => {
@@ -249,9 +249,30 @@ pub(super) fn audio_not_moved_to_phone(state: &mut State, effects: &mut Vec<Effe
             state.audio_notice = Some(Failure::AudioNotMovedToPhone);
             effects.push(Effect::ReportError(Failure::AudioNotMovedToPhone));
         }
-        Some(moving) if !moving.phone_back => end_handoff_to_phone(state),
+        Some(moving) if !moving.phone_back => hands_free_not_back(state, effects),
         _ => {}
     }
+}
+
+/// The Phone link gave up on a Call while hands-free is away for a Handoff
+/// to the Phone. The Call went to the Phone with hands-free, and nothing
+/// says it ended there: hands-free is taking too long, so it is lost.
+pub(super) fn call_gone_mid_handoff(state: &mut State, effects: &mut Vec<Effect>) {
+    if state
+        .moving_to_phone
+        .is_some_and(|moving| moving.dropped && !moving.phone_back)
+    {
+        hands_free_not_back(state, effects);
+    }
+}
+
+/// Hands-free dropped for a Handoff to the Phone and isn't coming back by
+/// itself. The Call carries on on the Phone, out of the Desktop's reach,
+/// and the Phone is disconnected until the Desktop has hands-free again.
+fn hands_free_not_back(state: &mut State, effects: &mut Vec<Effect>) {
+    state.moving_to_phone = None;
+    phone_disconnected(state);
+    hands_free_lost(state, effects);
 }
 
 /// The Handoff to the Phone's limit: whatever hasn't happened by now

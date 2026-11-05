@@ -39,7 +39,8 @@
 //!   `Deactivate()`. The audio goes back to the Phone by BlueZ dropping
 //!   hands-free and connecting it again (ADR-0005), which takes the
 //!   AudioGateway and its Calls away for about a second; they come back at
-//!   the same paths, and the Calls as the same Calls.
+//!   the same paths, and the Calls as the same Calls. If hands-free doesn't
+//!   come back, BlueZ is asked to connect it again (ticket #101).
 
 mod commands;
 
@@ -719,6 +720,9 @@ impl PhoneLink {
                     .and_then(|path| self.audio_gateways.get(path))
                     .cloned()
                     .map(Target::Phone),
+                // Hands-free is down, so there is no AudioGateway: the
+                // attached Phone's address is all there is.
+                PhoneCommand::ConnectHandsFree => self.attached.clone().map(Target::Phone),
                 PhoneCommand::MoveAudioToDesktop
                 | PhoneCommand::KeepAudioOnPhone
                 | PhoneCommand::AllowAudioOnDesktop

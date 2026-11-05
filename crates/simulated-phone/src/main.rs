@@ -467,6 +467,12 @@ impl Control {
             .map(|(call, properties)| (call.to_string(), range::call_state(&properties)))
             .collect();
         calls.extend(world.range.calls_away());
+        calls.extend(
+            world
+                .dropped
+                .iter()
+                .flat_map(hands_free::Dropped::calls_away),
+        );
         calls
     }
 
@@ -647,12 +653,13 @@ impl Control {
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
     /// `"get-calls-empty-while-dialling"`, `"slow-property-writes"`,
     /// `"activate-ignored"`, `"activate-ignored-once"`,
-    /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"` or
+    /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"`,
+    /// `"connect-profile-fails"`, `"connect-profile-fails-once"` or
     /// `"late-line-identification"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused and late-line-identification"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once and late-line-identification"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

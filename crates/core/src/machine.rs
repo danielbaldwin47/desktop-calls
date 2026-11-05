@@ -300,7 +300,7 @@ impl State {
     #[must_use]
     pub fn ringing(&self) -> bool {
         !self.do_not_disturb
-            && !self.presence.absent
+            && !self.presence.absent()
             && self.calls.iter().any(Call::rings_here)
             && !self.calls.iter().any(|call| call.state.blocks_ringing())
     }

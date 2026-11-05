@@ -27,17 +27,21 @@ pub(super) async fn execute(
             let path = match target {
                 Target::Object(path) => path,
                 Target::Phone(address) => {
-                    // The bounce logs its own failure.
-                    let input = match bluez::bounce_hands_free(system, &address).await {
-                        Ok(()) => {
-                            tracing::debug!(
-                                event_kind = %EventKind::PhoneCommandSent,
-                                command = "MoveAudioToPhone",
-                                "Hands-free dropped and connected again"
-                            );
-                            Input::PhoneCommandDone(command)
-                        }
-                        Err(_) => Input::PhoneCommandFailed(command),
+                    // Each logs its own failure.
+                    let done = if command == PhoneCommand::ConnectHandsFree {
+                        bluez::connect_hands_free(system, &address).await.is_ok()
+                    } else {
+                        bluez::bounce_hands_free(system, &address).await.is_ok()
+                    };
+                    let input = if done {
+                        tracing::debug!(
+                            event_kind = %EventKind::PhoneCommandSent,
+                            command = %command_name(&command),
+                            "BlueZ connected hands-free"
+                        );
+                        Input::PhoneCommandDone(command)
+                    } else {
+                        Input::PhoneCommandFailed(command)
                     };
                     let failed = matches!(input, Input::PhoneCommandFailed(_));
                     let _ = inputs.unbounded_send(input);
@@ -71,7 +75,7 @@ pub(super) async fn execute(
                 }
                 PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
                 // Resolved to the Phone itself, above.
-                PhoneCommand::MoveAudioToPhone => Ok(()),
+                PhoneCommand::MoveAudioToPhone | PhoneCommand::ConnectHandsFree => Ok(()),
             };
             let name = command_name(&command);
             match result {

@@ -90,9 +90,10 @@ pub fn new_tree(phone_name: &str, phone_address: &str) -> zbus::Result<ObjectTre
         vec![OBJECT_MANAGER, INTROSPECTABLE],
     );
     tree.insert(&path("/org")?, Interfaces::new(), vec![INTROSPECTABLE]);
+    // `AgentManager1` behaves (`pairing.rs`); it has no properties.
     tree.insert(
         &path("/org/bluez")?,
-        Interfaces::new(),
+        Interfaces::from([("org.bluez.AgentManager1".to_owned(), Properties::new())]),
         vec![INTROSPECTABLE],
     );
 
@@ -222,6 +223,52 @@ fn device_interfaces(
         ("org.bluez.MediaControl1".to_owned(), media_control),
         (BATTERY.to_owned(), battery),
     ]))
+}
+
+/// A device other than the Phone: headphones or another Phone, with
+/// `class` and, if `paired`, paired with the Desktop.
+pub fn other_device(
+    name: &str,
+    address: &str,
+    class: u32,
+    paired: bool,
+) -> zbus::Result<Interfaces> {
+    let mut properties = Properties::new();
+    properties.insert("Address".into(), text(address));
+    properties.insert("AddressType".into(), text("public"));
+    properties.insert("Name".into(), text(name));
+    properties.insert("Alias".into(), text(name));
+    properties.insert("Class".into(), OwnedVariant::from(class));
+    properties.insert("Paired".into(), OwnedVariant::from(paired));
+    properties.insert("Bonded".into(), OwnedVariant::from(paired));
+    properties.insert("Trusted".into(), OwnedVariant::from(paired));
+    properties.insert("Blocked".into(), OwnedVariant::from(false));
+    properties.insert("LegacyPairing".into(), OwnedVariant::from(false));
+    properties.insert("Connected".into(), OwnedVariant::from(false));
+    properties.insert("ServicesResolved".into(), OwnedVariant::from(false));
+    if paired {
+        properties.insert("UUIDs".into(), texts(&PHONE_UUIDS)?);
+    } else {
+        properties.insert("RSSI".into(), OwnedVariant::from(-60_i16));
+        properties.insert(
+            "UUIDs".into(),
+            texts(&[
+                "0000110b-0000-1000-8000-00805f9b34fb",
+                "0000111e-0000-1000-8000-00805f9b34fb",
+            ])?,
+        );
+    }
+    properties.insert(
+        "Adapter".into(),
+        OwnedVariant::from(ObjectPath::try_from(ADAPTER_PATH)?),
+    );
+    Ok(Interfaces::from([(DEVICE.to_owned(), properties)]))
+}
+
+/// Puts a device into BlueZ's objects.
+pub fn insert_device(tree: &mut ObjectTree, device: &OwnedObjectPath, interfaces: Interfaces) {
+    tree.insert(device, interfaces, vec![PROPERTIES, INTROSPECTABLE]);
+    tree.capture_introspection(device, DEVICE_INTROSPECTION);
 }
 
 /// BlueZ's path for a device: `/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF`.

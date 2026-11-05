@@ -143,7 +143,7 @@ fn idle_the_menu_offers_the_status_and_the_dialer() {
 
     assert_eq!(
         MenuEntry::labels(&harness.tray().menu()),
-        ["My Pixel connected", "Open Dialer"]
+        ["My Pixel connected", "Open Dialer", "Connect your phone…"]
     );
 }
 
@@ -157,6 +157,7 @@ fn during_a_call_the_menu_mutes_and_hangs_up_as_the_call_window_does() {
         [
             IN_CALL,
             "Open Dialer",
+            "Connect your phone…",
             "---",
             "Hang up",
             "Mute",

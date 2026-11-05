@@ -258,6 +258,12 @@ impl ControlInterface {
             .collect()
     }
 
+    /// Opens the Setup Window, to pair a Phone, pair it again or switch to
+    /// another, as the Indicator's "Connect your phone…" does.
+    fn open_connect_window(&self) {
+        let _ = self.intents.unbounded_send(Input::OpenSetupWindow);
+    }
+
     /// Answers the ringing Call with this id on the Desktop.
     fn answer(&self, call: u32) {
         let _ = self.intents.unbounded_send(Input::Answer(CallId(call)));

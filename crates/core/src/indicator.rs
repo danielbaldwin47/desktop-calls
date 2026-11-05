@@ -66,6 +66,8 @@ pub enum IndicatorEntry {
     /// The status line, which does nothing.
     Status,
     OpenDialer,
+    /// Opens the Setup Window, to pair a Phone, pair again or switch.
+    ConnectPhone,
     /// A line between groups of entries.
     Separator,
     /// Hangs up the Call in the Call Window, or stops placing it (`None`).
@@ -93,6 +95,9 @@ impl IndicatorEntry {
                 query: String::new(),
                 select_call: None,
             }),
+            Self::ConnectPhone | Self::Problem(ProblemKind::PairingLost) => {
+                Some(Input::OpenSetupWindow)
+            }
             Self::HangUp(call) => Some(call.map_or(Input::CancelDial, Input::HangUp)),
             Self::Mute(Mute::Off) => Some(Input::SetMuted(true)),
             Self::Mute(Mute::On) => Some(Input::SetMuted(false)),
@@ -177,7 +182,11 @@ impl State {
             }
         };
 
-        let mut menu = vec![IndicatorEntry::Status, IndicatorEntry::OpenDialer];
+        let mut menu = vec![
+            IndicatorEntry::Status,
+            IndicatorEntry::OpenDialer,
+            IndicatorEntry::ConnectPhone,
+        ];
         if let Some(window) = call_window {
             menu.push(IndicatorEntry::Separator);
             menu.push(IndicatorEntry::HangUp(window.call));

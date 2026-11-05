@@ -269,6 +269,7 @@ impl PhoneLink {
                     self.call_removed(&path, &mut outcome);
                 }
             }
+            Event::Object(ObjectEvent::Listed) => {}
             Event::Object(ObjectEvent::ServiceGone) => {
                 let paths: Vec<String> = self.audio_gateways.keys().cloned().collect();
                 for path in paths {

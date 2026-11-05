@@ -73,6 +73,12 @@ trait SimulatedPhone1 {
     fn most_pbap_sessions_at_once(&self) -> zbus::Result<u32>;
 
     fn recorded_method_calls(&self) -> zbus::Result<Vec<(String, String, String, String, String)>>;
+
+    fn pair_from_phone(&self) -> zbus::Result<u32>;
+
+    fn pairing_requests(&self) -> zbus::Result<Vec<(u32, String)>>;
+
+    fn set_hands_free(&self, mode: &str) -> zbus::Result<()>;
 }
 
 /// One method call the Simulated Phone received.
@@ -178,6 +184,43 @@ impl SimulatedPhone<'_> {
     pub fn forget_pairing(&self) {
         zbus::block_on(async { self.proxy().await?.forget_pairing().await })
             .expect("have the Simulated Phone forget the pairing");
+    }
+
+    /// Pairs from the Phone's side, as its owner does by tapping the Desktop
+    /// on the Phone's "Pair new device" screen, and returns the six-digit
+    /// code the Phone shows.
+    ///
+    /// # Errors
+    ///
+    /// The Simulated Phone's refusal: the Desktop isn't discoverable, or has
+    /// no pairing agent.
+    pub fn pair_from_phone(&self) -> zbus::Result<u32> {
+        zbus::block_on(async { self.proxy().await?.pair_from_phone().await })
+    }
+
+    /// Each pairing so far, from either side: its code, and `waiting`,
+    /// `confirmed` or `rejected`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't answer.
+    #[must_use]
+    pub fn pairing_requests(&self) -> Vec<(u32, String)> {
+        zbus::block_on(async { self.proxy().await?.pairing_requests().await })
+            .expect("list the Simulated Phone's pairings")
+    }
+
+    /// Whether the Phone shares Calls with the Desktop: `shared` (by
+    /// itself, the default), `when-asked` (it connects media alone, and
+    /// hands-free only for `ConnectProfile`) or `refused` (its "Phone calls"
+    /// switch for the Desktop is off).
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_hands_free(&self, mode: &str) {
+        zbus::block_on(async { self.proxy().await?.set_hands_free(mode).await })
+            .expect("set whether the Simulated Phone shares Calls");
     }
 
     /// The Calls on the Phone, as `(path, State)`, including those carrying

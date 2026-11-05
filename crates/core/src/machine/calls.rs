@@ -9,6 +9,7 @@ use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
 use super::presence::{connection_lost_over, found_lost_call, lost_track, reconnect_due};
+use super::setup::setup_timer;
 use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
 use crate::call::{Call, CallId, CallState, Caller, Direction, Request, Timestamp};
 use crate::messages::Failure;
@@ -70,6 +71,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
         Timer::ForgetEarlierRun => state.earlier_calls.clear(),
         Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
+        Timer::SetupStep(wait) => setup_timer(state, wait, effects),
         Timer::NumberLate(call) => state.awaiting_number.retain(|id| *id != call),
         Timer::DismissDial(attempt) => {
             if state

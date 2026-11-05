@@ -269,7 +269,7 @@ impl Harness {
 
     /// Starts the Simulated Phone, acting out `scenario` if there is one,
     /// and waits until it is on the bus.
-    fn start_simulated_phone(&mut self, scenario: Option<&Path>) {
+    fn start_simulated_phone(&mut self, scenario: Option<&Path>, nearby: &[String]) {
         let mut simulated_phone = self.command("simulated-phone");
         simulated_phone
             .arg("--name")
@@ -277,7 +277,8 @@ impl Harness {
             .arg("--address")
             .arg(&self.phone.address)
             .arg("--first-audio-gateway-index")
-            .arg(self.audio_gateway_index.to_string());
+            .arg(self.audio_gateway_index.to_string())
+            .args(nearby);
         if let Some(scenario) = scenario {
             simulated_phone.arg("--scenario").arg(scenario);
         }

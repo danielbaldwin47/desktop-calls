@@ -62,6 +62,12 @@ pub fn dialer(query: &str) -> ExitCode {
     call_app("OpenDialer", &(query, 0_u32))
 }
 
+/// `desktop-calls connect`: opens the Setup Window, to pair a Phone, pair
+/// it again, or switch to another.
+pub fn connect_phone() -> ExitCode {
+    call_app("OpenConnectWindow", &())
+}
+
 /// Calls `method` on the control interface, for a command with nothing to
 /// print.
 fn call_app<B>(method: &str, body: &B) -> ExitCode

@@ -31,7 +31,9 @@ mod hands_free;
 mod logind;
 mod obex;
 mod objects;
+mod pairing;
 mod range;
+mod restart;
 mod scenario;
 mod telephony;
 
@@ -67,6 +69,8 @@ struct Arguments {
     /// A scenario file to act out once on the bus.
     #[arg(long)]
     scenario: Option<PathBuf>,
+    #[command(flatten)]
+    nearby: pairing::Nearby,
 }
 
 /// Which bus a method call arrived on.
@@ -87,7 +91,7 @@ impl Bus {
 
 /// Which real service a connection stands in for.
 #[derive(Clone, Copy)]
-enum Service {
+pub(crate) enum Service {
     Bluez,
     Telephony,
     Obex,
@@ -113,6 +117,7 @@ struct World {
     /// Hands-free dropped for `DisconnectProfile`, until it is back.
     dropped: Option<hands_free::Dropped>,
     range: range::Range,
+    pairing: pairing::Pairing,
     behaviour: telephony::Behaviour,
     dialling: telephony::Dialling,
     recorded: Vec<(Bus, MethodCall)>,
@@ -151,10 +156,13 @@ fn read_scenario(path: &std::path::Path) -> Result<Vec<Step>, String> {
 
 async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let mut bluez = bluez::new_tree(&arguments.name, &arguments.address)?;
-    let range = range::Range::new(&mut bluez, &bluez::device_path(&arguments.address)?);
+    let device = bluez::device_path(&arguments.address)?;
+    let mut range = range::Range::new(&mut bluez, &device);
+    let pairing = pairing::Pairing::new(&mut bluez, &device, &arguments.nearby, &mut range)?;
     let world = Arc::new(Mutex::new(World {
         bluez,
         range,
+        pairing,
         telephony: telephony::new_tree()?,
         obex: obex::new()?,
         phone_address: arguments.address,
@@ -236,7 +244,7 @@ async fn act_out(control: &Connection, steps: Vec<Step>) -> zbus::Result<()> {
 }
 
 /// Answers every method call that arrives for one service, and records it.
-async fn serve(
+pub(crate) async fn serve(
     connection: Connection,
     mut messages: MessageStream,
     service: Service,
@@ -257,6 +265,11 @@ async fn serve(
                 call,
                 message,
             );
+            continue;
+        }
+        if matches!(service, Service::Bluez) && pairing::handles(&call) {
+            lock(&world).recorded.push((service.bus(), call.clone()));
+            pairing::answer(world.clone(), connection.clone(), call, message);
             continue;
         }
         if matches!(service, Service::Bluez) && range::handles(&call) {
@@ -453,6 +466,28 @@ impl Control {
             range::hands_free_down(&mut world)?
         };
         self.range_changed(change, &emitter).await
+    }
+
+    /// The person holding the Phone taps the Desktop on its "Pair new
+    /// device" screen, which needs the Desktop discoverable. Returns the
+    /// passkey the Phone shows; `PairingRequests` says how it went.
+    fn pair_from_phone(&self) -> zbus::fdo::Result<u32> {
+        pairing::pair_from_phone(&self.world, &self.system, &self.telephony)
+            .map_err(zbus::fdo::Error::Failed)
+    }
+
+    /// Each pairing so far: its passkey, and `waiting`, `confirmed` or
+    /// `rejected`.
+    fn pairing_requests(&self) -> Vec<(u32, String)> {
+        lock(&self.world).pairing.requests()
+    }
+
+    /// Whether the Phone shares Calls: `shared`, `when-asked` (media alone
+    /// until `ConnectProfile`) or `refused` ("Phone calls" off).
+    fn set_hands_free(&self, mode: &str) -> zbus::fdo::Result<()> {
+        lock(&self.world).pairing.hands_free = pairing::HandsFree::from_name(mode)
+            .ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("unknown mode {mode:?}")))?;
+        Ok(())
     }
 
     /// The Calls on the Phone, as `(path, State)`: those on the current
@@ -726,7 +761,7 @@ impl Control {
         let world = self.world.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(u64::from(gap_ms)));
-            if let Err(error) = come_back(&holder, &world, restart) {
+            if let Err(error) = restart::come_back(&holder, &world, restart) {
                 eprintln!("simulated-phone: the Telephony service didn't come back: {error}");
             }
         });
@@ -899,48 +934,6 @@ impl Control {
         }
         Ok(())
     }
-}
-
-/// The Telephony service after a restart: takes the name on a new
-/// connection, serves the same objects there, and announces them again.
-fn come_back(
-    holder: &TelephonyConnection,
-    world: &SharedWorld,
-    restart: Option<telephony::Restart>,
-) -> zbus::Result<()> {
-    let connection = zbus::block_on(async {
-        let connection = zbus::connection::Builder::session().build().await?;
-        let calls = MessageStream::from(&connection);
-        connection.request_name(telephony::SERVICE).await?;
-        Ok::<_, zbus::Error>((connection, calls))
-    });
-    let (connection, calls) = connection?;
-    *lock(holder) = Some(connection.clone());
-    let serving = connection.clone();
-    let world = world.clone();
-    let holder = holder.clone();
-    std::thread::spawn(move || {
-        if let Err(error) = zbus::block_on(serve(serving, calls, Service::Telephony, world, holder))
-        {
-            eprintln!("simulated-phone: the restarted Telephony service stopped: {error}");
-        }
-    });
-    let Some(restart) = restart else {
-        return Ok(());
-    };
-    zbus::block_on(async {
-        for signal in &restart.audio_gateway_back {
-            signal.emit(&connection).await?;
-        }
-        Ok::<_, zbus::Error>(())
-    })?;
-    std::thread::sleep(std::time::Duration::from_millis(40));
-    zbus::block_on(async {
-        for signal in &restart.calls_back {
-            signal.emit(&connection).await?;
-        }
-        Ok(())
-    })
 }
 
 fn connected_audio_gateway(world: &World) -> zbus::fdo::Result<OwnedObjectPath> {

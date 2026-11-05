@@ -47,6 +47,8 @@ pub enum ObjectEvent {
     },
     /// The service left the bus: every object it had is gone.
     ServiceGone,
+    /// Every object the service had when it was listed has been reported.
+    Listed,
 }
 
 /// Why following a service stopped.
@@ -250,6 +252,7 @@ impl Lister<'_> {
                         .collect();
                     Box::pin(self.added(path.to_string(), interfaces)).await?;
                 }
+                send(self.events, ObjectEvent::Listed)?;
             }
             Err(error) => unavailable(self.watched.service, &error.into()),
         }

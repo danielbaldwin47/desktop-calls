@@ -310,6 +310,22 @@ fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
+/// Asks BlueZ to connect the Phone now, wherever it is: it was just
+/// paired. A connect already under way does instead.
+pub(super) fn connect_phone_now(state: &mut State, effects: &mut Vec<Effect>) {
+    let Some(phone) = &state.phone else {
+        return;
+    };
+    if state.presence.reconnect.connecting {
+        return;
+    }
+    state.presence.reconnect.wait += 1;
+    state.presence.reconnect.connecting = true;
+    effects.push(Effect::ConnectPhone {
+        address: phone.address.clone(),
+    });
+}
+
 /// Waits a while, longer the more connects have failed, then connects.
 fn connect_later(state: &mut State, effects: &mut Vec<Effect>) {
     if !state.wants_phone() {

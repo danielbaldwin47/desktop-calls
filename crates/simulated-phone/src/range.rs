@@ -204,6 +204,22 @@ pub fn hands_free_down(world: &mut World) -> zbus::Result<Option<Change>> {
     Ok(Some(change))
 }
 
+/// Connects the Phone without hands-free, as a Phone that doesn't share
+/// Calls by itself does: media alone.
+pub fn connected_without_hands_free(world: &mut World) -> zbus::Result<Change> {
+    let device = bluez::device_path(&world.phone_address)?;
+    let mut change = Change::default();
+    if world.bluez.set(
+        &device,
+        bluez::DEVICE,
+        "Connected",
+        OwnedVariant::from(true),
+    ) {
+        change.bluez(connected_changed(&device, true));
+    }
+    Ok(change)
+}
+
 fn keep_away(world: &mut World, away: Away) {
     for (call, properties) in away.calls {
         let name = call
@@ -278,6 +294,16 @@ fn connect(
     call: &MethodCall,
     message: &Message,
 ) -> zbus::Result<()> {
+    if lock(world).pairing.is_other_phone(&call.path) {
+        // Another paired Phone, never in range: pages and times out, with
+        // BlueZ answering everything else meanwhile.
+        std::thread::sleep(PAGE_TIMEOUT);
+        let reply = Reply::Error(
+            "org.bluez.Error.Failed",
+            "br-connection-page-timeout".to_owned(),
+        );
+        return zbus::block_on(reply.send(system, &message.header()));
+    }
     let refused = {
         let mut world = lock(world);
         if call.path != bluez::device_path(&world.phone_address)?.as_str() {
@@ -322,7 +348,7 @@ fn connect(
         world.range.connecting = false;
         match failure {
             Some(_) => None,
-            None => hands_free_up(&mut world)?,
+            None => Some(crate::pairing::connected_by_phone(&mut world)?),
         }
     };
     zbus::block_on(async {

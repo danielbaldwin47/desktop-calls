@@ -7,6 +7,9 @@
 //! It reports each paired Bluetooth device that offers the Hands-Free Audio
 //! Gateway profile, which is what makes it a Phone that can carry Calls,
 //! and whether it has a Bluetooth connection to the Desktop: `Connected`.
+//! For the Setup Window it also reports each nearby device that isn't
+//! paired and whose `Class` says Phone, by its name, and when BlueZ has
+//! listed what it knows at startup. Pairing itself is `pairing.rs`.
 
 use std::collections::HashMap;
 
@@ -41,59 +44,9 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
         Ok::<_, WatchError>(())
     };
     let reporting = async {
-        // Paired Phones by object path: their addresses.
-        let mut phones: HashMap<String, String> = HashMap::new();
+        let mut devices = Devices::default();
         while let Some(event) = objects.next().await {
-            let reported = match event {
-                ObjectEvent::Added { path, interfaces } => {
-                    let Some(device) = interfaces.get(DEVICE) else {
-                        continue;
-                    };
-                    let Some(phone) = paired_phone(device) else {
-                        continue;
-                    };
-                    tracing::debug!(
-                        event_kind = %EventKind::PhonePaired,
-                        phone_address = %phone.address,
-                        "Found a paired Phone"
-                    );
-                    phones.insert(path, phone.address.clone());
-                    let presence =
-                        connected(device).map(|connected| presence(&phone.address, connected));
-                    std::iter::once(Input::PhonePaired(phone))
-                        .chain(presence)
-                        .collect()
-                }
-                ObjectEvent::Removed { path, interfaces } => {
-                    if !interfaces.iter().any(|interface| interface == DEVICE) {
-                        continue;
-                    }
-                    let Some(address) = phones.remove(&path) else {
-                        continue;
-                    };
-                    tracing::debug!(
-                        event_kind = %EventKind::PhoneUnpaired,
-                        phone_address = %address,
-                        "A paired Phone was removed"
-                    );
-                    vec![Input::PhoneUnpaired { address }]
-                }
-                ObjectEvent::Changed {
-                    path,
-                    interface,
-                    changed,
-                } if interface == DEVICE => {
-                    let (Some(address), Some(connected)) = (phones.get(&path), connected(&changed))
-                    else {
-                        continue;
-                    };
-                    vec![presence(address, connected)]
-                }
-                // Pairings outlive a bluetoothd restart; the objects are
-                // listed again when it is back.
-                ObjectEvent::ServiceGone | ObjectEvent::Changed { .. } => continue,
-            };
-            for input in reported {
+            for input in devices.event(event) {
                 inputs
                     .unbounded_send(input)
                     .map_err(|_| WatchError::ListenerGone)?;
@@ -104,6 +57,141 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
     futures_util::future::try_join(watching, reporting)
         .await
         .map(drop)
+}
+
+/// What BlueZ's devices are, as far as Desktop Calls cares.
+#[derive(Default)]
+struct Devices {
+    /// Every `Device1`'s properties so far, by object path.
+    properties: HashMap<String, HashMap<String, OwnedVariant>>,
+    /// Paired Phones by object path: their addresses.
+    phones: HashMap<String, String>,
+    /// Nearby Phones not paired, by object path, as last reported.
+    nearby: HashMap<String, Phone>,
+}
+
+impl Devices {
+    /// The inputs a change to BlueZ's objects makes.
+    fn event(&mut self, event: ObjectEvent) -> Vec<Input> {
+        match event {
+            ObjectEvent::Added { path, interfaces } => {
+                let Some(device) = interfaces.get(DEVICE) else {
+                    return Vec::new();
+                };
+                self.properties.insert(path.clone(), device.clone());
+                let connected = connected(device);
+                self.follow(&path, connected)
+            }
+            ObjectEvent::Changed {
+                path,
+                interface,
+                changed,
+            } if interface == DEVICE => {
+                let Some(device) = self.properties.get_mut(&path) else {
+                    return Vec::new();
+                };
+                device.extend(changed.iter().map(|(name, value)| {
+                    (
+                        name.clone(),
+                        value.try_clone().unwrap_or_else(|_| value.clone()),
+                    )
+                }));
+                self.follow(&path, connected(&changed))
+            }
+            ObjectEvent::Removed { path, interfaces } => {
+                if !interfaces.iter().any(|interface| interface == DEVICE) {
+                    return Vec::new();
+                }
+                self.properties.remove(&path);
+                if let Some(phone) = self.nearby.remove(&path) {
+                    return vec![Input::PhoneNotNearby {
+                        address: phone.address,
+                    }];
+                }
+                let Some(address) = self.phones.remove(&path) else {
+                    return Vec::new();
+                };
+                tracing::debug!(
+                    event_kind = %EventKind::PhoneUnpaired,
+                    phone_address = %address,
+                    "A paired Phone was removed"
+                );
+                vec![Input::PhoneUnpaired { address }]
+            }
+            ObjectEvent::Listed => vec![Input::PairedPhonesListed],
+            // Pairings outlive a bluetoothd restart; the objects are
+            // listed again when it is back.
+            ObjectEvent::ServiceGone | ObjectEvent::Changed { .. } => Vec::new(),
+        }
+    }
+
+    /// What the device at `path` is now, as inputs: newly a paired Phone,
+    /// its presence if `connected` changed, or a nearby Phone found,
+    /// renamed or paired.
+    fn follow(&mut self, path: &str, connected: Option<bool>) -> Vec<Input> {
+        let Some(device) = self.properties.get(path) else {
+            return Vec::new();
+        };
+        let mut inputs = Vec::new();
+        if let Some(address) = self.phones.get(path) {
+            inputs.extend(connected.map(|connected| presence(address, connected)));
+        } else if let Some(phone) = paired_phone(device) {
+            tracing::debug!(
+                event_kind = %EventKind::PhonePaired,
+                phone_address = %phone.address,
+                "Found a paired Phone"
+            );
+            if self.nearby.remove(path).is_some() {
+                inputs.push(Input::PhoneNotNearby {
+                    address: phone.address.clone(),
+                });
+            }
+            self.phones.insert(path.to_owned(), phone.address.clone());
+            let presence = self::connected(device).map(|now| presence(&phone.address, now));
+            inputs.push(Input::PhonePaired(phone));
+            inputs.extend(presence);
+        } else if let Some(phone) = nearby_phone(device)
+            && self.nearby.get(path) != Some(&phone)
+        {
+            tracing::debug!(
+                event_kind = %EventKind::PhoneNearby,
+                phone_address = %phone.address,
+                "Found a Phone nearby that isn't paired"
+            );
+            self.nearby.insert(path.to_owned(), phone.clone());
+            inputs.push(Input::PhoneNearby(phone));
+        }
+        inputs
+    }
+}
+
+/// The Phone a `Device1` describes, if it isn't paired, says it is a Phone
+/// by its `Class`, and has a name to list it by.
+fn nearby_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
+    let paired = device
+        .get("Paired")
+        .and_then(|paired| bool::try_from(paired.clone()).ok())
+        .unwrap_or(false);
+    // The major device class, bits 8 to 12 of the Class of Device: 2 is
+    // Phone (Bluetooth Assigned Numbers, 2.8.2).
+    let is_phone = device
+        .get("Class")
+        .and_then(|class| u32::try_from(class.clone()).ok())
+        .is_some_and(|class| (class >> 8) & 0x1f == 2);
+    if paired || !is_phone {
+        return None;
+    }
+    let text = |name: &str| {
+        device
+            .get(name)
+            .and_then(|value| String::try_from(value.clone()).ok())
+    };
+    // Without `Name`, BlueZ's `Alias` is the address: nothing to list it by.
+    text("Name")?;
+    Some(Phone {
+        name: text("Alias").or_else(|| text("Name"))?,
+        address: text("Address")?,
+    })
 }
 
 /// A `Device1`'s `Connected`, if it says.
@@ -330,7 +418,10 @@ async fn device_path(system: &Connection, address: &str) -> Result<String, Bounc
 }
 
 /// The object path of BlueZ's device with `address`, if it has one.
-async fn find_device(system: &Connection, address: &str) -> zbus::Result<Option<String>> {
+pub(crate) async fn find_device(
+    system: &Connection,
+    address: &str,
+) -> zbus::Result<Option<String>> {
     let objects = ObjectManagerProxy::builder(system)
         .destination(SERVICE)
         .path(ROOT)

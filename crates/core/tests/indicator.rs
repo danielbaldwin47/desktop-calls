@@ -154,6 +154,7 @@ fn during_a_call_the_menu_asks_for_what_the_call_window_buttons_do() {
                 query: String::new(),
                 select_call: None,
             }),
+            Some(Input::OpenSetupWindow),
             None,
             Some(Input::HangUp(CALL)),
             Some(Input::SetMuted(true)),
@@ -170,6 +171,7 @@ fn during_a_call_the_menu_asks_for_what_the_call_window_buttons_do() {
         [
             "In a Call with +44 7700 900123",
             "Open Dialer",
+            "Connect your phone…",
             "",
             "Hang up",
             "Mute",

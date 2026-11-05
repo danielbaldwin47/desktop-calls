@@ -14,6 +14,7 @@ Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
 - **Both Phones connected at once:** only the chosen Phone's hands-free and Calls are followed; the other Phone's AudioGateway is ignored by address. **[V]** (the chosen Phone's Call rings with both connected)
 - **"First listed" is now the same every start.** BlueZ's `GetManagedObjects` is a dictionary with no order a run can rely on, and the app read it in the order its hash map gave. The app now reads objects sorted by device path, so with two Phones paired and none chosen the same one is followed each run. A real BlueZ's own order is **[I]** unspecified.
 - **With no Phone followed, the Setup Window also lists the Phones already paired,** before the nearby ones. Choosing one keeps it as the chosen Phone, follows it, trusts it and connects it, with no pairing. Without this, the window opened with an empty list when the chosen Phone was unpaired, and the only way out was pairing again in Bluetooth settings. While a Phone is followed, the window lists nearby Phones alone, as before. **[V]** (core tests; scenario: unpair the chosen Phone, restart, choose the old Phone with Return, restart again)
+- **A paired Phone chosen while out of range** ends on a step of its own, "Can't reach <Phone>; bring it close with Bluetooth on", with Try again, which connects the Phone afresh; the window is done once it is connected. Before, the Phone's `ConnectProfile` page timeout read as a refusal and the window said it wasn't sharing Calls. **[V]** (core test; scenario: choose the away Phone, see the message, bring it back, Try again, done)
 - **No notice in the Setup Window says why it opened** when the chosen Phone is gone: ticket #150.
 
 ## Simulated Phone
@@ -27,8 +28,10 @@ Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
 - **[I]** That a real BlueZ disconnects a connected Phone before removing it, and so what the app sees when the user unpairs the followed Phone mid-Call. No scenario unpairs a Phone with a live Call.
 - **[I]** That a written choice survives power loss: the file is written whole and renamed, which is atomic, but the directory is not fsynced.
 - **[I]** The order a real BlueZ lists Phones in.
+- **[I]** What a real BlueZ's `ConnectProfile` says for a Phone out of range. The app takes `br-connection-page-timeout` (seen on the Pixel for `Connect`), "host is down" or `org.bluez.Error.ConnectionAttemptFailed` as "didn't answer"; any other error stays "Phone calls off". Checklist item 3 records the real text.
 
 ## For the Real-Phone Checklist (user only; agents must not run these)
 
 1. With the Pixel and another Phone paired, choose the Pixel in the Setup Window, restart the service (`systemctl --user restart desktop-calls`) a few times, and check the Pixel is followed each time.
-2. Unpair the Pixel in Bluetooth settings with the other Phone still paired, restart, and check the Setup Window opens and the other Phone is not followed.
+2. Unpair the Pixel in Bluetooth settings with the other Phone still paired, restart, and check the Setup Window opens and the other Phone is not followed. Then choose the other paired Phone in the Setup Window and check it connects without pairing.
+3. With that other Phone out of range (Bluetooth off on it), choose it in the Setup Window and check the window says "Can't reach <Phone>; bring it close with Bluetooth on", not that Phone calls are off. Switch its Bluetooth on, choose Try again, and check the window reaches "connected". Record the `detail` of the `hands-free-unreachable` journal line.

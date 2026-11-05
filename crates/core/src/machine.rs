@@ -746,6 +746,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::RejectPairing
         | Input::PairingFailed(_)
         | Input::HandsFreeRefused
+        | Input::HandsFreeUnreachable
         | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }

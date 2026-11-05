@@ -180,8 +180,11 @@ pub enum Input {
     /// The Phone refused hands-free when asked: its "Phone calls" setting
     /// for the Desktop is off.
     HandsFreeRefused,
-    /// The user asked to try hands-free again, after switching "Phone
-    /// calls" on.
+    /// The Phone didn't answer when asked for hands-free: out of range, or
+    /// its Bluetooth is off.
+    HandsFreeUnreachable,
+    /// The user asked to try again, after switching "Phone calls" on or
+    /// bringing the Phone close.
     RetryHandsFree,
 }
 
@@ -371,6 +374,7 @@ pub enum Effect {
     /// Let the Phone with this address connect without asking each time.
     TrustPhone { address: String },
     /// Ask the Phone with this address for hands-free alone. A refusal
-    /// comes as [`Input::HandsFreeRefused`].
+    /// comes as [`Input::HandsFreeRefused`], or [`Input::HandsFreeUnreachable`]
+    /// if it didn't answer.
     ConnectHandsFree { address: String },
 }

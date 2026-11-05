@@ -245,6 +245,58 @@ fn with_the_chosen_phone_unpaired_the_paired_phone_can_be_chosen_and_stays_chose
 }
 
 #[test]
+fn choosing_a_paired_phone_that_is_out_of_range_says_to_bring_it_close_and_connects_once_it_is() {
+    let mut harness = pixel_chosen_over_the_old_phone();
+    harness.simulated_phone().disconnect();
+    unpair(&harness, &harness.phone().address.clone());
+    harness.wait_for_app("the Pixel is forgotten", STARTUP, |state| {
+        state.phone.is_none()
+    });
+    harness.restart_app();
+    harness.wait_for_app(
+        "the Setup Window offers the old Phone, with keyboard focus",
+        STARTUP,
+        |state| {
+            field(state, "step") == Some("choose")
+                && field(state, "phones") == Some(OLD_PIXEL)
+                && field(state, "focused") == Some("true")
+        },
+    );
+
+    // The old Phone is paired and away: choosing it can't connect it.
+    harness.keyboard().press(Key::Return);
+    let state = harness.wait_for_app(
+        "the window says the old Phone can't be reached",
+        CONNECT_DEADLINE,
+        |state| field(state, "step") == Some("phone-unreachable"),
+    );
+    let summary = field(&state, "summary").unwrap_or_default();
+    assert!(
+        summary.contains("Can't reach Old Pixel; bring it close with Bluetooth on."),
+        "{summary}"
+    );
+    assert!(
+        !summary.contains("isn't sharing Calls"),
+        "wrong advice for a Phone that is away: {summary}"
+    );
+
+    // It is back and connects: the window is done by itself. (Try again,
+    // which connects the Phone afresh, is a core test: the away Phone would
+    // take BlueZ's page timeout, 5 s, and the window's waits again to
+    // say so again.)
+    harness.simulated_phone().connect_other_phone();
+    harness.wait_for_app(
+        "the old Phone is connected and the window is done",
+        CONNECT_DEADLINE,
+        |state| {
+            phone_is(state, OLD_PIXEL)
+                && state.connection_state == "connected"
+                && field(state, "step") == Some("done")
+        },
+    );
+}
+
+#[test]
 fn a_saved_choice_that_cannot_be_read_counts_as_no_choice() {
     let mut harness = pixel_chosen_over_the_old_phone();
     let file = chosen_phone_file(&harness);

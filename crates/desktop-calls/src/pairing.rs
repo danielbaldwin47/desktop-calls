@@ -100,8 +100,14 @@ impl Pairing {
             }
             Effect::ConnectHandsFree { address } => {
                 MainContext::default().spawn_local(async move {
-                    if !connect_hands_free(&system, &address).await {
-                        let _ = inputs.unbounded_send(Input::HandsFreeRefused);
+                    match connect_hands_free(&system, &address).await {
+                        HandsFree::Up => {}
+                        HandsFree::Refused => {
+                            let _ = inputs.unbounded_send(Input::HandsFreeRefused);
+                        }
+                        HandsFree::Unreachable => {
+                            let _ = inputs.unbounded_send(Input::HandsFreeUnreachable);
+                        }
                     }
                 });
             }
@@ -285,11 +291,34 @@ async fn trust(system: &Connection, address: &str) {
     }
 }
 
+/// How a Phone answered `ConnectProfile` for hands-free.
+enum HandsFree {
+    /// Agreed, or had it up already.
+    Up,
+    /// Answered, and turned it down: its Phone calls setting is off.
+    Refused,
+    /// Didn't answer: out of range, or its Bluetooth is off.
+    Unreachable,
+}
+
+/// Whether a BlueZ error from `ConnectProfile` says the Phone never
+/// answered the page. Inferred from the `br-connection-page-timeout` the
+/// real Pixel gave `Device1.Connect` out of range, and from BlueZ's kernel
+/// "Host is down" text for the same case: no real `ConnectProfile` out of
+/// range has been recorded (Real-Phone Checklist).
+fn did_not_answer(name: &str, message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    name == "org.bluez.Error.ConnectionAttemptFailed"
+        || message.contains("page-timeout")
+        || message.contains("host is down")
+        || message.contains("host-down")
+}
+
 /// `ConnectProfile` for hands-free alone: whether the Phone agreed, or
-/// had it up already.
-async fn connect_hands_free(system: &Connection, address: &str) -> bool {
+/// had it up already, turned it down, or never answered.
+async fn connect_hands_free(system: &Connection, address: &str) -> HandsFree {
     let Ok(Some(device)) = bluez::find_device(system, address).await else {
-        return false;
+        return HandsFree::Unreachable;
     };
     match system
         .call_method(
@@ -301,14 +330,26 @@ async fn connect_hands_free(system: &Connection, address: &str) -> bool {
         )
         .await
     {
-        Ok(_) => true,
+        Ok(_) => HandsFree::Up,
         Err(zbus::Error::MethodError(name, _, _))
             if matches!(
                 name.as_str(),
                 "org.bluez.Error.AlreadyConnected" | "org.bluez.Error.InProgress"
             ) =>
         {
-            true
+            HandsFree::Up
+        }
+        Err(zbus::Error::MethodError(name, message, _))
+            if did_not_answer(name.as_str(), message.as_deref().unwrap_or_default()) =>
+        {
+            tracing::info!(
+                event_kind = %EventKind::HandsFreeUnreachable,
+                error_kind = "hands-free-unreachable",
+                phone_address = %address,
+                detail = %format!("{name}: {}", message.unwrap_or_default()),
+                "The Phone didn't answer for hands-free: out of range or its Bluetooth is off"
+            );
+            HandsFree::Unreachable
         }
         Err(error) => {
             tracing::info!(
@@ -318,7 +359,7 @@ async fn connect_hands_free(system: &Connection, address: &str) -> bool {
                 detail = %error,
                 "The Phone refused hands-free: its Phone calls setting is off"
             );
-            false
+            HandsFree::Refused
         }
     }
 }

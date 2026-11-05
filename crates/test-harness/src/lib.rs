@@ -46,7 +46,7 @@ mod stand_ins;
 pub use client::TestClient;
 pub use input::Key;
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
-pub use stand_ins::{Notification, Theme, TrayItem};
+pub use stand_ins::{BAR_COLOUR, BAR_HEIGHT, Notification, Theme, TrayItem};
 
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;
@@ -198,6 +198,8 @@ pub struct Harness {
     system: Connection,
     stand_ins: StandIns,
     screen: Option<Screen>,
+    /// The stand-in for Omarchy's bar, if the scenario has one.
+    bar: Option<TestClient>,
     screenshot_directory: PathBuf,
     /// Every `Error` signal the app has sent, in order.
     app_errors: Arc<Mutex<Vec<AppError>>>,
@@ -215,6 +217,8 @@ pub struct Builder {
     theme: Theme,
     scenario: Option<PathBuf>,
     screenshot_directory: Option<PathBuf>,
+    omarchy_bar: bool,
+    toast_column: Option<u32>,
 }
 
 impl Builder {
@@ -246,6 +250,22 @@ impl Builder {
         self
     }
 
+    /// Puts a stand-in for Omarchy's bar on the screen: [`BAR_HEIGHT`] tall
+    /// across the top, reserved as an exclusive zone, drawn in
+    /// [`BAR_COLOUR`]. Needs a screen.
+    pub fn omarchy_bar(mut self) -> Self {
+        self.omarchy_bar = true;
+        self
+    }
+
+    /// Runs the app under a Hyprland stand-in whose `hyprctl layers -j`
+    /// reports Omarchy's notification-toast column `width` wide. Without
+    /// it there is no Hyprland, as under sway.
+    pub fn hyprland_toast_column(mut self, width: u32) -> Self {
+        self.toast_column = Some(width);
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -273,6 +293,14 @@ impl Builder {
         let system_bus = start_bus(&directory, "system", &mut processes);
         let session_bus = start_bus(&directory, "session", &mut processes);
         let mut environment = environment(&directory, &system_bus, &session_bus);
+        if let Some(width) = self.toast_column {
+            stand_ins::serve_hyprland(&directory.join("runtime"), width)
+                .expect("serve the Hyprland stand-in");
+            environment.push((
+                "HYPRLAND_INSTANCE_SIGNATURE",
+                stand_ins::HYPRLAND_SIGNATURE.to_owned(),
+            ));
+        }
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &mut processes);
             environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));
@@ -317,10 +345,21 @@ impl Builder {
             system,
             stand_ins,
             screen,
+            bar: None,
             screenshot_directory,
             app_errors,
             processes,
         };
+
+        if self.omarchy_bar {
+            let bar = harness.spawn_test_client(&["--bar"]);
+            bar.wait_for(
+                "the bar stand-in is drawn",
+                Duration::from_secs(10),
+                |line| line.starts_with("configured "),
+            );
+            harness.bar = Some(bar);
+        }
 
         let mut simulated_phone = harness.command("simulated-phone");
         simulated_phone

@@ -13,6 +13,11 @@
 //!
 //! The harness's self-tests drive it to prove that synthetic input arrives.
 //! With `--fullscreen` it asks to be fullscreen, as a video player does.
+//!
+//! With `--bar` it is instead a stand-in for Omarchy's bar: a layer-shell
+//! surface across the top of the output, [`BAR_HEIGHT`] tall, that reserves
+//! its height as an exclusive zone, drawn in [`BAR_PIXEL`]. It prints
+//! `configured <width> <height>` once drawn.
 
 use std::io::Write as _;
 use std::os::fd::AsFd as _;
@@ -25,12 +30,19 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 /// The window's size when the compositor leaves it to the client.
 const DEFAULT_SIZE: (i32, i32) = (640, 480);
 
 /// An opaque mid grey, in `ARGB8888` as little-endian bytes.
 const PIXEL: [u8; 4] = [0x80, 0x80, 0x80, 0xff];
+
+/// Omarchy's bar's height. Keep in step with `test_harness::BAR_HEIGHT`.
+const BAR_HEIGHT: u32 = 26;
+/// The bar stand-in's colour, RGB 0x30 0x30 0x60, in `ARGB8888` as
+/// little-endian bytes. Keep in step with `test_harness::BAR_COLOUR`.
+const BAR_PIXEL: [u8; 4] = [0x60, 0x30, 0x30, 0xff];
 
 fn main() -> ExitCode {
     match run() {
@@ -62,12 +74,35 @@ fn run() -> Result<(), String> {
         .map_err(missing("wl_seat"))?;
 
     let surface = compositor.create_surface(&handle, ());
-    let xdg_surface = wm_base.get_xdg_surface(&surface, &handle, ());
-    let toplevel = xdg_surface.get_toplevel(&handle, ());
-    toplevel.set_title("Desktop Calls test client".to_owned());
-    toplevel.set_app_id("desktop-calls-test-client".to_owned());
-    if std::env::args().any(|argument| argument == "--fullscreen") {
-        toplevel.set_fullscreen(None);
+    let bar = std::env::args().any(|argument| argument == "--bar");
+    if bar {
+        let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 =
+            globals
+                .bind(&handle, 1..=4, ())
+                .map_err(missing("zwlr_layer_shell_v1"))?;
+        let layer_surface = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "omarchy-bar".to_owned(),
+            &handle,
+            (),
+        );
+        layer_surface.set_anchor(
+            zwlr_layer_surface_v1::Anchor::Top
+                | zwlr_layer_surface_v1::Anchor::Left
+                | zwlr_layer_surface_v1::Anchor::Right,
+        );
+        layer_surface.set_size(0, BAR_HEIGHT);
+        layer_surface.set_exclusive_zone(i32::try_from(BAR_HEIGHT).unwrap_or(i32::MAX));
+    } else {
+        let xdg_surface = wm_base.get_xdg_surface(&surface, &handle, ());
+        let toplevel = xdg_surface.get_toplevel(&handle, ());
+        toplevel.set_title("Desktop Calls test client".to_owned());
+        toplevel.set_app_id("desktop-calls-test-client".to_owned());
+        if std::env::args().any(|argument| argument == "--fullscreen") {
+            toplevel.set_fullscreen(None);
+        }
     }
     surface.commit();
 
@@ -76,6 +111,7 @@ fn run() -> Result<(), String> {
         surface,
         size: DEFAULT_SIZE,
         size_chosen: false,
+        pixel: if bar { BAR_PIXEL } else { PIXEL },
         keyboard: None,
         pointer: None,
         modifiers: 0,
@@ -96,6 +132,8 @@ struct Client {
     size: (i32, i32),
     /// Whether the compositor chose `size`.
     size_chosen: bool,
+    /// The colour the surface is filled with.
+    pixel: [u8; 4],
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
     modifiers: u32,
@@ -104,13 +142,28 @@ struct Client {
 }
 
 impl Client {
+    /// Draws at the size the compositor chose and prints `configured`.
+    fn configured(&mut self, connection: &Connection, handle: &QueueHandle<Self>) {
+        let drawn = self
+            .draw(handle)
+            .and_then(|()| connection.flush().map_err(|error| error.to_string()));
+        match drawn {
+            Ok(()) if self.size_chosen => {
+                let (width, height) = self.size;
+                print(&format!("configured {width} {height}"));
+            }
+            Ok(()) => {}
+            Err(error) => self.failure = Some(error),
+        }
+    }
+
     /// Fills the window with one colour at its current size.
     fn draw(&mut self, handle: &QueueHandle<Self>) -> Result<(), String> {
         let (width, height) = self.size;
         let stride = width * 4;
         let length = usize::try_from(stride * height).map_err(|error| error.to_string())?;
         let mut file = tempfile::tempfile().map_err(|error| error.to_string())?;
-        file.write_all(&PIXEL.repeat(length / 4))
+        file.write_all(&self.pixel.repeat(length / 4))
             .map_err(|error| error.to_string())?;
         let pool = self
             .shm
@@ -200,17 +253,36 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for Client {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             xdg_surface.ack_configure(serial);
-            let drawn = client
-                .draw(handle)
-                .and_then(|()| connection.flush().map_err(|error| error.to_string()));
-            match drawn {
-                Ok(()) if client.size_chosen => {
-                    let (width, height) = client.size;
-                    print(&format!("configured {width} {height}"));
+            client.configured(connection, handle);
+        }
+    }
+}
+
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        layer_surface: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        (): &(),
+        connection: &Connection,
+        handle: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height,
+            } => {
+                layer_surface.ack_configure(serial);
+                let size = (i32::try_from(width), i32::try_from(height));
+                if let (Ok(width), Ok(height)) = size {
+                    client.size = (width, height);
+                    client.size_chosen = width > 0 && height > 0;
                 }
-                Ok(()) => {}
-                Err(error) => client.failure = Some(error),
+                client.configured(connection, handle);
             }
+            zwlr_layer_surface_v1::Event::Closed => client.failure = Some("closed".to_owned()),
+            _ => {}
         }
     }
 }
@@ -310,3 +382,4 @@ delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
+delegate_noop!(Client: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);

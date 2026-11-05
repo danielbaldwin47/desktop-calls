@@ -4,7 +4,9 @@
 
 use std::time::Duration;
 
-use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Region};
+use test_harness::{
+    AppState, BAR_COLOUR, BAR_HEIGHT, Builder, Harness, Key, LAYOUT_SIZE, Region, Screenshot,
+};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -16,17 +18,22 @@ const TRANSPORT_DEADLINE: Duration = Duration::from_millis(1_500);
 const NUMBER: &str = "+447700900123";
 const FORMATTED: &str = "+44 7700 900123";
 
-/// Omarchy's bar, along the top of the output.
-const BAR_HEIGHT: f64 = 26.0;
-/// Omarchy's notification toasts, a column this wide at the top-right.
-const TOAST_COLUMN_WIDTH: f64 = 380.0;
+/// How wide the app takes Omarchy's notification-toast column to be when
+/// Hyprland can't say.
+const FALLBACK_TOAST_COLUMN_WIDTH: f64 = 400.0;
+/// How far a surface may sit from what it is placed beside.
+const NEAR: f64 = 24.0;
 
 /// The Answer button's green and the Decline and Hang up buttons' red.
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 
 fn connected_on_screen() -> Harness {
-    let harness = Harness::builder().headless_screen().start();
+    connected(Harness::builder().headless_screen().omarchy_bar())
+}
+
+fn connected(builder: Builder) -> Harness {
+    let harness = builder.start();
     harness.simulated_phone().connect();
     harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
         state.connection_state == "connected"
@@ -66,16 +73,26 @@ fn click(harness: &Harness, region: Region) {
     harness.pointer().click(x, y);
 }
 
-fn toast_column() -> Region {
+fn toast_column(width: f64) -> Region {
     Region {
-        left: LAYOUT_SIZE.0 - TOAST_COLUMN_WIDTH,
+        left: LAYOUT_SIZE.0 - width,
         top: 0.0,
         right: LAYOUT_SIZE.0,
         bottom: LAYOUT_SIZE.1,
     }
 }
 
+/// Where the app's surfaces are: everything that is neither the black
+/// background nor the bar stand-in.
+fn app_region(screenshot: &Screenshot) -> Option<Region> {
+    screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
+}
+
 fn assert_clear_of_bar_and_toasts(region: Region) {
+    assert_clear_of_bar_and(region, FALLBACK_TOAST_COLUMN_WIDTH);
+}
+
+fn assert_clear_of_bar_and(region: Region, toast_column_width: f64) {
     assert!(
         region.left >= 0.0 && region.right <= LAYOUT_SIZE.0,
         "{region:?}"
@@ -83,7 +100,7 @@ fn assert_clear_of_bar_and_toasts(region: Region) {
     assert!(region.bottom <= LAYOUT_SIZE.1, "{region:?}");
     assert!(region.top >= BAR_HEIGHT, "under the bar: {region:?}");
     assert!(
-        !region.intersects(&toast_column()),
+        !region.intersects(&toast_column(toast_column_width)),
         "over the toast column: {region:?}"
     );
 }
@@ -112,6 +129,22 @@ fn call_window(state: &AppState) -> Option<&std::collections::BTreeMap<String, S
 }
 
 #[test]
+fn nothing_is_on_screen_while_nothing_rings() {
+    let harness = connected_on_screen();
+
+    let state = harness.app_state();
+
+    assert!(state.surfaces.is_empty(), "{:?}", state.surfaces);
+    let screenshot = harness.screenshot("idle");
+    assert_eq!(
+        app_region(&screenshot),
+        None,
+        "{}",
+        screenshot.path.display()
+    );
+}
+
+#[test]
 fn the_banner_shows_the_formatted_number_within_a_second() {
     let harness = connected_on_screen();
 
@@ -131,14 +164,32 @@ fn the_banner_sits_inside_the_output_below_the_bar_and_left_of_the_toasts() {
     let harness = connected_on_screen();
     ring_until_banner(&harness);
 
-    // Nothing else is on screen: the background is black.
     find_on_screen(&harness, "banner", GREEN);
     let screenshot = harness.screenshot("banner");
-    let banner = screenshot
-        .region_where(|pixel| pixel != [0, 0, 0])
-        .expect("the Banner is on screen");
+    let banner = app_region(&screenshot).expect("the Banner is on screen");
 
     assert_clear_of_bar_and_toasts(banner);
+}
+
+#[test]
+fn the_banner_clears_the_toast_column_hyprland_reports() {
+    let harness = connected(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .hyprland_toast_column(300),
+    );
+    ring_until_banner(&harness);
+
+    find_on_screen(&harness, "banner", GREEN);
+    let screenshot = harness.screenshot("banner");
+    let banner = app_region(&screenshot).expect("the Banner is on screen");
+
+    assert_clear_of_bar_and(banner, 300.0);
+    // It sits close beside the column Hyprland reports, not the wider
+    // fallback, and close under the bar, not a fixed margin below it.
+    assert!(banner.right >= LAYOUT_SIZE.0 - 300.0 - NEAR, "{banner:?}");
+    assert!(banner.top <= BAR_HEIGHT + NEAR, "{banner:?}");
 }
 
 #[test]

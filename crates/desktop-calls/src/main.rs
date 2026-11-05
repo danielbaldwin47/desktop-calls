@@ -4,6 +4,7 @@ mod bluez;
 mod cli;
 mod control;
 mod glib_runtime;
+mod hyprland;
 mod logging;
 mod object_manager;
 mod phone_link;

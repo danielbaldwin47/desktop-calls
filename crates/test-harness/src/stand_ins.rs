@@ -8,13 +8,20 @@
 //!   registration and reads each item's status and icon;
 //! - the settings portal, `org.freedesktop.portal.Settings`, which tells GTK
 //!   whether the Desktop is light or dark;
-//! - Omarchy's notification state file, whose `dnd` field is Do Not Disturb.
+//! - Omarchy's notification state file, whose `dnd` field is Do Not Disturb;
+//! - Omarchy's bar: `test-client --bar`, a layer-shell surface across the
+//!   top of the output that reserves [`BAR_HEIGHT`], drawn in [`BAR_COLOUR`];
+//! - Hyprland's request socket, answering `j/layers` with an
+//!   `omarchy-notifications` layer as wide as the scenario asks, the way
+//!   `hyprctl layers -j` reports Omarchy's notification-toast column.
 //!
 //! The D-Bus stand-ins share one connection to the scenario's session bus,
 //! served from the harness's process.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::io::{Read as _, Write as _};
+use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -27,6 +34,50 @@ use zbus::object_server::SignalEmitter;
 use zbus::{Connection, MatchRule, MessageStream, OwnedVariant, Variant, interface};
 
 use crate::within;
+
+/// The height of Omarchy's bar, in layout coordinates.
+pub const BAR_HEIGHT: f64 = 26.0;
+/// The bar stand-in's colour, so screenshots can tell it from the app.
+pub const BAR_COLOUR: [u8; 3] = [0x30, 0x30, 0x60];
+
+/// The instance signature the Hyprland stand-in serves under.
+pub(crate) const HYPRLAND_SIGNATURE: &str = "desktop-calls-test";
+
+/// Serves Hyprland's request socket under `runtime`, for the rest of the
+/// test process, reporting an `omarchy-notifications` layer `toast_width`
+/// wide at the top-right of the headless output.
+pub(crate) fn serve_hyprland(runtime: &Path, toast_width: u32) -> std::io::Result<()> {
+    let directory = runtime.join("hypr").join(HYPRLAND_SIGNATURE);
+    fs::create_dir_all(&directory)?;
+    let listener = UnixListener::bind(directory.join(".socket.sock"))?;
+    let (width, height) = crate::SCREEN_SIZE;
+    // `hyprctl layers -j` reports layout coordinates: at scale 1.6 the
+    // 3840x2160 output is 2400x1350.
+    let (width, height) = (width * 10 / 16, height * 10 / 16);
+    let layers = format!(
+        "{{\"HEADLESS-1\": {{\"levels\": {{\"0\": [], \"1\": [], \"2\": [], \"3\": [\
+         {{\"address\": \"0x1\", \"x\": {x}, \"y\": 0, \"w\": {toast_width}, \
+         \"h\": {height}, \"namespace\": \"omarchy-notifications\", \"pid\": 1, \
+         \"alpha\": 1.0}}]}}}}}}",
+        x = width.saturating_sub(toast_width),
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = [0; 256];
+            let Ok(length) = stream.read(&mut request) else {
+                continue;
+            };
+            let reply = if &request[..length] == b"j/layers" {
+                layers.as_str()
+            } else {
+                "unknown request"
+            };
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    Ok(())
+}
 
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";

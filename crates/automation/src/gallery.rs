@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use test_harness::{Harness, Screenshot, Theme};
+use test_harness::{BAR_COLOUR, Harness, Screenshot, Theme};
 
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -89,7 +89,7 @@ const STATES: &[State] = &[
         shown: |screenshot| {
             !shows(screenshot, RED)
                 && screenshot
-                    .region_where(|pixel| pixel != [0, 0, 0])
+                    .region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
                     .is_some()
         },
     },
@@ -150,6 +150,7 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
         for theme in THEMES {
             let harness = Harness::builder()
                 .headless_screen()
+                .omarchy_bar()
                 .theme(theme)
                 .screenshot_directory(output.clone())
                 .start();

@@ -8,8 +8,11 @@
 //!
 //! - The Banner is an overlay surface, so it shows above fullscreen windows.
 //!   It never takes keyboard focus. It sits top-right, below Omarchy's bar
-//!   and to the left of Omarchy's notification toasts, which are laid out in
-//!   a column of [`TOAST_COLUMN_WIDTH`] at the top-right.
+//!   (the compositor keeps it out of the bar's exclusive zone) and to the
+//!   left of Omarchy's notification-toast column, as wide as Hyprland says
+//!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
+//!   It is unmapped whenever nothing rings: a mapped overlay surface stops
+//!   Hyprland scanning a fullscreen window out directly.
 //! - The Call Window is on the top layer, so fullscreen windows cover it, in
 //!   the same corner, and takes keyboard focus only when clicked.
 //! - No output is chosen, so the compositor puts each on the focused output.
@@ -30,15 +33,14 @@ use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
 
 use crate::control::ShownSurfaces;
+use crate::hyprland::{self, Unknown};
+use crate::logging::EventKind;
 
-/// The height of Omarchy's bar, which the surfaces sit below.
-const BAR_HEIGHT: i32 = 26;
-/// The width of Omarchy's notification-toast column at the top-right.
-const TOAST_COLUMN_WIDTH: i32 = 380;
+/// How wide Omarchy's notification-toast column is taken to be when
+/// Hyprland can't say. Omarchy 4.5's is 394.
+const FALLBACK_TOAST_COLUMN_WIDTH: i32 = 400;
 /// Space between a surface and what it sits next to.
 const GAP: i32 = 12;
-const TOP_MARGIN: i32 = BAR_HEIGHT + GAP;
-const RIGHT_MARGIN: i32 = TOAST_COLUMN_WIDTH + GAP;
 const WIDTH: i32 = 340;
 
 /// Answer is green and Decline and Hang up are red, as on a phone, in light
@@ -100,16 +102,70 @@ impl Surfaces {
             shown: ShownSurfaces::new(),
             reports,
         }));
-        Self {
+        let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
             call_window: CallWindow::new(intents, report),
-        }
+        };
+        surfaces.place_beside_toasts();
+        surfaces
     }
 
     /// Shows, updates or hides each surface to match `view`.
     pub fn render(&self, view: &desktop_calls_core::Surfaces) {
+        if view.banner.is_some() && !self.banner.surface.window.is_visible() {
+            // The toast column may have changed since; the Banner moves if so.
+            self.place_beside_toasts();
+        }
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
+    }
+
+    /// Asks Hyprland, off the main thread, how wide the toast column is, and
+    /// moves both surfaces to its left.
+    fn place_beside_toasts(&self) {
+        let windows = [
+            self.banner.surface.window.clone(),
+            self.call_window.surface.window.clone(),
+        ];
+        glib::MainContext::default().spawn_local(async move {
+            let width = gtk::gio::spawn_blocking(hyprland::toast_column_width)
+                .await
+                .unwrap_or(Err(Unknown::NotHyprland));
+            let width = match width {
+                Ok(width) => i32::try_from(width).unwrap_or(FALLBACK_TOAST_COLUMN_WIDTH),
+                Err(unknown) => {
+                    toast_column_unknown(&unknown);
+                    FALLBACK_TOAST_COLUMN_WIDTH
+                }
+            };
+            if gtk4_layer_shell::is_supported() {
+                for window in windows {
+                    window.set_margin(Edge::Right, width + GAP);
+                }
+            }
+        });
+    }
+}
+
+fn toast_column_unknown(unknown: &Unknown) {
+    match unknown {
+        Unknown::NotHyprland | Unknown::NoToastLayer => tracing::debug!(
+            event_kind = %EventKind::ToastColumnUnknown,
+            error_kind = unknown.as_str(),
+            "No toast column to keep clear of; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
+        ),
+        Unknown::Unreachable(error) => tracing::warn!(
+            event_kind = %EventKind::ToastColumnUnknown,
+            error_kind = unknown.as_str(),
+            detail = %error,
+            "Hyprland didn't say how wide the toast column is; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
+        ),
+        Unknown::Unreadable(error) => tracing::warn!(
+            event_kind = %EventKind::ToastColumnUnknown,
+            error_kind = unknown.as_str(),
+            detail = %error,
+            "Couldn't read Hyprland's layers; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
+        ),
     }
 }
 
@@ -137,8 +193,10 @@ impl Surface {
             window.set_keyboard_mode(keyboard);
             window.set_anchor(Edge::Top, true);
             window.set_anchor(Edge::Right, true);
-            window.set_margin(Edge::Top, TOP_MARGIN);
-            window.set_margin(Edge::Right, RIGHT_MARGIN);
+            // The default exclusive zone keeps the surface out of the bar's;
+            // the margin is only the gap below it.
+            window.set_margin(Edge::Top, GAP);
+            window.set_margin(Edge::Right, FALLBACK_TOAST_COLUMN_WIDTH + GAP);
         }
         let surface = Self {
             name,

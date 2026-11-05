@@ -74,6 +74,7 @@ pub enum EventKind {
     RingingFailed,
     ErrorReported,
     SurfacesUnavailable,
+    ToastColumnUnknown,
 }
 
 impl EventKind {
@@ -106,6 +107,7 @@ impl EventKind {
             Self::RingingFailed => "ringing-failed",
             Self::ErrorReported => "error-reported",
             Self::SurfacesUnavailable => "surfaces-unavailable",
+            Self::ToastColumnUnknown => "toast-column-unknown",
         }
     }
 }

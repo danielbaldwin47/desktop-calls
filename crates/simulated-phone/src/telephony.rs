@@ -49,6 +49,9 @@
 //!   the whole string in one `AT+VTS`, and Android accepts exactly one tone
 //!   per `AT+VTS`, answering anything longer with `+CME ERROR: 25`, so a
 //!   longer string fails with `CME` here too.
+//! - A Call that rings during a live one is `waiting`, and `HoldAndAnswer`,
+//!   `ReleaseAndAnswer` and `SwapCalls` act on the Calls as PipeWire's
+//!   `AT+CHLD` does (`telephony/call_waiting.rs`).
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -60,6 +63,7 @@ use crate::objects::{
     interfaces_added_body,
 };
 
+mod call_waiting;
 pub mod hands_free;
 mod methods;
 mod phone;
@@ -84,6 +88,8 @@ const VOICE_CALL: &str = "org.ofono.VoiceCall";
 
 const INVALID_STATE: &str = "org.pipewire.Telephony.Error.InvalidState";
 const INVALID_STATE_MESSAGE: &str = "The current state does not allow this method call";
+const NOT_SUPPORTED: &str = "org.pipewire.Telephony.Error.NotSupported";
+const NOT_SUPPORTED_MESSAGE: &str = "Method is not supported on this Audio Gateway";
 const INVALID_FORMAT: &str = "org.pipewire.Telephony.Error.InvalidFormat";
 const INVALID_FORMAT_MESSAGE: &str = "Invalid phone number or tones";
 const CME: &str = "org.pipewire.Telephony.Error.CME";
@@ -147,6 +153,10 @@ pub enum Quirk {
     /// is still ringing (`backend-native.c`). A withheld caller's `+CLIP`
     /// fails PipeWire's parse, so that Call never gets a number.
     LateLineIdentification,
+    /// The Phone didn't list `AT+CHLD` support, so `HoldAndAnswer`,
+    /// `ReleaseAndAnswer` and `SwapCalls` fail with `NotSupported` whatever
+    /// the Calls' states, as PipeWire checks: the Calls stay as they were.
+    ChldUnsupported,
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
@@ -173,6 +183,7 @@ impl Quirk {
             "connect-profile-fails" => Some(Self::ConnectProfileFails),
             "connect-profile-fails-once" => Some(Self::ConnectProfileFailsOnce),
             "late-line-identification" => Some(Self::LateLineIdentification),
+            "chld-unsupported" => Some(Self::ChldUnsupported),
             _ => None,
         }
     }
@@ -251,10 +262,7 @@ pub fn dial_refusal(name: &str) -> Option<(&'static str, String)> {
     let refusal = match name {
         "invalid-format" => (INVALID_FORMAT, INVALID_FORMAT_MESSAGE),
         "invalid-state" => (INVALID_STATE, INVALID_STATE_MESSAGE),
-        "not-supported" => (
-            "org.pipewire.Telephony.Error.NotSupported",
-            "Method is not supported on this Audio Gateway",
-        ),
+        "not-supported" => (NOT_SUPPORTED, NOT_SUPPORTED_MESSAGE),
         "in-progress" => (
             "org.pipewire.Telephony.Error.InProgress",
             "Command already in progress",

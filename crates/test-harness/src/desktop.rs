@@ -385,11 +385,12 @@ impl Keyboard<'_> {
         }
     }
 
-    /// Presses `character`'s key while holding Control, such as Ctrl+V.
+    /// Presses `character`'s key while holding Control, such as Ctrl+V, and
+    /// Shift too where the character needs it: `'H'` is Ctrl+Shift+H.
     ///
     /// # Panics
     ///
-    /// If the US layout has no unshifted key for `character`, the screen
+    /// If the US layout has no key for `character`, the screen
     /// doesn't finish redrawing, or the compositor is gone.
     pub fn press_with_control(&self, character: char) {
         self.harness.wait_for_redraw();

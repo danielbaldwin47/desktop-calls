@@ -12,6 +12,7 @@ use crate::messages::{Failure, ProblemKind};
 use crate::missed::MissedCalls;
 
 mod audio;
+mod call_waiting;
 mod calls;
 mod dialling;
 mod input;
@@ -25,6 +26,7 @@ use audio::{
     activate, hands_free_down, hands_free_up, microphone_volume_changed, move_audio, mute,
     release_mute, restore_audio, still_silenced, transport_changed, unmute,
 };
+use call_waiting::{end_and_answer, hold_and_answer, swap};
 pub use calls::keypad_tones;
 use calls::{
     answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
@@ -40,8 +42,8 @@ use presence::{Presence, forget_phone, presence_input};
 use setup::Setup;
 pub use setup::{SetupNotice, SetupStep, SetupWindowView};
 pub use view::{
-    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Mute, RingingCaller,
-    Surfaces,
+    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute,
+    RingingCaller, Surfaces, WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so
@@ -265,6 +267,13 @@ pub struct State {
     /// Why the audio isn't where the user asked: shown beside the Call until
     /// the audio moves, the user asks again, or the Call ends.
     audio_notice: Option<Failure>,
+    /// Why the Phone refused Hold & Answer, End & Answer or Swap: shown
+    /// beside the Calls for a while, until they change, or the user asks
+    /// again.
+    waiting_notice: Option<Failure>,
+    /// How many times the Phone has refused those, so only the latest
+    /// refusal's timer takes its notice down.
+    waiting_notices: u32,
     focus: Focus,
     contacts_sync: ContactsState,
     contacts: Contacts,
@@ -319,7 +328,7 @@ impl State {
     }
 
     /// Whether the Desktop ringtone should be playing: a Call rings here, no
-    /// other Call is live, so a waiting Call never rings over a live one, and
+    /// other Call is live, so a Waiting Call never rings over a live one, and
     /// Do Not Disturb is off. The Banner shows either way.
     #[must_use]
     pub fn ringing(&self) -> bool {
@@ -508,7 +517,12 @@ impl State {
         if self.connection_lost.is_some()
             && matches!(
                 input,
-                Input::SetMuted(true) | Input::MoveAudio(_) | Input::SendTones(_)
+                Input::SetMuted(true)
+                    | Input::MoveAudio(_)
+                    | Input::SendTones(_)
+                    | Input::HoldAndAnswer
+                    | Input::EndAndAnswer
+                    | Input::Swap
             )
         {
             return Some(Failure::ConnectionLost);
@@ -522,6 +536,24 @@ impl State {
             Input::MoveAudio(_) if !self.calls.iter().any(|call| call.state.is_live()) => {
                 Some(Failure::NoLiveCall)
             }
+            Input::HoldAndAnswer | Input::EndAndAnswer if self.waiting_call().is_none() => {
+                Some(Failure::NoWaitingCall)
+            }
+            Input::HoldAndAnswer | Input::EndAndAnswer
+                if self.waiting_options() == WaitingOptions::Answer =>
+            {
+                Some(Failure::NothingToHoldOrEnd)
+            }
+            Input::HoldAndAnswer if self.waiting_options() == WaitingOptions::End => {
+                Some(if self.has_held_call() {
+                    Failure::AlreadyHolding
+                } else {
+                    Failure::NotConnectedYet
+                })
+            }
+            Input::Swap if !self.has_held_call() => Some(Failure::NoHeldCall),
+            // `AT+CHLD=2` would answer the Waiting Call instead.
+            Input::Swap if self.has_waiting_call() => Some(Failure::WaitingCallFirst),
             Input::SendTones(tones) => {
                 if !self
                     .calls
@@ -638,6 +670,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::Answer(call) => answer(&mut state, call, &mut effects),
         Input::Decline(call) => decline(&mut state, call, &mut effects),
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
+        Input::HoldAndAnswer => hold_and_answer(&mut state, &mut effects),
+        Input::EndAndAnswer => end_and_answer(&mut state, &mut effects),
+        Input::Swap => swap(&mut state, &mut effects),
         Input::Dial(text) => dial(&mut state, &text, &mut effects),
         Input::CancelDial => cancel_dial(&mut state, &mut effects),
         Input::MoveAudio(location) => move_audio(&mut state, location, &mut effects),

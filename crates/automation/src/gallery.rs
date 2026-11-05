@@ -50,6 +50,10 @@ const PHONE_NAME: &str = "My Pixel";
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
+/// The caller of a Waiting Call.
+const SECOND_NUMBER: &str = "+447700900456";
+/// A third caller, while the first Call is on hold and the second live.
+const THIRD_NUMBER: &str = "+447700900789";
 
 /// The stock Answer button's green, the stock Decline and Hang up buttons'
 /// red, and the orange that marks the microphone muted under every look.
@@ -279,6 +283,49 @@ const STATES: &[State] = &[
         shown: |screenshot, look| {
             !shows(screenshot, look.red()) && app_region(screenshot).is_some()
         },
+    },
+    State {
+        name: "call-waiting-banner",
+        title: "A Waiting Call: the Banner, with Hold & Answer, below the Call Window",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            waiting(harness);
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
+        name: "call-window-held",
+        title: "The Call Window with two Calls: the answered one live, the first on hold",
+        still: |_| true,
+        prepare: as_is,
+        reach: held,
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-window-held-third-call-waiting",
+        title: "Three Calls: one live and one on hold, neither with Hang up, and a Waiting Call's Banner with End & Answer and Decline only",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            held(harness);
+            let _path = harness.simulated_phone().ring(THIRD_NUMBER);
+            harness.wait_for_app(
+                "the Call Window says why the Held Call has no Swap or Hang up",
+                DEADLINE,
+                |state| {
+                    state
+                        .surface("call-window")
+                        .is_some_and(|window| window.contains_key("held-waiting-first"))
+                        && state
+                            .surface("banner")
+                            .is_some_and(|banner| banner.contains_key("options"))
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
         name: "call-window-connection-lost",
@@ -696,8 +743,45 @@ fn ring(harness: &Harness) -> u32 {
     state.calls.first().map_or(0, |call| call.id)
 }
 
+/// Rings the Phone, answers here and waits until the Call is live.
+fn on_a_call(harness: &Harness) {
+    let call = ring(harness);
+    harness.answer(call);
+    harness.wait_for_app("the Call is live", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.contains_key("audio-location"))
+    });
+}
+
+/// A Waiting Call rings during the Call: waits for its Banner.
+fn waiting(harness: &Harness) {
+    let _path = harness.simulated_phone().ring(SECOND_NUMBER);
+    harness.wait_for_app("the Waiting Call's Banner shows", DEADLINE, |state| {
+        state
+            .surface("banner")
+            .is_some_and(|banner| banner.contains_key("options"))
+    });
+}
+
 /// Where the app's surfaces are: everything that is neither the black
 /// background nor the bar stand-in.
+/// Two Calls: the answered one live, the first on hold.
+fn held(harness: &Harness) {
+    connect(harness);
+    on_a_call(harness);
+    waiting(harness);
+    if let Err(error) = harness.hold_and_answer() {
+        panic!("Hold & Answer: {error:?}");
+    }
+    harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.contains_key("held-caller"))
+            && state.surface("banner").is_none()
+    });
+}
+
 fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }

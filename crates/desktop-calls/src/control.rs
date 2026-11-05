@@ -48,6 +48,21 @@ pub enum Refused {
     NoLiveCall(String),
     MuteUnavailable(String),
     InvalidTones(String),
+    /// `HoldAndAnswer` or `EndAndAnswer` with no Waiting Call.
+    NoWaitingCall(String),
+    /// `Swap` with no Call on hold.
+    NoHeldCall(String),
+    /// `HoldAndAnswer` while the user's own Call is still being placed.
+    NotConnectedYet(String),
+    /// `Swap` while a Call is on hold and a Waiting Call rings: the Phone
+    /// would answer it instead. `HangUp` refused for the same reason reports
+    /// the `Error` signal instead, as it returns nothing.
+    WaitingCallFirst(String),
+    /// `HoldAndAnswer` or `Answer` while another Call is on hold already.
+    AlreadyHolding(String),
+    /// `HoldAndAnswer` or `EndAndAnswer` while the only other Call is on
+    /// hold.
+    NothingToHoldOrEnd(String),
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
@@ -63,6 +78,12 @@ impl From<Failure> for Refused {
             Failure::NoLiveCall => Self::NoLiveCall(text),
             Failure::MuteUnavailable => Self::MuteUnavailable(text),
             Failure::InvalidTones => Self::InvalidTones(text),
+            Failure::NoWaitingCall => Self::NoWaitingCall(text),
+            Failure::NoHeldCall => Self::NoHeldCall(text),
+            Failure::NotConnectedYet => Self::NotConnectedYet(text),
+            Failure::WaitingCallFirst => Self::WaitingCallFirst(text),
+            Failure::AlreadyHolding => Self::AlreadyHolding(text),
+            Failure::NothingToHoldOrEnd => Self::NothingToHoldOrEnd(text),
             Failure::Undialable
             | Failure::PhoneNotSetUp
             | Failure::PhoneConnecting
@@ -277,6 +298,28 @@ impl ControlInterface {
     /// Hangs up the Call with this id.
     fn hang_up(&self, call: u32) {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
+    }
+
+    /// Puts the live Call on hold and answers the Waiting Call, its audio on
+    /// the Desktop. It returns once the Phone is asked; the Calls' states
+    /// change when the Phone has done it, and `Error` says so if it refuses.
+    /// Fails with the reason while no Call is waiting.
+    fn hold_and_answer(&self) -> Result<(), Refused> {
+        self.pass_on(Input::HoldAndAnswer)
+    }
+
+    /// Ends the live Call and answers the Waiting Call, as `HoldAndAnswer`
+    /// does otherwise.
+    fn end_and_answer(&self) -> Result<(), Refused> {
+        self.pass_on(Input::EndAndAnswer)
+    }
+
+    /// Puts the live Call on hold and makes the Held Call live again; with
+    /// only a Held Call, makes it live again. It returns once the Phone is
+    /// asked, and `Error` says so if it refuses. Fails with the reason while
+    /// no Call is on hold.
+    fn swap(&self) -> Result<(), Refused> {
+        self.pass_on(Input::Swap)
     }
 
     /// Calls `number`, a number as typed or a `tel:` link, with the audio on

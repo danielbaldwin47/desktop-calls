@@ -40,6 +40,9 @@ pub struct BannerView {
     pub caller: RingingCaller,
     /// The Banner has keyboard focus, so A answers and D declines.
     pub focused: bool,
+    /// What the Banner offers for a Waiting Call in place of Answer, or
+    /// `None` for the only Call ringing.
+    pub waiting: Option<WaitingOptions>,
 }
 
 /// Who a ringing Call is from, as the Banner and the Indicator both say it.
@@ -72,6 +75,36 @@ pub struct CallWindowView {
     pub notice: Option<Failure>,
     /// The Call Window has keyboard focus.
     pub focused: bool,
+    /// The other connected Call, on hold, while there are two: listed below
+    /// the live one, which Swap makes live again.
+    pub held: Option<HeldCall>,
+    /// A Call is on hold while a Waiting Call rings: Swap, Resume and Hang
+    /// up aren't offered, as the Phone would answer or decline the Waiting
+    /// Call instead (`AT+CHLD`).
+    pub waiting_first: bool,
+}
+
+/// What the Banner offers for a Waiting Call, besides Decline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitingOptions {
+    /// Hold & Answer and End & Answer: the user's other Call is connected.
+    HoldOrEnd,
+    /// End & Answer alone: the user's own Call is still being placed, and a
+    /// Call nobody has answered can't be put on hold; or another Call is on
+    /// hold already, and the Phone holds one Call at a time.
+    End,
+    /// Answer, which keeps the user's only other Call on hold: there is no
+    /// live Call to hold or end.
+    Answer,
+}
+
+/// A Call on hold behind the one the Call Window shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldCall {
+    pub call: CallId,
+    pub caller: Caller,
+    /// The Contact the other party is, if Contacts say.
+    pub contact: Option<ContactMatch>,
 }
 
 /// What the Call Window says about the Call's audio, and so what its
@@ -96,6 +129,9 @@ pub enum CallWindowPhase {
     Ringing,
     /// Placing it failed; the notice says why, and the window closes shortly.
     NotPlaced,
+    /// Connected, and on hold, with no live Call beside it: Swap makes it
+    /// live again.
+    OnHold { active_since: Timestamp },
     /// Connected: the timer runs from `active_since`.
     Live {
         active_since: Timestamp,
@@ -153,6 +189,8 @@ impl State {
             audio: None,
             notice: Some(Failure::ConnectionLost),
             focused: self.focus == Focus::CallWindow,
+            held: None,
+            waiting_first: false,
         })
     }
 
@@ -182,6 +220,10 @@ impl State {
                 call: call.id,
                 caller: self.ringing_caller(call),
                 focused: self.focus == Focus::Banner,
+                waiting: self
+                    .waiting_call()
+                    .filter(|waiting| waiting.id == call.id)
+                    .map(|_| self.waiting_options()),
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.
@@ -190,30 +232,11 @@ impl State {
             .as_ref()
             .filter(|notice| notice.not_placed.is_none())
             .map(|notice| notice.failure)
+            .or(self.waiting_notice)
             .or(self.audio_notice);
         let call_window = self
             .lost_call_window()
-            .or_else(|| {
-                self.calls
-                    .iter()
-                    .find(|call| call.has_call_window() && self.unwanted != Some(call.id))
-                    .map(|call| CallWindowView {
-                        call: Some(call.id),
-                        caller: call.caller.clone(),
-                        contact: self.contact(&call.caller),
-                        phase: phase(
-                            call,
-                            self.codec.is_some_and(Codec::is_wideband),
-                            self.mute(),
-                        ),
-                        audio: call.state.is_live().then(|| CallAudio {
-                            location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                            moving: self.audio_moving_to(),
-                        }),
-                        notice,
-                        focused: self.focus == Focus::CallWindow,
-                    })
-            })
+            .or_else(|| self.calls_window(notice))
             .or_else(|| {
                 let dialling = self
                     .dialling
@@ -228,6 +251,8 @@ impl State {
                     phase: CallWindowPhase::Calling,
                     notice,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -239,6 +264,8 @@ impl State {
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -252,6 +279,8 @@ impl State {
                     phase: CallWindowPhase::NotPlaced,
                     notice: Some(notice.failure),
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
+                    waiting_first: false,
                 })
             })
             .or_else(|| {
@@ -263,6 +292,8 @@ impl State {
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
+                    held: None,
+                    waiting_first: false,
                 })
             });
         Surfaces {
@@ -271,6 +302,51 @@ impl State {
             dialer: self.dialer_view(),
             setup_window: self.setup_window_view(),
         }
+    }
+
+    /// The Call Window for the Phone's Calls, with `notice` beside them.
+    fn calls_window(&self, notice: Option<Failure>) -> Option<CallWindowView> {
+        let (call, held) = self.call_window_calls()?;
+        Some(CallWindowView {
+            call: Some(call.id),
+            caller: call.caller.clone(),
+            contact: self.contact(&call.caller),
+            phase: phase(
+                call,
+                self.codec.is_some_and(Codec::is_wideband),
+                self.mute(),
+            ),
+            audio: call.state.is_live().then(|| CallAudio {
+                location: self.audio_location().unwrap_or(AudioLocation::Phone),
+                moving: self.audio_moving_to(),
+            }),
+            notice,
+            focused: self.focus == Focus::CallWindow,
+            held: held.map(|held| HeldCall {
+                call: held.id,
+                caller: held.caller.clone(),
+                contact: self.contact(&held.caller),
+            }),
+            waiting_first: self.has_waiting_call() && self.has_held_call(),
+        })
+    }
+
+    /// The Calls the Call Window shows: the live one, or failing that the
+    /// first it has, and the other Call on hold, if there is one.
+    fn call_window_calls(&self) -> Option<(&Call, Option<&Call>)> {
+        let shown: Vec<&Call> = self
+            .calls
+            .iter()
+            .filter(|call| call.has_call_window() && self.unwanted != Some(call.id))
+            .collect();
+        let call = shown
+            .iter()
+            .find(|call| call.state == CallState::Active)
+            .or_else(|| shown.first())?;
+        let held = shown
+            .iter()
+            .find(|other| other.id != call.id && other.state == CallState::Held);
+        Some((call, held.copied()))
     }
 
     fn dialer_view(&self) -> Option<DialerView> {
@@ -287,6 +363,7 @@ impl State {
 /// Where `call` is, as the Call Window shows it.
 fn phase(call: &Call, wideband: bool, mute: Mute) -> CallWindowPhase {
     match (call.active_since, call.state) {
+        (Some(active_since), CallState::Held) => CallWindowPhase::OnHold { active_since },
         (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
             active_since,
             wideband,

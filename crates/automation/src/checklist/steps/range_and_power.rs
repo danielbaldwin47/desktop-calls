@@ -35,7 +35,8 @@ fn logged(
 /// Waits, for up to [`BACK_DEADLINE`], for the app to log the Phone
 /// connected after `after_us` (the Phone having left by then), and times
 /// how long it took from `start` (an app-logged line), recording it as
-/// `name`. `since` says what `start` was, for the evidence. Reading the log,
+/// `name`. `since` says what `start` was, such as "the Desktop resuming",
+/// for the evidence. Reading the log,
 /// not the app's state, means the state from before the Phone left can't
 /// pass for it being back.
 fn connected_again(
@@ -125,7 +126,7 @@ pub(super) fn out_of_range_and_back(sitting: &mut Sitting) -> Result<(), Stop> {
         &present,
         present.at_us,
         "reconnect_ms",
-        "the Phone's Bluetooth link came back",
+        "the Phone's Bluetooth link coming back",
     )
 }
 
@@ -174,7 +175,7 @@ pub(super) fn suspend_and_resume(sitting: &mut Sitting) -> Result<(), Stop> {
         &resumed,
         left.at_us.max(resumed.at_us),
         "reconnect_after_resume_ms",
-        "the Desktop resumed",
+        "the Desktop resuming",
     )
 }
 
@@ -211,6 +212,6 @@ pub(super) fn wireplumber_restart(sitting: &mut Sitting) -> Result<(), Stop> {
         &gone,
         gone.at_us,
         "reconnect_after_wireplumber_ms",
-        "the app logged the Phone gone",
+        "the app logging the Phone gone",
     )
 }

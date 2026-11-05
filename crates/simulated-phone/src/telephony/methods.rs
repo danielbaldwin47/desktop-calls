@@ -333,6 +333,9 @@ fn hang_up(
     ) {
         return (invalid_state(), Vec::new());
     }
+    if behaviour.quirks.contains(&Quirk::HangupIgnored) {
+        return (Reply::body(()), Vec::new());
+    }
     let ended = hung_up_call(tree, audio_gateway, path, &state);
     let mut signals = end_call(tree, audio_gateway, &ended);
     signals.extend(after_hang_up(tree, audio_gateway, &state));

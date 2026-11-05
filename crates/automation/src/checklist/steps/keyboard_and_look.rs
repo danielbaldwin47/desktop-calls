@@ -5,15 +5,19 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{
-    ACT_DEADLINE, CALL_DEADLINE, DIALER_TARGET, LOG_DEADLINE, call_ends, helper_calls, millis,
-    no_call_left,
+    ACT_DEADLINE, CALL_DEADLINE, DIALER_TARGET, LOG_DEADLINE, call_ends, helper_calls,
+    logged_since, millis, no_call_left,
 };
+use crate::checklist::fingerprint::Fingerprint;
 use crate::checklist::results::unix_micros;
-use crate::checklist::sitting::{Sitting, Stop, seconds};
+use crate::checklist::sitting::{Sitting, Stop, TestNumber, seconds};
 use crate::checklist::watch::AppState;
 
-/// How long a Call the runner hung up may take to leave the app's state.
+/// How long a Call the runner hung up may take to end.
 const HANG_UP_DEADLINE: Duration = Duration::from_secs(2);
+/// How long the Phone may take to report a placed Call's number: some
+/// report it only after the Call appears.
+const NUMBER_DEADLINE: Duration = Duration::from_secs(3);
 
 /// 7.1: place a Call to the Test Number and end it with the keyboard alone:
 /// the keybinding opens the Dialer, Enter places the Call, the keybinding
@@ -21,12 +25,7 @@ const HANG_UP_DEADLINE: Duration = Duration::from_secs(2);
 /// a digit mistyped, is hung up at once: it would ring a stranger.
 pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
-    let Some(test_number) = sitting.test_number() else {
-        sitting.check(
-            false,
-            "No Test Number is set up in ~/.config/desktop-calls/test-number, so the runner won't have you place a Call."
-                .to_owned(),
-        );
+    let Some(test_number) = test_number_or_why_not(sitting) else {
         return Ok(());
     };
     let mark = sitting.mark();
@@ -37,45 +36,19 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     let placed = sitting.wait_for("your Call being placed", CALL_DEADLINE, |state| {
         state.calls.iter().any(|call| call.direction == "outgoing")
     })?;
-    let Some(placed) = placed
+    let Some(call) = placed
         .state
         .calls
         .iter()
         .find(|call| call.direction == "outgoing")
-        .cloned()
+        .map(|call| call.id)
     else {
         return Err(Stop::TimedOut("your Call being placed".to_owned()));
     };
-    let call = placed.id;
-    if !placed.number.is(&test_number) {
-        // `HangUp` only queues the request: the Call leaving the app's
-        // state is what shows it ended.
-        let asked = sitting.hang_up(call).is_ok();
-        let ended = asked
-            && sitting
-                .happens_within("the wrong Call ending", HANG_UP_DEADLINE, |state| {
-                    state.call(call).is_none()
-                })?
-                .is_some();
-        if ended {
-            sitting.check(
-                false,
-                "The Call went to a number that isn't the Test Number, so the runner hung it up, and it ended."
-                    .to_owned(),
-            );
-        } else {
-            sitting.say(
-                "End this Call on the Pixel now: it went to a number that isn't the Test Number.",
-                &[],
-            );
-            sitting.check(
-                false,
-                format!(
-                    "The Call went to a number that isn't the Test Number, and it was still going {} after the runner tried to hang it up.",
-                    seconds(HANG_UP_DEADLINE)
-                ),
-            );
-        }
+    // Where the Call Window's focus is looked for: from the Call placed,
+    // however late its number comes.
+    let focus_mark = sitting.mark();
+    if !went_to(sitting, call, &test_number)? {
         return Ok(());
     }
     sitting.observed("The Call went to the Test Number.".to_owned());
@@ -86,7 +59,6 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
         "The keybinding opened the Dialer with the keyboard in it, and Enter placed the Call."
             .to_owned(),
     );
-    let focus_mark = sitting.mark();
     call_ends(
         sitting,
         call,
@@ -97,19 +69,23 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     // Call goes on: focus it had from the moment it showed proves nothing,
     // and neither does the ended Call's window taking it. The app publishes
     // a Call before the surfaces that follow from it (#107), so the Call
-    // Window must be seen shown without the keyboard first.
+    // Window must be seen shown without the keyboard first. The compositor
+    // may hand it the keyboard for a moment as the Dialer closes, so it
+    // must also still have it when the Call ends, as Ctrl+H needs.
     let during = |state: &AppState| state.call(call).is_some() && state.shows("call-window");
     let moved_focus = sitting.seen_in_order(
         focus_mark,
         |state| during(state) && !state.focused("call-window"),
         |state| during(state) && state.focused("call-window"),
-    );
+    ) && sitting
+        .last_seen_since(focus_mark, during)
+        .is_some_and(|last| last.state.focused("call-window"));
     sitting.check(
         moved_focus,
         if moved_focus {
             "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned()
         } else {
-            "The Call Window never went from showing without the keyboard to having it while the Call went on."
+            "The Call Window never went from showing without the keyboard to having it, and keeping it until the Call ended."
                 .to_owned()
         },
     );
@@ -123,6 +99,123 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
             "Placing or ending the Call needed the mouse.".to_owned()
         },
     );
+    Ok(())
+}
+
+/// The Test Number, after saying which country code was assumed for it;
+/// or `None`, once the step has recorded why it can't be used.
+fn test_number_or_why_not(sitting: &mut Sitting) -> Option<Fingerprint> {
+    match sitting.test_number() {
+        TestNumber::Ready { number, assumed } => {
+            if let Some(code) = assumed {
+                sitting.observed(format!(
+                    "Treating your Test Number as +{code} (from your locale)."
+                ));
+            }
+            Some(number)
+        }
+        TestNumber::NotSetUp => {
+            sitting.check(
+                false,
+                "No Test Number is set up in ~/.config/desktop-calls/test-number, so the runner won't have you place a Call."
+                    .to_owned(),
+            );
+            None
+        }
+        TestNumber::NoCountry => {
+            sitting.check(
+                false,
+                "Your Test Number has no country code, and your locale doesn't say which country you're in. Add +<country code> to the start of the number in ~/.config/desktop-calls/test-number, such as +1 for the US."
+                    .to_owned(),
+            );
+            None
+        }
+    }
+}
+
+/// Whether `call` went to the Test Number, once the Phone has said which
+/// number it went to: some Phones report it only after the Call appears.
+/// A Call that didn't, or might not have, is hung up, and the step fails.
+fn went_to(sitting: &mut Sitting, call: u32, test_number: &Fingerprint) -> Result<bool, Stop> {
+    let numbered = sitting.happens_within("the Call's number", NUMBER_DEADLINE, |state| {
+        state
+            .call(call)
+            .is_none_or(|placed| placed.number.is_known())
+    })?;
+    let number = numbered
+        .as_ref()
+        .and_then(|seen| seen.state.call(call))
+        .map(|placed| placed.number);
+    match number {
+        Some(number) if number.is(test_number) => Ok(true),
+        Some(number) if number.is_known() => {
+            end_wrong_call(
+                sitting,
+                call,
+                "The Call went to a number that isn't the Test Number",
+            )?;
+            Ok(false)
+        }
+        _ if sitting.now().call(call).is_none() => {
+            sitting.check(
+                false,
+                "The Call ended before the Phone said which number it went to.".to_owned(),
+            );
+            Ok(false)
+        }
+        _ => {
+            end_wrong_call(
+                sitting,
+                call,
+                &format!(
+                    "The Phone didn't say which number the Call went to within {}, so it may not be the Test Number",
+                    seconds(NUMBER_DEADLINE)
+                ),
+            )?;
+            Ok(false)
+        }
+    }
+}
+
+/// Hangs up `call`, which may ring a stranger, and fails the step: `why`
+/// says what is wrong with it. The Call has ended once the app logs it
+/// ended, or once it leaves the app's state with the Phone still connected:
+/// a Call also leaves when the link drops, and may then carry on on the
+/// Phone.
+fn end_wrong_call(sitting: &mut Sitting, call: u32, why: &str) -> Result<(), Stop> {
+    let from_us = unix_micros();
+    let gone_with_the_phone_here =
+        |state: &AppState| state.call(call).is_none() && state.connection_state == "connected";
+    if let Err(error) = sitting.hang_up(call) {
+        sitting.say(&format!("End this Call on the Pixel now. {why}."), &[]);
+        sitting.check(
+            false,
+            format!("{why}, and the app refused the runner's request to hang it up: {error}"),
+        );
+        return Ok(());
+    }
+    let logged = logged_since(
+        sitting,
+        from_us,
+        HANG_UP_DEADLINE,
+        |line| line.event_kind == "call-ended" && line.call_id == Some(u64::from(call)),
+        gone_with_the_phone_here,
+    )?;
+    if logged.is_some() || gone_with_the_phone_here(&sitting.now()) {
+        sitting.check(
+            false,
+            format!("{why}, so the runner hung it up, and it ended."),
+        );
+    } else {
+        sitting.say(&format!("End this Call on the Pixel now. {why}."), &[]);
+        sitting.check(
+            false,
+            format!(
+                "{why}. The runner hung it up, but couldn't confirm it ended within {}.",
+                seconds(HANG_UP_DEADLINE)
+            ),
+        );
+    }
     Ok(())
 }
 

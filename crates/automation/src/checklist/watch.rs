@@ -4,7 +4,6 @@
 //! signals themselves, however late the runner looks.
 
 use std::collections::{BTreeMap, HashMap};
-use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -16,6 +15,7 @@ use zbus::message::Type;
 use zbus::names::InterfaceName;
 use zbus::{Connection, MatchRule, MessageStream, OwnedVariant};
 
+use super::fingerprint::Fingerprint;
 use super::sitting::Event;
 
 /// The app's control interface, as `CODING_STANDARDS.md` names it.
@@ -62,87 +62,6 @@ pub struct AppCall {
     pub direction: String,
     pub state: String,
     pub number: Fingerprint,
-}
-
-/// A phone number's fingerprint: its national number, hashed, and its
-/// country code, if it was written with one. It stays in memory and is
-/// never written anywhere, so the number itself isn't kept.
-///
-/// Two fingerprints are [the same number](Fingerprint::is) when their whole
-/// national numbers match and so do their country codes, if both have one:
-/// `07700 900999` and `+44 7700 900999`, the same number written two ways,
-/// match; `+44 8700 900999` and `+33 7700 900999` don't.
-#[derive(Clone, Copy, Debug)]
-pub struct Fingerprint {
-    national: u64,
-    country: Option<u16>,
-}
-
-impl Fingerprint {
-    pub fn of(number: &str) -> Self {
-        let trimmed = number.trim_start();
-        let digits: Vec<u8> = number
-            .bytes()
-            .filter(u8::is_ascii_digit)
-            .map(|digit| digit - b'0')
-            .collect();
-        let mut hasher = DefaultHasher::new();
-        if digits.is_empty() {
-            number.hash(&mut hasher);
-            return Self {
-                national: hasher.finish(),
-                country: None,
-            };
-        }
-        // `+44 …` or `0044 …`: a country code, then the national number.
-        // `07700 …`: the national number after its trunk prefix, 0.
-        let international = if trimmed.starts_with('+') {
-            Some(&digits[..])
-        } else {
-            digits.strip_prefix(&[0, 0][..])
-        };
-        let (country, national) = match international {
-            Some(international) => {
-                let length = country_code_length(international).min(international.len());
-                let (country, national) = international.split_at(length);
-                let country = country
-                    .iter()
-                    .fold(0_u16, |code, digit| code * 10 + u16::from(*digit));
-                (Some(country), national)
-            }
-            None => (None, digits.strip_prefix(&[0][..]).unwrap_or(&digits)),
-        };
-        national.hash(&mut hasher);
-        Self {
-            national: hasher.finish(),
-            country,
-        }
-    }
-
-    /// Whether `other` is the same number: the whole national number
-    /// matches, and so does the country code where both have one.
-    pub fn is(&self, other: &Self) -> bool {
-        self.national == other.national
-            && match (self.country, other.country) {
-                (Some(mine), Some(theirs)) => mine == theirs,
-                _ => true,
-            }
-    }
-}
-
-/// How many digits the country code at the start of `international` has,
-/// by ITU-T E.164: `1` and `7` have one, the codes listed here two, and
-/// every other code three. No code is the start of another.
-fn country_code_length(international: &[u8]) -> usize {
-    const TWO_DIGITS: &[u8] = &[
-        20, 27, 30, 31, 32, 33, 34, 36, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 51, 52, 53, 54, 55,
-        56, 57, 58, 60, 61, 62, 63, 64, 65, 66, 81, 82, 84, 86, 90, 91, 92, 93, 94, 95, 98,
-    ];
-    match international {
-        [1 | 7, ..] => 1,
-        [first, second, ..] if TWO_DIGITS.contains(&(first * 10 + second)) => 2,
-        _ => 3,
-    }
 }
 
 impl AppState {

@@ -9,6 +9,7 @@
 //! can play the user.
 
 mod app_log;
+mod fingerprint;
 pub mod results;
 mod sitting;
 mod steps;

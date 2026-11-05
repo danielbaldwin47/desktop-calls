@@ -157,7 +157,19 @@ pub enum Quirk {
     /// `ReleaseAndAnswer` and `SwapCalls` fail with `NotSupported` whatever
     /// the Calls' states, as PipeWire checks: the Calls stay as they were.
     ChldUnsupported,
+    /// `Hangup` replies, and the Call carries on: a Phone that drops the
+    /// request. Tests use it to see what the Desktop does when hanging up
+    /// doesn't end the Call.
+    HangupIgnored,
+    /// On `Connect`, hands-free comes up [`SERVICE_LEVEL_TIME`] after BlueZ
+    /// marks the Phone connected, rather than at once: the service level
+    /// connection taking its time, as it does on a real Phone. Off by
+    /// default, so other tests keep their timings.
+    SlowServiceLevel,
 }
+
+/// How long [`Quirk::SlowServiceLevel`] takes to bring hands-free up.
+pub const SERVICE_LEVEL_TIME: Duration = Duration::from_millis(200);
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
 pub const SLOW_REPLY: Duration = Duration::from_secs(1);
@@ -184,6 +196,8 @@ impl Quirk {
             "connect-profile-fails-once" => Some(Self::ConnectProfileFailsOnce),
             "late-line-identification" => Some(Self::LateLineIdentification),
             "chld-unsupported" => Some(Self::ChldUnsupported),
+            "hangup-ignored" => Some(Self::HangupIgnored),
+            "slow-service-level" => Some(Self::SlowServiceLevel),
             _ => None,
         }
     }

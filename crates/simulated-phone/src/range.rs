@@ -93,6 +93,24 @@ enum Service {
 }
 
 impl Change {
+    /// This change split before its first Telephony signal: BlueZ marking
+    /// the Phone connected, then hands-free coming up.
+    fn split_at_hands_free(self) -> (Self, Self) {
+        let at = self
+            .signals
+            .iter()
+            .position(|(service, _)| matches!(service, Service::Telephony))
+            .unwrap_or(self.signals.len());
+        let mut connected = self.signals;
+        let hands_free = connected.split_off(at);
+        (
+            Self { signals: connected },
+            Self {
+                signals: hands_free,
+            },
+        )
+    }
+
     fn bluez(&mut self, signal: Signal) {
         self.signals.push((Service::Bluez, signal));
     }
@@ -343,18 +361,33 @@ fn connect(
         std::thread::sleep(CONNECT_TIME);
         None
     };
-    let change = {
+    let (change, service_level) = {
         let mut world = lock(world);
         world.range.connecting = false;
-        match failure {
-            Some(_) => None,
-            None => Some(crate::pairing::connected_by_phone(&mut world)?),
+        let slow = world
+            .behaviour
+            .quirks
+            .contains(&telephony::Quirk::SlowServiceLevel);
+        if failure.is_some() {
+            (None, None)
+        } else {
+            let change = crate::pairing::connected_by_phone(&mut world)?;
+            if slow {
+                let (connected, hands_free) = change.split_at_hands_free();
+                (Some(connected), Some(hands_free))
+            } else {
+                (Some(change), None)
+            }
         }
     };
+    if let Some(change) = change {
+        zbus::block_on(emit(system, telephony, change))?;
+    }
+    if let Some(hands_free) = service_level {
+        std::thread::sleep(telephony::SERVICE_LEVEL_TIME);
+        zbus::block_on(emit(system, telephony, hands_free))?;
+    }
     zbus::block_on(async {
-        if let Some(change) = change {
-            emit(system, telephony, change).await?;
-        }
         let reply = match failure {
             Some(failure) => Reply::Error("org.bluez.Error.Failed", failure.to_owned()),
             None => Reply::body(()),

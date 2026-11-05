@@ -25,6 +25,34 @@ test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
+# CI passes `--partition count:k/N` to run shard k of N; `just ci-local` runs
+# them whole.
+# Build the binaries the harness's scenarios run, then run them with cargo-nextest.
+ci-scenarios *args:
+    cargo build --workspace --bins --locked
+    cargo nextest run -p test-harness --locked --no-fail-fast {{args}}
+
+# Judged one scenario at a time as on the Desktop, which runs one app (issue
+# #47): in the whole run, every scenario's app at once slows each first paint
+# past its target. `just test-file` fails if a file has no ignored scenario
+# left, rather than run nothing.
+# Run the first-frame timing scenarios, one at a time.
+ci-first-frame-timings:
+    just test-file dialer_surface --ignored --test-threads=1
+    just test-file incoming_call_surfaces --ignored --test-threads=1
+
+# GitHub runs full CI only on pushes to main, so run this before every push.
+# It tests HEAD in CI's image: lint, tests, gallery, scorecard and every
+# scenario. If all pass, it pushes the branch if GitHub lacks the commit and
+# posts the status "CI passed", which branch protection requires and `just
+# merge` reads. Refuses a dirty tree. Runs from several agents take turns.
+# Cache, image and logs: ~/.cache/desktop-calls-ci. `just ci-local --help`.
+# Run CI here, and post "CI passed" on HEAD if it passes.
+[positional-arguments]
+[no-exit-message]
+ci-local *args:
+    @python3 tools/ci_local.py "$@"
+
 # `just test-file contacts with_5000`; --ci-like runs them under CI's limits.
 # Use it rather than `cargo test --test <file>`. `just test-file --help`.
 # Run one harness test file, or only its scenarios whose names contain FILTER.
@@ -91,16 +119,17 @@ run *args:
 pbap-probe *args:
     @/usr/bin/python3 tools/real-phone/pbap_probe.py "$@"
 
-# The only way to merge: GitHub can't enforce green checks on this repo.
-# `just merge --help` for options and the conditions it checks.
+# The only way to merge: it checks more than branch protection's "CI passed",
+# which `just ci-local` posts. `just merge --help` for options and the
+# conditions it checks.
 # Squash-merge PR once its checks pass on a head containing origin/main.
 [positional-arguments]
 [no-exit-message]
 merge pr *args:
     @python3 tools/merge.py "$@"
 
-# Wait on one CI run (default: the latest for this branch). If it passed,
-# print one line. If not, print each failed test's panic and download the
+# Wait on one GitHub CI run (default: the latest for this branch; only pushes
+# to main and `gh workflow run CI` start one). If it passed, print one line. If not, print each failed test's panic and download the
 # scenario logs into target/ci/<run-id>/. `just ci-wait --help`.
 [positional-arguments]
 [no-exit-message]

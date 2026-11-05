@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Wait on one CI run, and say why it failed without anyone reading its log.
+"""Wait on one GitHub CI run, and say why it failed without anyone reading its log.
+
+GitHub runs CI only on pushes to main and on `gh workflow run CI`; a branch's
+CI is `just ci-local` (ticket #158), which prints its own failures. So this
+is for the run after a merge, and for a dispatched run.
 
 Usage (through just):
   just ci-wait               # the latest run for the current branch
@@ -93,7 +97,11 @@ def latest_run() -> str:
             told = True
         time.sleep(POLL_SECONDS)
     if not runs:
-        raise Failed(f"CI has no run for {branch}. Next: git push, then just ci-wait")
+        raise Failed(
+            f"GitHub has no CI run for {branch}: it runs CI only on pushes to main and "
+            f"on `gh workflow run CI --ref {branch}`.\n"
+            "Next: just ci-local (a branch's CI), or `gh workflow run CI` for a run here"
+        )
     newest = str(runs[0]["databaseId"])
     print(
         f"CI has no run for {head[:7]}, the commit checked out here; "

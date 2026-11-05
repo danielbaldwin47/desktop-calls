@@ -6,9 +6,10 @@ Usage (through just):
   just merge 42 --wait 0     # don't wait: refuse if a check is still pending
   just merge 42 --wait 60    # wait up to 60 minutes
 
-GitHub cannot enforce green checks on this private Free repository (branch
-protection and rulesets return 403), so this is the only way to merge. It
-refuses unless all of these hold, in this order:
+Branch protection requires the status "CI passed" on a PR's head, which `just
+ci-local` posts after a green local run (ticket #158); GitHub doesn't run
+full CI on a PR. This is the only way to merge, and it checks more than
+protection does. It refuses unless all of these hold, in this order:
 
   1. The PR is open.
   2. The PR head already contains the tip of origin/<base>, so the CI that
@@ -23,8 +24,8 @@ refuses unless all of these hold, in this order:
      jobs can be missing while every check listed has passed. Pending checks
      and unfinished runs are waited for; one still pending when the wait ends
      counts as not passed. A skipped check counts as passed only beside a
-     passed "CI passed", which fails unless each job passed or was skipped
-     because the change touched only docs.
+     passed "CI passed". A head with no check at all is refused at once:
+     nothing starts CI on a PR, so run `just ci-local` on it.
   4. The head did not move while waiting, and still contains origin/<base>
      (with the same exception).
   5. GitHub reports the PR as mergeable, and it is not a draft.
@@ -54,8 +55,6 @@ import checklist_tickets
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 
-# How long CI may take to report its first check after a push.
-CHECKS_APPEAR_SECONDS = 180
 # How often to ask GitHub again while waiting.
 POLL_SECONDS = 10
 # How long GitHub may take to work out whether a PR is mergeable.
@@ -67,8 +66,8 @@ class Refused(Exception):
     what to run next."""
 
 
-# CI's summary check. It fails unless every job passed, or was skipped
-# because the change touched only docs, so a skipped check passes with it.
+# The commit status `just ci-local` posts when every job passed, and the
+# check run CI's summary job posts on main. `gh pr checks` lists both.
 SUMMARY_CHECK = "CI passed"
 # The compare API lists at most this many files and commits.
 COMPARE_FILES_LIMIT, COMPARE_COMMITS_LIMIT = 300, 250
@@ -217,8 +216,8 @@ def label(check: dict) -> str:
 
 
 def wait_for_checks(pr: dict, wait_seconds: float) -> None:
-    """Waits until every check has finished, or the wait ends, or CI has
-    reported nothing for CHECKS_APPEAR_SECONDS."""
+    """Waits until every check has finished, or the wait ends, or there is
+    no check at all: nothing starts CI on a PR, so none is coming."""
     number = str(pr["number"])
     started = time.monotonic()
     deadline = started + wait_seconds
@@ -243,11 +242,8 @@ def wait_for_checks(pr: dict, wait_seconds: float) -> None:
                 return
             # A run may have started more jobs meanwhile: look again.
             continue
-        if not current and time.monotonic() - started > CHECKS_APPEAR_SECONDS:
+        if not current:
             return
-        if not current and "start" not in announced:
-            print(f"Waiting for CI to start on {pr['headRefOid'][:7]}...", flush=True)
-            announced.add("start")
         for run in unfinished:
             if run["link"] not in announced:
                 print(f"Waiting for {label(run)}: {run['state'].lower()}  {run['link']}", flush=True)
@@ -261,8 +257,9 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     if not found:
         raise Refused(
             f"No checks are reported on PR #{number}'s head ({pr['headRefOid'][:7]}), so "
-            "nothing shows it is green. CI may not have started.\n"
-            f"Next: gh run list --branch {pr['headRefName']}   (then `just merge {number}`)"
+            "nothing shows it is green. GitHub doesn't run CI on a PR: `just ci-local` "
+            "does, on the commit checked out, and posts \"CI passed\".\n"
+            f"Next: git switch {pr['headRefName']} && just ci-local   (then `just merge {number}`)"
         )
     failed = [check for check in found if check["bucket"] in ("fail", "cancel")]
     pending = [check for check in found if check["bucket"] == "pending"]

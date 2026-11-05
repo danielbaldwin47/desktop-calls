@@ -8,6 +8,10 @@ Dated facts about how the app is tested: the harness, CI against the Desktop, an
 - 2026-11-05 (#47, `3def480`): the two first-frame timing tests (`the_first_banner_shows_without_holding_up_the_main_loop` and `with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly`) are `#[ignore]`d in the whole run. CI runs them in a step of their own, one scenario at a time (`-- --ignored --test-threads=1`). With four scenarios at once, every scenario's app compiles shaders together, which no Desktop does. The Dialer, first-Banner and idle scenarios wait for `first-frames-prepared` (`wait_for_first_frames_prepared`) before they act. Source: [first frames](../research/2026-11-05-first-frames.md).
 - 2026-11-05 (#17, `417411e`): the Do Not Disturb toggle scenario holds 250 ms from the harness replacing `quiet.json` to the ringer's log line. The app's own part was under 1 ms; the rest is inotify and the main loop. Source: [Do Not Disturb silent](../research/2026-11-05-do-not-disturb-silent.md).
 
+## CI runs locally
+
+- 2026-11-05 (#158): `just ci-local` runs CI's jobs on this machine, in `archlinux:latest` with CI's packages, unprivileged (`unshare` and `chroot`, no sudo or Docker), and posts the commit status "CI passed" on HEAD when they pass. GitHub runs full CI only on pushes to main; `just merge` reads the status as it read the check. The image, cargo cache and logs are in `~/.cache/desktop-calls-ci` (never `/tmp`, which has a per-user quota); a lock makes agents' runs take turns. Keep `just test-ci-like` for timing on 2 CPUs.
+
 ## Harness
 
 - 2026-11-05 (#107, `7032137`): the harness records `Calls` and `Surfaces` after each `PropertiesChanged`, in the order the app sent them (`Harness::published`), and `surfaces_seen` derives from it. `crates/test-harness/tests/publish_order.rs` checks that a surface names a Call only once `Calls` lists it, and closes only once `Calls` says why. In the app, `Surfaces::render` and `Indicator::render` take a `Published` proof that only `Publisher::publish` makes, so rendering before publishing doesn't compile. Source: [publish order](../research/2026-11-05-publish-order.md).

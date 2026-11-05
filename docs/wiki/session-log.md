@@ -2,7 +2,13 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
-## 2026-11-04, later checkpoint (supersedes the one below)
+## 2026-11-05 01:30 UTC, paused for the user's session reset (supersedes the entries below)
+
+- **`main` is red.** PR #40 (#7) was merged at `596fe37` while its CI was still pending, and CI then failed: 7 screen tests time out on "Banner shows within 1s" in CI but pass locally (runs 41947111574 and 41947055883). A fixer agent was started and then stopped at the user's request before it did meaningful work. Its stale worktree may exist under `.claude/worktrees/agent-acc43b6e45a437a6c`; delete it. **First action on resume:** relaunch the fixer (branch `fix/ci-banner-tests`, using diagnosing-bugs). Distinguish CI slowness from a real bug, and keep the 1 s scorecard measurement meaningful.
+- Process lesson: `gh pr merge` does not wait for checks, and branch protection is likely unavailable on a private Free repo (unverified). Always run `gh pr checks <n> --watch` and confirm a pass before merging.
+- After main is green, the frontier is #8, #9, #10, #15, #39.
+
+## 2026-11-04, later checkpoint
 
 - #7 finished as PR #40: 74 of 74 tests pass, the Banner meets the 1 s target, and the Omarchy 4.5 geometry is in. Its merge status is recorded in the commit log, so check `gh issue view 7`. No implementer is in flight.
 - Next frontier: #8, #9, #10, #15, #39. Launch them in parallel worktrees, keeping justfile/harness conflicts in mind; a merger agent resolves conflicts.

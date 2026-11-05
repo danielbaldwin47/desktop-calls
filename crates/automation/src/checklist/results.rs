@@ -28,9 +28,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
-/// Where the result files of runs against the real Phone go by default,
-/// relative to the repository, where `just` runs.
-pub const DEFAULT_DIRECTORY: &str = "docs/real-phone-checklist";
+/// Where the result files of runs against the real Phone go by default:
+/// `$XDG_STATE_HOME/desktop-calls/real-phone-checklist`, or under
+/// `~/.local/state`. They come from the real Phone and can hold real data,
+/// so they stay out of the repository, which is published (ticket #120).
+/// A relative `XDG_STATE_HOME` is ignored, as the XDG spec says. With no
+/// absolute `HOME` either, it says why rather than fall back to a relative
+/// path, which would put the results in the repository.
+pub fn default_directory() -> Result<PathBuf, String> {
+    let absolute = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let state = absolute("XDG_STATE_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".local/state")))
+        .ok_or_else(|| {
+            "HOME isn't set to an absolute path, so the Real-Phone Checklist has nowhere \
+             outside the repository to keep its results. Set HOME, or pass --results DIR."
+                .to_owned()
+        })?;
+    Ok(state.join("desktop-calls/real-phone-checklist"))
+}
 
 /// Whether a run was against the real Phone or the Simulated Phone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,4 +1,6 @@
 /target
 /.claude/worktrees/
 __pycache__/
+# Real-Phone Checklist results hold real data; they live in
+# ~/.local/state/desktop-calls/real-phone-checklist/ (ticket #120).
 /docs/real-phone-checklist/

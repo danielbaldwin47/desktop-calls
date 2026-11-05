@@ -16,6 +16,7 @@ Dated facts about how the app is tested: the harness, CI against the Desktop, an
 
 ## Real-Phone Checklist
 
+- 2026-11-05 (#120, PR #132): results from the real Phone live in `~/.local/state/desktop-calls/real-phone-checklist/` (`$XDG_STATE_HOME` if it is absolute), never in the repository. Cite that path in summaries. Without an interactive terminal the runner says so in one line and writes nothing. "Before you start" lists only the needs of the steps about to run.
 - 2026-11-05 (#17, `417411e`; extended by #107, `7032137`): step 2.7 is scripted. Under Do Not Disturb, the user declines one Call on the Desktop and answers a second on the Pixel; the runner fails the step if the second looks handled on the Desktop, and `Ringing` must stay false throughout. Under Do Not Disturb the runner reads "handled on the Desktop" from the Banner closing while the Call still rings. The user's next sitting is the first real run.
 - 2026-11-05 (#19, `6bf11cb`): six out-of-range checks await the user (walk out and back, suspend, a Call to the Test Number out of range, the real `Connect` errors, A2DP and paging cost, the link supervision timeout). Agents must not run them. They are listed in [out of range](../research/2026-11-05-out-of-range.md); the paging cost also gates #109.
 - 2026-11-05 (#101, `f7a35a6`): no item added, because nothing safe makes `ConnectProfile` fail on the real Pixel.

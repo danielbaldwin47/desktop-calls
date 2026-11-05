@@ -11,6 +11,11 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
 
 ## Batches
 
+- 2026-11-05, after an independent review of the session (Fable):
+  - **At most one infrastructure ticket** (CI, checklist tooling, review machinery) is in flight at a time, and every batch contains a user-facing ticket.
+  - **Report the scorecard in three tiers:** verified on the Pixel, verified on the Simulated Phone only, and claimed. Don't count tickets.
+  - **Cite a source for every number** in a progress report. The review found my "1.28 s audio" figure had no source.
+
 - 2026-11-05 (retro on #42): before launching a batch, list the files each ticket is likely to touch. Never run two tickets on the same file at once. #42 and the flake fix both worked on `crates/automation/src/gallery.rs`, and one fix was reverted.
 - 2026-11-05: only one agent at a time uses the real Phone. In a batch, name which one.
 

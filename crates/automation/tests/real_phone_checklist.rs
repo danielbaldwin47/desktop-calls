@@ -430,6 +430,115 @@ fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
             .contains("drew its first frame"),
         "{dialer:#}"
     );
+
+    // 7.1: placed and ended from the keyboard alone.
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "pass", "{keyboard:#}");
+    let evidence = keyboard["evidence"].to_string();
+    for seen in [
+        "opened the Dialer",
+        "Call Window the keyboard",
+        "keyboard alone",
+    ] {
+        assert!(evidence.contains(seen), "{seen}: {keyboard:#}");
+    }
+}
+
+/// Whether any of `record`'s evidence lines contains `text`.
+fn says(record: &serde_json::Value, text: &str) -> bool {
+    record["evidence"].as_array().is_some_and(|evidence| {
+        evidence
+            .iter()
+            .any(|line| line.as_str().is_some_and(|line| line.contains(text)))
+    })
+}
+
+#[test]
+fn step_3_1_sees_two_handoffs_to_the_phone_and_back_and_asks_about_the_earpiece_each_time() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["3"], results.path());
+    let questions = runner.play(|_| "y".to_owned());
+
+    let earpiece = questions
+        .iter()
+        .filter(|question| question.contains("earpiece"))
+        .count();
+    assert_eq!(earpiece, 2, "{}", runner.transcript.join("\n"));
+    let result = result_file(results.path());
+    let handoff = step(&result, "3.1");
+    assert_eq!(handoff["result"], "pass", "{handoff:#}");
+    for place in ["Phone", "Desktop"] {
+        let moved = handoff["evidence"]
+            .as_array()
+            .expect("the evidence")
+            .iter()
+            .filter(|line| {
+                line.as_str().is_some_and(|line| {
+                    line.contains(&format!("moved to the {place}"))
+                        && line.contains("after the Handoff was asked for")
+                })
+            })
+            .count();
+        assert_eq!(moved, 2, "{place}: {handoff:#}");
+    }
+}
+
+#[test]
+fn group_5_records_where_the_audio_goes_with_the_earbuds_connected() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["5"], results.path());
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    // As AOSP does, answering on the Desktop makes it the active device.
+    let on_desktop = step(&result, "5.1");
+    assert_eq!(on_desktop["result"], "pass", "{on_desktop:#}");
+    assert_eq!(
+        on_desktop["measurements"]["audio_location"], "desktop",
+        "{on_desktop:#}"
+    );
+    // Answered on the earbuds, the audio stays with the Phone, which then
+    // refuses Move audio here while the earbuds are active: recorded, with
+    // the Call Window's plain sentence.
+    let on_earbuds = step(&result, "5.2");
+    assert_eq!(on_earbuds["result"], "pass", "{on_earbuds:#}");
+    assert!(says(on_earbuds, "stayed with the Phone"), "{on_earbuds:#}");
+    assert_eq!(
+        on_earbuds["measurements"]["audio_location"], "phone",
+        "{on_earbuds:#}"
+    );
+    assert!(says(on_earbuds, "said so plainly"), "{on_earbuds:#}");
+}
+
+#[test]
+fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_restart() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["6"], results.path());
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    for (id, measurement) in [
+        ("6.1", "reconnect_ms"),
+        ("6.2", "reconnect_after_resume_ms"),
+        ("6.3", "reconnect_after_wireplumber_ms"),
+    ] {
+        let record = step(&result, id);
+        assert_eq!(record["result"], "pass", "{record:#}");
+        assert!(
+            record["measurements"][measurement]
+                .as_u64()
+                .is_some_and(|ms| ms <= 10_000),
+            "{record:#}"
+        );
+    }
+    assert!(
+        says(step(&result, "6.2"), "saw the Desktop suspend and resume"),
+        "{result:#}"
+    );
+    assert!(
+        says(step(&result, "6.3"), "Telephony go with"),
+        "{result:#}"
+    );
 }
 
 /// What the runner listed under "Before you start", in order.

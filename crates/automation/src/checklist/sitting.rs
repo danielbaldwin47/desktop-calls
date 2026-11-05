@@ -404,7 +404,12 @@ impl Sitting {
 ///   `mute`, `unmute`, `keybinding`, `escape`, `a`, `d`,
 ///   `click-notification`, `enter`;
 /// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
-///   Omarchy's bell records it;
+///   Omarchy's bell records it; `suspend`, `resume`, as logind announces
+///   them; `restart-wireplumber`, as Telephony leaves and returns;
+/// - the user's keyboard and Call Window, beyond the above:
+///   `type-test-number`, `ctrl-h`, `move-audio-to-phone`, `move-audio-here`;
+/// - the Phone and its surroundings: `callee-answers` (the Test Number
+///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
 pub struct Demo {
     /// The user's own window, which has keyboard focus until the keybinding
@@ -428,6 +433,9 @@ const DEMO_NUMBER: &str = "+447700900461";
 /// The demo's Test Number, for the PBAP probe to redact: another Ofcom
 /// drama number.
 const DEMO_TEST_NUMBER: &str = "+447700900999";
+
+/// How long Telephony is off the bus when the demo restarts `WirePlumber`.
+const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
 
 /// How many Calls the demo's Call History holds: more than the 50 the
 /// Pixel gives per pull, so there is a second page to read.
@@ -572,6 +580,28 @@ impl Demo {
             "phone-dials" => self.phone_dials(),
             "do-not-disturb-on" => self.harness.set_do_not_disturb(true),
             "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
+            "type-test-number" => self.harness.keyboard().type_text(DEMO_TEST_NUMBER),
+            "ctrl-h" => self.harness.keyboard().press_with_control('h'),
+            "callee-answers" => self.harness.simulated_phone().callee_answers(),
+            "earbuds-on" => self.harness.simulated_phone().set_earbuds(true),
+            "out-of-range" => self.harness.simulated_phone().disconnect(),
+            "return-to-range" => self.harness.simulated_phone().return_to_range(),
+            "suspend" => self.harness.simulated_phone().prepare_for_sleep(true),
+            "resume" => self.harness.simulated_phone().prepare_for_sleep(false),
+            "restart-wireplumber" => self
+                .harness
+                .simulated_phone()
+                .restart_telephony(WIREPLUMBER_GAP),
+            "move-audio-to-phone" | "move-audio-here" => {
+                let to = if action == "move-audio-here" {
+                    "desktop"
+                } else {
+                    "phone"
+                };
+                if let Err(error) = self.harness.move_audio(to) {
+                    println!("  demo: {}", error.message);
+                }
+            }
             other => self.act_on_call(other, call),
         }
         flush();
@@ -621,8 +651,10 @@ impl Demo {
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
                      click-notification, enter, phone-dials, indicator-click, indicator-mute, \
-                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, quirk NAME; or \
-                     skip, or quit."
+                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, \
+                     ctrl-h, callee-answers, earbuds-on, out-of-range, return-to-range, suspend, \
+                     resume, restart-wireplumber, move-audio-to-phone, move-audio-here, \
+                     quirk NAME; or skip, or quit."
                 ),
             },
         }

@@ -5,10 +5,66 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{
-    ACT_DEADLINE, DIALER_TARGET, LOG_DEADLINE, call_ends, helper_calls, millis, no_call_left,
+    ACT_DEADLINE, CALL_DEADLINE, DIALER_TARGET, LOG_DEADLINE, call_ends, helper_calls, millis,
+    no_call_left,
 };
 use crate::checklist::results::unix_micros;
 use crate::checklist::sitting::{Sitting, Stop};
+
+/// 7.1: place a Call to the Test Number and end it with the keyboard alone:
+/// the keybinding opens the Dialer, Enter places the Call, the keybinding
+/// focuses the Call Window and Ctrl+H hangs up.
+pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
+    no_call_left(sitting)?;
+    let mark = sitting.mark();
+    sitting.say(
+        "From here on, use only the keyboard. Press your Desktop Calls keybinding, type the Test Number, and press Enter.",
+        &["keybinding", "type-test-number", "enter", "phone-dials"],
+    );
+    let placed = sitting.wait_for("your Call being placed", CALL_DEADLINE, |state| {
+        state.calls.iter().any(|call| call.direction == "outgoing")
+    })?;
+    let Some(call) = placed
+        .state
+        .calls
+        .iter()
+        .find(|call| call.direction == "outgoing")
+        .map(|call| call.id)
+    else {
+        return Err(Stop::TimedOut("your Call being placed".to_owned()));
+    };
+    sitting.check(
+        sitting
+            .seen_since(mark, |state| state.focused("dialer"))
+            .is_some(),
+        "The keybinding opened the Dialer with the keyboard in it, and Enter placed the Call."
+            .to_owned(),
+    );
+    let focus_mark = sitting.mark();
+    call_ends(
+        sitting,
+        call,
+        "Once it rings or connects, press the keybinding again to bring up the Call Window, then Ctrl+H to hang up.",
+        &["callee-answers", "keybinding", "ctrl-h"],
+    )?;
+    sitting.check(
+        sitting
+            .seen_since(focus_mark, |state| state.focused("call-window"))
+            .is_some(),
+        "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned(),
+    );
+    let keyboard_only =
+        sitting.ask("Did you place and end the Call without touching the mouse?")?;
+    sitting.check(
+        keyboard_only,
+        if keyboard_only {
+            "You placed and ended the Call with the keyboard alone.".to_owned()
+        } else {
+            "Placing or ending the Call needed the mouse.".to_owned()
+        },
+    );
+    Ok(())
+}
 
 /// 7.2: the Banner beside a real notification, neither covering the other.
 pub(super) fn banner_beside_a_notification(sitting: &mut Sitting) -> Result<(), Stop> {

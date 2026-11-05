@@ -13,7 +13,7 @@ check: lint
 # CI runs this rather than `just check`: its test jobs build every target
 # between them, and building them again cost a minute (#118).
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
-lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo deny --locked check
@@ -129,6 +129,16 @@ uninstall:
     fi
     /usr/bin/python3 tools/install.py --uninstall
     if [ -z "${DESTDIR:-}" ]; then systemctl --user daemon-reload; fi
+
+# A Real-Phone Checklist step without a script names the open tickets it
+# waits on. Once one closes, the step needs its script, or the runner tells
+# the user it waits on a ticket long closed (ticket #120). Asks GitHub, and
+# fails if it can't; offline, DESKTOP_CALLS_OFFLINE=1 skips it knowingly.
+# `just merge` also refuses a PR that closes a ticket a step still names.
+[private]
+[no-exit-message]
+_checklist-waits-on-open-tickets:
+    @python3 tools/checklist_tickets.py
 
 # The core does no I/O and knows no GTK, D-Bus or logging, so none of those
 # crates may appear anywhere in its dependency tree.

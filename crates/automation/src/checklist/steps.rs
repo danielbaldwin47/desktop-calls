@@ -11,18 +11,24 @@ use std::time::{Duration, Instant};
 use super::sitting::{Seen, Sitting, Stop, seconds};
 use super::watch::AppState;
 
+mod audio_location;
 mod during_a_call;
 mod incoming;
 mod keyboard_and_look;
 mod missed_calls;
+mod range_and_power;
 
+use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
 use during_a_call::{keypad_tones, mute};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
     do_not_disturb, keybinding,
 };
-use keyboard_and_look::{banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar};
+use keyboard_and_look::{
+    banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar, keyboard_only_call,
+};
 use missed_calls::{ring_out, withheld_ring_out};
+use range_and_power::{out_of_range_and_back, suspend_and_resume, wireplumber_restart};
 
 /// A step's script. It returns once the step is done; whether it passed is
 /// in the sitting's findings.
@@ -185,8 +191,8 @@ pub const GROUPS: &[Group] = &[
                 id: "3.1",
                 needs: &[HELPER],
                 title: "Handoff to the Phone and back, twice: confirm by ear that the audio lands on the earpiece",
-                script: None,
-                lands_with: &[13, 14],
+                script: Some(handoff_twice),
+                lands_with: &[],
             },
             Step {
                 id: "3.2",
@@ -260,15 +266,15 @@ pub const GROUPS: &[Group] = &[
                 id: "5.1",
                 needs: &[HELPER, EARBUDS],
                 title: "With the earbuds connected to the Pixel, answer on the Desktop and note where the audio goes",
-                script: None,
-                lands_with: &[13],
+                script: Some(earbuds_answer_on_the_desktop),
+                lands_with: &[],
             },
             Step {
                 id: "5.2",
                 needs: &[HELPER, EARBUDS],
                 title: "Repeat, answering on the earbuds",
-                script: None,
-                lands_with: &[13],
+                script: Some(earbuds_answer_on_the_earbuds),
+                lands_with: &[],
             },
         ],
     },
@@ -280,22 +286,22 @@ pub const GROUPS: &[Group] = &[
                 id: "6.1",
                 needs: &[],
                 title: "Take the Pixel out of range (or turn its Bluetooth off), then back: the runner times the reconnect",
-                script: None,
-                lands_with: &[19],
+                script: Some(out_of_range_and_back),
+                lands_with: &[],
             },
             Step {
                 id: "6.2",
                 needs: &[],
                 title: "Suspend the Desktop for a minute, then resume",
-                script: None,
-                lands_with: &[19],
+                script: Some(suspend_and_resume),
+                lands_with: &[],
             },
             Step {
                 id: "6.3",
                 needs: &[NO_OTHER_AUDIO],
                 title: "Restart WirePlumber while idle",
-                script: None,
-                lands_with: &[20],
+                script: Some(wireplumber_restart),
+                lands_with: &[],
             },
         ],
     },
@@ -307,8 +313,8 @@ pub const GROUPS: &[Group] = &[
                 id: "7.1",
                 needs: &[KEYBINDING, TEST_NUMBER],
                 title: "Place and end a Call using only the keyboard",
-                script: None,
-                lands_with: &[10, 11],
+                script: Some(keyboard_only_call),
+                lands_with: &[],
             },
             Step {
                 id: "7.2",
@@ -412,6 +418,34 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
         ),
     );
     Ok(call)
+}
+
+/// How often the runner reads the app's log while it waits on a line.
+const LOG_POLL: Duration = Duration::from_millis(200);
+
+/// Waits up to `deadline` for the app to log `event_kind` after `from_us`,
+/// still reading skip and quit meanwhile, and returns when it was logged.
+/// `give_up` ends the wait early, for example when the Call has ended.
+fn logged_since(
+    sitting: &mut Sitting,
+    event_kind: &str,
+    from_us: u64,
+    deadline: Duration,
+    give_up: impl Fn(&AppState) -> bool,
+) -> Result<Option<u64>, Stop> {
+    let end = Instant::now() + deadline;
+    loop {
+        let logged = sitting
+            .log_since(from_us)
+            .iter()
+            .rfind(|line| line.event_kind == event_kind)
+            .map(|line| line.at_us);
+        if logged.is_some() || Instant::now() >= end || give_up(&sitting.now()) {
+            return Ok(logged);
+        }
+        // A wait that never matches: it reads what the user types meanwhile.
+        sitting.happens_within("nothing", LOG_POLL, |_| false)?;
+    }
 }
 
 /// How far before the Call appeared on the control interface to look for

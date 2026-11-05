@@ -666,6 +666,10 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     (state, effects)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per kind of Input, each handing off to its own function: the dispatch reads best as one table"
+)]
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
     state.note_paired_phones(&input);

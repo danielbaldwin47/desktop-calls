@@ -598,6 +598,14 @@ class InstalledService:
     def running(self) -> bool:
         return self.active_state() in ("active", "activating", "reloading")
 
+    def start_job(self) -> str:
+        """The path of the unit's start job still running, or "/"."""
+        path = call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "GetUnit",
+                    INSTALLED_UNIT, signature="s")
+        _, job = call(self.session, SYSTEMD, path, PROPERTIES_IF, "Get", SYSTEMD_UNIT_IF, "Job",
+                      signature="ss")
+        return str(job)
+
     def app_on_bus(self) -> bool:
         """Whether any copy of the app owns the control interface now."""
         return app_on_bus(self.session)
@@ -631,14 +639,16 @@ class InstalledService:
                                f"`systemctl --user start {INSTALLED_UNIT}`.")
                 return True
             log("SERVICE", f"starting {INSTALLED_UNIT}")
-            call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
-                 INSTALLED_UNIT, "replace", signature="ss")
-            wait_for(
-                lambda: (self.active_state() == "active" and self.app_on_bus())
-                or self.active_state() == "failed",
-                timeout, f"{INSTALLED_UNIT} running",
-            )
+            # StartUnit answers before the start ends, while ActiveState may
+            # still say how the last start went ("failed"), so the outcome is
+            # read once the start job has ended (#155).
+            job = str(call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
+                           INSTALLED_UNIT, "replace", signature="ss"))
+            wait_for(lambda: self.start_job() != job, timeout,
+                     f"{INSTALLED_UNIT} start finished", quiet=True)
             started = self.active_state() == "active" and self.app_on_bus()
+            if started:
+                log("OK", f"{INSTALLED_UNIT} running")
         except dbus.DBusException as e:
             if e.get_dbus_name() in self._ABSENT:
                 return True

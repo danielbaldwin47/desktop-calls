@@ -13,7 +13,10 @@
 #   COMMAND run by bash in /src
 #
 # The host's D-Bus, PipeWire, Bluetooth and home are not mounted: nothing in
-# the run can reach the real Phone or the user's session.
+# the run can reach the real Phone or the user's session. Nor does any of the
+# host's environment get in: not GH_TOKEN (lint's ticket check asks GitHub
+# anonymously, which works on this public repository) and not
+# DESKTOP_CALLS_OFFLINE (which would skip that check, and so can't pass a run).
 set -euo pipefail
 R=$1
 CACHE=$2
@@ -40,11 +43,5 @@ mount --bind "$CACHE/target" "$R/src/target"
 cp -L /etc/resolv.conf "$R/etc/resolv.conf"
 ip link set lo up 2>/dev/null || true
 
-environment=(HOME=/root PATH=/root/.cargo/bin:/usr/local/bin:/usr/bin TERM=dumb
-    CARGO_HOME=/cache/cargo-home CARGO_TERM_COLOR=never CI=true)
-for name in GH_TOKEN DESKTOP_CALLS_OFFLINE; do
-    if [ -n "${!name:-}" ]; then
-        environment+=("$name=${!name}")
-    fi
-done
-exec chroot "$R" /usr/bin/env -i "${environment[@]}" bash -euo pipefail -c "cd /src && $COMMAND"
+exec chroot "$R" /usr/bin/env -i HOME=/root PATH=/root/.cargo/bin:/usr/local/bin:/usr/bin TERM=dumb \
+    CARGO_HOME=/cache/cargo-home CARGO_TERM_COLOR=never CI=true bash -euo pipefail -c "cd /src && $COMMAND"

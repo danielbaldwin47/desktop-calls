@@ -18,7 +18,9 @@ What it does, in order:
   2. Takes a lock, so runs from several agents take turns.
   3. Removes /tmp/desktop-calls-test-* folders of yours that are over an
      hour old (the harness leaks them).
-  4. Builds the image the first time (a few minutes, 2 GB).
+  4. Builds the image the first time (a few minutes, 2 GB), and again once it
+     is two weeks old, as CI's is new each run. Refuses to run with
+     DESKTOP_CALLS_OFFLINE set, which would skip lint's ticket check.
   5. Checks out HEAD into a scratch directory and runs each job in the
      image, under nice, with a private /tmp. The jobs that run tests have
      no network, and nothing reaches the host's D-Bus, PipeWire, Bluetooth
@@ -45,6 +47,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -69,9 +72,12 @@ RUNS = ROOT / "runs"
 LOCK = ROOT / "lock"
 BUILT = ROOT / "image-built"
 
-# How old the image may get before a run says so. CI installs the newest
-# packages on every run, so an old image drifts from it.
+# How old the image may get before a run builds it again. CI installs the
+# newest packages on every run, so an old image drifts from it.
 IMAGE_STALE_DAYS = 14
+# Set, it makes the ticket check in lint skip itself (tools/checklist_tickets.py),
+# which a run that posts "CI passed" must not.
+OFFLINE = "DESKTOP_CALLS_OFFLINE"
 # How long logs and failed runs' /tmp are kept.
 KEEP_DAYS = 14
 # A /tmp/desktop-calls-test-* folder this old belongs to no running test.
@@ -93,7 +99,7 @@ JOBS: dict[str, str] = {
     "scenarios": "just ci-scenarios && just ci-first-frame-timings",
 }
 # Lint's `cargo deny` fetches the advisory database, and its ticket check asks
-# GitHub. The others build with the crates fetched beforehand, and run
+# GitHub, anonymously (the repository is public). The others build with the crates fetched beforehand, and run
 # scenarios that must not see the host's network.
 JOBS_WITH_NETWORK = {"lint"}
 # Before any job, with the network: the pinned toolchain (rust-toolchain.toml)
@@ -213,7 +219,15 @@ class Log:
             for raw in process.stdout:
                 self.line(raw.decode(errors="replace").rstrip("\n"))
         except KeyboardInterrupt:
+            # SIGINT or SIGTERM (see main). unshare's --kill-child takes the
+            # whole tree of the run down with it.
             process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            process.stdout.close()
             raise
         return process.wait()
 
@@ -277,21 +291,24 @@ def userns(*flags: str) -> list[str]:
     ]
 
 
+def image_age_days(now: float | None = None) -> float:
+    now = time.time() if now is None else now
+    return (now - BUILT.stat().st_mtime) / 86400 if BUILT.exists() else 0
+
+
 def build_image(log: Log, rebuild: bool) -> None:
-    """Builds the image if there is none (or when asked to), and warns if an old one."""
+    """Builds the image if there is none, when asked to, or when it is more
+    than IMAGE_STALE_DAYS old: CI's image is new each run."""
+    if ROOTFS.exists() and image_age_days() > IMAGE_STALE_DAYS:
+        log.line(f"The image is {image_age_days():.0f} days old; building it again.")
+        rebuild = True
     if ROOTFS.exists() and rebuild:
         log.line("Removing the old image...")
         remove_tree(ROOTFS)
     if ROOTFS.exists():
-        age_days = (time.time() - BUILT.stat().st_mtime) / 86400 if BUILT.exists() else 0
-        if age_days > IMAGE_STALE_DAYS:
-            log.line(
-                f"The image is {age_days:.0f} days old; CI's is new each run. "
-                "Next: just ci-local --rebuild-image"
-            )
         return
     started = time.monotonic()
-    log.line("Building the image (first run, or after --rebuild-image; a few minutes)...")
+    log.line("Building the image (first run, or an old one; a few minutes)...")
     partial = ROOT / "rootfs.partial"
     remove_tree(partial)
     remove_tree(LAYERS)
@@ -330,26 +347,10 @@ def run_in_image(
 ) -> int:
     flags = [] if network else ["--net"]
     CACHE.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env.pop("GH_TOKEN", None)
-    if network and token():
-        env["GH_TOKEN"] = token()
     return log.stream(
         userns(*flags)
         + [str(LOCAL_CI / "enter.sh"), str(ROOTFS), str(CACHE), str(scratch), str(tmp), command],
-        env=env,
     )
-
-
-_token: list[str] = []
-
-
-def token() -> str:
-    """GitHub's token, for lint's ticket check, which falls back to anonymous."""
-    if not _token:
-        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
-        _token.append(result.stdout.strip() if result.returncode == 0 else "")
-    return _token[0]
 
 
 def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Path]:
@@ -405,9 +406,9 @@ def push_branch(sha: str, log: Log) -> None:
             "Next: switch to a branch, push it, then just ci-local"
         )
     log.line(f"GitHub doesn't have {sha[:7]} yet: pushing {branch}.")
+    # The commit that was tested, not whatever the branch points at now.
     result = subprocess.run(
-        ["git", "push", "--set-upstream", "origin", f"{branch}:{branch}"],
-        capture_output=True, text=True,
+        ["git", "push", "origin", f"{sha}:refs/heads/{branch}"], capture_output=True, text=True
     )
     log.line((result.stdout + result.stderr).strip())
     if result.returncode != 0:
@@ -415,6 +416,10 @@ def push_branch(sha: str, log: Log) -> None:
             f"{sha[:7]} passed, but pushing {branch} failed, so no status was posted.\n"
             "Next: merge origin/main into the branch (or fix the push), then just ci-local"
         )
+    # So `git status` and a bare `git push` know the branch, as after `git push -u`.
+    subprocess.run(
+        ["git", "branch", "--set-upstream-to", f"origin/{branch}", branch], capture_output=True
+    )
 
 
 def status_description(state: str, seconds: float, failed: list[str], log: Log) -> str:
@@ -437,8 +442,18 @@ def post_status(sha: str, state: str, description: str) -> None:
         )
 
 
+def require_online() -> None:
+    if os.environ.get(OFFLINE):
+        raise Refused(
+            f"{OFFLINE} is set, which makes lint skip its ticket check, so this run "
+            "can't say \"CI passed\".\n"
+            f"Next: unset {OFFLINE}, then just ci-local"
+        )
+
+
 def settle(sha: str, failed: list[str], seconds: float, log: Log) -> int:
     """Posts the result, if HEAD is still the commit that was tested."""
+    require_online()
     now, dirty = head_and_cleanliness()
     if now != sha or dirty:
         raise Refused(
@@ -463,6 +478,16 @@ def settle(sha: str, failed: list[str], seconds: float, log: Log) -> int:
 # -- Main ---------------------------------------------------------------------
 
 
+def stop_on_sigterm() -> None:
+    """Treats SIGTERM like Ctrl-C, so a killed run takes its `unshare` tree
+    down with it instead of leaving it running under the lock's name."""
+
+    def handler(signum: int, frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handler)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run CI's jobs here, and post 'CI passed' on HEAD if they pass"
@@ -473,7 +498,10 @@ def main() -> int:
                         help="remove the image and build it again from the newest archlinux:latest")
     args = parser.parse_args()
     jobs = args.jobs or list(JOBS)
+    stop_on_sigterm()
     try:
+        if not args.jobs or set(args.jobs) == set(JOBS):
+            require_online()
         sha = require_clean_head()
         lock = take_turn()  # held until the process exits
         log = Log(sha)

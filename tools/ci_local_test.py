@@ -3,10 +3,16 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import pathlib
 import re
+import shutil
+import signal
+import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -52,6 +58,23 @@ class SameAsCI(unittest.TestCase):
         for recipe in ("ci-scenarios", "ci-first-frame-timings"):
             self.assertRegex(JUSTFILE, rf"(?m)^{recipe}\b.*:$")
 
+    def test_every_just_command_in_a_ci_job_is_a_local_job(self):
+        # The other direction: a `just` step added to the lint, check or
+        # scenarios job of ci.yml must be added to JOBS, or it runs on GitHub
+        # only, and "CI passed" can be posted without it.
+        local = {
+            recipe.strip()
+            for command in ci_local.JOBS.values()
+            for recipe in command.split("&&")
+        }
+        found = set()
+        for job in ("lint", "check", "scenarios"):
+            block = re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [\w-]+:\n|\Z)", WORKFLOW)
+            self.assertIsNotNone(block, job)
+            for line in re.findall(r"(?m)^\s+run: (just [^\n]*)$", block.group(1)):
+                found.add(line.split(" | ")[0].split(" --partition")[0].strip())
+        self.assertEqual(found, local)
+
     def test_the_image_has_the_packages_ci_installs(self):
         # The workflow's one package list, anchored as `&install` and used by
         # every test job.
@@ -93,6 +116,119 @@ class Folders(unittest.TestCase):
             os.utime(link, (two_hours_ago, two_hours_ago), follow_symlinks=False)
             self.assertEqual(ci_local.clear_stale_test_folders(parent=parent), [])
             self.assertTrue(target.exists())
+
+
+class Stopping(unittest.TestCase):
+    def test_sigterm_stops_the_run_and_its_child(self):
+        previous = signal.getsignal(signal.SIGTERM)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(ci_local, "LOGS", pathlib.Path(directory)):
+            ci_local.stop_on_sigterm()
+            log = ci_local.Log("a" * 40)
+            threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGTERM)).start()
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(KeyboardInterrupt):
+                    # Prints its process ID, then waits.
+                    log.stream(["sh", "-c", "echo $$; exec sleep 30"])
+            finally:
+                signal.signal(signal.SIGTERM, previous)
+                log._file.close()
+            child = int(log.path.read_text().split()[0])
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child, 0)
+
+
+class Offline(unittest.TestCase):
+    def test_a_run_with_the_ticket_check_skipped_cannot_pass(self):
+        with mock.patch.dict(os.environ, {ci_local.OFFLINE: "1"}), \
+                mock.patch.object(ci_local, "post_status") as post:
+            with self.assertRaises(ci_local.Refused):
+                ci_local.settle("a" * 40, [], 100, mock.Mock())
+            post.assert_not_called()
+
+    def test_the_image_never_gets_the_host_environment(self):
+        enter = (REPOSITORY / "tools/local-ci/enter.sh").read_text()
+        self.assertNotIn("DESKTOP_CALLS_OFFLINE=", enter)
+        self.assertNotIn("GH_TOKEN=", enter)
+        self.assertIn("env -i", enter)
+
+
+class Image(unittest.TestCase):
+    def test_an_old_image_is_built_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "rootfs").mkdir()
+            built = root / "image-built"
+            built.touch()
+            old = time.time() - (ci_local.IMAGE_STALE_DAYS + 1) * 86400
+            os.utime(built, (old, old))
+            with mock.patch.object(ci_local, "ROOTFS", root / "rootfs"), \
+                    mock.patch.object(ci_local, "BUILT", built), \
+                    mock.patch.object(ci_local, "ROOT", root), \
+                    mock.patch.object(
+                        ci_local, "remove_tree", side_effect=lambda p: shutil.rmtree(p, ignore_errors=True)
+                    ) as remove, \
+                    mock.patch.object(ci_local, "pull_base_layers", side_effect=RuntimeError("pulled")):
+                with self.assertRaisesRegex(RuntimeError, "pulled"):
+                    ci_local.build_image(mock.Mock(), rebuild=False)
+            remove.assert_any_call(root / "rootfs")
+
+    def test_a_fresh_image_is_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "rootfs").mkdir()
+            built = root / "image-built"
+            built.touch()
+            with mock.patch.object(ci_local, "ROOTFS", root / "rootfs"), \
+                    mock.patch.object(ci_local, "BUILT", built), \
+                    mock.patch.object(ci_local, "pull_base_layers") as pull:
+                ci_local.build_image(mock.Mock(), rebuild=False)
+            pull.assert_not_called()
+
+
+class Pushing(unittest.TestCase):
+    SHA = "c" * 40
+
+    def push(self, branch):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(ci_local, "git", return_value=branch), \
+                mock.patch.object(ci_local.subprocess, "run", side_effect=run):
+            ci_local.push_branch(self.SHA, mock.Mock())
+        return calls
+
+    def test_never_pushes_main(self):
+        with mock.patch.object(ci_local, "git", return_value="main"), \
+                mock.patch.object(ci_local.subprocess, "run") as run:
+            with self.assertRaisesRegex(ci_local.Refused, "main"):
+                ci_local.push_branch(self.SHA, mock.Mock())
+            run.assert_not_called()
+
+    def test_never_pushes_a_detached_head(self):
+        with mock.patch.object(ci_local, "git", return_value=""), \
+                mock.patch.object(ci_local.subprocess, "run") as run:
+            with self.assertRaisesRegex(ci_local.Refused, "detached"):
+                ci_local.push_branch(self.SHA, mock.Mock())
+            run.assert_not_called()
+
+    def test_pushes_the_tested_commit_never_the_branch_ref(self):
+        calls = self.push("ticket/7-x")
+        pushes = [command for command in calls if command[:2] == ["git", "push"]]
+        self.assertEqual(pushes, [["git", "push", "origin", f"{self.SHA}:refs/heads/ticket/7-x"]])
+        self.assertNotIn("--force", " ".join(pushes[0]))
+
+    def test_a_failed_push_posts_nothing(self):
+        def fail(command, **kwargs):
+            return subprocess.CompletedProcess(command, 1, "", "rejected")
+
+        with mock.patch.object(ci_local, "git", return_value="ticket/7-x"), \
+                mock.patch.object(ci_local.subprocess, "run", side_effect=fail):
+            with self.assertRaisesRegex(ci_local.Refused, "pushing ticket/7-x failed"):
+                ci_local.push_branch(self.SHA, mock.Mock())
 
 
 class Posting(unittest.TestCase):

@@ -421,21 +421,25 @@ impl Harness {
     /// The process ID of whatever owns the app's control interface now, if
     /// anything does.
     ///
+    /// One question to the bus, not "has it an owner?" then "whose?": the
+    /// owner can leave between the two, as the installed service does while
+    /// a dev run replaces it, and the second then fails (#155).
+    ///
     /// # Panics
     ///
     /// If the bus doesn't answer.
     #[must_use]
     pub fn app_process_id(&self) -> Option<u32> {
         zbus::block_on(async {
-            let bus = DBusProxy::new(&self.session).await?;
-            let name = BusName::try_from(APP_BUS_NAME)?;
-            if !bus.name_has_owner(name.clone()).await? {
-                return Ok(None);
+            let owner = DBusProxy::new(&self.session)
+                .await?
+                .get_connection_unix_process_id(BusName::try_from(APP_BUS_NAME)?)
+                .await;
+            match owner {
+                Ok(pid) => Ok(Some(pid)),
+                Err(zbus::fdo::Error::NameHasNoOwner(_)) => Ok(None),
+                Err(error) => Err(zbus::Error::from(error)),
             }
-            bus.get_connection_unix_process_id(name)
-                .await
-                .map(Some)
-                .map_err(zbus::Error::from)
         })
         .expect("ask the session bus who owns the app's control interface")
     }

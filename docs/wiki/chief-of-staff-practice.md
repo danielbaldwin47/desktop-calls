@@ -16,6 +16,9 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
   - **Report the scorecard in three tiers:** verified on the Pixel, verified on the Simulated Phone only, and claimed. Don't count tickets.
   - **Cite a source for every number** in a progress report. The review found my "1.28 s audio" figure had no source.
 
+- 2026-11-05, retro by Fable, decided with the user: **feature freeze until checklist groups 1, 2 and 6 have run on the Pixel.** Finish the PRs already open; start no new feature tickets. The review found that no scorecard item was verified on the Pixel and real Answer had never been observed.
+- 2026-11-05, same retro: **minor review findings go into one `after-v1` issue** as bullets, not separate tickets. Measurement and tooling tickets (#25–#27, #139–#152) carry the `after-v1` label.
+
 - 2026-11-05 (retro on #42): before launching a batch, list the files each ticket is likely to touch. Never run two tickets on the same file at once. #42 and the flake fix both worked on `crates/automation/src/gallery.rs`, and one fix was reverted.
 - 2026-11-05: only one agent at a time uses the real Phone. In a batch, name which one.
 
@@ -34,6 +37,7 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
   - **Each model caught things the other missed:**
     - Opus: protocol bugs, vacuous tests, log-cursor races.
     - Sonnet: glossary rules, safety gaps, stale text.
+  - **Lighter reviews for tooling** (Fable retro, 2026-11-05, user's decision): a PR that touches only `tools/`, `crates/automation/`, docs or `.github/` gets one Sonnet review and one round, then merges. #134, a checklist-script PR, took 4 rounds.
   - Planned next: move this review to GitHub Actions as the first task of a software factory, after v1.
 
 - 2026-11-05: confirm checks with `gh pr checks <n> --watch` and that the PR head contains `origin/main`, then merge with `--match-head-commit <full sha>` (a short SHA is rejected). Use `just merge <n>` once #56 lands. Never merge with CI pending: see the #40 incident in [retros](retros.md).

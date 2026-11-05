@@ -3,6 +3,9 @@
 
 [graph]
 all-features = true
+# Desktop Calls runs on Linux desktops only. Without this, cargo-deny also
+# judges dependencies that only microcontroller targets pull in.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
 [advisories]
 # Unmaintained crates and yanked versions fail too, not only vulnerabilities.

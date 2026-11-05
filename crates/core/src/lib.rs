@@ -7,7 +7,17 @@
 //! carry out the effects. See `CODING_STANDARDS.md`.
 #![deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 
+mod call;
 mod connection;
+mod machine;
 pub mod messages;
+mod number;
 
-pub use connection::{ConnectionState, Effect, Input, Phone, State, UnknownConnectionState, step};
+pub use call::{
+    AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,
+};
+pub use connection::{ConnectionState, Phone, UnknownConnectionState};
+pub use machine::{
+    BannerView, CallWindowPhase, CallWindowView, Effect, Input, PhoneCommand, State, Surfaces,
+    Timer, step,
+};

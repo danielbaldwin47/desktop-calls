@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use test_harness::vcards::{self, CallKind};
-use test_harness::{AppState, Harness, RecordedMethodCall, Screenshot};
+use test_harness::{AppEvent, AppState, Harness, RecordedMethodCall, Screenshot};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -668,6 +668,46 @@ fn call_history_past_the_phones_50_entry_pulls_is_read_page_by_page() {
         history.last().map(|entry| entry.number.as_str()),
         Some(vcards::number(119).as_str()),
         "the oldest Call is there"
+    );
+    // Call History progress is its own event; Contacts land once.
+    let logged = |kind: &str| {
+        harness
+            .app_log()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|event| event["event_kind"] == kind)
+            .count()
+    };
+    assert_eq!(logged("call-history-read"), 2, "the newest page, then all");
+    assert_eq!(logged("contacts-synced"), 1);
+}
+
+#[test]
+fn older_call_history_pages_the_phone_fails_leave_contacts_read() {
+    let harness = Harness::start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(10, 0));
+    phone.set_pbap_folder("cch", &vcards::call_history(120));
+    phone.fail_history_pulls_from(50);
+
+    harness.simulated_phone().connect();
+
+    let state = harness.wait_for_app("ContactsState is ready", SYNC_DEADLINE, is_ready);
+    assert_eq!(
+        (state.contacts.contacts, state.contacts.call_history),
+        (10, 50),
+        "Contacts, and the newest Calls"
+    );
+    // The Phone fails the pull of the older Calls.
+    wait_for_call_history_pulls(&harness, 2);
+    harness.wait_for_app("the sync is over", SYNC_DEADLINE, |_| {
+        harness.app_logged(&AppEvent::kind("contacts-synced"))
+    });
+    let state = harness.wait_for_app("still ready", DEADLINE, is_ready);
+    assert_eq!(
+        (state.contacts.contacts, state.contacts.call_history),
+        (10, 50),
+        "the failed page undid nothing"
     );
 }
 

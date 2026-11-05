@@ -876,6 +876,13 @@ impl Control {
         lock(&self.world).obex.pull_delay_per_vcard = obex::per_vcard(contacts_ms, call_history_ms);
     }
 
+    /// Makes each pull from a Call History folder at `offset` or later
+    /// fail, as a Phone that drops the transfer; `u16::MAX` for none.
+    fn fail_history_pulls_from(&self, offset: u16) {
+        lock(&self.world).obex.fail_history_pulls_from =
+            (offset != u16::MAX).then_some(usize::from(offset));
+    }
+
     /// Answers the prompt to share Contacts that the Phone shows, as the
     /// person holding it does: `"grant"` or `"deny"`. Fails if none shows.
     fn answer_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {

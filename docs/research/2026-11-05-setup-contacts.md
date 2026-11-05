@@ -10,8 +10,10 @@ For #22. Labels: **[V]** verified here, against the Simulated Phone and simulate
   2. It selects `pb` and asks `GetSize`, then pulls Contacts.
   3. It pulls the older Call History pages.
 
-  So the Setup Window shows "✓ Recent Calls" and "312 Contacts… about N seconds left" during the slow part, and Contacts never wait on the older pages. If an older page fails, the sync keeps the pages it already has, so Contacts are never skipped. Call History progress is logged as `call-history-read`, and `contacts-synced` is logged once, when Contacts land. The estimate is `GetSize` × 30 ms, counted from the moment the count is known.
-  - **[V]** by `granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_synced` and `call_history_past_the_phones_50_entry_pulls_is_read_page_by_page`. The second one shows Contacts are ready with 50 Calls, and the older Calls follow up to 120.
+  So the Setup Window shows "✓ Recent Calls" and "312 Contacts… about N seconds left" during the slow part, and Contacts never wait on the older pages. If an older page fails, the sync keeps the pages it already has, so Contacts are never skipped. Nothing is cached until Contacts are read: a cache with the newest Calls and no Contacts would read back after a restart as a sync that finished. Call History progress is logged as `call-history-read`, and `contacts-synced` is logged once, when Contacts land. The estimate is `GetSize` × 30 ms, counted from the moment the count is known.
+  - **[V]** by `granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_synced` and `call_history_past_the_phones_50_entry_pulls_is_read_page_by_page`. The second one shows Contacts are ready with 50 Calls, the older Calls follow up to 120, and the log has `call-history-read` twice and `contacts-synced` once.
+  - **[V]** by `older_call_history_pages_the_phone_fails_leave_contacts_read`, with the Simulated Phone's new `FailHistoryPullsFrom(offset)`.
+  - **[V]** that nothing is cached by `a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced`, which restarts the app and finds Contacts still `not-synced`.
   - **[I]** that the Pixel's pace is steady enough for the estimate to hold.
 
 ## The prompt
@@ -29,7 +31,7 @@ For #22. Labels: **[V]** verified here, against the Simulated Phone and simulate
   - **[V]** by the core tests in `crates/core/tests/setup_contacts.rs`.
   - **[V]** by the harness tests `a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again` and `a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced`.
 - If Contacts were already read, only older Calls are missing. The window finishes, with the heading "My Pixel is set up" rather than "is connected". **[V]** by the core tests.
-- When the Simulated Phone goes out of range, a `CreateSession` waiting on the prompt fails with `Failed` and the prompt goes away. **[I]** that real obexd fails the same call when the link drops, and that Android takes the prompt down. Either way the app ignores a sync failure that arrives while the Phone is gone.
+- When the Simulated Phone goes out of range, a `CreateSession` waiting on the prompt fails with `Failed` and the prompt goes away. **[I]** that real obexd fails the same call when the link drops, and that Android takes the prompt down. The app ignores a sync failure that arrives while the Phone is gone. A failure that arrives just before hands-free goes down shows the finish page for a moment. If the Phone leaves within 2 s of that, the window says the Phone disconnected instead, and Contacts are `not-synced`. A Phone leaving later leaves the finish page as it is. **[V]** by the core tests; **[I]** that 2 s covers the gap on real hardware.
 
 ## The keybinding
 

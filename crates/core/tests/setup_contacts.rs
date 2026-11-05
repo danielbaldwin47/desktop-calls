@@ -756,6 +756,41 @@ fn keys_taken_after_the_offer_refresh_the_offer_instead_of_asking_to_try_again()
 }
 
 #[test]
+fn a_phone_leaving_well_after_a_failed_sync_leaves_the_finish_page_as_it_is() {
+    let (state, effects) = run(
+        syncing(),
+        [Input::ContactsSyncFailed(SyncFailure::Unavailable(
+            Unavailable::Failed,
+        ))],
+    );
+    let Some(&timer) = setup_timers(&effects).last() else {
+        panic!("the moment after the failure has a timer: {effects:?}");
+    };
+    // Long after, on the keybinding's Confirm.
+    let (state, _) = run(
+        state,
+        [
+            Input::TimerFired(timer),
+            Input::KeybindingChecked(config(BINDINGS)),
+            Input::AddKeybinding,
+            disconnected(),
+        ],
+    );
+
+    assert!(
+        matches!(
+            setup_step(&state),
+            Some(SetupStep::Done {
+                connected: false,
+                ..
+            })
+        ),
+        "{:?}",
+        setup_step(&state)
+    );
+}
+
+#[test]
 fn a_sync_failing_just_before_the_phone_leaves_still_says_the_phone_left() {
     // The link dropping fails the PBAP session before hands-free goes down.
     let (state, _) = run(
@@ -776,4 +811,35 @@ fn a_sync_failing_just_before_the_phone_leaves_still_says_the_phone_left() {
     let (state, _) = reconnected(state);
     let (_, effects) = run(state, [Input::ContinueContacts]);
     assert_eq!(syncs(&effects), 1);
+}
+
+#[test]
+fn a_later_sync_cut_short_keeps_the_contacts_a_finished_sync_read() {
+    let (state, _) = run(synced(), [disconnected()]);
+    let (state, effects) = reconnected(state);
+    assert_eq!(syncs(&effects), 1, "every connect syncs");
+
+    let (state, _) = run(state, [disconnected()]);
+
+    assert_eq!(state.contacts_state(), ContactsState::Ready);
+}
+
+#[test]
+fn a_sync_cut_short_keeps_the_cached_contacts_ready() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::ContactsLoaded {
+                contacts: contacts(3),
+                call_history: call_history(2),
+            },
+        ],
+    );
+    let (state, effects) = reconnected(state);
+    assert_eq!(syncs(&effects), 1);
+
+    let (state, _) = run(state, [disconnected()]);
+
+    assert_eq!(state.contacts_state(), ContactsState::Ready);
 }

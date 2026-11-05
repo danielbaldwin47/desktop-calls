@@ -319,7 +319,7 @@ fn a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again() {
 
 #[test]
 fn a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced() {
-    let harness = fresh_install();
+    let mut harness = fresh_install();
     pair_through_the_window(&harness);
     wait_for_prompt(&harness);
     harness.simulated_phone().answer_contacts_prompt("grant");
@@ -333,6 +333,24 @@ fn a_phone_leaving_after_the_recent_calls_land_leaves_contacts_not_synced() {
     );
 
     phone_leaves(&harness);
+
+    // Nothing was cached: restarted, the app still has no Contacts.
+    let cache = harness.directory().join("cache/desktop-calls");
+    let cached = std::fs::read_dir(&cache).map_or(0, Iterator::count);
+    assert_eq!(cached, 0, "nothing cached in {}", cache.display());
+    harness.restart_app();
+    let state = harness.wait_for_app("the app is back", STARTUP, |state| {
+        state.contacts.state != "syncing"
+    });
+    assert_eq!(
+        (
+            state.contacts.state.as_str(),
+            state.contacts.reason.as_str()
+        ),
+        ("unavailable", "not-synced"),
+        "{:?}",
+        state.contacts
+    );
 }
 
 #[test]

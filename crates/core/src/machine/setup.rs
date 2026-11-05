@@ -59,6 +59,9 @@ const WARNING_MS: u32 = 3_000;
 /// About how long the Phone takes to give each Contact: the Pixel gave 319
 /// in 9.7 s (2026-11-05).
 const CONTACT_READ_MS: u64 = 30;
+/// How soon after a sync fails the Phone leaving means the failure was the
+/// link dropping: obexd's call fails a moment before hands-free goes down.
+const LINK_DROP_MS: u32 = 2_000;
 
 /// The open Setup Window.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -78,6 +81,9 @@ pub(super) struct Setup {
     keybinding: KeybindingStage,
     /// The confirmed keybinding is being written.
     adding: bool,
+    /// The sync failed a moment ago, and the finish page shows it: if the
+    /// Phone leaves now, the failure was the link dropping.
+    just_failed: bool,
 }
 
 /// How far the sync the Setup Window follows has got.
@@ -722,6 +728,7 @@ pub(super) fn setup_timer(state: &mut State, wait: u32, effects: &mut Vec<Effect
             ask_for_hands_free(setup, phone, effects);
         }
         Step::AskedForHandsFree(phone) => setup.step = Step::PhoneCallsOff(phone.clone()),
+        Step::Done(_) => setup.just_failed = false,
         Step::Confirmed(_) => {
             setup.step = Step::Choose;
             setup.notice = Some(SetupNotice::PairingFailed);
@@ -740,6 +747,7 @@ fn ask_for_hands_free(setup: &mut Setup, phone: Phone, effects: &mut Vec<Effect>
 
 fn wait(setup: &mut Setup, after_ms: u32, effects: &mut Vec<Effect>) {
     setup.wait += 1;
+    setup.just_failed = false;
     effects.push(Effect::StartTimer {
         timer: Timer::SetupStep(setup.wait),
         after_ms,
@@ -782,14 +790,7 @@ pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
         // The link dropping can fail the sync just before the Phone is
         // known to have left: that failure is the Phone leaving, so the
         // window says so rather than that Contacts couldn't be read.
-        Step::Done(phone)
-            if !here
-                && !setup.progress.contacts.is_read()
-                && matches!(
-                    sync,
-                    ContactsState::Unavailable(Unavailable::Failed | Unavailable::NotSynced)
-                ) =>
-        {
+        Step::Done(phone) if setup.just_failed && !here => {
             setup.step = Step::ContactsAway(phone.clone());
             return;
         }
@@ -813,6 +814,10 @@ pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
         };
     if over {
         finish(setup, phone, effects);
+        if sync == ContactsState::Unavailable(Unavailable::Failed) {
+            wait(setup, LINK_DROP_MS, effects);
+            setup.just_failed = true;
+        }
     }
 }
 

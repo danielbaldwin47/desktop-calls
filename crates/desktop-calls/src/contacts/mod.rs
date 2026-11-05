@@ -141,6 +141,13 @@ struct ContactsSync {
     locale_region: Option<String>,
 }
 
+/// Whether indexing what is held also writes the cache.
+#[derive(Clone, Copy)]
+enum Save {
+    Yes,
+    No,
+}
+
 /// Why a sync gave up.
 #[derive(Clone, Copy)]
 enum Stop {
@@ -218,7 +225,9 @@ impl ContactsSync {
         let mut history = self.pull_call_history(session, 1).await?;
         if let Some(folders) = &history {
             held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
-            self.report_call_history(address, held).await;
+            // Not saved yet: a cache with Calls and no Contacts would read
+            // back as a sync that finished.
+            self.report_call_history(address, held, Save::No).await;
         }
 
         let mut contacts = Folder::new("pb", None);
@@ -237,7 +246,7 @@ impl ContactsSync {
         if has_contacts {
             held.contacts = contacts_from(contacts.cards);
         }
-        let (indexed, call_history) = self.index_and_save(address, held).await;
+        let (indexed, call_history) = self.index(address, held, Save::Yes).await;
         tracing::info!(
             event_kind = %EventKind::ContactsSynced,
             contacts = held.contacts.len(),
@@ -259,7 +268,7 @@ impl ContactsSync {
                 return Err(Stop::Denied);
             }
             held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
-            self.report_call_history(address, held).await;
+            self.report_call_history(address, held, Save::Yes).await;
         }
         self.report(Input::ContactsSyncProgress(SyncProgress::Finished));
         Ok(())
@@ -279,10 +288,10 @@ impl ContactsSync {
         Ok(())
     }
 
-    /// Indexes and saves the Call History read so far, and reports it as
-    /// the sync's progress.
-    async fn report_call_history(&self, address: &str, held: &mut Cached) {
-        let (_, call_history) = self.index_and_save(address, held).await;
+    /// Indexes the Call History read so far, saving it if `save`, and
+    /// reports it as the sync's progress.
+    async fn report_call_history(&self, address: &str, held: &mut Cached, save: Save) {
+        let (_, call_history) = self.index(address, held, save).await;
         tracing::info!(
             event_kind = %EventKind::CallHistoryRead,
             call_history = held.call_history.len(),
@@ -310,7 +319,7 @@ impl ContactsSync {
             Ok(Some(folders)) => {
                 held.call_history =
                     call_history_from(&folders, std::mem::take(&mut held.call_history));
-                let (_, call_history) = self.index_and_save(address, held).await;
+                let (_, call_history) = self.index(address, held, Save::Yes).await;
                 tracing::info!(
                     event_kind = %EventKind::CallHistoryRefreshed,
                     call_history = held.call_history.len(),
@@ -546,14 +555,18 @@ impl ContactsSync {
         }
     }
 
-    /// Indexes what is held, off the main thread, and writes the cache.
-    async fn index_and_save(&self, address: &str, held: &mut Cached) -> (Contacts, CallHistory) {
+    /// Indexes what is held, off the main thread, and writes the cache if
+    /// `save`.
+    async fn index(&self, address: &str, held: &mut Cached, save: Save) -> (Contacts, CallHistory) {
         let address = address.to_owned();
         let region = self.locale_region.clone();
         let taken = std::mem::take(held);
         let done = off_main_thread(move || {
             let indexed = index(&taken, region.as_deref());
-            let saved = cache::save(&address, &taken);
+            let saved = match save {
+                Save::Yes => cache::save(&address, &taken),
+                Save::No => Ok(()),
+            };
             (taken, indexed, saved)
         })
         .await;

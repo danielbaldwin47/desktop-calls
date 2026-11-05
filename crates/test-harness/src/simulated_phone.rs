@@ -64,6 +64,8 @@ trait SimulatedPhone1 {
 
     fn set_pull_delay_per_vcard(&self, contacts_ms: u32, call_history_ms: u32) -> zbus::Result<()>;
 
+    fn fail_history_pulls_from(&self, offset: u16) -> zbus::Result<()>;
+
     fn answer_contacts_prompt(&self, answer: &str) -> zbus::Result<()>;
 
     fn contacts_prompts(&self) -> zbus::Result<Vec<(u64, u64, String)>>;
@@ -503,6 +505,17 @@ impl SimulatedPhone<'_> {
                 .await
         })
         .expect("set the Simulated Phone's pull delay for each vCard");
+    }
+
+    /// Makes each pull from a Call History folder at `offset` or later
+    /// fail with `Failed`, as a Phone that drops the transfer.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn fail_history_pulls_from(&self, offset: u16) {
+        zbus::block_on(async { self.proxy().await?.fail_history_pulls_from(offset).await })
+            .expect("make the Simulated Phone fail later Call History pulls");
     }
 
     /// Answers the "Allow access to contacts and call history?" prompt the

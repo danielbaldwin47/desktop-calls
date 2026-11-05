@@ -175,6 +175,9 @@ pub struct Obex {
     /// How much longer a pull takes for each vCard: from `pb`, and from a
     /// Call History folder.
     pub pull_delay_per_vcard: (Duration, Duration),
+    /// Pulls from a Call History folder at this offset or later fail with
+    /// `Failed`, as a Phone that drops the transfer.
+    pub fail_history_pulls_from: Option<usize>,
     /// How many times the Phone has gone out of range: a call waiting
     /// since an earlier count fails.
     links_lost: u32,
@@ -253,6 +256,7 @@ pub fn new() -> zbus::Result<Obex> {
         remembered: None,
         pull_delay: Duration::ZERO,
         pull_delay_per_vcard: (Duration::ZERO, Duration::ZERO),
+        fail_history_pulls_from: None,
         links_lost: 0,
         sessions_open: 0,
         most_sessions_at_once: 0,
@@ -582,6 +586,22 @@ fn pull_delay(obex: &Obex, folder: &str, count: usize) -> Duration {
 
 /// `PullAll(targetfile, filters)`: queues a transfer of the selected
 /// folder into `targetfile`.
+/// How many vCards a pull from `folder` at `offset` gives at most, as the
+/// Pixel caps Call History pulls; `None` if the Phone fails it.
+fn most_pulled(obex: &Obex, folder: &str, offset: usize, asked: Option<usize>) -> Option<usize> {
+    let most = asked.unwrap_or(usize::from(u16::MAX));
+    if !HISTORY_FOLDERS.contains(&folder) {
+        return Some(most);
+    }
+    if obex
+        .fail_history_pulls_from
+        .is_some_and(|from| offset >= from)
+    {
+        return None;
+    }
+    Some(most.min(HISTORY_PULL_CAP))
+}
+
 fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
     let Ok((targetfile, filters)) = message
         .body()
@@ -603,13 +623,13 @@ fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
             .and_then(|(_, value)| u16::try_from(value.clone()).ok())
             .map(usize::from)
     };
-    let mut most = filter("MaxCount").unwrap_or(usize::from(u16::MAX));
-    if HISTORY_FOLDERS.contains(&folder.as_str()) {
-        most = most.min(HISTORY_PULL_CAP);
-    }
+    let offset = filter("Offset").unwrap_or(0);
+    let Some(most) = most_pulled(obex, &folder, offset, filter("MaxCount")) else {
+        return Reply::Error(ERROR_FAILED, "Failed".to_owned()).into();
+    };
     let pulled: Vec<&str> = vcards_in(&held)
         .into_iter()
-        .skip(filter("Offset").unwrap_or(0))
+        .skip(offset)
         .take(most)
         .collect();
     let delay = pull_delay(obex, &folder, pulled.len());

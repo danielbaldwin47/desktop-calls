@@ -83,8 +83,7 @@ fn keys_unbound_after_a_binding_are_free_again() {
 
 #[test]
 fn an_earlier_desktop_calls_line_from_another_path_counts_as_added() {
-    let text =
-        "o.bind(\"SUPER + ALT + C\", \"Desktop Calls\", \"/home/user/.cargo/bin/desktop-calls\")\n";
+    let text = "o.bind(\"SUPER + ALT + C\", \"Phone\", \"/home/user/.cargo/bin/desktop-calls\")\n";
     assert_eq!(check(text), added());
 }
 

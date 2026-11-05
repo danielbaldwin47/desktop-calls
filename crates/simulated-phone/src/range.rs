@@ -276,8 +276,11 @@ pub fn other_phone_up(world: &mut World) -> zbus::Result<Option<Change>> {
             object: gateway.clone(),
             interfaces,
         },
-        Signal::ModemAdded { modem: gateway },
+        Signal::ModemAdded {
+            modem: gateway.clone(),
+        },
     ]);
+    world.pairing.other_gateway = Some(gateway);
     Ok(Some(change))
 }
 
@@ -355,8 +358,22 @@ fn connect(
     call: &MethodCall,
     message: &Message,
 ) -> zbus::Result<()> {
-    if lock(world).pairing.is_other_phone(&call.path) {
-        // Another paired Phone, never in range: pages and times out, with
+    let other = {
+        let world = lock(world);
+        world.pairing.is_other_phone(&call.path).then(|| {
+            OwnedObjectPath::try_from(call.path.as_str())
+                .ok()
+                .and_then(|path| world.bluez.get(&path, bluez::DEVICE, "Connected").cloned())
+                .and_then(|connected| bool::try_from(connected).ok())
+                .unwrap_or(false)
+        })
+    };
+    if other == Some(true) {
+        // The other Phone is connected already (`ConnectOtherPhone`).
+        return zbus::block_on(Reply::body(()).send(system, &message.header()));
+    }
+    if other == Some(false) {
+        // Another paired Phone, out of range: pages and times out, with
         // BlueZ answering everything else meanwhile.
         std::thread::sleep(PAGE_TIMEOUT);
         let reply = Reply::Error(

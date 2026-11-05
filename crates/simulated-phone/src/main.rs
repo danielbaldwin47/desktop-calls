@@ -459,6 +459,24 @@ impl Control {
         Ok(())
     }
 
+    /// A Call rings on the other Phone, as `Ring` does on the Phone, on the
+    /// AudioGateway of its own. Returns the Call's path. Fails while the
+    /// other Phone is not connected.
+    async fn ring_on_other_phone(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
+        let (call, signals) = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let Some(gateway) = world.pairing.other_gateway.clone() else {
+                return Err(zbus::fdo::Error::Failed(
+                    "the other Phone is not connected, so it cannot ring".to_owned(),
+                ));
+            };
+            telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?
+        };
+        self.emit(signals).await?;
+        Ok(call)
+    }
+
     /// Comes back into range without connecting: the Phone answers the
     /// Desktop's next page, and its `Connect` succeeds.
     fn return_to_range(&self) {

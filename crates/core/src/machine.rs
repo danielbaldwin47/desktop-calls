@@ -299,6 +299,9 @@ pub struct State {
     /// Once there is one, no other Phone is followed, and it outlives the
     /// Phone being unpaired, so a restart never picks another silently.
     chosen_phone: Option<String>,
+    /// Every Phone BlueZ has reported paired, followed or not, so the Setup
+    /// Window can offer the others when none is followed.
+    paired_phones: Vec<Phone>,
     /// Phones nearby that aren't paired with the Desktop, in the order
     /// BlueZ found them.
     nearby_phones: Vec<Phone>,
@@ -575,6 +578,26 @@ impl State {
         }
     }
 
+    /// Keeps `paired_phones` as BlueZ reports Phones paired and unpaired.
+    fn note_paired_phones(&mut self, input: &Input) {
+        match input {
+            Input::PhonePaired(phone) => {
+                match self
+                    .paired_phones
+                    .iter_mut()
+                    .find(|known| known.address.eq_ignore_ascii_case(&phone.address))
+                {
+                    Some(known) => *known = phone.clone(),
+                    None => self.paired_phones.push(phone.clone()),
+                }
+            }
+            Input::PhoneUnpaired { address } => self
+                .paired_phones
+                .retain(|known| !known.address.eq_ignore_ascii_case(address)),
+            _ => {}
+        }
+    }
+
     /// Whether the user's choice of Phone allows following `phone`.
     fn may_follow(&self, phone: &Phone) -> bool {
         self.chosen_phone
@@ -627,6 +650,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
 
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
+    state.note_paired_phones(&input);
     match input {
         // Desktop Calls works with one Phone: the first one paired.
         Input::EarlierRun(earlier) => pick_up_earlier_run(&mut state, earlier, &mut effects),
@@ -793,6 +817,7 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         setup_offered: state.setup_offered,
         setup_openings: state.setup_openings,
         chosen_phone: state.chosen_phone.clone(),
+        paired_phones: state.paired_phones.clone(),
         nearby_phones: state.nearby_phones.clone(),
         ..forget_phone(state)
     }

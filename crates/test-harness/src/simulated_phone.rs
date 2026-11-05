@@ -25,6 +25,8 @@ trait SimulatedPhone1 {
 
     fn connect_other_phone(&self) -> zbus::Result<()>;
 
+    fn ring_on_other_phone(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
+
     fn forget_pairing(&self) -> zbus::Result<()>;
 
     fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
@@ -178,6 +180,19 @@ impl SimulatedPhone<'_> {
     pub fn connect_other_phone(&self) {
         zbus::block_on(async { self.proxy().await?.connect_other_phone().await })
             .expect("bring the other Phone into range");
+    }
+
+    /// A Call rings on the other Phone, on its own AudioGateway. Returns the
+    /// Call's path.
+    ///
+    /// # Panics
+    ///
+    /// If the other Phone isn't connected.
+    #[must_use]
+    pub fn ring_on_other_phone(&self, number: &str) -> String {
+        zbus::block_on(async { self.proxy().await?.ring_on_other_phone(number).await })
+            .expect("make the other Phone ring")
+            .to_string()
     }
 
     /// Comes back into range without connecting by itself: the Desktop's

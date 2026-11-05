@@ -57,18 +57,23 @@ pub fn load() -> Option<String> {
 /// Keeps `address` as the Phone chosen last, replacing what was kept.
 pub fn save(address: &str) {
     match write(address) {
-        Ok(()) => tracing::info!(
+        Ok(true) => tracing::info!(
             event_kind = %EventKind::ChosenPhoneKept,
             phone_address = %address,
             "Keeping the Phone chosen, for the next run"
+        ),
+        Ok(false) => failed(
+            "chosen-phone-no-state-directory",
+            "neither XDG_STATE_HOME nor HOME is an absolute path",
         ),
         Err(error) => failed("chosen-phone-io", &error.to_string()),
     }
 }
 
-fn write(address: &str) -> io::Result<()> {
+/// Whether the choice was written: `false` if there is nowhere to keep it.
+fn write(address: &str) -> io::Result<bool> {
     let Some(path) = file() else {
-        return Ok(());
+        return Ok(false);
     };
     if let Some(directory) = path.parent() {
         DirBuilder::new()
@@ -89,7 +94,8 @@ fn write(address: &str) -> io::Result<()> {
     writer.write_all(&serde_json::to_vec(&document).map_err(io::Error::other)?)?;
     writer.sync_all()?;
     drop(writer);
-    fs::rename(&temporary, &path)
+    fs::rename(&temporary, &path)?;
+    Ok(true)
 }
 
 fn failed(error_kind: &str, detail: &str) {

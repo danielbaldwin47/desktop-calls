@@ -5,6 +5,10 @@
 
 use desktop_calls_core::{Effect, Input, Phone, SetupStep, State, step};
 
+fn setup_step(state: &State) -> Option<SetupStep> {
+    state.surfaces().setup_window.map(|window| window.step)
+}
+
 const PIXEL: &str = "AA:BB:CC:DD:EE:FF";
 const OLD: &str = "48:A4:93:00:00:7E";
 
@@ -118,8 +122,85 @@ fn when_the_chosen_phone_is_not_paired_the_setup_window_opens_and_no_other_phone
             .any(|effect| matches!(effect, Effect::AttachPhone { .. }))
     );
     assert_eq!(
-        state.surfaces().setup_window.map(|window| window.step),
+        setup_step(&state),
+        Some(SetupStep::Choose {
+            phones: vec![old()]
+        }),
+        "the Phone that is paired is offered, so the user is not stuck"
+    );
+}
+
+#[test]
+fn choosing_a_phone_that_is_paired_already_follows_and_keeps_it_without_pairing() {
+    let (state, _) = run(
+        State::default(),
+        [
+            chosen(PIXEL),
+            Input::PhonePaired(old()),
+            Input::PairedPhonesListed,
+        ],
+    );
+
+    let (state, effects) = run(
+        state,
+        [Input::ChoosePhone {
+            address: OLD.to_owned(),
+        }],
+    );
+
+    assert_eq!(state.phone(), Some(&old()));
+    assert!(effects.contains(&Effect::KeepChosenPhone {
+        address: OLD.to_owned()
+    }));
+    assert!(effects.contains(&Effect::AttachPhone {
+        address: OLD.to_owned()
+    }));
+    assert!(effects.contains(&Effect::ConnectPhone {
+        address: OLD.to_owned()
+    }));
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PairPhone { .. })),
+        "nothing is paired again"
+    );
+}
+
+#[test]
+fn paired_phones_are_offered_only_while_none_is_followed() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(old()),
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::OpenSetupWindow,
+        ],
+    );
+    assert_eq!(state.phone(), Some(&old()));
+    assert_eq!(
+        setup_step(&state),
         Some(SetupStep::Choose { phones: vec![] })
+    );
+
+    // A Phone unpaired is no longer offered.
+    let (state, _) = run(
+        State::default(),
+        [
+            chosen(PIXEL),
+            Input::PhonePaired(old()),
+            Input::PhonePaired(phone("Third", "11:22:33:44:55:66")),
+            Input::PairedPhonesListed,
+            Input::PhoneUnpaired {
+                address: OLD.to_owned(),
+            },
+        ],
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Choose {
+            phones: vec![phone("Third", "11:22:33:44:55:66")]
+        })
     );
 }
 

@@ -4,9 +4,11 @@
 //! #121).
 //!
 //! The Simulated Phone's other Phone (`old_phone_paired`) lists before the
-//! Phone in BlueZ's objects and in the app's reading of them, so without a
-//! remembered choice a restart follows it: every scenario here fails if the
-//! choice is not kept and obeyed.
+//! Phone in BlueZ's objects and in the app's reading of them, so a restart
+//! with no remembered choice follows it. The scenarios that follow a choice
+//! fail if the choice is not kept and obeyed; those about a saved choice
+//! that can't be read, and about one Phone paired, hold with or without it,
+//! by design.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,6 +24,7 @@ const PIXEL: &str = "My Pixel";
 const OLD_PIXEL: &str = "Old Pixel";
 const OLD_PIXEL_ADDRESS: &str = "00:A4:93:00:00:03";
 const NUMBER: &str = "+447700900123";
+const OTHER_NUMBER: &str = "+447700900999";
 
 /// The old Phone is paired and out of range, and the Pixel is nearby, not
 /// paired. The app follows the old Phone, the only one paired.
@@ -83,10 +86,10 @@ fn chosen_phone_file(harness: &Harness) -> std::path::PathBuf {
     harness.directory().join("state/desktop-calls/chosen-phone.json")
 }
 
-/// The user unpairs the device at `address` in Bluetooth settings. The
-/// Simulated BlueZ removes only a device that isn't connected, so the Phone
-/// goes out of range first, as `bluetoothctl remove` finds it after BlueZ
-/// has dropped it.
+/// The user unpairs the Phone at `address` in Bluetooth settings. The
+/// Simulated BlueZ removes only a Phone that isn't connected, so the tests
+/// take the Phone out of range first. That a real BlueZ drops a connected
+/// Phone before removing it is inferred, not seen.
 fn unpair(harness: &Harness, address: &str) {
     let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
     let path = zbus::ObjectPath::try_from(path.as_str()).unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
@@ -127,7 +130,7 @@ fn the_choice_is_kept_across_more_than_one_restart() {
 }
 
 #[test]
-fn with_both_phones_connected_at_once_the_chosen_one_is_followed() {
+fn with_both_phones_connected_before_a_restart_the_chosen_one_is_followed_and_the_other_is_ignored() {
     let mut harness = pixel_chosen_over_the_old_phone();
     harness.simulated_phone().connect_other_phone();
     harness.restart_app();
@@ -137,11 +140,22 @@ fn with_both_phones_connected_at_once_the_chosen_one_is_followed() {
         STARTUP,
         |state| phone_is(state, PIXEL) && state.connection_state == "connected",
     );
-    // The Pixel's Calls are the Desktop's Calls, not the other Phone's.
+    // A Call rings on the other Phone, then one on the Pixel: the app
+    // reports the Pixel's alone.
+    let _ignored = harness.simulated_phone().ring_on_other_phone(OTHER_NUMBER);
     let _call = harness.simulated_phone().ring(NUMBER);
-    harness.wait_for_app("the Pixel's Call rings", STARTUP, |state| {
-        state.ringing && state.calls.len() == 1
+    let state = harness.wait_for_app("a Call rings", STARTUP, |state| {
+        state.ringing && !state.calls.is_empty()
     });
+    assert_eq!(
+        state
+            .calls
+            .iter()
+            .map(|call| call.number.as_str())
+            .collect::<Vec<_>>(),
+        [NUMBER],
+        "only the Pixel's Call is the Desktop's"
+    );
 }
 
 #[test]
@@ -188,15 +202,46 @@ fn when_the_chosen_phone_was_unpaired_the_setup_window_opens_and_no_other_phone_
 }
 
 #[test]
-fn the_chosen_phone_unpaired_while_the_app_runs_is_not_replaced_by_another() {
-    let harness = pixel_chosen_over_the_old_phone();
+fn with_the_chosen_phone_unpaired_the_paired_phone_can_be_chosen_and_stays_chosen() {
+    let mut harness = pixel_chosen_over_the_old_phone();
+    harness.simulated_phone().connect_other_phone();
     harness.simulated_phone().disconnect();
     unpair(&harness, &harness.phone().address.clone());
-
-    let state = harness.wait_for_app("the Pixel is forgotten", STARTUP, |state| {
+    harness.wait_for_app("the Pixel is forgotten", STARTUP, |state| {
         state.phone.is_none()
     });
-    assert_eq!(state.connection_state, "not-set-up");
+    harness.restart_app();
+
+    // The only Phone left is paired already: the window offers it.
+    harness.wait_for_app(
+        "the Setup Window offers the old Phone, with keyboard focus",
+        STARTUP,
+        |state| {
+            field(state, "step") == Some("choose")
+                && field(state, "phones") == Some(OLD_PIXEL)
+                && field(state, "focused") == Some("true")
+        },
+    );
+    harness.keyboard().press(Key::Return);
+    harness.wait_for_app(
+        "the old Phone is followed and connected",
+        CONNECT_DEADLINE,
+        |state| phone_is(state, OLD_PIXEL) && state.connection_state == "connected",
+    );
+    assert_eq!(
+        harness.simulated_phone().pairing_requests().len(),
+        1,
+        "nothing was paired again: the Pixel's pairing is the only one"
+    );
+
+    harness.restart_app();
+
+    let state = harness.wait_for_app(
+        "the old Phone, chosen last, is followed from the start",
+        STARTUP,
+        |state| phone_is(state, OLD_PIXEL) && state.connection_state == "connected",
+    );
+    assert!(setup_window(&state).is_none(), "the Setup Window stays closed");
 }
 
 #[test]

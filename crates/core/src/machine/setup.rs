@@ -154,7 +154,11 @@ impl State {
         let setup = self.setup.as_ref()?;
         let step = match &setup.step {
             Step::Choose => SetupStep::Choose {
-                phones: self.nearby_phones.clone(),
+                phones: self
+                    .already_paired_to_choose()
+                    .chain(self.nearby_phones.iter())
+                    .cloned()
+                    .collect(),
             },
             Step::Pairing(phone) => SetupStep::Pairing {
                 phone: phone.clone(),
@@ -182,6 +186,13 @@ impl State {
             notice: setup.notice,
             opened: setup.opened,
         })
+    }
+
+    /// The Phones paired already that the Setup Window offers: while no
+    /// Phone is followed, such as when the chosen Phone was unpaired, any of
+    /// them can be chosen without pairing it again.
+    fn already_paired_to_choose(&self) -> impl Iterator<Item = &Phone> {
+        self.paired_phones.iter().filter(|_| self.phone.is_none())
     }
 
     /// Whether the Setup Window is pairing the Phone with `address`.
@@ -277,6 +288,25 @@ fn not_nearby(state: &mut State, address: &str) {
 }
 
 fn choose(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
+    if !state
+        .setup
+        .as_ref()
+        .is_some_and(|setup| setup.step == Step::Choose)
+    {
+        return;
+    }
+    // A Phone paired already is followed at once, with nothing to pair.
+    let paired_already = state
+        .already_paired_to_choose()
+        .find(|phone| phone.address.eq_ignore_ascii_case(address))
+        .cloned();
+    if let Some(phone) = paired_already {
+        if let Some(setup) = state.setup.as_mut() {
+            setup.notice = None;
+        }
+        paired(state, phone, effects);
+        return;
+    }
     let Some(phone) = state
         .nearby_phones
         .iter()
@@ -288,9 +318,6 @@ fn choose(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
     let Some(setup) = state.setup.as_mut() else {
         return;
     };
-    if setup.step != Step::Choose {
-        return;
-    }
     setup.notice = None;
     setup.step = Step::Pairing(phone.clone());
     effects.push(Effect::PairPhone {

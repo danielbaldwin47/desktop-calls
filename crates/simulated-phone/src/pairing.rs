@@ -25,7 +25,8 @@
 //! - With `--old-phone`, another Phone is paired too, and out of range:
 //!   connects to it page and time out. The control interface's
 //!   `ConnectOtherPhone` brings it into range, connected with hands-free
-//!   and its own AudioGateway, beside the Phone.
+//!   and its own AudioGateway, beside the Phone; `RingOnOtherPhone` makes a
+//!   Call ring on it.
 //! - `Adapter1.RemoveDevice` unpairs a device that isn't connected, as the
 //!   user does in Bluetooth settings: `InterfacesRemoved`. A connected one
 //!   fails `org.bluez.Error.Failed`, because the simulation doesn't model
@@ -112,6 +113,9 @@ pub struct Pairing {
     requests: Vec<(u32, String)>,
     /// Paired Phones other than the Phone, never in range.
     others: Vec<OwnedObjectPath>,
+    /// The AudioGateway of the other Phone, while it is connected with
+    /// hands-free.
+    pub other_gateway: Option<OwnedObjectPath>,
 }
 
 impl Pairing {

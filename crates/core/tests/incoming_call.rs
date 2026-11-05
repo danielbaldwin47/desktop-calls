@@ -3,7 +3,7 @@
 
 use desktop_calls_core::{
     AudioLocation, CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Mute, Phone,
-    PhoneCommand, State, Timer, Timestamp, Transport, messages::Failure, step,
+    PhoneCommand, RingingCaller, State, Timer, Timestamp, Transport, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -11,6 +11,14 @@ const CALL: CallId = CallId(1);
 
 fn caller() -> Caller {
     Caller::Number("+447700900123".to_owned())
+}
+
+/// `caller`, as the Banner shows a caller no Contact names.
+fn known(caller: Caller) -> RingingCaller {
+    RingingCaller::Known {
+        caller,
+        contact: None,
+    }
 }
 
 /// Feeds `inputs` to `state` and returns where it ends up, with every effect
@@ -107,7 +115,7 @@ fn an_incoming_call_rings_and_shows_the_banner() {
     assert_eq!(effects, [Effect::StartRinging]);
     let banner = state.surfaces().banner.expect("the Banner is shown");
     assert_eq!(banner.call, CALL);
-    assert_eq!(banner.caller, caller());
+    assert_eq!(banner.caller, known(caller()));
     assert_eq!(state.surfaces().call_window, None);
     assert_eq!(state.audio_location(), Some(AudioLocation::Phone));
 }
@@ -350,7 +358,7 @@ fn a_call_with_no_number_yet_shows_the_banner_awaiting_the_number() {
     let (state, effects) = ringing_with_no_number();
 
     let banner = state.surfaces().banner.expect("the Banner shows at once");
-    assert!(banner.awaiting_number, "{banner:?}");
+    assert_eq!(banner.caller, RingingCaller::Identifying);
     assert!(
         effects.contains(&Effect::StartTimer {
             timer: Timer::NumberLate(CALL),
@@ -373,7 +381,7 @@ fn a_number_that_comes_late_ends_the_wait() {
     );
 
     let banner = state.surfaces().banner.expect("the Banner shows");
-    assert_eq!((banner.caller, banner.awaiting_number), (caller(), false));
+    assert_eq!(banner.caller, known(caller()));
 }
 
 #[test]
@@ -383,10 +391,7 @@ fn with_no_number_by_the_end_of_the_wait_the_number_is_withheld() {
     let (state, _) = run(state, [Input::TimerFired(Timer::NumberLate(CALL))]);
 
     let banner = state.surfaces().banner.expect("the Banner still shows");
-    assert_eq!(
-        (banner.caller, banner.awaiting_number),
-        (Caller::Withheld, false)
-    );
+    assert_eq!(banner.caller, known(Caller::Withheld));
 }
 
 #[test]

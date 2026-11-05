@@ -4,7 +4,7 @@
 
 use crate::call::{AudioLocation, CallId, Caller};
 use crate::connection::{ConnectionState, Phone};
-use crate::machine::{CallWindowPhase, Input, Mute, State, Surfaces};
+use crate::machine::{CallWindowPhase, Input, Mute, RingingCaller, State, Surfaces};
 use crate::matching::ContactMatch;
 use crate::messages::ProblemKind;
 
@@ -48,11 +48,8 @@ pub enum IndicatorStatus {
     NotConnected(Phone),
     Connected(Phone),
     OutOfRange(Phone),
-    /// A Call rings here from this caller.
-    Ringing {
-        caller: Caller,
-        contact: Option<ContactMatch>,
-    },
+    /// A Call rings here from this caller, as the Banner says it.
+    Ringing(RingingCaller),
     /// A Call with this other party is live or being placed.
     InCall {
         caller: Caller,
@@ -142,10 +139,7 @@ impl State {
         let (look, status) = if let Some(banner) = &surfaces.banner {
             (
                 IndicatorLook::Ringing,
-                IndicatorStatus::Ringing {
-                    caller: banner.caller.clone(),
-                    contact: banner.contact.clone(),
-                },
+                IndicatorStatus::Ringing(banner.caller.clone()),
             )
         } else if let Some(window) = call_window {
             (

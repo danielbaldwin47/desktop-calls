@@ -4,10 +4,10 @@
 //! `late-line-identification` quirk does that. Every surface showing the
 //! Call follows the number once it arrives: the Incoming Call Banner, the
 //! Missed Call notification, and the Dialer it opens. Until the number
-//! arrives, or the Phone has had long enough to send it, the Banner says it
-//! is identifying the caller rather than "Withheld number". Observed through the
-//! control interface's `Calls`, `Surfaces` and `MissedCall`, and the
-//! notification server stand-in.
+//! arrives, or the Phone has had long enough to send it, the Banner and the
+//! Indicator say the caller is being identified rather than "Withheld
+//! number". Observed through the control interface's `Calls`, `Surfaces` and
+//! `MissedCall`, and the notification server and tray stand-ins.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -157,6 +157,43 @@ fn a_withheld_number_shows_as_withheld_once_the_wait_is_over() {
         Some("Withheld number"),
         "{state:?}"
     );
+}
+
+/// Waits until the Banner's caller line reads `caller` and, in the same
+/// look, the Indicator's tooltip reads `tooltip`: both observed together,
+/// so neither wait can use up the time the other needs.
+fn banner_and_indicator_say(harness: &Harness, caller: &str, tooltip: &str) {
+    let started = Instant::now();
+    loop {
+        let state = harness.app_state();
+        let items = harness.tray().items();
+        if banner_caller(&state).as_deref() == Some(caller)
+            && items
+                .iter()
+                .any(|item| item.tooltip.as_deref() == Some(tooltip))
+        {
+            return;
+        }
+        assert!(
+            started.elapsed() < DEADLINE,
+            "the Banner didn't say {caller:?} while the Indicator said {tooltip:?} \
+             within {DEADLINE:?}: the Banner last said {:?}, the tray items {items:?}",
+            banner_caller(&state)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// While the caller is being identified, the Indicator's tooltip says the
+/// Banner's caller line, not "Call from Withheld number"; once the wait is
+/// over, both say the number is withheld.
+#[test]
+fn while_the_caller_is_identified_the_indicator_says_what_the_banner_says() {
+    let harness = synced_late();
+
+    let _path = harness.simulated_phone().ring("");
+    banner_and_indicator_say(&harness, IDENTIFYING, IDENTIFYING);
+    banner_and_indicator_say(&harness, "Withheld number", "Call from Withheld number");
 }
 
 /// A Call whose number came late rings out: the Missed Call names Alice,

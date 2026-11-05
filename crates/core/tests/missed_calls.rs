@@ -6,7 +6,8 @@ use desktop_calls_core::matching::DialerRowKind;
 use desktop_calls_core::{
     CallHistory, CallHistoryEntry, CallHistoryKind, CallId, CallState, Caller, Contact,
     ContactMatch, ContactNumber, Contacts, Directory, Effect, Input, MissedCallNotice, NumberLabel,
-    Phone, PhoneCommand, State, SyncFailure, Timestamp, Unavailable, messages::Failure, step,
+    Phone, PhoneCommand, RingingCaller, State, SyncFailure, Timestamp, Unavailable,
+    messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -514,8 +515,11 @@ fn the_banner_names_a_caller_the_phone_reports_late() {
 
     let banner = state.surfaces().banner.expect("the Banner shows");
     assert_eq!(
-        (banner.caller, banner.contact),
-        (number(ALICE), Some(alice()))
+        banner.caller,
+        RingingCaller::Known {
+            caller: number(ALICE),
+            contact: Some(alice()),
+        }
     );
 }
 

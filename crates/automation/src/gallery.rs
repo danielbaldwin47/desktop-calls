@@ -27,6 +27,10 @@ struct State {
     name: &'static str,
     /// The caption.
     title: &'static str,
+    /// Whether the app still reports the state, for one that doesn't last:
+    /// only a capture taken while it does is kept, and if none is, the run
+    /// fails rather than show the next state under this caption.
+    still: fn(&AppState) -> bool,
     /// Brings the scenario into the state.
     reach: fn(&Harness),
     /// Whether a capture under `look` shows the state yet.
@@ -101,6 +105,7 @@ const STATES: &[State] = &[
     State {
         name: "bare-output",
         title: "The bare output, with the Phone connected and no surface shown",
+        still: |_| true,
         prepare: as_is,
         reach: connect,
         shown: |_, _| true,
@@ -108,6 +113,7 @@ const STATES: &[State] = &[
     State {
         name: "incoming-call-banner",
         title: "The Incoming Call Banner, ringing",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -118,6 +124,9 @@ const STATES: &[State] = &[
     State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
+        // The Banner identifies the caller for only 2 s, so a capture on a
+        // slow runner could show "Withheld number" under this caption.
+        still: identifying,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -125,18 +134,18 @@ const STATES: &[State] = &[
             // as the Phone may still report one, longer than the
             // `late-line-identification` quirk's number takes.
             let _path = harness.simulated_phone().ring("");
-            harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
-                state
-                    .surface("banner")
-                    .and_then(|banner| banner.get("caller"))
-                    .is_some_and(|caller| caller == "Identifying caller…")
-            });
+            harness.wait_for_app(
+                "the Banner is identifying the caller",
+                DEADLINE,
+                identifying,
+            );
         },
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
         name: "call-window-live",
         title: "The Call Window, answered here, with HD audio on this computer",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -159,6 +168,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-muted",
         title: "The Call Window, muted, with the keypad shown and tones sent",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -209,6 +219,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-mute-unavailable",
         title: "The Call Window, answered on the phone, so Mute is unavailable",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -236,6 +247,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-ended",
         title: "The Call Window, just after the Call ended",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -262,6 +274,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-connection-lost",
         title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -291,6 +304,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-calling",
         title: "The Call Window, placing a Call, before the other end rings",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -301,6 +315,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-ringing",
         title: "The Call Window, placing a Call, ringing at the other end",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -313,6 +328,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-not-placed",
         title: "The Call Window, after the Phone couldn't place the Call",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -331,6 +347,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-call-history",
         title: "The Dialer, before typing: the Call History, newest first, Missed Calls marked",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             sync(harness);
@@ -341,6 +358,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-results",
         title: "The Dialer, searching for smith, the second match selected",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             sync(harness);
@@ -355,6 +373,7 @@ const STATES: &[State] = &[
     State {
         name: "dialer-not-connected",
         title: "The Dialer, after Enter with the Phone out of range",
+        still: |_| true,
         prepare: as_is,
         reach: |harness| {
             sync(harness);
@@ -375,6 +394,7 @@ const STATES: &[State] = &[
     State {
         name: "setup-window-choose",
         title: "The Setup Window on a fresh install, listing the Phone nearby",
+        still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
             setup_window_at(harness, "choose");
@@ -390,6 +410,7 @@ const STATES: &[State] = &[
     State {
         name: "setup-window-confirm",
         title: "The Setup Window, showing the code to check against the Phone's",
+        still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
             setup_window_at(harness, "choose");
@@ -404,6 +425,7 @@ const STATES: &[State] = &[
     State {
         name: "setup-window-phone-calls-off",
         title: "The Setup Window, after the Phone refused hands-free: where to switch Phone calls on",
+        still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
             harness.simulated_phone().set_hands_free("refused");
@@ -415,6 +437,7 @@ const STATES: &[State] = &[
     State {
         name: "setup-window-done",
         title: "The Setup Window, paired and connected for Calls",
+        still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
             pair_through_setup_window(harness);
@@ -647,6 +670,14 @@ fn connect(harness: &Harness) {
     });
 }
 
+/// Whether the Banner's caller line says the caller is being identified.
+fn identifying(state: &AppState) -> bool {
+    state
+        .surface("banner")
+        .and_then(|banner| banner.get("caller"))
+        .is_some_and(|caller| caller == "Identifying caller…")
+}
+
 /// Rings the Phone, waits for the Banner and returns the Call's id.
 fn ring(harness: &Harness) -> u32 {
     let _path = harness.simulated_phone().ring(NUMBER);
@@ -730,8 +761,15 @@ pub fn run(options: &Options) -> ExitCode {
                     .screenshot_directory(output.clone())
                     .start();
                 (state.reach)(&harness);
+                // A frame is judged after it is taken. A surface queues its
+                // new content for `Surfaces` as it renders it, and a task on
+                // the same GLib main context publishes it. That task runs at
+                // default priority, before GTK's redraw, which GLib runs at a
+                // lower one. Only that scheduling order, not any proof in the
+                // code, makes a frame judged while the app still reports the
+                // state show that state.
                 let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
-                    (state.shown)(screenshot, look)
+                    (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
                 });
             }
         }

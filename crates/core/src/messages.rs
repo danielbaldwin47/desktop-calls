@@ -8,6 +8,7 @@ use crate::call::{AudioLocation, Caller, Timestamp};
 use crate::contacts::CallHistoryKind;
 use crate::contacts::NumberLabel;
 use crate::indicator::{IndicatorEntry, IndicatorStatus, IndicatorView};
+use crate::machine::RingingCaller;
 use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
@@ -297,7 +298,11 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
         IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),
-        IndicatorStatus::Ringing { caller, contact } => {
+        // No one to say the Call is from yet: the Banner's own words.
+        IndicatorStatus::Ringing(RingingCaller::Identifying) => {
+            label(Label::IdentifyingCaller).to_owned()
+        }
+        IndicatorStatus::Ringing(RingingCaller::Known { caller, contact }) => {
             format!("Call from {}", caller_name(caller, contact.as_ref()))
         }
         IndicatorStatus::InCall { caller, contact } => {

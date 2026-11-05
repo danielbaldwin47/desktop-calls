@@ -36,7 +36,7 @@ use std::pin::pin;
 use std::process::{Child, ChildStdout, Command, Output, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod client;
 mod input;
@@ -45,7 +45,7 @@ mod stand_ins;
 
 pub use client::TestClient;
 pub use input::Key;
-pub use screen::{LAYOUT_SIZE, SCREEN_SIZE, Screenshot};
+pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
 pub use stand_ins::{Notification, Theme, TrayItem};
 
 use futures_channel::oneshot;
@@ -384,6 +384,35 @@ impl Harness {
         )
     }
 
+    /// Captures the screen as `<name>.png` until the capture satisfies
+    /// `shown`, and returns it. What the app reports can run a frame ahead
+    /// of what is on screen; this waits for the screen.
+    ///
+    /// # Panics
+    ///
+    /// If no capture satisfies `shown` within `deadline`; the panic names the
+    /// last capture.
+    #[must_use]
+    pub fn screenshot_when(
+        &self,
+        name: &str,
+        deadline: Duration,
+        shown: impl Fn(&Screenshot) -> bool,
+    ) -> Screenshot {
+        let started = Instant::now();
+        loop {
+            let screenshot = self.screenshot(name);
+            if shown(&screenshot) {
+                return screenshot;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the screen never showed {name} within {deadline:?}; see {}",
+                screenshot.path.display()
+            );
+        }
+    }
+
     /// The address of the scenario's private session bus, for a test that
     /// acts as another Desktop client.
     #[must_use]
@@ -459,9 +488,25 @@ impl Harness {
     /// If the scenario has no screen, or the client can't start.
     #[must_use]
     pub fn start_test_client(&self) -> TestClient {
+        self.spawn_test_client(&[])
+    }
+
+    /// Starts the harness's test client fullscreen, as a video player would
+    /// be. See [`Harness::start_test_client`].
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the client can't be started.
+    #[must_use]
+    pub fn start_fullscreen_test_client(&self) -> TestClient {
+        self.spawn_test_client(&["--fullscreen"])
+    }
+
+    fn spawn_test_client(&self, arguments: &[&str]) -> TestClient {
         self.screen();
         let child = self
             .command("test-client")
+            .args(arguments)
             .stdout(Stdio::piped())
             .stderr(self.log_file("test-client.stderr"))
             .spawn()

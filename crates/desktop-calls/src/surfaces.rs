@@ -164,6 +164,11 @@ impl Surface {
             mapped.set(false);
             report.borrow_mut().set(name, None);
         });
+        // Pre-warm: realising creates the window's renderer, which costs
+        // GTK most of a second the first time (it probes Vulkan, then GL).
+        // Doing it now, hidden, lets the Banner show within a second of the
+        // Phone ringing.
+        WidgetExt::realize(&surface.window);
         surface
     }
 
@@ -346,9 +351,10 @@ impl CallWindow {
             CallWindowPhase::Ended => (messages::label(Label::CallEnded).to_owned(), None, false),
         };
         self.status.set_text(&status);
+        // The row stays, empty, while there is nothing to say, so Hang up
+        // never moves under the pointer when the Call connects.
         self.audio_location
             .set_text(audio_location.unwrap_or_default());
-        self.audio_location.set_visible(audio_location.is_some());
         self.hd.set_visible(wideband);
         self.hang_up
             .set_sensitive(view.phase != CallWindowPhase::Ended);

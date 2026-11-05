@@ -12,6 +12,7 @@
 //! - `button <code> pressed at <x> <y>` or `... released at ...`
 //!
 //! The harness's self-tests drive it to prove that synthetic input arrives.
+//! With `--fullscreen` it asks to be fullscreen, as a video player does.
 
 use std::io::Write as _;
 use std::os::fd::AsFd as _;
@@ -65,6 +66,9 @@ fn run() -> Result<(), String> {
     let toplevel = xdg_surface.get_toplevel(&handle, ());
     toplevel.set_title("Desktop Calls test client".to_owned());
     toplevel.set_app_id("desktop-calls-test-client".to_owned());
+    if std::env::args().any(|argument| argument == "--fullscreen") {
+        toplevel.set_fullscreen(None);
+    }
     surface.commit();
 
     let mut client = Client {

@@ -37,6 +37,8 @@ gtk4-layer-shell = "0.8"
 # Formats phone numbers for reading, by libphonenumber's rules.
 phonenumber = "0.3"
 tempfile = "3"
+# Reads the harness's screenshots, to find surfaces on screen.
+png = "0.18"
 # The test harness's synthetic keyboard and pointer, and its test client.
 wayland-client = "0.31"
 # Only to route wayland-backend's error messages through `log`, which has no

@@ -10,6 +10,7 @@
 mod call;
 mod connection;
 mod contacts;
+mod earlier_run;
 mod machine;
 pub mod matching;
 pub mod messages;
@@ -23,6 +24,7 @@ pub use contacts::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Contact, ContactNumber, Contacts,
     ContactsState, NumberLabel, SyncFailure, Unavailable,
 };
+pub use earlier_run::{EarlierCall, EarlierRun};
 pub use machine::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Effect, Input, Mute,
     PhoneCommand, PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,

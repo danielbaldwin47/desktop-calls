@@ -599,6 +599,60 @@ pub fn reregister_call(
     Some((removed, added))
 }
 
+/// What the Telephony service announces when `WirePlumber` restarts with the
+/// AudioGateway at `audio_gateway` connected, as watched on the real Pixel:
+/// the old service unannounces each Call, then the AudioGateway, then leaves
+/// the bus; the new one announces the AudioGateway again at the same path,
+/// then, 40 ms later, each Call at its own path.
+pub struct Restart {
+    pub gone: Vec<Signal>,
+    pub audio_gateway_back: Vec<Signal>,
+    pub calls_back: Vec<Signal>,
+}
+
+/// Restarts the Telephony service's view of the AudioGateway at
+/// `audio_gateway`. Its Calls and volumes stay; its audio link drops with
+/// the old service, so the new one starts idle and rejecting audio, as for a
+/// new AudioGateway. That the link drops is inferred, not observed.
+pub fn restart(tree: &mut ObjectTree, audio_gateway: &OwnedObjectPath) -> zbus::Result<Restart> {
+    let mut gone = Vec::new();
+    let mut calls_back = Vec::new();
+    for (call, properties) in calls(tree, audio_gateway.as_str()) {
+        gone.extend(unannounce_call(audio_gateway, &call));
+        calls_back.extend(announce_call(audio_gateway, &call, properties));
+    }
+    let manager = OwnedObjectPath::try_from(MANAGER_PATH)?;
+    gone.push(Signal::InterfacesRemoved {
+        manager: manager.clone(),
+        object: audio_gateway.clone(),
+        interfaces: AUDIO_GATEWAY_INTERFACES.to_vec(),
+    });
+    set_transport(
+        tree,
+        audio_gateway,
+        vec![
+            ("State", OwnedVariant::from(Str::from("idle"))),
+            ("Codec", OwnedVariant::from(0_u8)),
+            ("RejectSCO", OwnedVariant::from(true)),
+        ],
+    );
+    let interfaces = tree
+        .objects_below(MANAGER_PATH)
+        .into_iter()
+        .find(|(path, _)| path == audio_gateway)
+        .map(|(_, interfaces)| interfaces.clone())
+        .unwrap_or_default();
+    Ok(Restart {
+        gone,
+        audio_gateway_back: vec![Signal::InterfacesAdded {
+            manager,
+            object: audio_gateway.clone(),
+            interfaces,
+        }],
+        calls_back,
+    })
+}
+
 /// The Calls on the AudioGateway at `audio_gateway`, by path.
 pub fn calls(tree: &ObjectTree, audio_gateway: &str) -> Vec<(OwnedObjectPath, Properties)> {
     tree.objects_below(audio_gateway)

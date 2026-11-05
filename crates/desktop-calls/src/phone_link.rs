@@ -18,7 +18,8 @@
 //! - A Call that goes away without first going `disconnected` may come back
 //!   within a second, as the same Call: the hands-free profile dropping
 //!   briefly, or `WirePlumber` restarting, does that mid-Call. Such a Call ends
-//!   only if it isn't back within [`GRACE`].
+//!   only if it isn't back within [`GRACE`], or [`SERVICE_GRACE`] once the
+//!   whole service has gone.
 //! - `Call1.Hangup` falls back to `org.ofono.VoiceCall.Hangup` where `Call1`'s
 //!   method doesn't exist, and a hang-up error for a Call that is already
 //!   going counts as success.
@@ -59,6 +60,12 @@ const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 /// come back as the same Call. The Pixel's took 0.5 to 1.1 s.
 const GRACE: Duration = Duration::from_secs(2);
 
+/// How long the Calls of a Telephony service that left the bus may take to
+/// come back with it. After a `WirePlumber` restart the real service was back
+/// with its Call in 1.07 s; a busy or slower Desktop takes longer, and a
+/// Call ended too soon is worse than one shown a little too long.
+const SERVICE_GRACE: Duration = Duration::from_secs(10);
+
 /// What the Phone link can be told to do.
 pub enum Command {
     /// Follow the Phone with this Bluetooth address.
@@ -73,8 +80,8 @@ pub enum Command {
 enum Event {
     Command(Command),
     Object(ObjectEvent),
-    /// The grace period of the vanished Call with this id ran out.
-    GraceOver(CallId),
+    /// A grace period of a vanished Call ran out.
+    GraceOver(Grace),
 }
 
 /// A Phone command with the object it goes to.
@@ -111,11 +118,11 @@ pub async fn run(
         let mut link = PhoneLink::default();
         while let Some(event) = events.next().await {
             let outcome = link.handle(event);
-            for id in outcome.graces {
+            for (grace, lasting) in outcome.graces {
                 let sender = grace_sender.clone();
                 MainContext::default().spawn_local(async move {
-                    glib::timeout_future(GRACE).await;
-                    let _ = sender.unbounded_send(id);
+                    glib::timeout_future(lasting).await;
+                    let _ = sender.unbounded_send(grace);
                 });
             }
             if !outcome.batch.is_empty() {
@@ -142,8 +149,9 @@ pub async fn run(
 #[derive(Default)]
 struct Outcome {
     inputs: Vec<Input>,
-    /// Vanished Calls whose grace period starts now.
-    graces: Vec<CallId>,
+    /// Grace periods of vanished Calls that start now, each with how long
+    /// it lasts.
+    graces: Vec<(Grace, Duration)>,
     /// Phone commands to carry out, in order.
     batch: Vec<Resolved>,
 }
@@ -164,10 +172,23 @@ struct Followed {
     ended: bool,
 }
 
+/// One grace period of a vanished Call. Only the latest one of each Call
+/// counts: the one started when its whole service went replaces the shorter
+/// one before it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Grace {
+    call: CallId,
+    number: u32,
+}
+
 /// A Call that went away without ending, during its grace period.
 struct Vanished {
     id: CallId,
+    grace: Grace,
     number: String,
+    /// The Desktop asked to hang up meanwhile: the Call is hung up as soon
+    /// as it is back.
+    hang_up: bool,
 }
 
 #[derive(Default)]
@@ -176,6 +197,10 @@ struct PhoneLink {
     audio_gateways: HashMap<String, String>,
     /// Each AudioGateway's latest `MicrophoneVolume`, by object path.
     microphone_volumes: HashMap<String, u8>,
+    /// Each AudioGateway's latest transport properties, by object path, so
+    /// a Phone attached after its AudioGateway appeared, as at startup
+    /// mid-Call, reports where the audio is.
+    transports: HashMap<String, HashMap<String, OwnedVariant>>,
     /// The address of the Phone being followed.
     attached: Option<String>,
     /// The AudioGateway of the followed Phone, while it is connected.
@@ -186,6 +211,7 @@ struct PhoneLink {
     followed: HashMap<String, Followed>,
     vanished: Vec<Vanished>,
     last_call_id: u32,
+    graces_started: u32,
 }
 
 impl PhoneLink {
@@ -229,9 +255,19 @@ impl PhoneLink {
                     self.forget(&path, &mut outcome);
                 }
                 self.call_objects.clear();
+                // The Calls come back with the service, which takes longer
+                // than the hands-free profile bouncing.
+                let ids: Vec<CallId> = self.vanished.iter().map(|call| call.id).collect();
+                for id in ids {
+                    let grace = self.start_grace(id, SERVICE_GRACE, &mut outcome);
+                    if let Some(vanished) = self.vanished.iter_mut().find(|call| call.id == id) {
+                        vanished.grace = grace;
+                    }
+                }
             }
-            Event::GraceOver(id) => {
-                if let Some(index) = self.vanished.iter().position(|call| call.id == id) {
+            Event::GraceOver(grace) => {
+                let id = grace.call;
+                if let Some(index) = self.vanished.iter().position(|call| call.grace == grace) {
                     self.vanished.remove(index);
                     tracing::info!(
                         event_kind = %EventKind::CallEnded,
@@ -259,13 +295,11 @@ impl PhoneLink {
             if let Some(volume) = gateway.get("MicrophoneVolume").and_then(byte) {
                 self.microphone_volumes.insert(path.clone(), volume);
             }
+            if let Some(transport) = interfaces.get(TRANSPORT) {
+                self.transports.insert(path.clone(), transport.clone());
+            }
             self.audio_gateways.insert(path, address);
             self.adopt_matching_gateway(outcome);
-            if let Some(transport) = interfaces.get(TRANSPORT)
-                && self.connected.is_some()
-            {
-                transport_changed(transport, outcome);
-            }
         } else if let Some(call) = interfaces.get(CALL) {
             let object = CallObject {
                 state: call.get("State").and_then(string).unwrap_or_default(),
@@ -287,8 +321,17 @@ impl PhoneLink {
         outcome: &mut Outcome,
     ) {
         match interface {
-            TRANSPORT if self.connected.as_deref() == Some(path) => {
-                transport_changed(changed, outcome);
+            TRANSPORT => {
+                if let Some(known) = self.transports.get_mut(path) {
+                    for (name, value) in changed {
+                        if let Ok(value) = value.try_clone() {
+                            known.insert(name.clone(), value);
+                        }
+                    }
+                }
+                if self.connected.as_deref() == Some(path) {
+                    transport_changed(changed, outcome);
+                }
             }
             AUDIO_GATEWAY => {
                 if let Some(volume) = changed.get("MicrophoneVolume").and_then(byte) {
@@ -373,7 +416,7 @@ impl PhoneLink {
             .iter()
             .position(|call| call.number == object.number)
         {
-            let id = self.vanished.remove(index).id;
+            let Vanished { id, hang_up, .. } = self.vanished.remove(index);
             tracing::info!(
                 event_kind = %EventKind::CallReturned,
                 call_id = id.0,
@@ -383,10 +426,16 @@ impl PhoneLink {
                 path.to_owned(),
                 Followed {
                     id,
-                    ending: false,
+                    ending: hang_up,
                     ended: false,
                 },
             );
+            if hang_up {
+                outcome.batch.push(Resolved {
+                    command: PhoneCommand::HangUp(id),
+                    path: path.to_owned(),
+                });
+            }
             outcome.inputs.push(Input::CallChanged {
                 call: id,
                 state,
@@ -458,11 +507,24 @@ impl PhoneLink {
             call_id = id.0,
             "Call {id} went away without ending; waiting for it to come back"
         );
+        let grace = self.start_grace(id, GRACE, outcome);
         self.vanished.push(Vanished {
             id,
+            grace,
             number: number.unwrap_or_default(),
+            hang_up: false,
         });
-        outcome.graces.push(id);
+    }
+
+    /// Starts a grace period of `lasting` for the vanished Call `call`.
+    fn start_grace(&mut self, call: CallId, lasting: Duration, outcome: &mut Outcome) -> Grace {
+        self.graces_started += 1;
+        let grace = Grace {
+            call,
+            number: self.graces_started,
+        };
+        outcome.graces.push((grace, lasting));
+        grace
     }
 
     /// Every followed Call goes away without ending, as when the
@@ -508,6 +570,9 @@ impl PhoneLink {
         if let Some(volume) = self.microphone_volumes.get(path) {
             outcome.inputs.push(Input::MicrophoneVolumeChanged(*volume));
         }
+        if let Some(transport) = self.transports.get(path) {
+            transport_changed(transport, outcome);
+        }
         let calls: Vec<String> = self.call_objects.keys().cloned().collect();
         for call in calls {
             self.follow_call(&call, outcome);
@@ -518,6 +583,7 @@ impl PhoneLink {
     /// Phone disconnected, unless another of its AudioGateways remains.
     fn forget(&mut self, path: &str, outcome: &mut Outcome) {
         self.microphone_volumes.remove(path);
+        self.transports.remove(path);
         let Some(address) = self.audio_gateways.remove(path) else {
             return;
         };
@@ -527,19 +593,43 @@ impl PhoneLink {
             path,
             "An AudioGateway disappeared"
         );
+        let followed = self.connected.as_deref() == Some(path);
+        // Vanished Calls are known again by their number, so they vanish
+        // before their objects are forgotten: the service may go without
+        // unannouncing them first, as when WirePlumber stops.
+        if followed {
+            self.vanish_all(outcome);
+        }
         let prefix = format!("{path}/");
         self.call_objects
             .retain(|call, _| !call.starts_with(&prefix));
-        if self.connected.as_deref() != Some(path) {
+        if !followed {
             return;
         }
-        self.vanish_all(outcome);
         self.connected = None;
         let before = outcome.inputs.len();
         self.adopt_matching_gateway(outcome);
         if outcome.inputs.len() == before {
             outcome.inputs.push(Input::PhoneDisconnected { address });
         }
+    }
+
+    /// Whether `command` hangs up a Call that vanished and may come back,
+    /// which is then hung up as soon as it does.
+    fn hang_up_when_back(&mut self, command: &PhoneCommand) -> bool {
+        let PhoneCommand::HangUp(id) = command else {
+            return false;
+        };
+        let Some(vanished) = self.vanished.iter_mut().find(|call| call.id == *id) else {
+            return false;
+        };
+        tracing::info!(
+            event_kind = %EventKind::PhoneCommandSent,
+            call_id = id.0,
+            "Call {id} will be hung up once it is back"
+        );
+        vanished.hang_up = true;
+        true
     }
 
     /// Finds the object each command goes to. A command that can't be
@@ -552,16 +642,19 @@ impl PhoneLink {
                     let found = self
                         .followed
                         .iter_mut()
-                        .find(|(_, followed)| followed.id == *id && !followed.ended);
-                    match found {
-                        Some((path, followed)) => {
+                        .find(|(_, followed)| followed.id == *id && !followed.ended)
+                        .map(|(path, followed)| {
                             if matches!(command, PhoneCommand::HangUp(_)) {
                                 followed.ending = true;
                             }
-                            Some(path.clone())
-                        }
-                        None => None,
+                            path.clone()
+                        });
+                    // While the Telephony service restarts, a Call is away
+                    // for about a second; it is hung up once back.
+                    if found.is_none() && self.hang_up_when_back(&command) {
+                        continue;
                     }
+                    found
                 }
                 PhoneCommand::MoveAudioToDesktop
                 | PhoneCommand::KeepAudioOnPhone

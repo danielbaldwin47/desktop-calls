@@ -16,7 +16,8 @@
 //! it is on the bus (see `scenario.rs`); `just demo` uses this.
 //!
 //! So far it can be a paired Phone whose hands-free link comes and goes, that
-//! rings, that dials for the Desktop, whose Calls can be answered, hung up
+//! rings, that dials for the Desktop, whose Telephony service restarts as
+//! `WirePlumber` does, whose Calls can be answered, hung up
 //! and have their audio brought to the Desktop, and that opens a PBAP
 //! session. Tests can pick the codec and
 //! switch on quirks other Phones show.
@@ -110,8 +111,8 @@ struct World {
 
 type SharedWorld = Arc<Mutex<World>>;
 
-fn lock(world: &SharedWorld) -> MutexGuard<'_, World> {
-    world.lock().unwrap_or_else(PoisonError::into_inner)
+fn lock<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
+    shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn main() -> ExitCode {
@@ -171,7 +172,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
             Control {
                 world: world.clone(),
                 system: system.clone(),
-                session: session.clone(),
+                telephony: Arc::new(Mutex::new(Some(session.clone()))),
             },
         )
         .name(CONTROL_BUS_NAME)
@@ -304,11 +305,15 @@ fn run_obex_later(
     });
 }
 
+/// The connection the Telephony service is on. A restart replaces it; it is
+/// `None` while the service is off the bus.
+type TelephonyConnection = Arc<Mutex<Option<Connection>>>;
+
 /// What tests use to act as the Phone.
 struct Control {
     world: SharedWorld,
     system: Connection,
-    session: Connection,
+    telephony: TelephonyConnection,
 }
 
 #[interface(interface = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone1")]
@@ -346,7 +351,7 @@ impl Control {
             (device, gateway, interfaces)
         };
         emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", true).await?;
-        self.session
+        self.telephony()?
             .emit_signal(
                 None::<&str>,
                 telephony::MANAGER_PATH,
@@ -392,10 +397,10 @@ impl Control {
         // first, then the AudioGateway.
         for call in calls {
             for signal in telephony::unannounce_call(&gateway, &call) {
-                signal.emit(&self.session).await?;
+                signal.emit(&self.telephony()?).await?;
             }
         }
-        self.session
+        self.telephony()?
             .emit_signal(
                 None::<&str>,
                 telephony::MANAGER_PATH,
@@ -424,7 +429,7 @@ impl Control {
             telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?
         };
         for signal in signals {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
         Ok(call)
     }
@@ -453,7 +458,7 @@ impl Control {
             })?
         };
         for signal in signals {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
         Ok(call)
     }
@@ -474,7 +479,7 @@ impl Control {
             telephony::dial_on_phone(&mut world.telephony, &gateway, &world.behaviour, &number)?
         };
         for signal in signals {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
         Ok(call)
     }
@@ -492,7 +497,7 @@ impl Control {
                 .ok_or_else(|| zbus::fdo::Error::Failed("no dialled Call is ringing".to_owned()))?
         };
         for signal in signals {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
         Ok(())
     }
@@ -572,9 +577,9 @@ impl Control {
             })?
         };
         for signal in removed {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
-        let session = self.session.clone();
+        let session = self.telephony()?;
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(u64::from(after_ms)));
             zbus::block_on(async {
@@ -584,6 +589,41 @@ impl Control {
                     }
                 }
             });
+        });
+        Ok(())
+    }
+
+    /// Restarts the Telephony service, as `systemctl --user restart
+    /// wireplumber` does. The service unannounces the connected
+    /// AudioGateway's Calls, then the AudioGateway, and leaves the bus.
+    /// `gap_ms` later a new connection takes `org.pipewire.Telephony` and
+    /// announces the AudioGateway again at the same path, then, 40 ms later,
+    /// its Calls at theirs. Returns once the service has left the bus. On the
+    /// real Pixel the gap was 0.73 s.
+    async fn restart_telephony(&self, gap_ms: u32) -> zbus::fdo::Result<()> {
+        let old = self.telephony()?;
+        let restart = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            match world.audio_gateway.clone() {
+                Some(gateway) => Some(telephony::restart(&mut world.telephony, &gateway)?),
+                None => None,
+            }
+        };
+        if let Some(restart) = &restart {
+            for signal in &restart.gone {
+                signal.emit(&old).await?;
+            }
+        }
+        *lock(&self.telephony) = None;
+        old.release_name(telephony::SERVICE).await?;
+        let holder = self.telephony.clone();
+        let world = self.world.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(gap_ms)));
+            if let Err(error) = come_back(&holder, &world, restart) {
+                eprintln!("simulated-phone: the Telephony service didn't come back: {error}");
+            }
         });
         Ok(())
     }
@@ -706,6 +746,12 @@ fn unknown_pbap_folder(folder: &str) -> zbus::fdo::Error {
 }
 
 impl Control {
+    fn telephony(&self) -> zbus::fdo::Result<Connection> {
+        lock(&self.telephony).clone().ok_or_else(|| {
+            zbus::fdo::Error::Failed("the Telephony service is restarting".to_owned())
+        })
+    }
+
     async fn end_call_on_phone(
         &self,
         call: &OwnedObjectPath,
@@ -723,10 +769,50 @@ impl Control {
 
     async fn emit(&self, signals: Vec<telephony::Signal>) -> zbus::fdo::Result<()> {
         for signal in signals {
-            signal.emit(&self.session).await?;
+            signal.emit(&self.telephony()?).await?;
         }
         Ok(())
     }
+}
+
+/// The Telephony service after a restart: takes the name on a new
+/// connection, serves the same objects there, and announces them again.
+fn come_back(
+    holder: &TelephonyConnection,
+    world: &SharedWorld,
+    restart: Option<telephony::Restart>,
+) -> zbus::Result<()> {
+    let connection = zbus::block_on(async {
+        let connection = zbus::connection::Builder::session().build().await?;
+        let calls = MessageStream::from(&connection);
+        connection.request_name(telephony::SERVICE).await?;
+        Ok::<_, zbus::Error>((connection, calls))
+    });
+    let (connection, calls) = connection?;
+    *lock(holder) = Some(connection.clone());
+    let serving = connection.clone();
+    let world = world.clone();
+    std::thread::spawn(move || {
+        if let Err(error) = zbus::block_on(serve(serving, calls, Service::Telephony, world)) {
+            eprintln!("simulated-phone: the restarted Telephony service stopped: {error}");
+        }
+    });
+    let Some(restart) = restart else {
+        return Ok(());
+    };
+    zbus::block_on(async {
+        for signal in &restart.audio_gateway_back {
+            signal.emit(&connection).await?;
+        }
+        Ok::<_, zbus::Error>(())
+    })?;
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    zbus::block_on(async {
+        for signal in &restart.calls_back {
+            signal.emit(&connection).await?;
+        }
+        Ok(())
+    })
 }
 
 fn connected_audio_gateway(world: &World) -> zbus::fdo::Result<OwnedObjectPath> {

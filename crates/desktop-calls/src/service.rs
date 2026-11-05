@@ -25,7 +25,7 @@ use crate::phone_link::Command;
 use crate::ringer::Ringer;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
-use crate::{bluez, contacts, phone_link};
+use crate::{bluez, contacts, earlier_run, phone_link};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -110,6 +110,11 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .await
         .map_err(|error| raw_failure(Failure::SystemBusUnreachable, &error))?;
     let (input_sender, inputs) = unbounded();
+    // Before anything the Phone reports, so its Calls are known for what
+    // they were before a crash.
+    if let Some(earlier) = earlier_run::load() {
+        let _ = input_sender.unbounded_send(Input::EarlierRun(earlier));
+    }
     let (dial_sender, dials) = unbounded();
     let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
         .await
@@ -309,6 +314,10 @@ async fn decide(
             let _ = verdict.send(refusal);
         }
         shell.carry_out(effects).await;
+        let next_run = next.for_next_run();
+        if next_run != state.for_next_run() {
+            earlier_run::save(&next_run);
+        }
         if next.connection_state() != state.connection_state() {
             tracing::info!(
                 event_kind = %EventKind::ConnectionStateChanged,

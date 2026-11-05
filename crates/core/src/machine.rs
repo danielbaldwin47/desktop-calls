@@ -6,6 +6,7 @@ use crate::call::{
 };
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
+use crate::earlier_run::{EarlierCall, EarlierRun};
 use crate::matching::{self, ContactMatch, DialerRow};
 use crate::messages::{Failure, ProblemKind};
 
@@ -15,6 +16,10 @@ const RECENT_CALLS: usize = 16;
 
 /// How long the Call Window shows "Call ended" before it closes.
 const CALL_ENDED_MS: u32 = 2_000;
+/// How long Calls from the earlier run may take to show again after
+/// startup: the Phone link lists them as soon as the Phone is attached.
+/// A Call seen later is a new one.
+const FORGET_EARLIER_RUN_MS: u32 = 30_000;
 /// How long a refusal or failure of a Call placed here stays on the Call
 /// Window: long enough to read a sentence.
 const NOTICE_MS: u32 = 6_000;
@@ -37,6 +42,8 @@ const MAX_MICROPHONE_VOLUME: u8 = 15;
 /// Something that happened, as the shell adapters report it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
+    /// What the run before this one left, at startup.
+    EarlierRun(EarlierRun),
     /// A paired Phone that can carry Calls exists on the Desktop.
     PhonePaired(Phone),
     /// The paired Phone with this address is gone.
@@ -185,6 +192,9 @@ pub enum Timer {
     DialTimedOut(u32),
     /// The audio hasn't come here since this attempt to bring it here.
     HandoffTimedOut(u32),
+    /// Calls from the earlier run that haven't shown again by now aren't
+    /// live any more.
+    ForgetEarlierRun,
 }
 
 /// Something the shell adapters must do.
@@ -397,6 +407,15 @@ struct MovingAudio {
     retried: bool,
 }
 
+/// Hands-free dropped mid-Call with the audio on the Desktop, as it does
+/// when `WirePlumber` restarts: the audio comes back here once hands-free and
+/// the Call are both back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AudioToRestore {
+    /// The Phone has reported the Call again.
+    call_back: bool,
+}
+
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -423,7 +442,15 @@ pub struct State {
     /// The Phone's latest report of its hands-free microphone gain.
     microphone_volume: Option<u8>,
     muting: Muting,
+    /// The gain the Desktop last silenced the microphone from, until the
+    /// Phone reports it given back. While the Phone reports 0 with the audio
+    /// on the Desktop, the microphone shows as muted, from this gain: hands-free
+    /// may have gone before the Desktop could give it back.
+    silenced: Option<u8>,
+    /// The earlier run's Calls that haven't shown again yet.
+    earlier_calls: Vec<EarlierCall>,
     moving_audio: Option<MovingAudio>,
+    restore_audio: Option<AudioToRestore>,
     /// How many times the Phone has been asked to bring the audio here.
     handoff_attempts: u32,
     /// Why the audio isn't where the user asked: shown beside the Call until
@@ -530,6 +557,37 @@ impl State {
                 kind: ProblemKind::ContactsPromptUnanswered,
             }],
             _ => Vec::new(),
+        }
+    }
+
+    /// What the next run needs if this one stops now: each connected Call,
+    /// and each Call of the earlier run not seen again yet, with the
+    /// microphone gain to give back if the Desktop silenced it. The shell
+    /// keeps it for the next run whenever it changes, so that a run started
+    /// after a crash picks up the Calls as they were.
+    #[must_use]
+    pub fn for_next_run(&self) -> EarlierRun {
+        let mut calls: Vec<EarlierCall> = self
+            .calls
+            .iter()
+            .filter_map(|call| {
+                Some(EarlierCall {
+                    caller: call.caller.clone(),
+                    direction: call.direction,
+                    active_since: call.active_since?,
+                })
+            })
+            .collect();
+        calls.extend(self.earlier_calls.iter().cloned());
+        let restore_microphone_volume = match self.muting {
+            Muting::Silencing { restore }
+            | Muting::On { restore }
+            | Muting::Restoring { restore } => Some(restore),
+            Muting::Off => self.silenced,
+        };
+        EarlierRun {
+            calls,
+            restore_microphone_volume,
         }
     }
 
@@ -791,7 +849,9 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     }
     // Mute is the Desktop's microphone. Once the audio leaves the Desktop,
     // or the Call ends, the Phone's microphone must not stay silenced.
-    if state.audio_location() != Some(AudioLocation::Desktop) {
+    if state.audio_location() == Some(AudioLocation::Desktop) {
+        still_silenced(&mut state);
+    } else {
         release_mute(&mut state, &mut effects);
     }
     (state, effects)
@@ -866,6 +926,9 @@ fn phone_disconnected(state: &mut State) {
         state.contacts_sync = state.held_contacts_state();
     }
     state.keeping_audio_on_phone = false;
+    if state.audio_location() == Some(AudioLocation::Desktop) {
+        state.restore_audio = Some(AudioToRestore { call_back: false });
+    }
     if state.connection == ConnectionState::Connected {
         state.connection = ConnectionState::Disconnected;
         state.transport = Transport::Idle;
@@ -887,6 +950,17 @@ fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
     if call.direction == Direction::Outgoing {
         adopt_dialled(state, &mut call, effects);
     }
+    if call.active_since.is_some()
+        && let Some(index) = state
+            .earlier_calls
+            .iter()
+            .position(|earlier| earlier.caller == call.caller)
+    {
+        // Connected before this run started: the Call it had then.
+        let earlier = state.earlier_calls.remove(index);
+        call.direction = earlier.direction;
+        call.active_since = Some(earlier.active_since);
+    }
     if state.recent_calls.len() == RECENT_CALLS {
         state.recent_calls.remove(0);
     }
@@ -898,6 +972,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
     match input {
         // Desktop Calls works with one Phone: the first one paired.
+        Input::EarlierRun(earlier) => pick_up_earlier_run(&mut state, earlier, &mut effects),
         Input::PhonePaired(phone) if state.phone.is_none() => {
             effects.push(Effect::AttachPhone {
                 address: phone.address.clone(),
@@ -935,14 +1010,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             call,
             state: call_state,
             at,
-        } => {
-            if let Some(known) = state.call_mut(call) {
-                known.state = call_state;
-                if call_state.is_connected() && known.active_since.is_none() {
-                    known.active_since = Some(at);
-                }
-            }
-        }
+        } => call_changed(&mut state, call, call_state, at, &mut effects),
         Input::CallEnded { call } => {
             let known = state.calls.iter().any(|known| known.id == call);
             end_call(&mut state, call, &mut effects);
@@ -965,7 +1033,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 state.codec = codec;
             }
         }
-        Input::MicrophoneVolumeChanged(volume) => state.microphone_volume = Some(volume),
+        Input::MicrophoneVolumeChanged(volume) => microphone_volume_changed(&mut state, volume),
         Input::SetMuted(true) => mute(&mut state, &mut effects),
         Input::SetMuted(false) => unmute(&mut state, &mut effects),
         Input::SendTones(typed) => send_tones(&state, typed, &mut effects),
@@ -987,7 +1055,10 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::DialerEnter
         | Input::DialerChoose(_)
         | Input::CloseDialer) => dialer_input(&mut state, input, &mut effects),
-        Input::PhoneCommandDone(command) => command_done(&mut state, &command),
+        Input::PhoneCommandDone(command) => {
+            command_done(&mut state, &command);
+            restore_audio(&mut state, &mut effects);
+        }
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
@@ -1047,8 +1118,23 @@ fn adopt_dialled(state: &mut State, call: &mut Call, effects: &mut Vec<Effect>) 
     }
 }
 
+/// Startup with what the run before left: its Calls take their direction
+/// and timer from it once the Phone lists them again, and a microphone it
+/// silenced for Mute still counts as muted.
+fn pick_up_earlier_run(state: &mut State, earlier: EarlierRun, effects: &mut Vec<Effect>) {
+    if !earlier.calls.is_empty() {
+        effects.push(Effect::StartTimer {
+            timer: Timer::ForgetEarlierRun,
+            after_ms: FORGET_EARLIER_RUN_MS,
+        });
+    }
+    state.earlier_calls = earlier.calls;
+    state.silenced = earlier.restore_microphone_volume;
+}
+
 fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
     match timer {
+        Timer::ForgetEarlierRun => state.earlier_calls.clear(),
         Timer::DismissDial(attempt) => {
             if state
                 .notice
@@ -1236,11 +1322,29 @@ fn unmute(state: &mut State, effects: &mut Vec<Effect>) {
 fn release_mute(state: &mut State, effects: &mut Vec<Effect>) {
     if let Muting::Silencing { restore } | Muting::On { restore } = state.muting {
         effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(restore)));
+        state.silenced = Some(restore);
     }
     state.muting = Muting::Off;
 }
 
+/// With the audio on the Desktop, a microphone the Desktop silenced and the
+/// Phone still reports at 0 is muted: showing it unmuted would have the
+/// user talk to no one.
+fn still_silenced(state: &mut State) {
+    if state.muting == Muting::Off
+        && state.microphone_volume == Some(0)
+        && let Some(restore) = state.silenced.take()
+    {
+        state.muting = Muting::On { restore };
+    }
+}
+
 fn command_done(state: &mut State, command: &PhoneCommand) {
+    if let PhoneCommand::SetMicrophoneVolume(volume) = command
+        && state.silenced == Some(*volume)
+    {
+        state.silenced = None;
+    }
     match (command, state.muting) {
         (PhoneCommand::KeepAudioOnPhone, _) if state.keeping_audio_on_phone => {
             state.keeping_audio_on_phone = false;
@@ -1415,8 +1519,51 @@ fn transport_changed(state: &mut State, transport: Transport, effects: &mut Vec<
     if was_here != is_here {
         state.audio_notice = None;
     }
+    if transport.is_up() {
+        // It came back by itself.
+        state.restore_audio = None;
+    }
     if is_here && state.moving_audio.take().is_some() {
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
+/// The Phone reported a Call's new state.
+fn call_changed(
+    state: &mut State,
+    call: CallId,
+    call_state: CallState,
+    at: Timestamp,
+    effects: &mut Vec<Effect>,
+) {
+    let Some(known) = state.call_mut(call) else {
+        return;
+    };
+    known.state = call_state;
+    if call_state.is_connected() && known.active_since.is_none() {
+        known.active_since = Some(at);
+    }
+    if let Some(restore) = &mut state.restore_audio {
+        restore.call_back = true;
+    }
+    restore_audio(state, effects);
+}
+
+fn microphone_volume_changed(state: &mut State, volume: u8) {
+    state.microphone_volume = Some(volume);
+    if volume != 0 {
+        state.silenced = None;
+    }
+}
+
+/// Brings the audio back here once hands-free and the Call are back after
+/// a drop that took it from the Desktop.
+fn restore_audio(state: &mut State, effects: &mut Vec<Effect>) {
+    let ready = state.restore_audio.is_some_and(|restore| restore.call_back)
+        && state.connection == ConnectionState::Connected;
+    if ready {
+        state.restore_audio = None;
+        move_audio(state, AudioLocation::Desktop, effects);
     }
 }
 
@@ -1531,6 +1678,7 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
     if state.calls.is_empty() {
         state.codec = None;
         state.moving_audio = None;
+        state.restore_audio = None;
         state.audio_notice = None;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
     }

@@ -117,6 +117,9 @@ fn settle(
     found
 }
 
+/// The script `just install` runs.
+const INSTALL_SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/install.py");
+
 /// The environment variable that makes passing scenarios keep their
 /// directories, as failing ones always do: `KEEP_SCENARIO_LOGS=1 just test`.
 /// CI sets it when run by hand with `keep_scenario_logs`.
@@ -143,6 +146,8 @@ trait SimulatedPhone1 {
     fn enable_quirk(&self, name: &str) -> zbus::Result<()>;
 
     fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
+
+    fn restart_telephony(&self, gap_ms: u32) -> zbus::Result<()>;
 
     fn alert(&self) -> zbus::Result<zbus::OwnedObjectPath>;
 
@@ -387,6 +392,7 @@ pub struct Builder {
     phone_connected: bool,
     omarchy_theme: Option<OmarchyTheme>,
     hyprland: Option<HyprlandSettings>,
+    installed: bool,
 }
 
 /// What the Hyprland stand-in reports.
@@ -502,6 +508,15 @@ impl Builder {
         self
     }
 
+    /// Installs Desktop Calls into the scenario's home as `just install`
+    /// does, and leaves the service stopped: the session bus starts it
+    /// through D-Bus activation once something calls it, as the user's
+    /// session bus does.
+    pub fn installed(mut self) -> Self {
+        self.installed = true;
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -528,13 +543,16 @@ impl Builder {
         let group = ProcessGroup::start(&directory);
         let mut processes = Vec::new();
 
-        let [system_bus, session_bus] = ["system", "session"].map(|bus| {
-            let address = start_bus(&directory, bus, &group, &mut processes);
-            timeline
-                .monitor(&address, bus)
-                .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
-            address
-        });
+        // A service the session bus starts runs inside it, so where the app
+        // is installed, the session bus too runs with the journal hidden.
+        let [system_bus, session_bus] =
+            [("system", false), ("session", self.installed)].map(|(bus, hide_journal)| {
+                let address = start_bus(&directory, bus, hide_journal, &group, &mut processes);
+                timeline
+                    .monitor(&address, bus)
+                    .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
+                address
+            });
         let mut environment = environment(&directory, &system_bus, &session_bus);
         if let Some(time_zone) = self.time_zone {
             environment.push(("TZ", time_zone));
@@ -570,6 +588,7 @@ impl Builder {
         let session =
             zbus::block_on(zbus::connection::Builder::address(session_bus.as_str()).build())
                 .expect("connect the harness to the private session bus");
+        share_environment(&session, &environment);
         let system =
             zbus::block_on(zbus::connection::Builder::address(system_bus.as_str()).build())
                 .expect("connect the harness to the private system bus");
@@ -618,7 +637,11 @@ impl Builder {
             harness.simulated_phone().connect();
         }
 
-        harness.start_app();
+        if self.installed {
+            harness.install();
+        } else {
+            harness.start_app();
+        }
         harness
     }
 }
@@ -1389,6 +1412,67 @@ impl Harness {
         self.wait_for_bus_name(APP_BUS_NAME, "desktop-calls");
     }
 
+    /// Installs the app into the scenario's home with `tools/install.py`,
+    /// which `just install` runs.
+    fn install(&self) {
+        let output = self
+            // The system Python: a version manager's `python3` shim (mise's)
+            // reads its configuration from the real home, which a scenario
+            // hides.
+            .external_command("/usr/bin/python3")
+            .arg(INSTALL_SCRIPT)
+            .arg(self.bin_directory.join("desktop-calls"))
+            .output()
+            .expect("run tools/install.py");
+        assert!(
+            output.status.success(),
+            "tools/install.py failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Whether the app's control interface is on the session bus now.
+    ///
+    /// # Panics
+    ///
+    /// If the bus doesn't answer.
+    #[must_use]
+    pub fn app_on_bus(&self) -> bool {
+        zbus::block_on(async {
+            DBusProxy::new(&self.session)
+                .await?
+                .name_has_owner(BusName::try_from(APP_BUS_NAME)?)
+                .await
+                .map_err(zbus::Error::from)
+        })
+        .expect("ask the session bus whether the app is on it")
+    }
+
+    /// Stops the app if the session bus started it: such an app is the
+    /// bus's child, not the harness's.
+    fn stop_activated_app(&self) {
+        if self
+            .processes
+            .iter()
+            .any(|(name, _)| *name == "desktop-calls")
+        {
+            return;
+        }
+        let pid = zbus::block_on(async {
+            DBusProxy::new(&self.session)
+                .await?
+                .get_connection_unix_process_id(BusName::try_from(APP_BUS_NAME)?)
+                .await
+                .map_err(zbus::Error::from)
+        });
+        if let Ok(pid) = pid {
+            let _ = Command::new("kill")
+                .arg("-KILL")
+                .arg(pid.to_string())
+                .status();
+        }
+    }
+
     /// Waits for the app's first `Error` signal, and returns it.
     ///
     /// # Panics
@@ -1539,37 +1623,14 @@ impl Harness {
         command
     }
 
-    /// The command that runs the app's long-running process.
-    ///
-    /// Where the systemd journal is reachable, the app would log there, so it
-    /// runs in a mount namespace with an empty directory over the journal's.
-    /// It then finds no journal and logs to its file under `XDG_STATE_HOME`,
-    /// exactly as it would on any machine without a journal. A second user
-    /// namespace maps the user back to their own ID, so the app runs as the
-    /// same user it would outside.
+    /// The command that runs the app's long-running process, where it can't
+    /// reach the journal, so it logs to the scenario's directory.
     fn app_command(&self) -> Command {
-        let app = self.bin_directory.join("desktop-calls");
-        if !Path::new(JOURNAL_SOCKET).exists() {
-            let mut command = self.command("desktop-calls");
-            command.arg("service");
-            return command;
-        }
-        let user = fs::metadata("/proc/self").expect("read /proc/self");
-        let mut command = Command::new("unshare");
+        let mut command = without_journal(&self.bin_directory.join("desktop-calls"));
         self.group
             .adopt(&mut command)
             .env_clear()
             .envs(self.environment.iter().cloned())
-            .args(["--user", "--map-root-user", "--mount", "--", "sh", "-c"])
-            .arg(concat!(
-                "mount -t tmpfs none /run/systemd/journal && ",
-                "uid=$1 gid=$2 && shift 2 && ",
-                r#"exec unshare --user --map-user="$uid" --map-group="$gid" -- "$@""#
-            ))
-            .arg("sh")
-            .arg(user.uid().to_string())
-            .arg(user.gid().to_string())
-            .arg(app)
             .arg("service");
         command
     }
@@ -1613,6 +1674,7 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
+        self.stop_activated_app();
         while let Some((_, mut child)) = self.processes.pop() {
             let _ = child.kill();
             let _ = child.wait();
@@ -1873,6 +1935,22 @@ impl SimulatedPhone<'_> {
             self.proxy().await?.reregister_call(&call, after_ms).await
         })
         .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
+    }
+
+    /// Restarts the Telephony service, as restarting `WirePlumber` does: the
+    /// service unannounces the AudioGateway's Calls and the AudioGateway,
+    /// leaves the bus, and `gap` later comes back on a new connection with
+    /// the same objects at the same paths, the Calls 40 ms after the
+    /// AudioGateway. Returns once the service has left the bus. On the real
+    /// Pixel the gap was 0.73 s.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn restart_telephony(&self, gap: Duration) {
+        let gap_ms = u32::try_from(gap.as_millis()).unwrap_or(u32::MAX);
+        zbus::block_on(async { self.proxy().await?.restart_telephony(gap_ms).await })
+            .expect("restart the Simulated Phone's Telephony service");
     }
 
     /// Makes the Call the Desktop dialled ring at the other end, as the
@@ -2333,10 +2411,61 @@ fn bin_directory() -> PathBuf {
     directory
 }
 
-/// Starts a private `dbus-daemon` and returns its address.
+/// Gives the bus `session` is on `environment` for every service it starts,
+/// as the Desktop's session does with `dbus-update-activation-environment`,
+/// so such a service runs in the scenario's world.
+fn share_environment(session: &Connection, environment: &[(&'static str, String)]) {
+    zbus::block_on(async {
+        DBusProxy::new(session)
+            .await?
+            .update_activation_environment(
+                environment
+                    .iter()
+                    .map(|(name, value)| (*name, value.as_str()))
+                    .collect(),
+            )
+            .await
+    })
+    .expect("give the private session bus the scenario's environment");
+}
+
+/// A command that runs `program` where the systemd journal can't be
+/// reached, if it can be reached here. Arguments added to the command go to
+/// `program`.
+///
+/// Where the journal is reachable, the app would log there, so `program`
+/// runs in a mount namespace with an empty directory over the journal's. The
+/// app then finds no journal and logs to its file under `XDG_STATE_HOME`,
+/// exactly as it would on any machine without a journal. A second user
+/// namespace maps the user back to their own ID, so `program` runs as the
+/// same user it would outside.
+fn without_journal(program: &Path) -> Command {
+    if !Path::new(JOURNAL_SOCKET).exists() {
+        return Command::new(program);
+    }
+    let user = fs::metadata("/proc/self").expect("read /proc/self");
+    let mut command = Command::new("unshare");
+    command
+        .args(["--user", "--map-root-user", "--mount", "--", "sh", "-c"])
+        .arg(concat!(
+            "mount -t tmpfs none /run/systemd/journal && ",
+            "uid=$1 gid=$2 && shift 2 && ",
+            r#"exec unshare --user --map-user="$uid" --map-group="$gid" -- "$@""#
+        ))
+        .arg("sh")
+        .arg(user.uid().to_string())
+        .arg(user.gid().to_string())
+        .arg(program);
+    command
+}
+
+/// Starts a private `dbus-daemon` and returns its address. With
+/// `hide_journal`, it and every service it starts run where the journal
+/// can't be reached (see [`without_journal`]).
 fn start_bus(
     directory: &Path,
     name: &'static str,
+    hide_journal: bool,
     group: &ProcessGroup,
     processes: &mut Vec<(&'static str, Child)>,
 ) -> String {
@@ -2351,6 +2480,7 @@ fn start_bus(
   <type>session</type>
   <listen>unix:path={}</listen>
   <auth>EXTERNAL</auth>
+  <servicedir>{}</servicedir>
   <policy context="default">
     <allow send_destination="*" eavesdrop="true"/>
     <allow eavesdrop="true"/>
@@ -2358,13 +2488,24 @@ fn start_bus(
   </policy>
 </busconfig>
 "#,
-            socket.display()
+            socket.display(),
+            // Where the user's own D-Bus services are installed, as a
+            // session bus looks for them.
+            directory
+                .join("home/.local/share/dbus-1/services")
+                .display()
         ),
     )
     .expect("write the bus configuration");
+    let mut command = if hide_journal {
+        without_journal(Path::new("dbus-daemon"))
+    } else {
+        Command::new("dbus-daemon")
+    };
     let mut child = group
-        .adopt(&mut Command::new("dbus-daemon"))
+        .adopt(&mut command)
         .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
         .arg("--nofork")
         .arg("--print-address")
         .arg(format!("--config-file={}", config.display()))

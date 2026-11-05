@@ -87,6 +87,8 @@ pub enum EventKind {
     ThemeUnreadable,
     ThemeUnwatched,
     RoundingUnknown,
+    EarlierRunLoaded,
+    EarlierRunFailed,
     MainLoopStalled,
 }
 
@@ -133,6 +135,8 @@ impl EventKind {
             Self::ThemeUnreadable => "theme-unreadable",
             Self::ThemeUnwatched => "theme-unwatched",
             Self::RoundingUnknown => "rounding-unknown",
+            Self::EarlierRunLoaded => "earlier-run-loaded",
+            Self::EarlierRunFailed => "earlier-run-failed",
             Self::MainLoopStalled => "main-loop-stalled",
         }
     }

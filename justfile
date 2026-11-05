@@ -89,10 +89,29 @@ real-phone-checklist *args:
     @cargo build --quiet --workspace --bins --locked
     @target/debug/automation real-phone-checklist "$@"
 
-# Install for this user: binary, systemd user unit, D-Bus activation and desktop file.
+# Install for this user: the binary in ~/.local/bin, a systemd user unit that
+# starts with the graphical session and restarts after a crash, D-Bus
+# activation and the desktop file (launcher entry, tel: links). Then starts
+# it, now and at every login. With DESTDIR=dir, only stages the files there.
 [no-exit-message]
 install:
-    @echo "just install: not available yet (lands with ticket #20)." >&2; exit 1
+    cargo build --release --locked -p desktop-calls
+    /usr/bin/python3 tools/install.py target/release/desktop-calls
+    if [ -z "${DESTDIR:-}" ]; then \
+        systemctl --user daemon-reload && \
+        systemctl --user enable desktop-calls.service && \
+        systemctl --user restart desktop-calls.service; \
+    fi
+
+# Stop Desktop Calls and remove what `just install` installed. Contacts and
+# Call History cached in ~/.cache/desktop-calls stay.
+[no-exit-message]
+uninstall:
+    if [ -z "${DESTDIR:-}" ]; then \
+        systemctl --user disable --now desktop-calls.service || true; \
+    fi
+    /usr/bin/python3 tools/install.py --uninstall
+    if [ -z "${DESTDIR:-}" ]; then systemctl --user daemon-reload; fi
 
 # The core does no I/O and knows no GTK, D-Bus or logging, so none of those
 # crates may appear anywhere in its dependency tree.

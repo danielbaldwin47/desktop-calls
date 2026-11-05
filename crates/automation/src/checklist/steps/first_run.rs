@@ -26,6 +26,7 @@ const ASK_AGAIN_DEADLINE: Duration = Duration::from_secs(30);
 
 const FORGET_ON_THE_PIXEL: &str = "On the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and tap Forget.";
 const REMOVE_ON_THE_DESKTOP: &str = "On this computer: remove the Pixel in Bluetooth settings, or with `bluetoothctl remove` and its address.";
+const STILL_PAIRED: &str = "The Pixel is still paired, and this step pairs it afresh. Run `just real-phone-checklist 1 --fresh` instead: step 1.1 forgets the pairing on both sides first.";
 
 /// One of the Setup Window's reported fields, while it shows.
 fn window_field<'state>(state: &'state AppState, name: &str) -> Option<&'state str> {
@@ -131,6 +132,12 @@ fn close_the_window(sitting: &mut Sitting) -> Result<(), Stop> {
 /// Call to the Test Number with it, timed from the step's start.
 pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
+    // With the Pixel still paired, the Setup Window never lists it, and the
+    // wait for it would run out its two minutes.
+    if !sitting.now().phone_name.is_empty() {
+        sitting.check(false, STILL_PAIRED.to_owned());
+        return Ok(());
+    }
     let Some(test_number) = test_number_or_why_not(sitting) else {
         return Ok(());
     };
@@ -151,7 +158,9 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
         return Ok(());
     }
     check_synced(sitting, &finished.state);
-    add_the_keybinding(sitting)?;
+    if !add_the_keybinding(sitting)? {
+        return Ok(());
+    }
     close_the_window(sitting)?;
     sitting.say(
         "Press Super + Alt + C, type the Test Number, and press Enter.",
@@ -193,8 +202,9 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
 }
 
 /// Adds the keybinding from the finish page, if it offers it: the line is
-/// shown first, and written once confirmed.
-fn add_the_keybinding(sitting: &mut Sitting) -> Result<(), Stop> {
+/// shown first, and written once confirmed. Returns whether Super + Alt + C
+/// is bound to the Dialer now; if not, the step has failed, and says why.
+fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
     // The page checks the Hyprland config as it opens: the offer, or the
     // keybinding already there, follows within moments.
     let offered = sitting.happens_within("the keybinding offered", APP_DEADLINE, |state| {
@@ -204,16 +214,19 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<(), Stop> {
         Some(seen) if already_added(&seen.state) => {
             sitting
                 .observed("The keybinding was there already: the finish page says so.".to_owned());
-            return Ok(());
+            return Ok(true);
         }
         Some(_) => {}
         None => {
             let state = sitting.now();
             let said = window_field(&state, "instructions").unwrap_or_default();
-            sitting.observed(format!(
-                "The finish page offered no keybinding to add: {said}"
-            ));
-            return Ok(());
+            sitting.check(
+                false,
+                format!(
+                    "The finish page offered no keybinding to add, so Super + Alt + C won't open the Dialer. It says: {said}"
+                ),
+            );
+            return Ok(false);
         }
     }
     sitting.say(
@@ -226,15 +239,25 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<(), Stop> {
     let line = window_field(&shown.state, "line").unwrap_or_default();
     sitting.observed(format!("The window showed the line to add: {line}"));
     sitting.say("Choose Confirm to add it.", &["enter"]);
+    // Only the added page ends the wait, or the page saying it couldn't add
+    // the line: the states between belong to neither.
     let added = sitting.wait_for("the keybinding being added", ACT_DEADLINE, |state| {
-        window_field(state, "buttons") != Some("Confirm\nCancel")
+        already_added(state) || window_field(state, "notice").is_some()
     })?;
-    let instructions = window_field(&added.state, "instructions").unwrap_or_default();
+    let added_now = already_added(&added.state);
+    let said = if added_now {
+        window_field(&added.state, "instructions")
+    } else {
+        window_field(&added.state, "notice")
+    };
     sitting.check(
-        already_added(&added.state),
-        format!("Once confirmed, the finish page says: {instructions}"),
+        added_now,
+        format!(
+            "Once confirmed, the finish page says: {}",
+            said.unwrap_or_default()
+        ),
     );
-    Ok(())
+    Ok(added_now)
 }
 
 /// 1.3: with Contacts access off, the Phone asks again once paired

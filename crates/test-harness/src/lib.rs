@@ -60,7 +60,7 @@ pub mod vcards;
 
 pub use app::{
     AppCall, AppCallHistoryEntry, AppContactsState, AppDialerRow, AppError, AppProblem, AppState,
-    MissedCall, ShownSurfaces,
+    MissedCall, Published, ShownSurfaces,
 };
 pub use builder::Builder;
 pub use client::TestClient;
@@ -161,8 +161,8 @@ pub struct Harness {
     app_errors: Arc<Mutex<Vec<AppError>>>,
     /// Every `MissedCall` signal the app has sent, in order.
     missed_calls: Arc<Mutex<Vec<MissedCall>>>,
-    /// Every value the app's `Surfaces` property has signalled, in order.
-    surfaces_seen: Arc<Mutex<Vec<ShownSurfaces>>>,
+    /// The app's `Calls` and `Surfaces` after each signal that changed either, in order.
+    published: Arc<Mutex<Vec<Published>>>,
     // Stopped in reverse order of starting: the app, the Simulated Phone,
     // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,

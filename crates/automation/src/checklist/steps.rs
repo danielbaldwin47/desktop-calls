@@ -149,7 +149,7 @@ pub const GROUPS: &[Group] = &[
             },
             Step {
                 id: "2.7",
-                title: "Turn Do Not Disturb on and receive a Call: the Banner shows and the Desktop stays silent",
+                title: "Turn Do Not Disturb on and receive two Calls: the Banner shows and the Desktop stays silent; decline the first on the Desktop and answer the second on the Pixel",
                 script: Some(do_not_disturb),
                 lands_with: &[],
             },
@@ -412,9 +412,9 @@ fn call_ends(
 /// Without Do Not Disturb, the Desktop stops ringing. `Ringing` is published
 /// with the Call's state, so this can't be mistaken for the Pixel answering.
 /// Under Do Not Disturb the Desktop never rings, so the Banner closing tells
-/// instead. `Surfaces` follows the Call's state a moment later, so for that
-/// moment a Call answered on the Pixel looks the same; 2.7, the one step run
-/// under Do Not Disturb, asks only for Decline on the Desktop.
+/// instead. The control interface publishes a Call's state before the
+/// surfaces that follow from it (ticket #107), so a Call answered or
+/// declined on the Pixel is already listed as such when its Banner closes.
 fn handled_on_desktop(state: &AppState, call: u32) -> bool {
     let still_ringing = state
         .call(call)

@@ -6,10 +6,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  # `gh workflow run CI --ref <branch> -f keep_scenario_logs=true` keeps the
+  # logs of passing scenarios too, to compare them with failing ones.
   workflow_dispatch:
+    inputs:
+      keep_scenario_logs:
+        description: Keep the logs of passing scenarios too
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+# The harness keeps a passing scenario's directory too when this is set (see
+# KEEP_SCENARIO_LOGS in crates/test-harness/src/lib.rs). Failing scenarios
+# always keep theirs.
+env:
+  KEEP_SCENARIO_LOGS: ${{ inputs.keep_scenario_logs && '1' || '' }}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -122,11 +135,14 @@ jobs:
           path: scorecard.txt
           if-no-files-found: ignore
 
-      - name: Keep the logs of failed scenarios
-        if: failure()
+      # Every scenario directory left: those of failed scenarios, and of
+      # passing ones too when KEEP_SCENARIO_LOGS is set. `just ci-wait`
+      # downloads them.
+      - name: Keep the scenario logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-scenario-logs-check
+          name: scenario-logs-check
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 
@@ -168,11 +184,11 @@ jobs:
           path: target/screenshots
           if-no-files-found: ignore
 
-      - name: Keep the logs of failed scenarios
-        if: failure()
+      - name: Keep the scenario logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-scenario-logs
+          name: scenario-logs
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 

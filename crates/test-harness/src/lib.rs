@@ -10,7 +10,11 @@
 //! When a scenario fails, its directory is kept and its path printed. It
 //! holds every process's log: the app's own log file, which the app writes
 //! because the harness hides the systemd journal from it, and the standard
-//! error of each process.
+//! error of each process. With [`KEEP_SCENARIO_LOGS`] set, passing scenarios
+//! keep theirs too.
+//!
+//! Every process a scenario starts dies with it, even when the test process
+//! is killed: see `process_group.rs`.
 //!
 //! A scenario that asks for a screen also gets a compositor of its own, and
 //! the app runs on it. Screenshots are kept under `target/screenshots/`.
@@ -40,6 +44,7 @@ use std::time::{Duration, Instant};
 
 mod client;
 mod input;
+mod process_group;
 mod screen;
 mod screencopy;
 mod stand_ins;
@@ -59,6 +64,7 @@ use zbus::names::{BusName, InterfaceName};
 use zbus::proxy::CacheProperties;
 use zbus::{Connection, MatchRule, MessageStream, proxy};
 
+use crate::process_group::ProcessGroup;
 use crate::screen::{Screen, ScreenKind};
 use crate::screencopy::Recorder;
 use crate::stand_ins::StandIns;
@@ -108,6 +114,11 @@ fn settle(
     }
     found
 }
+
+/// The environment variable that makes passing scenarios keep their
+/// directories, as failing ones always do: `KEEP_SCENARIO_LOGS=1 just test`.
+/// CI sets it when run by hand with `keep_scenario_logs`.
+pub const KEEP_SCENARIO_LOGS: &str = "KEEP_SCENARIO_LOGS";
 
 /// The journal's socket. While it is reachable the app logs there, so the
 /// harness hides it from the app to get a log file per scenario.
@@ -353,6 +364,9 @@ pub struct Harness {
     // Stopped in reverse order of starting: the app, the Simulated Phone,
     // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,
+    /// Holds every process above and their children. Dropped last, so it
+    /// kills whatever they left running.
+    group: ProcessGroup,
 }
 
 /// Chooses what a scenario's world has beyond the buses, the Simulated Phone
@@ -506,10 +520,11 @@ impl Builder {
             .expect("create the scenario directory")
             .keep();
         let bin_directory = bin_directory();
+        let group = ProcessGroup::start(&directory);
         let mut processes = Vec::new();
 
-        let system_bus = start_bus(&directory, "system", &mut processes);
-        let session_bus = start_bus(&directory, "session", &mut processes);
+        let system_bus = start_bus(&directory, "system", &group, &mut processes);
+        let session_bus = start_bus(&directory, "session", &group, &mut processes);
         let mut environment = environment(&directory, &system_bus, &session_bus);
         if let Some(time_zone) = self.time_zone {
             environment.push(("TZ", time_zone));
@@ -522,7 +537,7 @@ impl Builder {
                 .expect("make the Omarchy theme current");
         }
         let screen = self.screen.as_ref().map(|kind| {
-            let screen = Screen::start(kind, &directory, &environment, &mut processes);
+            let screen = Screen::start(kind, &directory, &environment, &group, &mut processes);
             environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));
             screen
         });
@@ -572,6 +587,7 @@ impl Builder {
             app_errors,
             surfaces_seen,
             processes,
+            group,
         };
 
         if self.omarchy_bar {
@@ -637,6 +653,7 @@ impl Harness {
         self.screen();
         Screen::screenshot(
             &self.environment,
+            &self.group,
             &self.screenshot_directory.join(format!("{name}.png")),
         )
     }
@@ -654,6 +671,7 @@ impl Harness {
         self.screen();
         Screen::screenshot_of(
             &self.environment,
+            &self.group,
             &self.screenshot_directory.join(format!("{name}.png")),
             region,
         )
@@ -767,7 +785,10 @@ impl Harness {
     #[must_use]
     pub fn external_command(&self, program: &str) -> Command {
         let mut command = Command::new(program);
-        command.env_clear().envs(self.environment.iter().cloned());
+        self.group
+            .adopt(&mut command)
+            .env_clear()
+            .envs(self.environment.iter().cloned());
         command
     }
 
@@ -1478,7 +1499,10 @@ impl Harness {
     /// environment and nothing else.
     fn command(&self, binary: &str) -> Command {
         let mut command = Command::new(self.bin_directory.join(binary));
-        command.env_clear().envs(self.environment.iter().cloned());
+        self.group
+            .adopt(&mut command)
+            .env_clear()
+            .envs(self.environment.iter().cloned());
         command
     }
 
@@ -1499,7 +1523,8 @@ impl Harness {
         }
         let user = fs::metadata("/proc/self").expect("read /proc/self");
         let mut command = Command::new("unshare");
-        command
+        self.group
+            .adopt(&mut command)
             .env_clear()
             .envs(self.environment.iter().cloned())
             .args(["--user", "--map-root-user", "--mount", "--", "sh", "-c"])
@@ -1558,7 +1583,7 @@ impl Drop for Harness {
             let _ = child.kill();
             let _ = child.wait();
         }
-        if thread::panicking() {
+        if thread::panicking() || keep_scenario_logs() {
             eprintln!("Kept this scenario's logs in {}", self.directory.display());
         } else {
             let _ = fs::remove_dir_all(&self.directory);
@@ -2225,6 +2250,13 @@ fn collect_surfaces(session: &Connection) -> Arc<Mutex<Vec<ShownSurfaces>>> {
     seen
 }
 
+/// Whether passing scenarios keep their directories too: when
+/// [`KEEP_SCENARIO_LOGS`] is set to anything but empty or `0`.
+#[must_use]
+pub fn keep_scenario_logs() -> bool {
+    std::env::var_os(KEEP_SCENARIO_LOGS).is_some_and(|value| !value.is_empty() && value != "0")
+}
+
 /// Runs `future`, giving up after `deadline`.
 async fn within<F: Future>(deadline: Duration, future: F) -> Option<F::Output> {
     let (expired, expiry) = oneshot::channel();
@@ -2263,6 +2295,7 @@ fn bin_directory() -> PathBuf {
 fn start_bus(
     directory: &Path,
     name: &'static str,
+    group: &ProcessGroup,
     processes: &mut Vec<(&'static str, Child)>,
 ) -> String {
     let socket = directory.join(format!("{name}-bus"));
@@ -2287,7 +2320,8 @@ fn start_bus(
         ),
     )
     .expect("write the bus configuration");
-    let mut child = Command::new("dbus-daemon")
+    let mut child = group
+        .adopt(&mut Command::new("dbus-daemon"))
         .env_clear()
         .arg("--nofork")
         .arg("--print-address")

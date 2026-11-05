@@ -15,6 +15,7 @@ check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python
 
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
 # Screen scenarios need sway, grim and wl-clipboard: sudo pacman -S --needed sway grim wl-clipboard
+# A failing scenario keeps its directory under $TMPDIR; KEEP_SCENARIO_LOGS=1 keeps passing ones too.
 test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}

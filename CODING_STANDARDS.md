@@ -32,7 +32,7 @@ These rules bind every change to Desktop Calls. Most are enforced by `just check
 - Tests go through one seam: the real `desktop-calls` binary running against the Simulated Phone, driven and observed only through the control interface, synthetic keyboard and pointer input, the desktop stand-ins, and screenshots. There are no tests of internals. The pure core modules (Call state machine, matching, Messages) may also be tested at their public interface.
 - A test states a user-visible scenario and asserts only external behaviour: control-interface state and signals, what the Simulated Phone recorded it was asked to do, what the stand-ins received, and what is on screen.
 - Wait on observable state with a deadline, for example "until `ConnectionState` is `connected`, at most 5 s". Never a fixed sleep.
-- Each test gets its own private buses and temporary home, so tests run in parallel, and keeps its logs when it fails.
+- Each test gets its own private buses and temporary home, so tests run in parallel, and keeps its logs when it fails (`KEEP_SCENARIO_LOGS=1` keeps them when it passes too). Nothing it starts outlives it, even when its process is killed.
 
 ## No test-only code paths
 

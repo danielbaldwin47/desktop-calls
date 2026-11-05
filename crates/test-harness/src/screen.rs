@@ -15,6 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::input::SyntheticInput;
+use crate::process_group::ProcessGroup;
 
 /// The size of the headless output in pixels: the user's monitor.
 pub const SCREEN_SIZE: (u32, u32) = (3840, 2160);
@@ -226,6 +227,7 @@ impl Screen {
         kind: &ScreenKind,
         directory: &Path,
         environment: &[(&'static str, String)],
+        group: &ProcessGroup,
         processes: &mut Vec<(&'static str, Child)>,
     ) -> Self {
         let ready = directory.join("compositor-ready");
@@ -239,7 +241,8 @@ impl Screen {
         fs::write(&config, config_text(kind, &ready)).expect("write the compositor's config");
 
         let mut command = Command::new("sway");
-        command
+        group
+            .adopt(&mut command)
             .env_clear()
             .envs(environment.iter().cloned())
             .arg("--config")
@@ -303,13 +306,18 @@ impl Screen {
 
     /// Captures every output into `path` with `grim`. `environment` names
     /// this screen in `WAYLAND_DISPLAY`.
-    pub fn screenshot(environment: &[(&'static str, String)], path: &Path) -> Screenshot {
-        Self::grim(environment, &[], path)
+    pub fn screenshot(
+        environment: &[(&'static str, String)],
+        group: &ProcessGroup,
+        path: &Path,
+    ) -> Screenshot {
+        Self::grim(environment, group, &[], path)
     }
 
     /// Captures only `region`, in layout coordinates, into `path`.
     pub fn screenshot_of(
         environment: &[(&'static str, String)],
+        group: &ProcessGroup,
         path: &Path,
         region: Region,
     ) -> Screenshot {
@@ -317,14 +325,20 @@ impl Screen {
         let (left, top) = (region.left.floor(), region.top.floor());
         let (width, height) = (region.right.ceil() - left, region.bottom.ceil() - top);
         let geometry = format!("{left},{top} {width}x{height}");
-        Self::grim(environment, &["-g", &geometry], path)
+        Self::grim(environment, group, &["-g", &geometry], path)
     }
 
-    fn grim(environment: &[(&'static str, String)], arguments: &[&str], path: &Path) -> Screenshot {
+    fn grim(
+        environment: &[(&'static str, String)],
+        group: &ProcessGroup,
+        arguments: &[&str],
+        path: &Path,
+    ) -> Screenshot {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create the screenshot directory");
         }
-        let captured = Command::new("grim")
+        let captured = group
+            .adopt(&mut Command::new("grim"))
             .env_clear()
             .envs(environment.iter().cloned())
             .args(arguments)

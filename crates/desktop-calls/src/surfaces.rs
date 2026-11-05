@@ -580,8 +580,6 @@ fn detail_label() -> gtk::Label {
     label
 }
 
-/// Whether a key press holds Control, Alt or Super, so it is a shortcut of
-/// something else and not a plain letter.
 /// Escape, or Super+W: Omarchy's Close window. Hyprland's close never
 /// reaches a layer surface, so a bind can hand Super+W to the surface
 /// instead, which then closes as on Escape (ticket #125).
@@ -594,6 +592,8 @@ fn is_escape(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
         || (super_only && matches!(key, gtk::gdk::Key::w | gtk::gdk::Key::W))
 }
 
+/// Whether a key press holds Control, Alt or Super, so it is a shortcut of
+/// something else and not a plain letter.
 fn has_command_modifier(modifiers: gtk::gdk::ModifierType) -> bool {
     modifiers.intersects(
         gtk::gdk::ModifierType::CONTROL_MASK

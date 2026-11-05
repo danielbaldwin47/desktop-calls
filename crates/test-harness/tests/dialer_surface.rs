@@ -496,21 +496,25 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
 /// One way of opening the Dialer.
 type OpenDialer = fn(&Harness);
 
-/// How many times the app has logged `activate-requested`, and how many
-/// times the Dialer has drawn its first frame.
-fn asked_and_drawn(harness: &Harness) -> (usize, usize) {
+/// The app's log, in order: `true` for each `activate-requested`, `false`
+/// for each first frame the Dialer drew.
+fn asked_and_drawn(harness: &Harness) -> Vec<bool> {
     let asked = AppEvent::kind("activate-requested");
     let drawn = AppEvent::kind("surface-shown").with("surface", "dialer");
     harness
         .app_log()
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .fold((0, 0), |(a, d), event| {
-            (
-                a + usize::from(asked.matches(&event)),
-                d + usize::from(drawn.matches(&event)),
-            )
+        .filter_map(|event| {
+            if asked.matches(&event) {
+                Some(true)
+            } else if drawn.matches(&event) {
+                Some(false)
+            } else {
+                None
+            }
         })
+        .collect()
 }
 
 /// Step 7.4 of the Real-Phone Checklist times the Dialer's first frame from
@@ -542,21 +546,34 @@ fn every_way_of_opening_the_dialer_logs_that_it_was_asked() {
         harness.wait_for_app(&format!("{way} opens the Dialer"), DEADLINE, focused);
         // The first frame is logged just after the Dialer shows.
         let started = Instant::now();
-        let (asked, drawn) = loop {
-            let (asked, drawn) = asked_and_drawn(&harness);
+        let events = loop {
+            let events = asked_and_drawn(&harness);
+            let drawn = events.iter().filter(|asked| !**asked).count();
             if drawn >= opened || started.elapsed() > DEADLINE {
-                break (asked, drawn);
+                break events;
             }
             thread::sleep(Duration::from_millis(50));
         };
+        let drawn = events.iter().filter(|asked| !**asked).count();
+        let asked = events.len() - drawn;
         assert_eq!(
             drawn, opened,
             "opened by {way}, the Dialer's first frames logged"
         );
-        assert!(
-            asked >= drawn,
-            "opened by {way}, the Dialer has drawn its first frame {drawn} times, but the app \
-             has logged activate-requested only {asked} times"
+        assert_eq!(
+            asked, opened,
+            "opened by {way}, the app logged activate-requested {asked} times for {opened} openings"
+        );
+        // This opening's activate-requested comes before its first frame.
+        assert_eq!(
+            events.last(),
+            Some(&false),
+            "opened by {way}, the app logged activate-requested after the Dialer's first frame"
+        );
+        assert_eq!(
+            events.get(events.len().wrapping_sub(2)),
+            Some(&true),
+            "opened by {way}, the Dialer drew its first frame before the app logged activate-requested"
         );
         harness.keyboard().press(Key::Escape);
         harness.wait_for_app("the Dialer closes", DEADLINE, |state| {

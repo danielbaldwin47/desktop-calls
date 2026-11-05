@@ -301,20 +301,7 @@ const STATES: &[State] = &[
         title: "The Call Window with two Calls: the answered one live, the first on hold",
         still: |_| true,
         prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            on_a_call(harness);
-            waiting(harness);
-            if let Err(error) = harness.hold_and_answer() {
-                panic!("Hold & Answer: {error:?}");
-            }
-            harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
-                state
-                    .surface("call-window")
-                    .is_some_and(|window| window.contains_key("held-caller"))
-                    && state.surface("banner").is_none()
-            });
-        },
+        reach: held,
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
@@ -323,18 +310,7 @@ const STATES: &[State] = &[
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
-            connect(harness);
-            on_a_call(harness);
-            waiting(harness);
-            if let Err(error) = harness.hold_and_answer() {
-                panic!("Hold & Answer: {error:?}");
-            }
-            harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
-                state
-                    .surface("call-window")
-                    .is_some_and(|window| window.contains_key("held-caller"))
-                    && state.surface("banner").is_none()
-            });
+            held(harness);
             let _path = harness.simulated_phone().ring(THIRD_NUMBER);
             harness.wait_for_app(
                 "the Call Window says why the Held Call has no Swap or Hang up",
@@ -349,7 +325,6 @@ const STATES: &[State] = &[
                 },
             );
         },
-        // Decline is red; with no Hold & Answer, nothing is green.
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
@@ -791,6 +766,22 @@ fn waiting(harness: &Harness) {
 
 /// Where the app's surfaces are: everything that is neither the black
 /// background nor the bar stand-in.
+/// Two Calls: the answered one live, the first on hold.
+fn held(harness: &Harness) {
+    connect(harness);
+    on_a_call(harness);
+    waiting(harness);
+    if let Err(error) = harness.hold_and_answer() {
+        panic!("Hold & Answer: {error:?}");
+    }
+    harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.contains_key("held-caller"))
+            && state.surface("banner").is_none()
+    });
+}
+
 fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }

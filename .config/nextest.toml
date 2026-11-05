@@ -1,0 +1,9 @@
+# cargo-nextest, which runs the harness's scenarios in CI's shards (#118).
+
+[profile.default]
+# The slowest scenario takes about 30 s on a CI runner. A scenario still
+# running after 3 minutes has hung: nextest kills it and fails it, rather
+# than leave the job to run until GitHub's 6-hour limit. With six at a time
+# on two CPUs, call_window_keyboard's scenarios hung for over 2 minutes in
+# run 42034428129.
+slow-timeout = { period = "60s", terminate-after = 3 }

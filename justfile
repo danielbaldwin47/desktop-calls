@@ -6,11 +6,16 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Check formatting, lints, the build, dependencies and file lengths. CI runs this.
-check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data
+# Check formatting, lints, dependencies and file lengths, then build every target.
+check: lint
+    cargo build --workspace --all-targets --locked
+
+# CI runs this rather than `just check`: its test jobs build every target
+# between them, and building them again cost a minute (#118).
+# `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    cargo build --workspace --all-targets --locked
     cargo deny --locked check
 
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
@@ -19,6 +24,14 @@ check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python 
 test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
+
+# `just test-file contacts with_5000`; --ci-like runs them under CI's limits.
+# Use it rather than `cargo test --test <file>`. `just test-file --help`.
+# Run one harness test file, or only its scenarios whose names contain FILTER.
+[positional-arguments]
+[no-exit-message]
+test-file *args:
+    @python3 tools/test_file.py "$@"
 
 # Run the tests under CI's limits, to reproduce a CI-only failure before
 # pushing: a cgroup CPU quota, four scenarios at a time, no GPU, CI's
@@ -130,6 +143,11 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# The repo's Python tools pass their own tests, tools/*_test.py.
+[private]
+_tools-pass-their-tests:
+    python3 -B -m unittest discover --start-directory tools --pattern '*_test.py' --quiet
 
 # An agent that reads a whole oversized file spends its context on it: the
 # harness's 2,442-line lib.rs took 88k of the 276k characters one agent read

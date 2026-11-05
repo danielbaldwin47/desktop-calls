@@ -1,0 +1,3 @@
+# `just demo`: the paired Phone comes into range and hands-free connects.
+# The steps are documented in crates/simulated-phone/src/scenario.rs.
+connect

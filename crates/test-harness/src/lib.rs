@@ -12,6 +12,9 @@
 //! because the harness hides the systemd journal from it, and the standard
 //! error of each process.
 //!
+//! A scenario that asks for a screen also gets a compositor of its own, and
+//! the app runs on it. Screenshots are kept under `target/screenshots/`.
+//!
 //! The binaries are found next to the test executable, so build them first;
 //! `just test` does.
 
@@ -33,6 +36,16 @@ use std::process::{Child, ChildStdout, Command, Output, Stdio};
 use std::thread;
 use std::time::Duration;
 
+mod client;
+mod input;
+mod screen;
+mod stand_ins;
+
+pub use client::TestClient;
+pub use input::Key;
+pub use screen::{LAYOUT_SIZE, SCREEN_SIZE, Screenshot};
+pub use stand_ins::{Notification, Theme, TrayItem};
+
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
@@ -40,6 +53,9 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 use zbus::names::{BusName, InterfaceName};
 use zbus::proxy::CacheProperties;
 use zbus::{Connection, proxy};
+
+use crate::screen::{Screen, ScreenKind};
+use crate::stand_ins::StandIns;
 
 /// The app's control interface, as the contract in `CODING_STANDARDS.md` names it.
 const APP_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls";
@@ -110,20 +126,71 @@ pub struct Harness {
     phone: PhoneIdentity,
     audio_gateway_index: u32,
     session: Connection,
+    session_bus: String,
+    stand_ins: StandIns,
+    screen: Option<Screen>,
+    screenshot_directory: PathBuf,
     // Stopped in reverse order of starting: the app, the Simulated Phone,
-    // then the buses.
+    // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,
 }
 
-impl Harness {
-    /// Starts private buses, the Simulated Phone and the app, and returns once
-    /// the app's control interface is on the bus.
+/// Chooses what a scenario's world has beyond the buses, the Simulated Phone
+/// and the app. [`Harness::builder`] makes one.
+#[derive(Default)]
+#[must_use]
+pub struct Builder {
+    screen: Option<ScreenKind>,
+    theme: Theme,
+    scenario: Option<PathBuf>,
+    screenshot_directory: Option<PathBuf>,
+}
+
+impl Builder {
+    /// Gives the scenario an off-screen compositor of [`SCREEN_SIZE`], and
+    /// runs the app on it.
+    pub fn headless_screen(mut self) -> Self {
+        self.screen = Some(ScreenKind::Headless);
+        self
+    }
+
+    /// Gives the scenario a compositor that shows as a window on the
+    /// compositor listening at `parent_socket`, and runs the app on it.
+    pub fn nested_screen(mut self, parent_socket: PathBuf) -> Self {
+        self.screen = Some(ScreenKind::Nested { parent_socket });
+        self
+    }
+
+    /// Makes the Desktop light or dark, through the settings portal that GTK
+    /// reads. Light by default.
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// Has the Simulated Phone act out the scenario file at `path` as soon
+    /// as it is on the bus. See `crates/simulated-phone/src/scenario.rs`.
+    pub fn scenario(mut self, path: PathBuf) -> Self {
+        self.scenario = Some(path);
+        self
+    }
+
+    /// Keeps screenshots in `directory`. By default they go to
+    /// `target/screenshots/scenarios/<test name>/`.
+    pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
+        self.screenshot_directory = Some(directory);
+        self
+    }
+
+    /// Starts private buses, the compositor if asked for, the Simulated Phone
+    /// and the app, and returns once the app's control interface is on the
+    /// bus.
     ///
     /// # Panics
     ///
     /// If any of them fails to start; the panic says which and where its log is.
     #[must_use]
-    pub fn start() -> Self {
+    pub fn start(self) -> Harness {
         let directory = tempfile::Builder::new()
             .prefix("desktop-calls-test-")
             .tempdir()
@@ -134,7 +201,19 @@ impl Harness {
 
         let system_bus = start_bus(&directory, "system", &mut processes);
         let session_bus = start_bus(&directory, "session", &mut processes);
-        let environment = environment(&directory, &system_bus, &session_bus);
+        let mut environment = environment(&directory, &system_bus, &session_bus);
+        let screen = self.screen.as_ref().map(|kind| {
+            let screen = Screen::start(kind, &directory, &environment, &mut processes);
+            environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));
+            screen
+        });
+        let screenshot_directory = self.screenshot_directory.unwrap_or_else(|| {
+            bin_directory
+                .parent()
+                .unwrap_or(&bin_directory)
+                .join("screenshots/scenarios")
+                .join(scenario_name())
+        });
 
         let phone = PhoneIdentity {
             name: "Simulated Pixel".to_owned(),
@@ -148,24 +227,35 @@ impl Harness {
             zbus::block_on(zbus::connection::Builder::address(session_bus.as_str()).build())
                 .expect("connect the harness to the private session bus");
 
-        let mut harness = Self {
+        let stand_ins = StandIns::start(&session_bus, self.theme)
+            .expect("serve the desktop stand-ins on the private session bus");
+
+        let mut harness = Harness {
             directory,
             bin_directory,
             environment,
             phone,
             audio_gateway_index,
             session,
+            session_bus,
+            stand_ins,
+            screen,
+            screenshot_directory,
             processes,
         };
 
-        let simulated_phone = harness
-            .command("simulated-phone")
+        let mut simulated_phone = harness.command("simulated-phone");
+        simulated_phone
             .arg("--name")
             .arg(&harness.phone.name)
             .arg("--address")
             .arg(&harness.phone.address)
             .arg("--first-audio-gateway-index")
-            .arg(harness.audio_gateway_index.to_string())
+            .arg(harness.audio_gateway_index.to_string());
+        if let Some(scenario) = &self.scenario {
+            simulated_phone.arg("--scenario").arg(scenario);
+        }
+        let simulated_phone = simulated_phone
             .stdout(harness.log_file("simulated-phone.stdout"))
             .stderr(harness.log_file("simulated-phone.stderr"))
             .spawn()
@@ -183,6 +273,138 @@ impl Harness {
         harness.wait_for_bus_name(APP_BUS_NAME, "desktop-calls");
 
         harness
+    }
+}
+
+impl Harness {
+    /// Starts a scenario with no screen. See [`Builder::start`].
+    ///
+    /// # Panics
+    ///
+    /// If any process fails to start; the panic says which and where its log is.
+    #[must_use]
+    pub fn start() -> Self {
+        Self::builder().start()
+    }
+
+    /// Chooses a screen and more before starting.
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+
+    /// Captures the screen as `<name>.png` in the screenshot directory.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the capture fails.
+    #[must_use]
+    pub fn screenshot(&self, name: &str) -> Screenshot {
+        self.screen();
+        Screen::screenshot(
+            &self.environment,
+            &self.screenshot_directory.join(format!("{name}.png")),
+        )
+    }
+
+    /// The address of the scenario's private session bus, for a test that
+    /// acts as another Desktop client.
+    #[must_use]
+    pub fn session_bus_address(&self) -> &str {
+        &self.session_bus
+    }
+
+    /// A command for any program on `PATH`, with this scenario's environment
+    /// and nothing else, as a Desktop client would run.
+    #[must_use]
+    pub fn external_command(&self, program: &str) -> Command {
+        let mut command = Command::new(program);
+        command.env_clear().envs(self.environment.iter().cloned());
+        command
+    }
+
+    /// The notification server stand-in.
+    #[must_use]
+    pub fn notifications(&self) -> Notifications<'_> {
+        Notifications {
+            stand_ins: &self.stand_ins,
+        }
+    }
+
+    /// The tray watcher stand-in.
+    #[must_use]
+    pub fn tray(&self) -> Tray<'_> {
+        Tray {
+            stand_ins: &self.stand_ins,
+        }
+    }
+
+    /// Turns Omarchy's Do Not Disturb on or off, by rewriting its state file
+    /// as Omarchy does.
+    ///
+    /// # Panics
+    ///
+    /// If the file can't be written.
+    pub fn set_do_not_disturb(&self, on: bool) {
+        stand_ins::write_do_not_disturb(&self.directory.join("home"), on)
+            .expect("write Omarchy's notification state file");
+    }
+
+    /// Types on the screen's synthetic keyboard, into whatever has focus.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen.
+    #[must_use]
+    pub fn keyboard(&self) -> Keyboard<'_> {
+        Keyboard {
+            screen: self.screen(),
+        }
+    }
+
+    /// Moves and clicks the screen's synthetic pointer.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen.
+    #[must_use]
+    pub fn pointer(&self) -> Pointer<'_> {
+        Pointer {
+            screen: self.screen(),
+        }
+    }
+
+    /// Starts the harness's own client, which opens a window on the screen
+    /// and prints the input it receives.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the client can't start.
+    #[must_use]
+    pub fn start_test_client(&self) -> TestClient {
+        self.screen();
+        let child = self
+            .command("test-client")
+            .stdout(Stdio::piped())
+            .stderr(self.log_file("test-client.stderr"))
+            .spawn()
+            .expect("start test-client");
+        TestClient::new(child)
+    }
+
+    /// Blocks until the screen closes: the compositor exits, or, for a
+    /// nested screen, its window is closed.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen.
+    pub fn wait_until_screen_closes(&self) {
+        self.screen().input().wait_until_closed();
+    }
+
+    fn screen(&self) -> &Screen {
+        self.screen
+            .as_ref()
+            .expect("this needs a screen: start with Harness::builder().headless_screen()")
     }
 
     /// This scenario's directory: the temporary home, the XDG directories,
@@ -370,6 +592,146 @@ impl Drop for Harness {
     }
 }
 
+/// The notification server stand-in. See [`Harness::notifications`].
+pub struct Notifications<'harness> {
+    stand_ins: &'harness StandIns,
+}
+
+impl Notifications<'_> {
+    /// Every notification received so far, in order.
+    #[must_use]
+    pub fn received(&self) -> Vec<Notification> {
+        self.stand_ins.notifications()
+    }
+
+    /// Waits until a received notification satisfies `condition`, and
+    /// returns it.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first. The panic names `description` and every
+    /// notification received.
+    pub fn wait_for(
+        &self,
+        description: &str,
+        deadline: Duration,
+        condition: impl Fn(&Notification) -> bool,
+    ) -> Notification {
+        self.stand_ins
+            .wait_for_notification(deadline, condition)
+            .unwrap_or_else(|received| {
+                panic!(
+                    "\"{description}\" did not happen within {deadline:?}; received {received:#?}"
+                )
+            })
+    }
+
+    /// Clicks notification `id`, as Omarchy does: invokes its `default`
+    /// action and closes it.
+    ///
+    /// # Panics
+    ///
+    /// If the notification offered no `default` action.
+    pub fn invoke_default_action(&self, id: u32) {
+        if let Err(error) = self.stand_ins.invoke_default_action(id) {
+            panic!("click notification {id}: {error}");
+        }
+    }
+}
+
+/// The tray watcher stand-in. See [`Harness::tray`].
+pub struct Tray<'harness> {
+    stand_ins: &'harness StandIns,
+}
+
+impl Tray<'_> {
+    /// Every registered item, with its status and icon as it reports them now.
+    #[must_use]
+    pub fn items(&self) -> Vec<TrayItem> {
+        self.stand_ins.tray_items()
+    }
+
+    /// Waits until the registered items satisfy `condition`, and returns them.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first. The panic names `description` and the
+    /// items.
+    pub fn wait_for(
+        &self,
+        description: &str,
+        deadline: Duration,
+        condition: impl Fn(&[TrayItem]) -> bool,
+    ) -> Vec<TrayItem> {
+        self.stand_ins
+            .wait_for_tray(deadline, condition)
+            .unwrap_or_else(|error| {
+                panic!("\"{description}\" did not happen within {deadline:?}: {error}")
+            })
+    }
+}
+
+/// The screen's synthetic keyboard. See [`Harness::keyboard`].
+pub struct Keyboard<'harness> {
+    screen: &'harness Screen,
+}
+
+impl Keyboard<'_> {
+    /// Types `text` with a US layout, holding Shift where a character needs it.
+    ///
+    /// # Panics
+    ///
+    /// If `text` has a character the US layout can't type, or the compositor
+    /// is gone.
+    pub fn type_text(&self, text: &str) {
+        if let Err(error) = self.screen.input().type_text(text) {
+            panic!("type {text:?}: {error}");
+        }
+    }
+
+    /// Presses and releases `key`.
+    ///
+    /// # Panics
+    ///
+    /// If the compositor is gone.
+    pub fn press(&self, key: Key) {
+        if let Err(error) = self.screen.input().press(key) {
+            panic!("press {key:?}: {error}");
+        }
+    }
+}
+
+/// The screen's synthetic pointer, in layout coordinates: the headless
+/// screen is [`LAYOUT_SIZE`]. See [`Harness::pointer`].
+pub struct Pointer<'harness> {
+    screen: &'harness Screen,
+}
+
+impl Pointer<'_> {
+    /// Moves the pointer to (`x`, `y`).
+    ///
+    /// # Panics
+    ///
+    /// If the point is off the screen, or the compositor is gone.
+    pub fn move_to(&self, x: f64, y: f64) {
+        if let Err(error) = self.screen.input().move_to(x, y, LAYOUT_SIZE) {
+            panic!("move the pointer to ({x}, {y}): {error}");
+        }
+    }
+
+    /// Moves the pointer to (`x`, `y`) and clicks the left button there.
+    ///
+    /// # Panics
+    ///
+    /// If the point is off the screen, or the compositor is gone.
+    pub fn click(&self, x: f64, y: f64) {
+        self.move_to(x, y);
+        if let Err(error) = self.screen.input().click() {
+            panic!("click at ({x}, {y}): {error}");
+        }
+    }
+}
+
 /// Drives the Simulated Phone through its control interface.
 pub struct SimulatedPhone<'harness> {
     harness: &'harness Harness,
@@ -483,16 +845,18 @@ async fn within<F: Future>(deadline: Duration, future: F) -> Option<F::Output> {
     }
 }
 
-/// Where cargo put the workspace's binaries: the directory above the test
-/// executable's `deps`.
+/// Where cargo put the workspace's binaries: `target/<profile>`, which holds
+/// the automation binary, and whose `deps` holds test executables.
 fn bin_directory() -> PathBuf {
-    let test_executable = std::env::current_exe().expect("find the test executable");
-    let directory = test_executable
+    let executable = std::env::current_exe().expect("find the running executable");
+    let mut directory = executable
         .parent()
-        .and_then(Path::parent)
-        .expect("the test executable is in target/<profile>/deps")
+        .expect("the executable is in target/<profile>")
         .to_owned();
-    for binary in ["desktop-calls", "simulated-phone"] {
+    if directory.ends_with("deps") {
+        directory.pop();
+    }
+    for binary in ["desktop-calls", "simulated-phone", "test-client"] {
         assert!(
             directory.join(binary).exists(),
             "{binary} isn't built in {}; run `just test`, which builds it first",
@@ -592,6 +956,14 @@ fn random_address() -> String {
         "{first:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
         bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]
     )
+}
+
+/// The running test's name, from its thread, as a directory name.
+fn scenario_name() -> String {
+    match thread::current().name() {
+        Some(name) if name != "main" => name.replace("::", "-"),
+        _ => "scenario".to_owned(),
+    }
 }
 
 fn random_u32() -> u32 {

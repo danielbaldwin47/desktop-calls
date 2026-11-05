@@ -18,11 +18,14 @@ jobs:
     # Arch Linux, to match the user's Desktop (Omarchy).
     container: archlinux:latest
     steps:
+      # sway is the screen harness's headless compositor, grim its screenshot
+      # tool, and libnotify's notify-send a client of the notification stand-in.
       - name: Install system packages
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel git rustup just cargo-deny
           gtk4 gtk4-layer-shell libadwaita dbus python
+          sway grim libnotify
 
       - uses: actions/checkout@v5
 
@@ -45,6 +48,29 @@ jobs:
 
       - name: just test
         run: just test
+
+      - name: just screenshot
+        run: just screenshot
+
+      - name: just scorecard
+        run: just scorecard | tee scorecard.txt
+
+      # The gallery, and every screenshot a screen scenario took.
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: target/screenshots
+          if-no-files-found: ignore
+
+      - name: Keep the scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard
+          path: scorecard.txt
+          if-no-files-found: ignore
 
       - name: Keep the logs of failed scenarios
         if: failure()

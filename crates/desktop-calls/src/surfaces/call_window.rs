@@ -606,25 +606,35 @@ impl CallWindow {
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
+        self.report_tones(&mut content);
+        self.held.update(&view, &mut content);
+        self.surface.show(content);
+        if let Some(resized) = self.resized.borrow().as_ref() {
+            resized();
+        }
+    }
+
+    /// Reports the tone entry, the keypad toggle and the keypad while they
+    /// show, and the tones typed while the entry shows.
+    fn report_tones(&self, content: &mut BTreeMap<String, String>) {
+        // The toggle keeps its place while hidden, so it counts as hidden
+        // only when it can't be seen, pressed or reached with the keyboard:
+        // any one of those left is the toggle still there.
+        let toggle_there = self.keypad_shown.opacity() > 0.0
+            || self.keypad_shown.can_target()
+            || self.keypad_shown.can_focus();
         for (key, shown) in [
             ("tone-entry", WidgetExt::is_visible(&self.tones)),
-            ("keypad-toggle", !view.connection_lost),
+            ("keypad-toggle", toggle_there),
+            ("keypad", WidgetExt::is_visible(&self.keypad)),
         ] {
             if shown {
                 content.insert(key.to_owned(), "shown".to_owned());
             }
         }
-        if WidgetExt::is_visible(&self.keypad) {
-            content.insert("keypad".to_owned(), "shown".to_owned());
-        }
         let tones = self.tones.text();
         if WidgetExt::is_visible(&self.tones) && !tones.is_empty() {
             content.insert("tones".to_owned(), tones.to_string());
-        }
-        self.held.update(&view, &mut content);
-        self.surface.show(content);
-        if let Some(resized) = self.resized.borrow().as_ref() {
-            resized();
         }
     }
 

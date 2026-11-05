@@ -666,8 +666,10 @@ fn losing_contact_and_getting_it_back_moves_neither_mute_nor_hang_up() {
     let lost = harness.screenshot_when("call-window-lost", SCREEN_DEADLINE, |screenshot| {
         working_hang_up(screenshot).is_none()
     });
-    Rows::of(&lost, hang_up, background)
-        .assert_mute_and_hang_up_in_place(hang_up.right, "while contact is lost");
+    let lost = Rows::of(&lost, hang_up, background);
+    lost.assert_mute_and_hang_up_in_place(hang_up.right, "while contact is lost");
+    // Mute's row has only Mute on screen: the toggle's place is kept empty.
+    assert_eq!(lost.controls.len(), 1, "the toggle shows while lost: {lost:?}");
 
     harness.simulated_phone().return_to_range();
     wait_contact_back(&harness);

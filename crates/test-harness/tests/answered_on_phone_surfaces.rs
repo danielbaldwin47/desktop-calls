@@ -20,7 +20,9 @@ const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long a surface may take to be drawn on screen. Each capture and its
 /// scan take over a second on a busy CI runner, so this allows several.
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
-/// How long the Banner may stay up after the Phone confirms the Call is gone.
+/// How long the Banner may stay up after the Phone confirms the Call is
+/// gone: from the app's `call-ended` to the Banner unmapped, by its log
+/// (ticket #99). The tests' own wait for it is held to [`ROUND_TRIP`].
 const KEEP_UP_DEADLINE: Duration = Duration::from_millis(200);
 
 const NUMBER: &str = "+447700900123";
@@ -38,21 +40,21 @@ fn connected_on_screen() -> Harness {
 }
 
 /// Rings the Phone and waits until the Banner is on screen, drawn. Returns
-/// the Call's object path.
+/// the Call's object path and its app-assigned id.
 ///
 /// The person holding the Phone reacts seconds after it rings, by which
 /// time the Banner is drawn. Its first frame is the one slow moment: on a
 /// CI-like machine, with software rendering and one CPU shared by four
 /// scenarios, it held the app for about 0.6 s after the Banner mapped, and a
 /// change on the Phone that arrived then waited behind it.
-fn ring_until_banner(harness: &Harness) -> String {
+fn ring_until_banner(harness: &Harness) -> (String, u32) {
     let path = harness.simulated_phone().ring(NUMBER);
     let state = harness.wait_for_app("the Banner shows", ROUND_TRIP, |state| {
         state.ringing && state.surface("banner").is_some()
     });
     harness.assert_banner_within(state.calls[0].id, BANNER_DEADLINE);
     let _ = harness.screenshot_when("banner", SCREEN_DEADLINE, shows_green);
-    path
+    (path, state.calls[0].id)
 }
 
 fn shows_green(screenshot: &test_harness::Screenshot) -> bool {
@@ -73,7 +75,7 @@ fn banner_closed(state: &AppState) -> bool {
 #[test]
 fn answered_on_the_phone_the_banner_closes_and_the_call_window_says_audio_on_phone() {
     let harness = connected_on_screen();
-    let path = ring_until_banner(&harness);
+    let (path, _) = ring_until_banner(&harness);
 
     harness.simulated_phone().answer_on_phone(&path);
 
@@ -99,11 +101,12 @@ fn answered_on_the_phone_the_banner_closes_and_the_call_window_says_audio_on_pho
 #[test]
 fn declined_on_the_phone_the_banner_closes_at_once() {
     let harness = connected_on_screen();
-    let path = ring_until_banner(&harness);
+    let (path, call) = ring_until_banner(&harness);
 
     harness.simulated_phone().decline_on_phone(&path);
 
-    let state = harness.wait_for_app("the Banner closes", KEEP_UP_DEADLINE, banner_closed);
+    let state = harness.wait_for_app("the Banner closes", ROUND_TRIP, banner_closed);
+    harness.assert_banner_closed_within(call, KEEP_UP_DEADLINE);
     assert!(state.calls.is_empty(), "{state:?}");
     // A Call that never connected has no Call Window to show "Call ended".
     assert_eq!(state.surface("call-window"), None);
@@ -112,11 +115,12 @@ fn declined_on_the_phone_the_banner_closes_at_once() {
 #[test]
 fn the_caller_hanging_up_while_ringing_closes_the_banner_at_once() {
     let harness = connected_on_screen();
-    let path = ring_until_banner(&harness);
+    let (path, call) = ring_until_banner(&harness);
 
     harness.simulated_phone().caller_hangs_up(&path);
 
-    let state = harness.wait_for_app("the Banner closes", KEEP_UP_DEADLINE, banner_closed);
+    let state = harness.wait_for_app("the Banner closes", ROUND_TRIP, banner_closed);
+    harness.assert_banner_closed_within(call, KEEP_UP_DEADLINE);
     assert!(state.calls.is_empty(), "{state:?}");
     assert_eq!(state.surface("call-window"), None);
 }

@@ -2,17 +2,26 @@
 //! or dark) and Hyprland's corner rounding, with no restart, and are stock
 //! Adwaita on a Desktop without Omarchy. Checked on screenshots.
 //!
-//! The timed checks capture only a few pixels of the screen at a time, so a
-//! slow CI runner spends its time on the app, not on the harness.
+//! A theme switch is held to its target by the app's own log, up to the
+//! frame drawn in the new theme. The timed screen checks capture only a few
+//! pixels at a time, so a slow CI runner spends its time on the app, not on
+//! the harness, and are held to a looser round trip.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use test_harness::{BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot};
+use test_harness::{AppEvent, BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long an open surface may take to follow a theme switch.
+/// How long an open surface may take to follow a theme switch: from the
+/// switch starting to the surface's first frame in the new theme, by the
+/// app's log (ticket #99).
 const THEME_DEADLINE: Duration = Duration::from_secs(1);
+/// How long the tests' own round trip may take: the switch, and the new
+/// colours captured off the screen. Looser than [`THEME_DEADLINE`] because
+/// a loaded CI runner stretches the captures even when the app is fast
+/// (tickets #83 and #99); the target is asserted on the app's log.
+const ROUND_TRIP: Duration = Duration::from_secs(3);
 
 const NUMBER: &str = "+447700900123";
 
@@ -123,6 +132,21 @@ fn time_until(harness: &Harness, name: &str, patch: Region, colour: [u8; 3]) -> 
     }
 }
 
+/// Checks the app drew the Banner in `theme` within [`THEME_DEADLINE`] of
+/// `since`, just before the harness started switching to it, by the app's
+/// log. Nothing but the app sits between the switch and the frame: no test
+/// process starting, no capture of the screen.
+fn assert_banner_follows_within(harness: &Harness, since: SystemTime, theme: OmarchyTheme) {
+    harness.assert_app_within_since(
+        &format!("the Banner to show the {} theme", theme.mode().as_str()),
+        since,
+        &AppEvent::kind("theme-shown")
+            .with("surface", "banner")
+            .with("mode", theme.mode().as_str()),
+        THEME_DEADLINE,
+    );
+}
+
 #[test]
 fn an_open_banner_follows_a_switch_between_light_and_dark_omarchy_themes_within_a_second() {
     let dark = OmarchyTheme::Dark;
@@ -140,8 +164,10 @@ fn an_open_banner_follows_a_switch_between_light_and_dark_omarchy_themes_within_
         "the Banner's background isn't the dark theme's"
     );
 
+    let since = SystemTime::now();
     harness.switch_omarchy_theme(light);
     let to_light = time_until(&harness, "to-light", patch, light.colour("background"));
+    assert_banner_follows_within(&harness, since, light);
 
     let screenshot = harness.screenshot("light");
     assert!(
@@ -152,11 +178,16 @@ fn an_open_banner_follows_a_switch_between_light_and_dark_omarchy_themes_within_
         shows(&screenshot, light.colour("red")),
         "Decline isn't the light theme's red"
     );
+    let since = SystemTime::now();
     harness.switch_omarchy_theme(dark);
     let to_dark = time_until(&harness, "to-dark", patch, dark.colour("background"));
+    assert_banner_follows_within(&harness, since, dark);
 
-    assert!(to_light <= THEME_DEADLINE, "to light took {to_light:?}");
-    assert!(to_dark <= THEME_DEADLINE, "to dark took {to_dark:?}");
+    assert!(
+        to_light <= ROUND_TRIP,
+        "to light took {to_light:?} on screen"
+    );
+    assert!(to_dark <= ROUND_TRIP, "to dark took {to_dark:?} on screen");
     // The same Banner, still ringing: the app followed without a restart.
     let state = harness.app_state();
     assert!(

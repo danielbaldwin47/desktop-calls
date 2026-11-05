@@ -389,6 +389,23 @@ impl Harness {
         )
     }
 
+    /// Checks the app closed the Incoming Call Banner within `target` of
+    /// the Phone saying the Call with id `call` ended, by its log: from its
+    /// `call-ended` to the Banner unmapped, the moment the compositor is
+    /// told to take it off the screen (ticket #99).
+    ///
+    /// # Panics
+    ///
+    /// If it took longer.
+    pub fn assert_banner_closed_within(&self, call: u32, target: Duration) -> Duration {
+        self.assert_app_within(
+            "the Banner to close once the Phone said the Call ended",
+            &AppEvent::kind("call-ended").with("call_id", call),
+            &AppEvent::kind("surface-unmapped").with("surface", "banner"),
+            target,
+        )
+    }
+
     /// Asks the app to answer the Call with this id, as any client of the
     /// control interface could.
     ///

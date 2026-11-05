@@ -169,6 +169,53 @@ def test_failures(step: StepLog) -> list[TestFailure]:
     return failures
 
 
+# cargo-nextest's report of a failed test: a heading such as
+# `FAIL [   3.034s] (  1/209) test-harness::contacts some_test`, then the
+# test's indented `stdout ───` and `stderr ───`. The summary at the end
+# repeats each heading without the output.
+NEXTEST_FAIL = re.compile(r"^\s*(?:FAIL|TIMEOUT|SIGSEGV|SIGABRT|ABORT) \[[^]]*\] (?:\(\s*\d+/\d+\) )?(\S+) (\S+)\s*$")
+# Any other nextest status line, or its summary, ends a failure's output.
+NEXTEST_STATUS = re.compile(r"^\s*(?:PASS|FAIL|SKIP|SLOW|TIMEOUT|LEAK|RETRY|TRY \d+ \w+|Summary|Cancelling|Starting)\b")
+
+
+def nextest_failures(step: StepLog) -> list[TestFailure]:
+    """Every failed test in a step that ran cargo nextest, with its panics."""
+    failures: dict[str, TestFailure] = {}
+    current: TestFailure | None = None
+    panic: list[str] | None = None
+    for raw in step.lines:
+        line = raw.strip()
+        if heading := NEXTEST_FAIL.match(raw):
+            binary = heading.group(1).split("::", 1)[-1]
+            name = f"{binary}::{heading.group(2)}"
+            if name in failures:
+                current, panic = None, None
+                continue
+            current = TestFailure(step.job, name)
+            current.target = f"-p test-harness --test {binary} -- {heading.group(2)} --exact"
+            failures[name] = current
+            panic = None
+        elif NEXTEST_STATUS.match(raw):
+            current, panic = None, None
+        elif current is None:
+            continue
+        elif re.match(r"^thread '.*' (\(\d+\) )?panicked at ", line):
+            panic = [line.split(" panicked at ", 1)[1].rstrip(":")]
+            current.panics.append(panic)
+        elif line.startswith("Kept this scenario's logs in "):
+            if kept := RUNNER_SCENARIO.search(line):
+                current.kept.append(kept.group(1))
+            panic = None
+        elif line.startswith("note: run with `RUST_BACKTRACE") or line == "stack backtrace:":
+            panic = None
+        elif panic is not None:
+            panic.append(line)
+            for scenario in RUNNER_SCENARIO.findall(line):
+                if scenario not in current.kept:
+                    current.kept.append(scenario)
+    return list(failures.values())
+
+
 def report(failures: list[TestFailure], steps: list[StepLog], directory: pathlib.Path) -> None:
     for failure in failures:
         target = f" ({failure.target})" if failure.target else ""
@@ -245,7 +292,11 @@ def main() -> int:
         if failed_jobs:
             print("Failed jobs: " + "; ".join(failed_jobs))
         steps = failed_steps(run_id)
-        failures = [failure for step in steps for failure in test_failures(step)]
+        failures = [
+            failure
+            for step in steps
+            for failure in (*test_failures(step), *nextest_failures(step))
+        ]
         # "CI passed" fails whenever another job did; it says nothing new.
         steps = [step for step in steps if step.job != "CI passed" or len(failed_jobs) == 1]
         directory = pathlib.Path("target/ci") / run_id

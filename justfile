@@ -6,11 +6,16 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Check formatting, lints, the build, dependencies and file lengths. CI runs this.
-check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data
+# Check formatting, lints, dependencies and file lengths, then build every target.
+check: lint
+    cargo build --workspace --all-targets --locked
+
+# CI runs this rather than `just check`: its test jobs build every target
+# between them, and building them again cost a minute (#118).
+# `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    cargo build --workspace --all-targets --locked
     cargo deny --locked check
 
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.

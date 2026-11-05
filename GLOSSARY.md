@@ -30,6 +30,26 @@ _Avoid_: audio route, output
 Moving a live Call's Audio Location from Phone to Desktop or back. The Call itself stays on the Phone's line.
 _Avoid_: transfer (in telephony, that means sending the call to another number)
 
+**Waiting Call**:
+An incoming Call that rings while another Call is already live.
+_Avoid_: second call, call waiting (that names the feature, not the Call)
+
+**Held Call**:
+A live Call that the user has put on hold, so neither side hears the other until it is resumed.
+_Avoid_: paused call, parked call
+
+**Hold & Answer**:
+Answering a Waiting Call by putting the live Call on hold.
+_Avoid_: accept and hold
+
+**End & Answer**:
+Answering a Waiting Call by ending the live Call.
+_Avoid_: replace, release and accept
+
+**Swap**:
+Switching which of two Calls is live, putting the other on hold.
+_Avoid_: toggle, switch calls
+
 **Contacts**:
 The Phone's address book, as visible from the Desktop.
 _Avoid_: phonebook, address book

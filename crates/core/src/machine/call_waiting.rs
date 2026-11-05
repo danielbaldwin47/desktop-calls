@@ -21,10 +21,10 @@ use crate::call::{AudioLocation, Call, CallId, CallState, Request};
 use crate::messages::Failure;
 
 impl State {
-    /// The Waiting Call: one ringing while the user is on another Call, or
-    /// still placing one. The Banner offers Hold & Answer or End & Answer,
-    /// and Decline, for it, since the Phone answers a `waiting` Call only
-    /// that way.
+    /// The Waiting Call: one ringing while the user is on another Call, on
+    /// hold or live, or still placing one. The Banner offers it what
+    /// [`State::waiting_options`] says, and Decline, never plain Answer, as
+    /// the Phone answers a `waiting` Call only with `AT+CHLD`.
     pub(super) fn waiting_call(&self) -> Option<&Call> {
         self.calls.iter().find(|call| {
             call.rings_here()

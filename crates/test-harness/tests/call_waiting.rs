@@ -1,4 +1,4 @@
-//! Scenarios 14 and 15: call waiting. A second Call rings during a live
+//! Scenarios 14 and 15: call waiting. A Waiting Call rings during a live
 //! one; Hold & Answer, Swap, End & Answer and Decline act on it, by the
 //! control interface and by keys alone, against the Simulated Phone, which
 //! carries them out as PipeWire's `AT+CHLD` does.
@@ -557,6 +557,7 @@ fn while_a_third_call_waits_the_held_call_offers_neither_swap_nor_hang_up() {
         state.calls.len() == 2
             && call_window(state, "swap").as_deref() == Some("Swap")
             && call_window(state, "held-waiting-first").is_none()
+            && call_window(state, "hang-up-shortcut").is_some()
     });
 }
 
@@ -660,7 +661,7 @@ fn a_call_ringing_while_one_is_being_placed_is_answered_by_end_and_answer() {
     });
 }
 
-/// With Bob on hold, the Phone holds no second Call, so for Carol the Banner
+/// With Bob on hold, the Phone holds no other Call, so for Carol the Banner
 /// offers End & Answer and Decline alone, and H, or A, holds nobody; E ends
 /// only Alice, live, and answers Carol, Bob staying on hold.
 #[test]
@@ -729,6 +730,12 @@ fn hanging_up_the_live_call_while_one_is_held_and_one_waits_is_refused() {
     let harness = connected();
     let [(_, bob), (alice_path, alice), (carol_path, _)] = three_calls(&harness);
 
+    let state = harness.app_state();
+    assert_eq!(
+        call_window(&state, "hang-up-shortcut"),
+        None,
+        "the main Hang up is greyed out"
+    );
     harness.hang_up(alice);
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "waiting-call-first");

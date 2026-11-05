@@ -555,6 +555,10 @@ impl CallWindow {
         }
         who.report(&mut content);
         content.extend(self.shortcuts.clone());
+        if view.waiting_first {
+            // Greyed out, Hang up has no shortcut to report.
+            content.remove("hang-up-shortcut");
+        }
         if let Some(audio_location) = audio_location {
             content.insert("audio-location".to_owned(), audio_location.to_owned());
             content.insert("handoff".to_owned(), handoff.to_owned());

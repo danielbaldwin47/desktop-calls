@@ -82,8 +82,8 @@ pub(super) async fn execute(
                 PhoneCommand::EndAndAnswer(_) => {
                     call(session, &path, AUDIO_GATEWAY, "ReleaseAndAnswer", &()).await
                 }
-                // With only a held Call besides the waiting one, AT+CHLD=2
-                // accepts the waiting Call and keeps the held one.
+                // With only a held Call besides the Waiting Call, AT+CHLD=2
+                // accepts the Waiting Call and keeps the held one.
                 PhoneCommand::Swap | PhoneCommand::AnswerBesideHeld(_) => {
                     call(session, &path, AUDIO_GATEWAY, "SwapCalls", &()).await
                 }

@@ -48,14 +48,15 @@ pub enum Refused {
     NoLiveCall(String),
     MuteUnavailable(String),
     InvalidTones(String),
-    /// `HoldAndAnswer` or `EndAndAnswer` with no Call waiting.
+    /// `HoldAndAnswer` or `EndAndAnswer` with no Waiting Call.
     NoWaitingCall(String),
     /// `Swap` with no Call on hold.
     NoHeldCall(String),
     /// `HoldAndAnswer` while the user's own Call is still being placed.
     NotConnectedYet(String),
-    /// `Swap` or `HangUp` while a Call is on hold and a Waiting Call rings:
-    /// the Phone would answer or decline it instead.
+    /// `Swap` while a Call is on hold and a Waiting Call rings: the Phone
+    /// would answer it instead. `HangUp` refused for the same reason reports
+    /// the `Error` signal instead, as it returns nothing.
     WaitingCallFirst(String),
     /// `HoldAndAnswer` or `Answer` while another Call is on hold already.
     AlreadyHolding(String),

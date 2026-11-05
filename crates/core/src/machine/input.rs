@@ -67,7 +67,7 @@ pub enum Input {
     Decline(CallId),
     /// The user asked to hang up this Call.
     HangUp(CallId),
-    /// The user asked to put the live Call on hold and answer the waiting
+    /// The user asked to put the live Call on hold and answer the Waiting
     /// Call.
     HoldAndAnswer,
     /// The user asked to end the live Call and answer the Waiting Call.

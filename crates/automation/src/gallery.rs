@@ -50,7 +50,7 @@ const PHONE_NAME: &str = "My Pixel";
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
-/// A second caller, for call waiting.
+/// The caller of a Waiting Call.
 const SECOND_NUMBER: &str = "+447700900456";
 /// A third caller, while the first Call is on hold and the second live.
 const THIRD_NUMBER: &str = "+447700900789";
@@ -754,7 +754,7 @@ fn on_a_call(harness: &Harness) {
     });
 }
 
-/// A second caller rings during the Call: waits for its Banner.
+/// A Waiting Call rings during the Call: waits for its Banner.
 fn waiting(harness: &Harness) {
     let _path = harness.simulated_phone().ring(SECOND_NUMBER);
     harness.wait_for_app("the Waiting Call's Banner shows", DEADLINE, |state| {

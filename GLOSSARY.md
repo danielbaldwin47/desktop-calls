@@ -31,7 +31,7 @@ Moving a live Call's Audio Location from Phone to Desktop or back. The Call itse
 _Avoid_: transfer (in telephony, that means sending the call to another number)
 
 **Waiting Call**:
-An incoming Call that rings while another Call is already live.
+An incoming Call that rings while another Call is already live, on hold, or still being placed by the user.
 _Avoid_: second call, call waiting (that names the feature, not the Call)
 
 **Held Call**:
@@ -65,7 +65,7 @@ _Avoid_: call log, recents
 ## Desktop surfaces
 
 **Incoming Call Banner**:
-The transient on-screen notice for a ringing Call, with Answer and Decline.
+The transient on-screen notice for a ringing Call, with Answer and Decline. For a Waiting Call it offers Hold & Answer, End & Answer or Answer, whichever the Phone can do, and Decline.
 _Avoid_: popup, toast, notification
 
 **Dialer**:
@@ -73,7 +73,7 @@ The search-as-you-type window for starting a Call from a name or number.
 _Avoid_: launcher, call picker
 
 **Call Window**:
-The small window shown during a live Call: timer, mute, keypad, Handoff, hang up.
+The small window shown during a live Call: timer, mute, keypad, Handoff, hang up, and, with a Call on hold, Swap.
 _Avoid_: in-call screen, call UI
 
 **Indicator**:

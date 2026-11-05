@@ -401,6 +401,106 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
     );
     assert_eq!(after.len(), 2, "{after:#?}");
     no_problems_shown(&harness);
+    wait_for_audio_put_right(&harness);
+}
+
+/// Waits until the app has counted setting up audio as done, which it does
+/// only once systemd's restart job for `WirePlumber` ended `done`: the
+/// Problem also goes once the drop-ins read as set up, so it proves nothing.
+fn wait_for_audio_put_right(harness: &Harness) {
+    harness.wait_for_app_log(r#""event_kind":"desktop-fixed""#, DEADLINE);
+}
+
+/// Presses Set up audio once the Problem shows, and waits until setting up
+/// is done: `WirePlumber` restarted, its job ended `done` and no Problem
+/// left.
+fn set_up_audio_and_wait_until_done(harness: &Harness) {
+    wait_for_problems(harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(harness);
+    press_set_up_audio(harness);
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber is restarted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    no_problems_shown(harness);
+    wait_for_audio_put_right(harness);
+}
+
+/// A permission mode no umask gives a new file: owner and others may read
+/// it, the group may not. A umask of 022 gives 0644, 027 gives 0640, 077
+/// gives 0600.
+const NOT_FROM_ANY_UMASK: u32 = 0o604;
+
+#[test]
+fn setting_up_audio_keeps_the_permissions_of_a_drop_in_it_rewrites() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_with_mode("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert_eq!(
+        harness.wireplumber_drop_in_text("51-music.conf"),
+        ROLES_MOVED,
+        "the drop-in was rewritten"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_mode("51-music.conf"),
+        NOT_FROM_ANY_UMASK
+    );
+}
+
+#[test]
+fn setting_up_audio_keeps_the_permissions_of_its_own_drop_in_it_rewrites() {
+    // What an earlier Set up audio wrote, since changed by hand.
+    const EARLIER: &str = "\
+# Written by Desktop Calls when you chose Set up audio: hands-free with
+monitor.bluez.properties = {
+  bluez5.roles = [ a2dp_sink a2dp_source ]
+}
+";
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_with_mode(DROP_IN, EARLIER, NOT_FROM_ANY_UMASK)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert_ne!(
+        harness.wireplumber_drop_in_text(DROP_IN),
+        EARLIER,
+        "the drop-in was rewritten"
+    );
+    assert_eq!(harness.wireplumber_drop_in_mode(DROP_IN), NOT_FROM_ANY_UMASK);
+}
+
+#[test]
+fn setting_up_audio_rewrites_the_file_a_linked_drop_in_points_to_and_keeps_its_permissions() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config_linked("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
+        .start();
+
+    set_up_audio_and_wait_until_done(&harness);
+
+    assert!(
+        harness.wireplumber_drop_in_is_link("51-music.conf"),
+        "the drop-in is still a link"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_text("51-music.conf"),
+        ROLES_MOVED,
+        "the file it points to was rewritten"
+    );
+    assert_eq!(
+        harness.wireplumber_drop_in_mode("51-music.conf"),
+        NOT_FROM_ANY_UMASK
+    );
 }
 
 #[test]
@@ -549,6 +649,58 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
         Some(ROLES_WITHOUT_HANDS_FREE),
         "the other file is left as it was"
     );
+}
+
+/// Sets up audio against a Desktop whose systemd accepts the restart of
+/// `WirePlumber` and then ends the job as `result` says, and checks the
+/// Setup Window says the audio didn't restart and keeps the Problem, with
+/// its button, so the user can try again. `wait` is how long the app may
+/// take to give up on the job.
+fn setting_up_audio_with_a_restart_job_ending(result: &str, wait: Duration) {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config("51-music.conf", ROLES_WITHOUT_HANDS_FREE)
+        .wireplumber_restart_job(result)
+        .start();
+    wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
+
+    press_set_up_audio(&harness);
+
+    harness.simulated_phone().wait_for_recorded(
+        "WirePlumber's restart is accepted",
+        DEADLINE,
+        restarts_wireplumber,
+    );
+    let state = harness.wait_for_app("the Setup Window says the audio didn't restart", wait, |state| {
+        field(state, "notice").is_some_and(|notice| notice.contains("didn't restart"))
+    });
+    assert_eq!(kinds(&state), ["audio-not-set-up"]);
+    assert_eq!(field(&state, "buttons"), Some("Set up audio"), "it can be tried again");
+    assert!(
+        harness.wireplumber_drop_ins().contains_key(DROP_IN),
+        "the audio setting is saved"
+    );
+    no_raw_dbus_text(&[
+        field(&state, "notice").unwrap_or_default(),
+        field(&state, "buttons").unwrap_or_default(),
+    ]);
+}
+
+#[test]
+fn a_restart_job_that_fails_keeps_the_problem_and_says_the_audio_didnt_restart() {
+    setting_up_audio_with_a_restart_job_ending("failed", DEADLINE);
+}
+
+#[test]
+fn a_restart_job_that_times_out_keeps_the_problem_and_says_the_audio_didnt_restart() {
+    setting_up_audio_with_a_restart_job_ending("timeout", DEADLINE);
+}
+
+#[test]
+fn a_restart_job_that_never_ends_keeps_the_problem_once_the_app_gives_up_waiting() {
+    setting_up_audio_with_a_restart_job_ending("never", Duration::from_secs(15));
 }
 
 #[test]

@@ -18,13 +18,23 @@
 //! - `org.freedesktop.systemd1` on the session bus answers `RestartUnit`:
 //!   restarting `wireplumber.service` restarts the Telephony service as
 //!   [`crate::Control::restart_telephony`] does, with the real Pixel's
-//!   0.73 s gap. Each call is recorded.
+//!   0.73 s gap. Each call is recorded. The call returns the job's path
+//!   (ids count up from 7), and the job ends with a `JobRemoved` signal
+//!   sent only to the clients that called `Subscribe`, as systemd's manual
+//!   says: `done`, unless `--wireplumber-restart-job` says it ends `failed`
+//!   or `timeout` (`WirePlumber` doesn't restart then), or never ends. The
+//!   signals go out before the reply, an unrelated job's first.
 //!
 //! The control interface's `SimulatedDesktop1.SetAdapterPower` changes the
 //! adapter's power as another app, or the user, would.
 
-use zbus::object_server::ObjectServer;
-use zbus::{Connection, OwnedObjectPath, OwnedVariant, interface};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use zbus::message::Header;
+use zbus::names::BusName;
+use zbus::object_server::{ObjectServer, SignalEmitter};
+use zbus::{Connection, ObjectPath, OwnedObjectPath, OwnedVariant, interface};
 
 use crate::objects::{Interfaces, MethodCall, ObjectTree, Properties, Reply};
 use crate::telephony::Signal;
@@ -60,6 +70,32 @@ impl AdapterPower {
     }
 }
 
+/// How the job that restarts `wireplumber.service` ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum RestartJob {
+    /// The unit restarted.
+    #[default]
+    Done,
+    /// The unit failed to start again.
+    Failed,
+    /// The unit took too long to start again.
+    Timeout,
+    /// The job never ends.
+    Never,
+}
+
+impl RestartJob {
+    /// The result systemd gives the job's end, or none if it never ends.
+    fn result(self) -> Option<&'static str> {
+        match self {
+            Self::Done => Some("done"),
+            Self::Failed => Some("failed"),
+            Self::Timeout => Some("timeout"),
+            Self::Never => None,
+        }
+    }
+}
+
 /// The Desktop's conditions, from the command line.
 #[derive(clap::Args)]
 pub struct Conditions {
@@ -72,6 +108,9 @@ pub struct Conditions {
     /// BlueZ's experimental hands-free holds the Phone's hands-free link.
     #[arg(long)]
     bluez_telephony: bool,
+    /// How the job that restarts `wireplumber.service` ends.
+    #[arg(long, value_enum, default_value_t)]
+    wireplumber_restart_job: RestartJob,
 }
 
 impl Conditions {
@@ -94,6 +133,11 @@ impl Conditions {
             );
         }
         Ok(())
+    }
+
+    /// How the job that restarts `wireplumber.service` ends.
+    pub fn restart_job(&self) -> RestartJob {
+        self.wireplumber_restart_job
     }
 
     /// Whether the Desktop has its Bluetooth file-transfer service.
@@ -198,31 +242,128 @@ impl SimulatedDesktop {
     }
 }
 
+/// The first job id the manager hands out. Real ids count up from the
+/// manager's start, so a job's path says nothing a client can rely on.
+const FIRST_JOB_ID: u32 = 7;
+
 /// The systemd user manager, as far as setting up audio uses it.
 pub struct Systemd {
-    pub world: SharedWorld,
+    world: SharedWorld,
+    restart_job: RestartJob,
+    /// The clients that called `Subscribe`, by unique name, once per call.
+    subscribers: Mutex<Vec<String>>,
+    next_job_id: AtomicU32,
 }
 
-#[interface(interface = "org.freedesktop.systemd1.Manager")]
 impl Systemd {
-    /// Restarts `name`: for `wireplumber.service`, the Telephony service
-    /// restarts. Returns the job's path.
-    async fn restart_unit(
-        &self,
-        #[zbus(object_server)] server: &ObjectServer,
-        name: String,
-        mode: String,
-    ) -> zbus::fdo::Result<OwnedObjectPath> {
+    pub fn new(world: SharedWorld, restart_job: RestartJob) -> Self {
+        Self {
+            world,
+            restart_job,
+            subscribers: Mutex::new(Vec::new()),
+            next_job_id: AtomicU32::new(FIRST_JOB_ID),
+        }
+    }
+
+    /// Records that the manager was called.
+    fn record(&self, member: &str, arguments: String) {
         lock(&self.world).recorded.push((
             Bus::Session,
             MethodCall {
                 path: SYSTEMD_PATH.to_owned(),
                 interface: SYSTEMD_MANAGER.to_owned(),
-                member: "RestartUnit".to_owned(),
-                arguments: format!("({name:?}, {mode:?})"),
+                member: member.to_owned(),
+                arguments,
             },
         ));
-        if name == "wireplumber.service" {
+    }
+
+    /// The path of the job with `id`.
+    fn job_path(id: u32) -> zbus::Result<OwnedObjectPath> {
+        OwnedObjectPath::try_from(format!("{SYSTEMD_PATH}/job/{id}"))
+    }
+
+    /// Sends `JobRemoved` for job `id` to each client that called
+    /// `Subscribe`, and to nobody else, as systemd's manual says
+    /// (`org.freedesktop.systemd1(5)`).
+    async fn send_job_removed(
+        &self,
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        unit: &str,
+        result: &str,
+    ) -> zbus::Result<()> {
+        let job = Self::job_path(id)?;
+        let subscribers = lock(&self.subscribers).clone();
+        for subscriber in subscribers {
+            let to = emitter
+                .to_owned()
+                .set_destination(BusName::try_from(subscriber)?);
+            Self::job_removed(&to, id, job.as_ref(), unit, result).await?;
+        }
+        Ok(())
+    }
+}
+
+#[interface(interface = "org.freedesktop.systemd1.Manager")]
+impl Systemd {
+    /// Has systemd send `JobRemoved` to this client.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the interface macro hands the header over by value"
+    )]
+    fn subscribe(&self, #[zbus(header)] header: Header<'_>) {
+        self.record("Subscribe", "()".to_owned());
+        if let Some(sender) = header.sender() {
+            lock(&self.subscribers).push(sender.to_string());
+        }
+    }
+
+    /// Ends one `subscribe` of this client's.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the interface macro hands the header over by value"
+    )]
+    fn unsubscribe(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        self.record("Unsubscribe", "()".to_owned());
+        let sender = header.sender().map(ToString::to_string);
+        let mut subscribers = lock(&self.subscribers);
+        let position = subscribers
+            .iter()
+            .position(|subscriber| Some(subscriber) == sender.as_ref());
+        match position {
+            Some(position) => {
+                subscribers.remove(position);
+                Ok(())
+            }
+            None => Err(zbus::fdo::Error::Failed(
+                "org.freedesktop.systemd1.NotSubscribed: Caller is not subscribed".to_owned(),
+            )),
+        }
+    }
+
+    /// Restarts `name`: for `wireplumber.service`, the Telephony service
+    /// restarts, unless the job is to end `failed` or `timeout`, or never.
+    /// Returns the job's path.
+    ///
+    /// The job is fast: before the reply goes out, `JobRemoved` goes to the
+    /// subscribers, first for an unrelated job that ended the other way,
+    /// then for this one. A client that matches on anything but the job's
+    /// own path, or that listens only once it has the reply, goes wrong.
+    async fn restart_unit(
+        &self,
+        #[zbus(object_server)] server: &ObjectServer,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        name: String,
+        mode: String,
+    ) -> zbus::fdo::Result<OwnedObjectPath> {
+        self.record("RestartUnit", format!("({name:?}, {mode:?})"));
+        let job_ends = if name == "wireplumber.service" {
+            self.restart_job
+        } else {
+            RestartJob::Done
+        };
+        if name == "wireplumber.service" && job_ends == RestartJob::Done {
             let control = server.interface::<_, Control>(CONTROL_PATH).await?;
             control
                 .get()
@@ -230,9 +371,37 @@ impl Systemd {
                 .restart_telephony(WIREPLUMBER_GAP_MS)
                 .await?;
         }
-        OwnedObjectPath::try_from(format!("{SYSTEMD_PATH}/job/1"))
-            .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))
+        let unrelated_id = self.next_job_id.fetch_add(1, Ordering::Relaxed);
+        let id = self.next_job_id.fetch_add(1, Ordering::Relaxed);
+        let result = job_ends.result();
+        let unrelated_result = if result == Some("done") {
+            "failed"
+        } else {
+            "done"
+        };
+        self.send_job_removed(
+            &emitter,
+            unrelated_id,
+            "unrelated.service",
+            unrelated_result,
+        )
+        .await?;
+        if let Some(result) = result {
+            self.send_job_removed(&emitter, id, &name, result).await?;
+        }
+        Ok(Self::job_path(id)?)
     }
+
+    /// A job ended, with `result`: `done`, `canceled`, `timeout`, `failed`,
+    /// `dependency` or `skipped`.
+    #[zbus(signal)]
+    async fn job_removed(
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        job: ObjectPath<'_>,
+        unit: &str,
+        result: &str,
+    ) -> zbus::Result<()>;
 }
 
 /// Serves the Desktop's control interface and its systemd stand-in on
@@ -241,6 +410,7 @@ pub fn serve<'a>(
     builder: zbus::connection::Builder<'a>,
     world: &SharedWorld,
     system: &Connection,
+    restart_job: RestartJob,
 ) -> zbus::connection::Builder<'a> {
     builder
         .serve_at(
@@ -250,11 +420,6 @@ pub fn serve<'a>(
                 system: system.clone(),
             },
         )
-        .serve_at(
-            SYSTEMD_PATH,
-            Systemd {
-                world: world.clone(),
-            },
-        )
+        .serve_at(SYSTEMD_PATH, Systemd::new(world.clone(), restart_job))
         .name(SYSTEMD_SERVICE)
 }

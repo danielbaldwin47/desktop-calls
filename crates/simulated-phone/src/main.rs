@@ -198,19 +198,24 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let logind = logind::connect().await?;
     let telephony: TelephonyConnection = Arc::new(Mutex::new(Some(session.clone())));
     // The control name comes last, so a test that sees it can rely on the rest.
-    let control = desktop::serve(zbus::connection::Builder::session(), &world, &system)
-        .serve_at(
-            CONTROL_PATH,
-            Control {
-                world: world.clone(),
-                system: system.clone(),
-                telephony: telephony.clone(),
-                logind,
-            },
-        )
-        .name(CONTROL_BUS_NAME)
-        .build()
-        .await?;
+    let control = desktop::serve(
+        zbus::connection::Builder::session(),
+        &world,
+        &system,
+        arguments.desktop.restart_job(),
+    )
+    .serve_at(
+        CONTROL_PATH,
+        Control {
+            world: world.clone(),
+            system: system.clone(),
+            telephony: telephony.clone(),
+            logind,
+        },
+    )
+    .name(CONTROL_BUS_NAME)
+    .build()
+    .await?;
 
     futures_util::future::try_join4(
         serve(

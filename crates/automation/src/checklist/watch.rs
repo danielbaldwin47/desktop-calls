@@ -4,7 +4,6 @@
 //! signals themselves, however late the runner looks.
 
 use std::collections::{BTreeMap, HashMap};
-use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -16,6 +15,7 @@ use zbus::message::Type;
 use zbus::names::InterfaceName;
 use zbus::{Connection, MatchRule, MessageStream, OwnedVariant};
 
+use super::fingerprint::Fingerprint;
 use super::sitting::Event;
 
 /// The app's control interface, as `CODING_STANDARDS.md` names it.
@@ -62,19 +62,6 @@ pub struct AppCall {
     pub direction: String,
     pub state: String,
     pub number: Fingerprint,
-}
-
-/// A phone number's fingerprint: equal for equal numbers. It stays in
-/// memory and is never written anywhere, so the number itself isn't kept.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Fingerprint(u64);
-
-impl Fingerprint {
-    fn of(number: &str) -> Self {
-        let mut hasher = DefaultHasher::new();
-        number.hash(&mut hasher);
-        Self(hasher.finish())
-    }
 }
 
 impl AppState {

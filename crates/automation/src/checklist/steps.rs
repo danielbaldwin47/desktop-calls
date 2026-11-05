@@ -8,21 +8,28 @@
 
 use std::time::{Duration, Instant};
 
+use super::app_log::LogLine;
 use super::sitting::{Seen, Sitting, Stop, seconds};
 use super::watch::AppState;
 
+mod audio_location;
 mod during_a_call;
 mod incoming;
 mod keyboard_and_look;
 mod missed_calls;
+mod range_and_power;
 
+use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
 use during_a_call::{keypad_tones, mute};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
     do_not_disturb, keybinding,
 };
-use keyboard_and_look::{banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar};
+use keyboard_and_look::{
+    banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar, keyboard_only_call,
+};
 use missed_calls::{ring_out, withheld_ring_out};
+use range_and_power::{out_of_range_and_back, suspend_and_resume, wireplumber_restart};
 
 /// A step's script. It returns once the step is done; whether it passed is
 /// in the sitting's findings.
@@ -44,6 +51,12 @@ pub struct Step {
     /// The tickets whose features the step waits on, while it has no script.
     pub lands_with: &'static [u32],
 }
+
+/// Steps without a script of their own that run only together with
+/// another step, as (step, the step it runs with). 1.1 leaves the Phone
+/// unpaired, so it is runnable only with 1.2, which pairs it again.
+/// `tools/checklist_tickets.py` reads this table.
+pub const RUNS_WITH: &[(&str, &str)] = &[("1.1", "1.2")];
 
 /// The polish scorecard's targets (`docs/wiki/polish-scorecard.md`).
 const BANNER_TARGET: Duration = Duration::from_secs(1);
@@ -89,8 +102,9 @@ pub const GROUPS: &[Group] = &[
                 needs: &[],
                 title: "Forget the pairing on both the Pixel and the Desktop, then install and start Desktop Calls",
                 script: None,
-                // It leaves the Phone unpaired, so it runs only with 1.2.
-                lands_with: &[22],
+                // It leaves the Phone unpaired, so it runs only with 1.2:
+                // see RUNS_WITH.
+                lands_with: &[],
             },
             Step {
                 id: "1.2",
@@ -185,8 +199,8 @@ pub const GROUPS: &[Group] = &[
                 id: "3.1",
                 needs: &[HELPER],
                 title: "Handoff to the Phone and back, twice: confirm by ear that the audio lands on the earpiece",
-                script: None,
-                lands_with: &[13, 14],
+                script: Some(handoff_twice),
+                lands_with: &[],
             },
             Step {
                 id: "3.2",
@@ -213,42 +227,42 @@ pub const GROUPS: &[Group] = &[
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Call the Test Number from the Desktop while the second helper calls you: Hold & Answer, then Swap, then hang up one; the other stays live",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
             Step {
                 id: "4.2",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat with End & Answer: your Call ends and the second helper's connects",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
             Step {
                 id: "4.3",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat with Decline: only the second helper's Call ends",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
             Step {
                 id: "4.4",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat, leaving the second helper's Call to ring out: a Missed Call notification appears",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
             Step {
                 id: "4.5",
                 needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
                 title: "Repeat 4.1 up to Hold & Answer, so the Test Number's Call is on hold and the second helper's live, then have the second helper call you from the third phone: the Banner offers only End & Answer and Decline, and End & Answer ends only the second helper's first Call while the Test Number's stays on hold. If the Test Number's Call comes back live instead, note it, and which Call the Call Window shows",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
             Step {
                 id: "4.6",
                 needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
                 title: "Then have the third phone hang up, leaving the Test Number's Call on hold alone, and have the second helper call again from their first phone: the Banner offers Answer and Decline, and Answer connects them while the Test Number's Call stays on hold. If the Test Number's Call comes back live when the third phone hangs up, or the new Call rings as an ordinary incoming Call, note it",
                 script: None,
-                lands_with: &[16],
+                lands_with: &[148],
             },
         ],
     },
@@ -260,15 +274,15 @@ pub const GROUPS: &[Group] = &[
                 id: "5.1",
                 needs: &[HELPER, EARBUDS],
                 title: "With the earbuds connected to the Pixel, answer on the Desktop and note where the audio goes",
-                script: None,
-                lands_with: &[13],
+                script: Some(earbuds_answer_on_the_desktop),
+                lands_with: &[],
             },
             Step {
                 id: "5.2",
                 needs: &[HELPER, EARBUDS],
                 title: "Repeat, answering on the earbuds",
-                script: None,
-                lands_with: &[13],
+                script: Some(earbuds_answer_on_the_earbuds),
+                lands_with: &[],
             },
         ],
     },
@@ -280,22 +294,22 @@ pub const GROUPS: &[Group] = &[
                 id: "6.1",
                 needs: &[],
                 title: "Take the Pixel out of range (or turn its Bluetooth off), then back: the runner times the reconnect",
-                script: None,
-                lands_with: &[19],
+                script: Some(out_of_range_and_back),
+                lands_with: &[],
             },
             Step {
                 id: "6.2",
                 needs: &[],
                 title: "Suspend the Desktop for a minute, then resume",
-                script: None,
-                lands_with: &[19],
+                script: Some(suspend_and_resume),
+                lands_with: &[],
             },
             Step {
                 id: "6.3",
                 needs: &[NO_OTHER_AUDIO],
                 title: "Restart WirePlumber while idle",
-                script: None,
-                lands_with: &[20],
+                script: Some(wireplumber_restart),
+                lands_with: &[],
             },
         ],
     },
@@ -307,8 +321,8 @@ pub const GROUPS: &[Group] = &[
                 id: "7.1",
                 needs: &[KEYBINDING, TEST_NUMBER],
                 title: "Place and end a Call using only the keyboard",
-                script: None,
-                lands_with: &[10, 11],
+                script: Some(keyboard_only_call),
+                lands_with: &[],
             },
             Step {
                 id: "7.2",
@@ -412,6 +426,40 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
         ),
     );
     Ok(call)
+}
+
+/// How often the runner reads the app's log while it waits on a line.
+const LOG_POLL: Duration = Duration::from_millis(200);
+
+/// Waits until the app logs a line after `from_us` that `wanted` accepts,
+/// still reading skip and quit, and returns the first such line. `None` if
+/// `deadline` passes, or `give_up` holds for the app's state, first. The
+/// timeline's cursor stays put, so the step's next wait still sees every
+/// state published meanwhile.
+fn logged_since(
+    sitting: &mut Sitting,
+    from_us: u64,
+    deadline: Duration,
+    wanted: impl Fn(&LogLine) -> bool,
+    give_up: impl Fn(&AppState) -> bool,
+) -> Result<Option<LogLine>, Stop> {
+    let end = Instant::now() + deadline;
+    loop {
+        let logged = sitting.log_since(from_us).into_iter().find(&wanted);
+        if logged.is_some() || Instant::now() >= end || give_up(&sitting.now()) {
+            return Ok(logged);
+        }
+        sitting.pause(LOG_POLL)?;
+    }
+}
+
+/// A line logging the Phone's connection state changing to one `wanted`
+/// accepts.
+fn connection_logged(wanted: impl Fn(&str) -> bool) -> impl Fn(&LogLine) -> bool {
+    move |line| {
+        line.event_kind == "connection-state-changed"
+            && line.connection_state.as_deref().is_some_and(&wanted)
+    }
 }
 
 /// How far before the Call appeared on the control interface to look for

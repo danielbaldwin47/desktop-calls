@@ -83,6 +83,7 @@ jobs:
         with:
           key: ${{ hashFiles('Cargo.toml') }}
       - name: just lint
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: just lint
 
   check:

@@ -28,6 +28,8 @@ refuses unless all of these hold, in this order:
   4. The head did not move while waiting, and still contains origin/<base>
      (with the same exception).
   5. GitHub reports the PR as mergeable, and it is not a draft.
+  6. No Real-Phone Checklist step at the head lands with a closed ticket, or
+     with one the PR closes (tools/checklist_tickets.py, ticket #120).
 
 Then it squash-merges the head it checked (`--match-head-commit`) and
 deletes the PR's branch on GitHub. Local branches and worktrees are left
@@ -41,12 +43,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import time
 
 import changes
+import checklist_tickets
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 
@@ -319,6 +323,38 @@ def require_mergeable(pr: dict) -> dict:
     return pr
 
 
+def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
+    """No Real-Phone Checklist step at the head may say it lands with a
+    closed ticket, or with one this PR closes: the step needs its script
+    first (ticket #120). CI's `just check` can't see which tickets the PR
+    closes, so this is where that is caught. `is_open` stands in for GitHub
+    in tests."""
+    number = pr["number"]
+    if os.environ.get(checklist_tickets.OFFLINE) == "1":
+        print(checklist_tickets.SKIPPED, flush=True)
+        return
+    closing = json.loads(gh("pr", "view", str(number), "--json", "closingIssuesReferences"))
+    tickets = {issue["number"] for issue in closing["closingIssuesReferences"]}
+    git("fetch", "--quiet", "origin", f"refs/pull/{number}/head")
+    text = git("show", f"{pr['headRefOid']}:{checklist_tickets.STEPS}")
+    try:
+        wrong = checklist_tickets.check(text, tickets, is_open)
+    except checklist_tickets.Unreadable as error:
+        raise Refused(
+            f"{error}\nNext: fix the parser on PR #{number}'s branch, then just merge {number}"
+        ) from None
+    except checklist_tickets.Unreachable as error:
+        raise Refused(
+            f"{error}\nNext: check the network and `gh auth status`, then just merge {number}"
+        ) from None
+    if wrong:
+        lines = "\n".join(f"  {line}" for line in wrong)
+        raise Refused(
+            f"Real-Phone Checklist steps wait on closed tickets (ticket #120):\n{lines}\n"
+            f"Next: write those steps' scripts on PR #{number}'s branch, then just merge {number}"
+        )
+
+
 def merge(number: int, wait_minutes: float) -> int:
     pr = pull_request(number)
     require_open(pr)
@@ -345,6 +381,7 @@ def merge(number: int, wait_minutes: float) -> int:
     if allowed_now and allowed_now != allowed:
         print(allowed_now, flush=True)
     now = require_mergeable(now)
+    require_no_step_waits_on_a_closed_ticket(now)
 
     head, branch = now["headRefOid"], now["headRefName"]
     gh("pr", "merge", str(number), "--squash", "--match-head-commit", head)

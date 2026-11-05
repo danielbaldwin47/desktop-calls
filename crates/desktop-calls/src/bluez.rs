@@ -206,7 +206,9 @@ fn connected(device: &HashMap<String, OwnedVariant>) -> Option<bool> {
 fn presence(address: &str, connected: bool) -> Input {
     let address = address.to_owned();
     if connected {
-        tracing::debug!(
+        // At info, as its absence is: the Real-Phone Checklist times the
+        // reconnect from it (step 6.1), and reads only info and above.
+        tracing::info!(
             event_kind = %EventKind::PhonePresent,
             phone_address = %address,
             "The Phone is connected over Bluetooth"

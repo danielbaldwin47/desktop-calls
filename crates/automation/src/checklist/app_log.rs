@@ -25,6 +25,11 @@ pub struct LogLine {
     pub call_id: Option<u64>,
     /// The surface the line is about, if any, such as "dialer".
     pub surface: Option<String>,
+    /// The connection state the line reports, if any, such as "connected".
+    pub connection_state: Option<String>,
+    /// Where the line says the Call audio is, or was asked to go, if it
+    /// says: "desktop" or "phone".
+    pub audio_location: Option<String>,
 }
 
 impl LogLine {
@@ -98,6 +103,8 @@ fn journal_line(text: &str) -> Option<LogLine> {
         message: value["MESSAGE"].as_str().unwrap_or_default().to_owned(),
         call_id: value["CALL_ID"].as_str().and_then(|id| id.parse().ok()),
         surface: value["SURFACE"].as_str().map(str::to_owned),
+        connection_state: value["CONNECTION_STATE"].as_str().map(str::to_owned),
+        audio_location: value["AUDIO_LOCATION"].as_str().map(str::to_owned),
     })
 }
 
@@ -116,5 +123,7 @@ fn file_line(text: &str) -> Option<LogLine> {
         message: value["message"].as_str().unwrap_or_default().to_owned(),
         call_id: value["call_id"].as_u64(),
         surface: value["surface"].as_str().map(str::to_owned),
+        connection_state: value["connection_state"].as_str().map(str::to_owned),
+        audio_location: value["audio_location"].as_str().map(str::to_owned),
     })
 }

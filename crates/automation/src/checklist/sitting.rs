@@ -23,6 +23,7 @@ use zbus::Connection;
 use zbus::Variant;
 
 use super::app_log::{AppLog, LogLine};
+use super::fingerprint::{Fingerprint, NoCountry};
 use super::watch::{AppState, Timeline};
 
 /// What reaches the sitting: a change on the control interface, or a line
@@ -208,6 +209,105 @@ impl Sitting {
             Ok(seen) => Ok(Some(seen)),
             Err(Stop::TimedOut(_)) => Ok(None),
             Err(stop) => Err(stop),
+        }
+    }
+
+    /// Lets `window` pass while still reading what the user types, without
+    /// moving where the next wait starts: for polling something outside the
+    /// timeline, such as the app's log.
+    pub fn pause(&mut self, window: Duration) -> Result<(), Stop> {
+        let end = Instant::now() + window;
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(());
+            }
+            match self.next_event(left.min(TICK))? {
+                Some(Event::Line(line)) => self.handle_line(&line)?,
+                Some(Event::Closed) => return Err(Stop::Quit),
+                Some(Event::Changed) | None => {}
+            }
+        }
+    }
+
+    /// The last state published since `mark` that satisfies `condition`:
+    /// how something stood when it ended, such as which surface had the
+    /// keyboard as a Call ended.
+    pub fn last_seen_since(
+        &self,
+        mark: usize,
+        condition: impl Fn(&AppState) -> bool,
+    ) -> Option<Seen> {
+        self.timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .skip(mark)
+            .rev()
+            .find(|(_, state)| condition(state))
+            .map(|(at, state)| Seen {
+                at: *at,
+                state: state.clone(),
+            })
+    }
+
+    /// Whether, since `mark`, the app published a state satisfying `first`
+    /// and then, after it, one satisfying `then`: a change, not a state
+    /// that held all along.
+    pub fn seen_in_order(
+        &self,
+        mark: usize,
+        first: impl Fn(&AppState) -> bool,
+        then: impl Fn(&AppState) -> bool,
+    ) -> bool {
+        let timeline = self
+            .timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut states = timeline.iter().skip(mark).map(|(_, state)| state);
+        states.any(first) && states.any(then)
+    }
+
+    /// Asks the app to hang up `call`, as the Call Window's Hang up does.
+    pub fn hang_up(&self, call: u32) -> zbus::Result<()> {
+        zbus::block_on(self.bus.call_method(
+            Some(super::watch::BUS_NAME),
+            super::watch::PATH,
+            Some(super::watch::INTERFACE),
+            "HangUp",
+            &(call,),
+        ))
+        .map(drop)
+    }
+
+    /// The Test Number, from `~/.config/desktop-calls/test-number`, read
+    /// in the Desktop's locale if it has no country code. The number
+    /// itself is never kept or printed.
+    pub fn test_number(&self) -> TestNumber {
+        let number = if self.demo.is_some() {
+            DEMO_TEST_NUMBER_AS_FILED.to_owned()
+        } else {
+            let Some(config) = std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .filter(|config| config.is_absolute())
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .filter(|home| home.is_absolute())
+                        .map(|home| home.join(".config"))
+                })
+            else {
+                return TestNumber::NotSetUp;
+            };
+            match fs::read_to_string(config.join("desktop-calls/test-number")) {
+                Ok(number) => number,
+                Err(_) => return TestNumber::NotSetUp,
+            }
+        };
+        match Fingerprint::of_test_number(&number, locale_region().as_deref()) {
+            Ok(Some((number, assumed))) => TestNumber::Ready { number, assumed },
+            Ok(None) => TestNumber::NotSetUp,
+            Err(NoCountry) => TestNumber::NoCountry,
         }
     }
 
@@ -404,7 +504,20 @@ impl Sitting {
 ///   `mute`, `unmute`, `keybinding`, `escape`, `a`, `d`,
 ///   `click-notification`, `enter`;
 /// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
-///   Omarchy's bell records it;
+///   Omarchy's bell records it; `suspend`, `resume`, as logind announces
+///   them, with the Phone leaving on suspend and returning after resume as
+///   the Pixel does; `resume-slowly`, with the Phone answering the
+///   Desktop's page only a few seconds after resume; `suspend-phone-stays`
+///   and `resume-then-phone-leaves`, with the Phone leaving only after
+///   resume; `restart-wireplumber`, as Telephony leaves and returns;
+/// - the user's keyboard and Call Window, beyond the above:
+///   `type-test-number`, `type-wrong-number` (the last digit off, as a
+///   slip would be), `type-wrong-first-digit` (the first digit after the
+///   country code off), `type-wrong-country` (another country code),
+///   `ctrl-h`, `move-audio-to-phone`, `move-audio-here`,
+///   `move-audio-to-phone-and-back` (each move waited for);
+/// - the Phone and its surroundings: `callee-answers` (the Test Number
+///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
 pub struct Demo {
     /// The user's own window, which has keyboard focus until the keybinding
@@ -428,6 +541,35 @@ const DEMO_NUMBER: &str = "+447700900461";
 /// The demo's Test Number, for the PBAP probe to redact: another Ofcom
 /// drama number.
 const DEMO_TEST_NUMBER: &str = "+447700900999";
+
+/// The demo's Test Number as the user's file has it: without its country
+/// code, which the runner takes from the locale.
+const DEMO_TEST_NUMBER_AS_FILED: &str = "07700 900999";
+
+/// The demo's Test Number with its last digit slipped.
+const DEMO_WRONG_NUMBER: &str = "+447700900998";
+
+/// The demo's Test Number with its first digit after the country code
+/// slipped.
+const DEMO_WRONG_FIRST_DIGIT: &str = "+448700900999";
+
+/// The demo's Test Number's national number under another country code.
+const DEMO_WRONG_COUNTRY: &str = "+337700900999";
+
+/// How long after `resume-then-phone-leaves` the demo's Phone is back in
+/// range.
+const LATE_LEAVING_RETURN: Duration = Duration::from_secs(1);
+
+/// How long the demo waits for the audio to move.
+const AUDIO_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long the demo's Phone takes to answer the Desktop's page after
+/// `resume-slowly`: longer than the runner reads the log for a line the
+/// app logs at once.
+const SLOW_RETURN: Duration = Duration::from_secs(4);
+
+/// How long Telephony is off the bus when the demo restarts `WirePlumber`.
+const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
 
 /// How many Calls the demo's Call History holds: more than the 50 the
 /// Pixel gives per pull, so there is a second page to read.
@@ -461,6 +603,9 @@ impl Demo {
         window.wait_for("your window has keyboard focus", FOCUS_DEADLINE, |line| {
             line == "keyboard-enter"
         });
+        // As a real Phone, hands-free comes up a moment after BlueZ marks
+        // the Phone connected, so a reconnect takes time to measure.
+        harness.simulated_phone().enable_quirk("slow-service-level");
         Self {
             _window: window,
             harness,
@@ -572,9 +717,85 @@ impl Demo {
             "phone-dials" => self.phone_dials(),
             "do-not-disturb-on" => self.harness.set_do_not_disturb(true),
             "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
+            "type-test-number" => self.harness.keyboard().type_text(DEMO_TEST_NUMBER),
+            "type-wrong-number" => self.harness.keyboard().type_text(DEMO_WRONG_NUMBER),
+            "type-wrong-first-digit" => self.harness.keyboard().type_text(DEMO_WRONG_FIRST_DIGIT),
+            "type-wrong-country" => self.harness.keyboard().type_text(DEMO_WRONG_COUNTRY),
+            "ctrl-h" => self.harness.keyboard().press_with_control('h'),
+            "callee-answers" => self.harness.simulated_phone().callee_answers(),
+            "earbuds-on" => self.harness.simulated_phone().set_earbuds(true),
+            "out-of-range" => self.harness.simulated_phone().disconnect(),
+            "return-to-range" => self.harness.simulated_phone().return_to_range(),
+            // The Desktop's Bluetooth sleeps with it, so the Phone leaves,
+            // and comes back only once the Desktop is awake.
+            "suspend" => {
+                self.harness.simulated_phone().prepare_for_sleep(true);
+                self.harness.simulated_phone().disconnect();
+            }
+            "resume" => {
+                self.harness.simulated_phone().prepare_for_sleep(false);
+                self.harness.simulated_phone().return_to_range();
+            }
+            // The Phone stays through the suspend, and leaves only after
+            // resume, as real BlueZ may report it; it is back a moment later.
+            "suspend-phone-stays" => self.harness.simulated_phone().prepare_for_sleep(true),
+            "resume-then-phone-leaves" => {
+                let phone = self.harness.simulated_phone();
+                phone.prepare_for_sleep(false);
+                phone.disconnect();
+                phone.return_to_range_after(LATE_LEAVING_RETURN);
+            }
+            "resume-slowly" => {
+                self.harness.simulated_phone().prepare_for_sleep(false);
+                self.harness
+                    .simulated_phone()
+                    .return_to_range_after(SLOW_RETURN);
+            }
+            "restart-wireplumber" => self
+                .harness
+                .simulated_phone()
+                .restart_telephony(WIREPLUMBER_GAP),
+            "move-audio-to-phone-and-back" => self.move_audio_to_phone_and_back(),
+            "move-audio-to-phone" | "move-audio-here" => {
+                let to = if action == "move-audio-here" {
+                    "desktop"
+                } else {
+                    "phone"
+                };
+                if let Err(error) = self.harness.move_audio(to) {
+                    println!("  demo: {}", error.message);
+                }
+            }
             other => self.act_on_call(other, call),
         }
         flush();
+    }
+
+    /// Moves the audio to the Phone and, once it is there, straight back,
+    /// returning once it is back: an audio change the runner sees only in
+    /// the app's published states, while it is still reading the log.
+    fn move_audio_to_phone_and_back(&self) {
+        // The Call Window offers each way back once the Handoff before it
+        // has settled (ADR-0005).
+        for (location, back) in [
+            ("phone", "Move audio here"),
+            ("desktop", "Move audio to phone"),
+        ] {
+            if let Err(error) = self.harness.move_audio(location) {
+                println!("  demo: {}", error.message);
+                return;
+            }
+            self.harness
+                .wait_for_app("the Handoff settling", AUDIO_DEADLINE, |state| {
+                    state.audio_location == location
+                        && state.connection_state == "connected"
+                        && state
+                            .surfaces
+                            .get("call-window")
+                            .and_then(|window| window.get("handoff"))
+                            .is_some_and(|label| label == back)
+                });
+        }
     }
 
     fn act_on_call(&self, action: &str, call: Option<u32>) {
@@ -621,8 +842,13 @@ impl Demo {
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
                      click-notification, enter, phone-dials, indicator-click, indicator-mute, \
-                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, quirk NAME; or \
-                     skip, or quit."
+                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-wrong-number, \
+                     type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
+                     earbuds-on, out-of-range, return-to-range, suspend, resume, resume-slowly, \
+                     suspend-phone-stays, resume-then-phone-leaves, \
+                     restart-wireplumber, move-audio-to-phone, move-audio-here, \
+                     move-audio-to-phone-and-back, \
+                     quirk NAME; or skip, or quit."
                 ),
             },
         }
@@ -655,4 +881,31 @@ pub fn seconds(duration: Duration) -> String {
 
 pub fn flush() {
     let _ = io::stdout().flush();
+}
+
+/// The Test Number, as step 7.1 needs it.
+pub enum TestNumber {
+    /// `~/.config/desktop-calls/test-number` is missing or empty.
+    NotSetUp,
+    /// The number has no country code, and the locale names no country.
+    NoCountry,
+    Ready {
+        number: Fingerprint,
+        /// The country code taken from the locale, if the number had none.
+        assumed: Option<u16>,
+    },
+}
+
+/// The region of the Desktop's locale for telephone numbers, such as `US`
+/// for `en_US.UTF-8`: from `LC_TELEPHONE`, then `LC_ALL`, then `LANG`.
+fn locale_region() -> Option<String> {
+    ["LC_TELEPHONE", "LC_ALL", "LANG"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty())
+        .and_then(|locale| {
+            let (_, rest) = locale.split_once('_')?;
+            let region: String = rest.chars().take_while(char::is_ascii_alphabetic).collect();
+            (region.len() == 2).then_some(region)
+        })
 }

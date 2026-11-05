@@ -21,6 +21,8 @@ trait SimulatedPhone1 {
 
     fn return_to_range(&self) -> zbus::Result<()>;
 
+    fn return_to_range_after(&self, delay_ms: u32) -> zbus::Result<()>;
+
     fn forget_pairing(&self) -> zbus::Result<()>;
 
     fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
@@ -173,6 +175,18 @@ impl SimulatedPhone<'_> {
     pub fn return_to_range(&self) {
         zbus::block_on(async { self.proxy().await?.return_to_range().await })
             .expect("bring the Simulated Phone back into range");
+    }
+
+    /// Comes back into range `delay` from now, without connecting by
+    /// itself. Returns at once.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn return_to_range_after(&self, delay: Duration) {
+        let delay_ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
+        zbus::block_on(async { self.proxy().await?.return_to_range_after(delay_ms).await })
+            .expect("bring the Simulated Phone back into range later");
     }
 
     /// Forgets the Desktop, as its owner does in its Bluetooth settings: it

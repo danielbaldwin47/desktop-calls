@@ -19,6 +19,8 @@ signal-hook = "0.4"
 zbus = { workspace = true, features = ["default-rt"] }
 futures-util.workspace = true
 serde_json.workspace = true
+# Step 7.1 reads the Test Number's country code as libphonenumber does.
+phonenumber.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

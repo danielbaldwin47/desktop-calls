@@ -9,6 +9,7 @@
 //! can play the user.
 
 mod app_log;
+mod fingerprint;
 pub mod results;
 mod sitting;
 mod steps;
@@ -341,10 +342,10 @@ fn run_group(
     println!("Group {}: {}", group.number, group.title);
     for step in &waiting {
         println!(
-            "  Not yet runnable: {} {} (lands with {}).",
+            "  Not yet runnable: {} {} ({}).",
             step.id,
             step.title,
-            tickets(step.lands_with)
+            waits_on(step)
         );
     }
     if to_run.is_empty() {
@@ -370,7 +371,7 @@ fn run_group(
     // The file records the group once the user has started or skipped it.
     for step in waiting {
         if file.step(step.id).is_none() {
-            let evidence = format!("Not yet runnable: lands with {}.", tickets(step.lands_with));
+            let evidence = format!("Not yet runnable: {}.", waits_on(step));
             record(file, order, skipped(step, evidence));
         }
     }
@@ -532,6 +533,30 @@ fn resume_command(options: &Options) -> String {
         .map(|group| format!(" {group}"))
         .unwrap_or_default();
     format!("just real-phone-checklist{demo}{group}")
+}
+
+/// Why `step`, which has no script, can't run yet: the tickets it lands
+/// with, or the step it runs together with.
+fn waits_on(step: &Step) -> String {
+    let partner = steps::RUNS_WITH
+        .iter()
+        .find(|(id, _)| *id == step.id)
+        .map(|(_, partner)| *partner);
+    let Some(partner) = partner else {
+        return format!("lands with {}", tickets(step.lands_with));
+    };
+    let partner_lands_with = steps::GROUPS
+        .iter()
+        .flat_map(|group| group.steps)
+        .find(|other| other.id == partner && other.script.is_none())
+        .map(|other| other.lands_with);
+    match partner_lands_with {
+        Some(numbers) if !numbers.is_empty() => format!(
+            "runs together with {partner}, which lands with {}",
+            tickets(numbers)
+        ),
+        _ => format!("runs together with {partner}"),
+    }
 }
 
 fn tickets(numbers: &[u32]) -> String {

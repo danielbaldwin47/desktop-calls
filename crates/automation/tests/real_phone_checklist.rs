@@ -40,11 +40,28 @@ struct Runner {
     transcript: Vec<String>,
     /// The step at whose start the user types `quit`, if any.
     quit_at: Option<&'static str>,
+    /// Demo actions the user does once instead of ones the runner
+    /// suggests, as (suggested, done instead): slips, such as a mistyped
+    /// number. What is done instead may be several actions, split by `;`.
+    slips: Vec<(&'static str, &'static str)>,
+    /// How many times the user does the suggested action as asked before
+    /// slipping, for an action suggested more than once.
+    slip_after: usize,
 }
 
 impl Runner {
+    /// Starts the runner on a Desktop whose locale is in Britain, where
+    /// the demo's Test Number is.
     fn start(arguments: &[&str], results: &Path) -> Self {
+        Self::start_in_locale(arguments, results, "en_GB.UTF-8")
+    }
+
+    /// Starts the runner on a Desktop whose locale is `lang`.
+    fn start_in_locale(arguments: &[&str], results: &Path, lang: &str) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_automation"))
+            .env_remove("LC_ALL")
+            .env_remove("LC_TELEPHONE")
+            .env("LANG", lang)
             .arg("real-phone-checklist")
             .args(arguments)
             .arg("--demo")
@@ -72,6 +89,8 @@ impl Runner {
             printed,
             transcript: Vec::new(),
             quit_at: None,
+            slips: Vec::new(),
+            slip_after: 0,
         }
     }
 
@@ -100,7 +119,21 @@ impl Runner {
             {
                 self.type_line("quit");
             } else if let Some(action) = line.trim_start().strip_prefix("demo> ") {
-                self.type_line(action);
+                let slip = self
+                    .slips
+                    .iter()
+                    .position(|(suggested, _)| *suggested == action);
+                let done = match slip {
+                    Some(_) if self.slip_after > 0 => {
+                        self.slip_after -= 1;
+                        action
+                    }
+                    Some(index) => self.slips.remove(index).1,
+                    None => action,
+                };
+                for action in done.split(';') {
+                    self.type_line(action);
+                }
             } else if line.starts_with("Press Enter") {
                 self.type_line("");
             } else if let Some(question) = line.trim_start().strip_prefix("Question: ") {
@@ -390,6 +423,14 @@ fn group_1_reads_a_second_page_of_call_history_and_reports_whether_the_phone_hon
     for id in ["1.1", "1.2", "1.3"] {
         assert_eq!(step(&result, id)["result"], "skipped", "{result:#}");
     }
+    // 1.1 doesn't use #22's feature: it waits only on 1.2, which does.
+    assert!(
+        says(
+            step(&result, "1.1"),
+            "runs together with 1.2, which lands with #22"
+        ),
+        "{result:#}"
+    );
 }
 
 #[test]
@@ -429,6 +470,127 @@ fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
             .to_string()
             .contains("drew its first frame"),
         "{dialer:#}"
+    );
+
+    // 7.1: placed and ended from the keyboard alone. The demo's Test Number
+    // is filed without its country code, as the user's is.
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "pass", "{keyboard:#}");
+    let evidence = keyboard["evidence"].to_string();
+    for seen in [
+        "Treating your Test Number as +44 (from your locale).",
+        "opened the Dialer",
+        "Call Window the keyboard",
+        "keyboard alone",
+    ] {
+        assert!(evidence.contains(seen), "{seen}: {keyboard:#}");
+    }
+}
+
+/// Whether any of `record`'s evidence lines contains `text`.
+fn says(record: &serde_json::Value, text: &str) -> bool {
+    record["evidence"].as_array().is_some_and(|evidence| {
+        evidence
+            .iter()
+            .any(|line| line.as_str().is_some_and(|line| line.contains(text)))
+    })
+}
+
+#[test]
+fn step_3_1_sees_two_handoffs_to_the_phone_and_back_and_asks_about_the_earpiece_each_time() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["3"], results.path());
+    let questions = runner.play(|_| "y".to_owned());
+
+    let earpiece = questions
+        .iter()
+        .filter(|question| question.contains("earpiece"))
+        .count();
+    assert_eq!(earpiece, 2, "{}", runner.transcript.join("\n"));
+    let result = result_file(results.path());
+    let handoff = step(&result, "3.1");
+    assert_eq!(handoff["result"], "pass", "{handoff:#}");
+    for place in ["Phone", "Desktop"] {
+        let moved = handoff["evidence"]
+            .as_array()
+            .expect("the evidence")
+            .iter()
+            .filter(|line| {
+                line.as_str().is_some_and(|line| {
+                    line.contains(&format!("moved to the {place}"))
+                        && line.contains("after the Handoff was asked for, by the app's log")
+                })
+            })
+            .count();
+        assert_eq!(moved, 2, "{place}: {handoff:#}");
+    }
+}
+
+#[test]
+fn group_5_records_where_the_audio_goes_with_the_earbuds_connected() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["5"], results.path());
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    // As AOSP does, answering on the Desktop makes it the active device.
+    let on_desktop = step(&result, "5.1");
+    assert_eq!(on_desktop["result"], "pass", "{on_desktop:#}");
+    assert_eq!(
+        on_desktop["measurements"]["audio_location"], "desktop",
+        "{on_desktop:#}"
+    );
+    // Answered on the earbuds, the audio stays with the Phone, which then
+    // refuses Move audio here while the earbuds are active: recorded, with
+    // the Call Window's plain sentence.
+    let on_earbuds = step(&result, "5.2");
+    assert_eq!(on_earbuds["result"], "pass", "{on_earbuds:#}");
+    assert!(says(on_earbuds, "stayed with the Phone"), "{on_earbuds:#}");
+    assert_eq!(
+        on_earbuds["measurements"]["audio_location"], "phone",
+        "{on_earbuds:#}"
+    );
+    assert!(says(on_earbuds, "said so plainly"), "{on_earbuds:#}");
+}
+
+#[test]
+fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_restart() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["6"], results.path());
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    for (id, measurement) in [
+        ("6.1", "reconnect_ms"),
+        ("6.2", "reconnect_after_resume_ms"),
+        ("6.3", "reconnect_after_wireplumber_ms"),
+    ] {
+        let record = step(&result, id);
+        assert_eq!(record["result"], "pass", "{record:#}");
+        assert!(
+            record["measurements"][measurement]
+                .as_u64()
+                .is_some_and(|ms| ms > 0 && ms <= 10_000),
+            "{record:#}"
+        );
+        assert!(says(record, "by the app's log"), "{record:#}");
+    }
+    // The demo's Phone brings hands-free up 200 ms after BlueZ marks it
+    // connected, as a real Phone takes a moment to, so 6.1 never reads 0 ms.
+    let back = step(&result, "6.1");
+    assert!(
+        back["measurements"]["reconnect_ms"]
+            .as_u64()
+            .is_some_and(|ms| ms >= 200),
+        "{back:#}"
+    );
+    assert!(
+        says(step(&result, "6.2"), "saw the Desktop suspend and resume"),
+        "{result:#}"
+    );
+    assert!(
+        says(step(&result, "6.3"), "Telephony go with"),
+        "{result:#}"
     );
 }
 
@@ -552,4 +714,237 @@ fn with_no_home_the_results_have_nowhere_to_go_so_it_says_why_and_writes_nothing
         .expect("read the directory")
         .collect();
     assert!(written.is_empty(), "{written:?}");
+}
+
+/// Plays group 7 with the Test Number typed as `slip` does it, and checks
+/// that 7.1 fails, that the runner's hang-up ended the Call before 7.2,
+/// and that neither number is ever printed.
+fn the_runner_ends_a_call_typed_as(slip: &'static str) {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    runner.slips = vec![("type-test-number", slip)];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{slip}: {keyboard:#}");
+    // `HangUp` only queues the request: the Call must have left the app's
+    // state, so 7.2 never finds it still going.
+    assert!(
+        says(
+            keyboard,
+            "isn't the Test Number, so the runner hung it up, and it ended"
+        ),
+        "{slip}: {keyboard:#}"
+    );
+    assert!(
+        !says(keyboard, "keyboard alone"),
+        "{slip}: it went on after the wrong Call: {keyboard:#}"
+    );
+    let transcript = runner.transcript.join("\n");
+    assert!(
+        !transcript.contains("A Call is still going"),
+        "{slip}: {transcript}"
+    );
+    assert!(
+        !transcript.contains("End this Call on the Pixel"),
+        "{slip}: {transcript}"
+    );
+    for number in ["900999", "900998"] {
+        assert!(!transcript.contains(number), "{slip}: {transcript}");
+    }
+}
+
+#[test]
+fn step_7_1_ends_at_once_a_call_with_the_last_digit_slipped() {
+    the_runner_ends_a_call_typed_as("type-wrong-number");
+}
+
+#[test]
+fn step_7_1_ends_at_once_a_call_with_the_first_digit_after_the_country_code_slipped() {
+    // A fingerprint of the last 9 digits alone would have matched this.
+    the_runner_ends_a_call_typed_as("type-wrong-first-digit");
+}
+
+#[test]
+fn step_7_1_ends_at_once_a_call_to_the_same_digits_under_another_country_code() {
+    the_runner_ends_a_call_typed_as("type-wrong-country");
+}
+
+#[test]
+fn step_7_1_fails_the_focus_check_when_the_keybinding_never_moves_the_keyboard() {
+    // The user ends the Call from the Call Window without pressing the
+    // keybinding again: the Call Window showed without the keyboard and
+    // never got it.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    runner.slips = vec![("keybinding", "hang-up")];
+    runner.slip_after = 1;
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(
+        says(
+            keyboard,
+            "never went from showing without the keyboard to having it"
+        ),
+        "{keyboard:#}"
+    );
+    assert!(!says(keyboard, "Call Window the keyboard"), "{keyboard:#}");
+}
+
+#[test]
+fn step_6_2_waits_for_a_phone_that_reconnects_seconds_after_resume() {
+    // The Phone answers the Desktop's page 4 s after resume: longer than a
+    // line the app logs at once takes to read, so the runner must wait for
+    // the reconnect, not take the state from before the suspend for it.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["6"], results.path());
+    runner.slips = vec![("resume", "resume-slowly")];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let record = step(&result, "6.2");
+    assert_eq!(record["result"], "pass", "{record:#}");
+    assert!(
+        record["measurements"]["reconnect_after_resume_ms"]
+            .as_u64()
+            .is_some_and(|ms| (4_000..=10_000).contains(&ms)),
+        "{record:#}"
+    );
+    assert!(says(record, "by the app's log"), "{record:#}");
+}
+
+#[test]
+fn step_3_1_sees_audio_that_reached_the_phone_while_the_runner_read_the_log() {
+    // The audio reaches the Phone and comes straight back before the runner
+    // finds the app's handoff-requested line. Reading the log must not move
+    // where the next wait starts, or the runner misses the audio arriving.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["3"], results.path());
+    runner.slips = vec![("move-audio-to-phone", "move-audio-to-phone-and-back")];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let handoff = step(&result, "3.1");
+    assert!(
+        says(handoff, "moved to the Phone"),
+        "the runner missed the audio reaching the Phone: {handoff:#}"
+    );
+}
+
+#[test]
+fn step_7_1_takes_the_test_numbers_country_from_the_locale_and_no_other() {
+    // In the US, the Test Number filed without a country code is a +1
+    // number, so the demo's Call to +44 isn't to it.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start_in_locale(&["7"], results.path(), "en_US.UTF-8");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(
+        says(
+            keyboard,
+            "Treating your Test Number as +1 (from your locale)."
+        ),
+        "{keyboard:#}"
+    );
+    assert!(
+        says(
+            keyboard,
+            "isn't the Test Number, so the runner hung it up, and it ended"
+        ),
+        "{keyboard:#}"
+    );
+}
+
+#[test]
+fn step_7_1_without_a_country_code_or_a_locale_region_asks_for_the_country_code() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start_in_locale(&["7"], results.path(), "C.UTF-8");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(says(keyboard, "Add +<country code>"), "{keyboard:#}");
+    assert!(
+        !runner.printed("demo> type-test-number"),
+        "it had the user dial: {}",
+        runner.transcript.join("\n")
+    );
+}
+
+#[test]
+fn step_7_1_says_to_end_a_wrong_call_on_the_pixel_when_hanging_up_does_not_end_it() {
+    // The Phone ignores the hang-up: the runner can't confirm the Call
+    // ended, so it tells the user to end it on the Pixel.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    runner.slips = vec![("type-test-number", "quirk hangup-ignored;type-wrong-number")];
+    runner.quit_at = Some("7.2");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(
+        says(keyboard, "couldn't confirm it ended within 2 s"),
+        "{keyboard:#}"
+    );
+    assert!(
+        runner.printed("End this Call on the Pixel now."),
+        "{}",
+        runner.transcript.join("\n")
+    );
+    assert!(!says(keyboard, "and it ended"), "{keyboard:#}");
+}
+
+#[test]
+fn step_6_2_times_a_phone_that_leaves_only_after_the_desktop_resumes() {
+    // Real BlueZ may tell the app the Phone left only after resume.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["6"], results.path());
+    runner.slips = vec![
+        ("suspend", "suspend-phone-stays"),
+        ("resume", "resume-then-phone-leaves"),
+    ];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let record = step(&result, "6.2");
+    assert_eq!(record["result"], "pass", "{record:#}");
+    assert!(
+        record["measurements"]["reconnect_after_resume_ms"]
+            .as_u64()
+            .is_some_and(|ms| (1_000..=10_000).contains(&ms)),
+        "{record:#}"
+    );
+}
+
+#[test]
+fn step_7_1_fails_the_focus_check_when_the_call_window_had_the_keyboard_before_the_call() {
+    // The user presses the keybinding again before the Phone places the
+    // Call: the Call Window has the keyboard from the moment the Call is
+    // listed, so nothing shows the keybinding moving it there afterwards.
+    // Without the order (unfocused, then focused) this run would pass.
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["7"], results.path());
+    runner.slips = vec![("phone-dials", "keybinding;phone-dials")];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let keyboard = step(&result, "7.1");
+    assert_eq!(keyboard["result"], "fail", "{keyboard:#}");
+    assert!(
+        says(
+            keyboard,
+            "never went from showing without the keyboard to having it"
+        ),
+        "{keyboard:#}"
+    );
 }

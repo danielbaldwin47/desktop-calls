@@ -6,8 +6,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Check formatting, lints, the build and dependencies. CI runs this.
-check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python
+# Check formatting, lints, the build, dependencies and file lengths. CI runs this.
+check: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit
     cargo fmt --all --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo build --workspace --all-targets --locked
@@ -129,6 +129,36 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# An agent that reads a whole oversized file spends its context on it: the
+# harness's 2,442-line lib.rs took 88k of the 276k characters one agent read
+# before its context was compacted (ticket #79). So no .rs file in the repo,
+# tracked or new, may be over 1,000 lines. Split one along its seams.
+# It walks the tree rather than asking git, because in CI's container git
+# refuses a checkout another user owns (exit 128, "dubious ownership").
+# It skips build output (target) and hidden directories (.git, and the agent
+# worktrees under .claude, which are other checkouts).
+[private]
+[no-exit-message]
+_rust-files-fit:
+    #!/usr/bin/env python3
+    import os, sys
+    LIMIT = 1000
+    over = []
+    for directory, subdirectories, files in os.walk("."):
+        subdirectories[:] = sorted(d for d in subdirectories if d != "target" and not d.startswith("."))
+        for name in sorted(files):
+            if not name.endswith(".rs"):
+                continue
+            path = os.path.relpath(os.path.join(directory, name))
+            with open(path, encoding="utf-8") as file:
+                lines = sum(1 for _ in file)
+            if lines > LIMIT:
+                over.append(f"  {path}: {lines:,} lines")
+    if over:
+        print(f"Rust files over {LIMIT:,} lines (CODING_STANDARDS.md); split each along its seams:", file=sys.stderr)
+        print("\n".join(over), file=sys.stderr)
+        sys.exit(1)
 
 # A D-Bus property Set without an explicit signature lets the library guess
 # one. On 2026-11-04 a guessed `ssb` crashed WirePlumber mid-Call (ticket #3).

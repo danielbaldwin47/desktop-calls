@@ -68,7 +68,8 @@ These rules bind every change to Desktop Calls. Most are enforced by `just check
 
 ## Tooling
 
-- `just check` must pass before you push: rustfmt, clippy with `-D warnings`, the build, `cargo deny` and the core-purity check. `just --list` shows every recipe.
+- `just check` must pass before you push: rustfmt, clippy with `-D warnings`, the build, `cargo deny`, the core-purity check and the file-length check. `just --list` shows every recipe.
+- No `.rs` file is over 1,000 lines, so an agent can read a whole file without spending its context on it. `just check` fails and names any file over. Split it into modules along its seams, keeping its public paths with `pub use`.
 - The toolchain is pinned in `rust-toolchain.toml`. Change it in its own commit.
 - Every dependency must be compatible with GPL-3.0-or-later, free of known advisories, and from crates.io; `deny.toml` holds the licence list. Add a licence to it only after checking its compatibility, with a comment.
 - Lockfile changes are committed; `--locked` is used everywhere.

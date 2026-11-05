@@ -929,7 +929,9 @@ impl AppEvent {
         self
     }
 
-    fn matches(&self, event: &serde_json::Value) -> bool {
+    /// Whether `event`, one line of the app's log as JSON, is one of these.
+    #[must_use]
+    pub fn matches(&self, event: &serde_json::Value) -> bool {
         event["event_kind"] == self.kind
             && self
                 .fields

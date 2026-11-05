@@ -4,7 +4,8 @@
 //! Simulated Phone was asked to do, and screenshots.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use test_harness::vcards::{self, CallKind};
 use test_harness::{
@@ -170,6 +171,24 @@ fn never_dialled(harness: &Harness) {
 
 fn app_region(screenshot: &Screenshot) -> Option<test_harness::Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
+}
+
+/// Omarchy's Super+W closes the focused window, and a Hyprland bind can
+/// hand it to the Dialer instead (ticket #125); the Dialer then closes, as
+/// on Escape, and calls no one. sway here binds no keys, so Super+W reaches
+/// the Dialer as it would through that bind.
+#[test]
+fn super_w_closes_the_dialer_as_escape_does() {
+    let harness = synced_on_screen();
+    open(&harness);
+    type_query(&harness, "jose");
+
+    harness.keyboard().press_with_super('w');
+
+    harness.wait_for_app("the Dialer closes", DEADLINE, |state| {
+        dialer(state).is_none()
+    });
+    never_dialled(&harness);
 }
 
 #[test]
@@ -472,4 +491,76 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
         "{:?}",
         dialer(&state)
     );
+}
+
+/// One way of opening the Dialer.
+type OpenDialer = fn(&Harness);
+
+/// How many times the app has logged `activate-requested`, and how many
+/// times the Dialer has drawn its first frame.
+fn asked_and_drawn(harness: &Harness) -> (usize, usize) {
+    let asked = AppEvent::kind("activate-requested");
+    let drawn = AppEvent::kind("surface-shown").with("surface", "dialer");
+    harness
+        .app_log()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .fold((0, 0), |(a, d), event| {
+            (
+                a + usize::from(asked.matches(&event)),
+                d + usize::from(drawn.matches(&event)),
+            )
+        })
+}
+
+/// Step 7.4 of the Real-Phone Checklist times the Dialer's first frame from
+/// the app's `activate-requested` line, so every way of opening the Dialer
+/// must log one first (ticket #125: opened from the Indicator, it logged
+/// none, and 7.4 had nothing to measure).
+#[test]
+fn every_way_of_opening_the_dialer_logs_that_it_was_asked() {
+    let harness = synced_on_screen();
+    let ways: [(&str, OpenDialer); 6] = [
+        ("a left click on the Indicator", |harness| {
+            harness.tray().activate();
+        }),
+        ("Open Dialer in the Indicator's menu", |harness| {
+            harness.tray().click("Open Dialer");
+        }),
+        ("the keybinding's command", |harness| run(harness, &[])),
+        ("`desktop-calls dialer`", |harness| {
+            run(harness, &["dialer"]);
+        }),
+        ("`OpenDialer` on the control interface", |harness| {
+            harness.open_dialer("", 0);
+        }),
+        ("the app launcher", Harness::launch_from_app_launcher),
+    ];
+
+    for (opened, (way, open)) in (1..).zip(ways) {
+        open(&harness);
+        harness.wait_for_app(&format!("{way} opens the Dialer"), DEADLINE, focused);
+        // The first frame is logged just after the Dialer shows.
+        let started = Instant::now();
+        let (asked, drawn) = loop {
+            let (asked, drawn) = asked_and_drawn(&harness);
+            if drawn >= opened || started.elapsed() > DEADLINE {
+                break (asked, drawn);
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(
+            drawn, opened,
+            "opened by {way}, the Dialer's first frames logged"
+        );
+        assert!(
+            asked >= drawn,
+            "opened by {way}, the Dialer has drawn its first frame {drawn} times, but the app \
+             has logged activate-requested only {asked} times"
+        );
+        harness.keyboard().press(Key::Escape);
+        harness.wait_for_app("the Dialer closes", DEADLINE, |state| {
+            dialer(state).is_none()
+        });
+    }
 }

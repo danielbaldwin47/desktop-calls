@@ -487,7 +487,7 @@ impl Surface {
         }
     }
 
-    /// Escape gives keyboard focus back, however the surface got it, and
+    /// Escape (or Super+W) gives keyboard focus back, however the surface got it, and
     /// sends the Call state machine `escape`.
     fn on_escape(&self, escape: Input, intents: &UnboundedSender<Input>) {
         let keys = gtk::EventControllerKey::new();
@@ -495,7 +495,7 @@ impl Surface {
         let (window, releasing, intents) =
             (self.window.clone(), self.releasing.clone(), intents.clone());
         keys.connect_key_pressed(move |_, key, _, modifiers| {
-            if key != gtk::gdk::Key::Escape || has_command_modifier(modifiers) {
+            if !is_escape(key, modifiers) {
                 return glib::Propagation::Proceed;
             }
             if gtk4_layer_shell::is_supported() {
@@ -582,6 +582,18 @@ fn detail_label() -> gtk::Label {
 
 /// Whether a key press holds Control, Alt or Super, so it is a shortcut of
 /// something else and not a plain letter.
+/// Escape, or Super+W: Omarchy's Close window. Hyprland's close never
+/// reaches a layer surface, so a bind can hand Super+W to the surface
+/// instead, which then closes as on Escape (ticket #125).
+fn is_escape(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+    let super_only = (modifiers
+        & (ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK))
+        == ModifierType::SUPER_MASK;
+    (key == gtk::gdk::Key::Escape && !has_command_modifier(modifiers))
+        || (super_only && matches!(key, gtk::gdk::Key::w | gtk::gdk::Key::W))
+}
+
 fn has_command_modifier(modifiers: gtk::gdk::ModifierType) -> bool {
     modifiers.intersects(
         gtk::gdk::ModifierType::CONTROL_MASK

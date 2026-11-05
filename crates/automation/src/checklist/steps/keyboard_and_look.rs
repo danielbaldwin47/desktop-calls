@@ -53,8 +53,9 @@ pub(super) fn banner_beside_a_notification(sitting: &mut Sitting) -> Result<(), 
 pub(super) fn indicator_in_the_bar(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     sitting.say(
-        "Right-click the arrow at the tray end of Omarchy's bar. In the list, find \
-         Desktop Calls and click Pin, unless it says Unpin already.",
+        "Right-click the small arrow at the tray end of Omarchy's bar, not the phone \
+         icon (that opens Desktop Calls' own menu). A list called Tray icons opens: \
+         on the Desktop Calls row, click Pin, unless it says Unpin already.",
         &[],
     );
     let pinned = sitting.ask("Does Desktop Calls' phone icon now stay in the bar?")?;
@@ -143,14 +144,14 @@ pub(super) fn indicator_in_the_bar(sitting: &mut Sitting) -> Result<(), Stop> {
     Ok(())
 }
 
-/// Step 7.4: the Dialer's first frame within 150 ms of the keybinding, by
+/// Step 7.4: the Dialer's first frame within 150 ms of being asked, by
 /// the app's own log (ticket #47). CI paints in software and holds it only
 /// to 250 ms; the user's Desktop is where the 150 ms target is judged.
 pub(super) fn dialer_first_frame(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     let asked_us = unix_micros();
     sitting.say(
-        "Press your Desktop Calls keybinding to open the Dialer.",
+        "Press your Desktop Calls keybinding to open the Dialer, or click the phone icon if the keybinding isn't set up.",
         &["keybinding"],
     );
     sitting.wait_for("the Dialer opening", ACT_DEADLINE, |state| {
@@ -162,7 +163,7 @@ pub(super) fn dialer_first_frame(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting.check(
                 took <= DIALER_TARGET,
                 format!(
-                    "The Dialer drew its first frame {} ms after the keybinding asked (target {} ms).",
+                    "The Dialer drew its first frame {} ms after it was asked (target {} ms).",
                     took.as_millis(),
                     DIALER_TARGET.as_millis()
                 ),

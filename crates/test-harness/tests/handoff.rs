@@ -1,14 +1,18 @@
 //! Scenarios 11 and 12: a Call placed on the Phone keeps its audio there,
-//! and a Handoff brings it to the Desktop, by the Call Window's button, the
-//! control interface and the CLI; a Phone that ignores `Activate` once gets
-//! one more try a second later (ticket #70), and one that keeps ignoring it
-//! gets a plain message after 3 s and keeps the Call. Checked through the control interface, the Call Window's
-//! `Surfaces`, screenshots, and what the Simulated Phone was asked.
+//! and a Handoff moves it to the Desktop and back to the Phone, by the Call
+//! Window's button, the control interface and the CLI. To the Desktop, a
+//! Phone that ignores `Activate` once gets one more try a second later
+//! (ticket #70), and one that keeps ignoring it gets a plain message after
+//! 3 s and keeps the Call. To the Phone, hands-free drops and comes back
+//! (ADR-0005) with the Call carrying on, and a refusal gets a plain message
+//! and keeps the Call. Checked through the control interface, the Call
+//! Window's `Surfaces`, screenshots, and what the Simulated Phone was asked.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use test_harness::{AppState, Harness, RecordedMethodCall, Region, Screenshot};
+use test_harness::{AppCall, AppState, Bus, Harness, RecordedMethodCall, Region, Screenshot};
+use zbus::OwnedVariant;
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -38,9 +42,21 @@ const PHONE_OPENS_LINK: Duration = Duration::from_millis(300);
 /// [`PHONE_OPENS_LINK`], so about 1.3 s. Waiting the full limit before
 /// asking again took about 3.3 s (ticket #70).
 const RETRIED_HANDOFF_DEADLINE: Duration = Duration::from_millis(2_500);
+/// How long a Handoff to the Phone may take once the app is asked, until
+/// the audio is on the Phone. Hands-free drops at once, so this is mostly
+/// the app's own part; the Call coming back takes the Pixel up to 1.01 s
+/// more (ticket #14's prototype), which the Call Window shows as "Moving
+/// audio to phone…".
+const TO_PHONE_DEADLINE: Duration = Duration::from_millis(500);
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
+const TELEPHONY: &str = "org.pipewire.Telephony";
+const BLUEZ: &str = "org.bluez";
+const DEVICE: &str = "org.bluez.Device1";
+const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
+/// The Hands-Free Audio Gateway profile, the only one the Desktop drops.
+const HANDS_FREE_PROFILE: &str = "0000111f-0000-1000-8000-00805f9b34fb";
 
 /// The Hang up button's red.
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
@@ -458,27 +474,350 @@ fn moving_the_audio_with_no_call_is_refused_plainly() {
     );
 }
 
-#[test]
-fn moving_the_audio_to_the_phone_gives_the_instruction_for_the_phone() {
-    let harness = connected();
-    live_on_phone(&harness);
+/// A live Call with its audio brought to the Desktop.
+fn live_here(harness: &Harness) -> AppCall {
+    live_on_phone(harness);
+    if let Err(error) = harness.move_audio("desktop") {
+        panic!("MoveAudio(\"desktop\") was refused: {error:?}");
+    }
+    let state = wait_for_audio_here(harness);
+    harness.simulated_phone().wait_for_recorded(
+        "RejectSCO is set again once the audio is here",
+        DEADLINE,
+        |calls| audio_requests(calls).last() == Some(&"RejectSCO=true"),
+    );
+    state.calls[0].clone()
+}
+
+/// What the Desktop asked of BlueZ's `Device1`, in order.
+fn device_requests(calls: &[RecordedMethodCall]) -> Vec<&str> {
+    calls
+        .iter()
+        .filter(|call| call.bus == "system" && call.interface == DEVICE)
+        .map(|call| call.member.as_str())
+        .collect()
+}
+
+/// Waits until the audio is on the Phone, the Call Window says so and
+/// offers to bring it back, and checks the Call carried on as the same Call:
+/// its id, its timer and its controls. Then checks the app's own part took
+/// no longer than [`TO_PHONE_DEADLINE`].
+fn wait_for_audio_on_phone(harness: &Harness, before: &AppCall) -> AppState {
+    let state = harness.wait_for_app(
+        "the audio is on the Phone and the Call Window offers to bring it back",
+        DEADLINE,
+        |state| {
+            state.audio_location == "phone"
+                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
+                && shown(state, "handoff").as_deref() == Some("Move audio here")
+        },
+    );
+    assert_eq!(state.calls.len(), 1, "{:?}", state.calls);
+    let call = &state.calls[0];
+    assert_eq!(call.id, before.id);
+    assert_eq!(call.state, "active");
+    assert_eq!(call.active_since_ms, before.active_since_ms);
+    assert_eq!(state.connection_state, "connected");
+    let status = shown(&state, "status").unwrap_or_default();
+    assert!(
+        is_timer(&status),
+        "the Call Window shows {status:?}, not the Call's timer"
+    );
+    assert_eq!(shown(&state, "call"), Some(before.id.to_string()));
+    assert_eq!(shown(&state, "notice"), None);
+    let took = since_last_handoff_request(harness, "phone");
+    assert!(
+        took <= TO_PHONE_DEADLINE,
+        "the Handoff to the Phone took {took:?} once the app was asked"
+    );
+    state
+}
+
+/// Whether `text` reads as the Call timer, such as `0:07`.
+fn is_timer(text: &str) -> bool {
+    text.contains(':')
+        && text
+            .split(':')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// How long the app took from its latest Handoff request, to `location`,
+/// to the audio reaching `location`, by its log.
+fn since_last_handoff_request(harness: &Harness, location: &str) -> Duration {
+    let events = log_events(harness);
+    let event = |kind: &str| {
+        events
+            .iter()
+            .rev()
+            .find(|event| event["event_kind"] == kind && event["audio_location"] == location)
+            .unwrap_or_else(|| panic!("no {kind} to the {location} in the log"))
+    };
+    let requested = timestamp_us(event("handoff-requested"));
+    let moved = timestamp_us(event("audio-moved"));
+    Duration::from_micros(
+        moved
+            .checked_sub(requested)
+            .unwrap_or_else(|| panic!("the audio moved to the {location} before it was asked")),
+    )
+}
+
+/// Every event in the app's log so far, parsed.
+fn log_events(harness: &Harness) -> Vec<serde_json::Value> {
     harness
-        .move_audio("desktop")
-        .expect("MoveAudio(\"desktop\") is accepted");
-    harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
-        state.audio_location == "desktop"
+        .app_log()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// A property of the Simulated Phone's objects, read as any D-Bus client
+/// could.
+fn phone_property(
+    harness: &Harness,
+    bus: Bus,
+    service: &str,
+    path: &str,
+    interface: &str,
+    name: &str,
+) -> OwnedVariant {
+    harness
+        .call_phone_method(bus, service, path, PROPERTIES, "Get", &(interface, name))
+        .body()
+        .deserialize::<OwnedVariant>()
+        .unwrap_or_else(|error| panic!("{interface}.{name} isn't a variant: {error}"))
+}
+
+fn device_path(harness: &Harness) -> String {
+    format!(
+        "/org/bluez/hci0/dev_{}",
+        harness.phone().address.replace(':', "_")
+    )
+}
+
+/// Checks the Desktop moved the audio to the Phone `handoffs` times by
+/// dropping hands-free and connecting it again, and nothing else of BlueZ's:
+/// never `Disconnect` or `RemoveDevice`, so the Phone stays connected and
+/// paired; that it never asked the Phone to hang up; and that the Phone's
+/// next audio link stays on the Phone (`RejectSCO` true).
+fn assert_moved_to_phone(harness: &Harness, handoffs: usize) {
+    let calls = harness.simulated_phone().wait_for_recorded(
+        "BlueZ was asked to drop hands-free and connect it again",
+        DEADLINE,
+        |calls| device_requests(calls).len() >= 2 * handoffs,
+    );
+    assert_eq!(
+        device_requests(&calls),
+        ["DisconnectProfile", "ConnectProfile"].repeat(handoffs),
+        "{calls:#?}"
+    );
+    for call in calls.iter().filter(|call| call.interface == DEVICE) {
+        assert_eq!(call.path, device_path(harness), "{call:?}");
+        assert_eq!(
+            call.arguments,
+            format!("(\"{HANDS_FREE_PROFILE}\",)"),
+            "{call:?}"
+        );
+    }
+    assert!(
+        !calls.iter().any(|call| matches!(
+            call.member.as_str(),
+            "Hangup" | "Disconnect" | "RemoveDevice" | "Deactivate"
+        )),
+        "{calls:#?}"
+    );
+    let gateway = harness.simulated_phone().audio_gateway();
+    let reject_sco = phone_property(
+        harness,
+        Bus::Session,
+        TELEPHONY,
+        &gateway,
+        TRANSPORT,
+        "RejectSCO",
+    );
+    assert_eq!(bool::try_from(reject_sco), Ok(true));
+    let device = device_path(harness);
+    for name in ["Paired", "Connected"] {
+        let value = phone_property(harness, Bus::System, BLUEZ, &device, DEVICE, name);
+        assert_eq!(bool::try_from(value), Ok(true), "Device1.{name}");
+    }
+}
+
+#[test]
+fn move_audio_phone_moves_the_audio_to_the_phone_and_keeps_the_call() {
+    let harness = connected();
+    let before = live_here(&harness);
+
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+
+    wait_for_audio_on_phone(&harness, &before);
+    assert_moved_to_phone(&harness, 1);
+    let state = harness.app_holds("the audio stays on the Phone", QUIET, |state| {
+        state.audio_location == "phone" && state.calls.len() == 1
     });
+    assert_eq!(state.calls[0].state, "active");
+}
+
+#[test]
+fn desktop_calls_audio_phone_moves_the_audio_to_the_phone() {
+    let harness = connected();
+    let before = live_here(&harness);
 
     let output = harness.cli(&["audio", "phone"]);
 
-    assert!(!output.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr).trim(),
-        "Tap the audio button on your phone's call screen to move the audio to your phone."
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    harness.app_holds("the audio stays on the Desktop", QUIET, |state| {
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "Moving the audio to your phone."
+    );
+    wait_for_audio_on_phone(&harness, &before);
+    assert_moved_to_phone(&harness, 1);
+}
+
+/// Scenario 12.
+#[test]
+fn the_audio_goes_here_to_the_phone_here_and_to_the_phone_again_in_one_call() {
+    let harness = connected();
+    let before = live_here(&harness);
+
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+    wait_for_audio_on_phone(&harness, &before);
+    harness
+        .move_audio("desktop")
+        .expect("MoveAudio(\"desktop\") is accepted on the AudioGateway that came back");
+    harness.wait_for_app("the audio is back on the Desktop", DEADLINE, |state| {
         state.audio_location == "desktop"
+            && shown(state, "handoff").as_deref() == Some("Move audio to phone")
     });
+    let took = since_last_handoff_request(&harness, "desktop");
+    assert!(
+        took <= HANDOFF_DEADLINE,
+        "the second Handoff here took {took:?} once the app was asked"
+    );
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted again");
+
+    wait_for_audio_on_phone(&harness, &before);
+    assert_moved_to_phone(&harness, 2);
+    let calls = harness
+        .simulated_phone()
+        .wait_for_recorded("anything", DEADLINE, |_| true);
+    assert_eq!(
+        handoff_requests(&calls)
+            .into_iter()
+            .filter(|request| *request != "RejectSCO=true")
+            .collect::<Vec<_>>(),
+        ["RejectSCO=false", "Activate", "RejectSCO=false", "Activate"],
+        "two Handoffs here, each asked once: {calls:#?}"
+    );
+}
+
+/// The "no `Deactivate()`" quirk: PipeWire's transport has no way to close
+/// the audio link, so the app never looks for one.
+#[test]
+fn the_transport_has_no_deactivate_and_the_handoff_to_the_phone_needs_none() {
+    let harness = connected();
+    let before = live_here(&harness);
+    let gateway = harness.simulated_phone().audio_gateway();
+    let introspection: String = harness
+        .call_phone_method(
+            Bus::Session,
+            TELEPHONY,
+            &gateway,
+            "org.freedesktop.DBus.Introspectable",
+            "Introspect",
+            &(),
+        )
+        .body()
+        .deserialize()
+        .expect("Introspect replies with XML");
+    assert!(introspection.contains(TRANSPORT), "{introspection}");
+    assert!(!introspection.contains("Deactivate"), "{introspection}");
+
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+
+    wait_for_audio_on_phone(&harness, &before);
+    assert_moved_to_phone(&harness, 1);
+}
+
+#[test]
+fn a_handoff_to_the_phone_bluez_refuses_says_how_to_do_it_on_the_phone() {
+    let harness = connected();
+    let before = live_here(&harness);
+    harness
+        .simulated_phone()
+        .enable_quirk("disconnect-profile-refused");
+
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+
+    let state = harness.wait_for_app(
+        "the Call Window says the audio stayed here",
+        DEADLINE,
+        |state| shown(state, "notice").is_some(),
+    );
+    assert_eq!(
+        shown(&state, "notice").as_deref(),
+        Some(
+            "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen."
+        )
+    );
+    assert_eq!(state.audio_location, "desktop");
+    assert_eq!(
+        shown(&state, "handoff").as_deref(),
+        Some("Move audio to phone")
+    );
+    let error = harness.wait_for_app_error(DEADLINE);
+    assert_eq!(error.kind, "audio-not-moved-to-phone");
+    let state = harness.app_holds("the Call stays live", QUIET, |state| {
+        state.calls.len() == 1 && state.calls[0].state == "active"
+    });
+    assert_eq!(state.calls[0].id, before.id);
+    let calls = harness
+        .simulated_phone()
+        .wait_for_recorded("anything", DEADLINE, |_| true);
+    assert_eq!(device_requests(&calls), ["DisconnectProfile"], "{calls:#?}");
+    assert!(
+        !telephony(&calls).any(|call| call.member == "Hangup"),
+        "{calls:#?}"
+    );
+}
+
+#[test]
+fn hanging_up_while_hands_free_is_away_ends_the_call_once_it_is_back() {
+    let harness = connected();
+    let before = live_here(&harness);
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+    harness
+        .simulated_phone()
+        .wait_for_recorded("hands-free has dropped", DEADLINE, |calls| {
+            device_requests(calls).contains(&"DisconnectProfile")
+        });
+
+    harness.hang_up(before.id);
+
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone is asked to hang up the Call once it is back",
+        DEADLINE,
+        |calls| telephony(calls).any(|call| call.member == "Hangup"),
+    );
+    let state = harness.wait_for_app("the Call has ended", DEADLINE, |state| {
+        state.calls.is_empty()
+    });
+    assert_eq!(state.connection_state, "connected");
 }
 
 fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
@@ -511,9 +850,10 @@ fn handoff_button_centre(hang_up: Region) -> (f64, f64) {
 }
 
 #[test]
-fn clicking_move_audio_here_brings_the_audio_here_and_the_button_offers_the_phone() {
+fn clicking_the_handoff_button_moves_the_audio_here_and_back_to_the_phone() {
     let harness = connected();
     live_on_phone(&harness);
+    let before = harness.app_state().calls[0].clone();
     let hang_up = hang_up_button(&harness, "call-window-audio-on-phone");
     let (x, y) = handoff_button_centre(hang_up);
 
@@ -532,14 +872,11 @@ fn clicking_move_audio_here_brings_the_audio_here_and_the_button_offers_the_phon
 
     harness.pointer().click(x, y);
 
-    let state = harness.wait_for_app(
-        "the Call Window says how to move the audio on the Phone",
-        DEADLINE,
-        |state| shown(state, "notice").is_some(),
+    wait_for_audio_on_phone(&harness, &before);
+    assert_moved_to_phone(&harness, 1);
+    let back = hang_up_button(&harness, "call-window-audio-back-on-phone");
+    assert!(
+        (back.top - hang_up.top).abs() < 1.0 && (back.right - hang_up.right).abs() < 1.0,
+        "Hang up moved from {hang_up:?} to {back:?}"
     );
-    assert_eq!(
-        shown(&state, "notice").as_deref(),
-        Some("Tap the audio button on your phone's call screen to move the audio to your phone.")
-    );
-    assert_eq!(state.audio_location, "desktop");
 }

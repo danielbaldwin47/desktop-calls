@@ -2,11 +2,12 @@
 //! a Call placed on the Phone keeps its audio there, Handoff to the Desktop
 //! with its one retry (a second after `Activate` if the audio link hasn't
 //! started) and its 3 s limit, a Handoff that fails, and the fallback
-//! instruction for a Handoff to the Phone.
+//! Handoff to the Phone, which bounces hands-free (ADR-0005), with what it
+//! shows when it fails.
 
 use desktop_calls_core::{
-    AudioLocation, CallAudio, CallId, CallState, Caller, Effect, Input, Phone, PhoneCommand, State,
-    Timer, Timestamp, Transport, messages::Failure, step,
+    AudioLocation, CallAudio, CallId, CallState, Caller, ConnectionState, Effect, Input, Phone,
+    PhoneCommand, State, Timer, Timestamp, Transport, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -150,15 +151,25 @@ fn audio(state: &State) -> Option<CallAudio> {
 
 const ON_PHONE: CallAudio = CallAudio {
     location: AudioLocation::Phone,
-    moving_here: false,
+    moving: None,
 };
 const MOVING_HERE: CallAudio = CallAudio {
     location: AudioLocation::Phone,
-    moving_here: true,
+    moving: Some(AudioLocation::Desktop),
 };
 const ON_DESKTOP: CallAudio = CallAudio {
     location: AudioLocation::Desktop,
-    moving_here: false,
+    moving: None,
+};
+/// Asked to go to the Phone, and still on the Desktop.
+const LEAVING_DESKTOP: CallAudio = CallAudio {
+    location: AudioLocation::Desktop,
+    moving: Some(AudioLocation::Phone),
+};
+/// On the Phone, while hands-free comes back from the Handoff's bounce.
+const ARRIVED_ON_PHONE: CallAudio = CallAudio {
+    location: AudioLocation::Phone,
+    moving: Some(AudioLocation::Phone),
 };
 
 #[test]
@@ -424,32 +435,237 @@ fn moving_the_audio_where_it_already_is_does_nothing() {
     assert_eq!(effects, []);
 }
 
-#[test]
-fn moving_the_audio_to_the_phone_gives_the_instruction_until_the_audio_leaves() {
-    let (state, _) = run(
+/// The live Call's audio on the Desktop, after a Handoff here.
+fn live_here() -> State {
+    run(
         live_on_phone(),
         [
             Input::MoveAudio(AudioLocation::Desktop),
+            Input::PhoneCommandDone(PhoneCommand::MoveAudioToDesktop),
+            Input::TransportChanged(Transport::Pending),
+            Input::TransportChanged(Transport::Active),
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+        ],
+    )
+    .0
+}
+
+/// The timer for a Handoff to the Phone's 5 s limit the effects started.
+fn to_phone_timer(effects: &[Effect]) -> Option<Timer> {
+    started(
+        effects,
+        |timer| matches!(timer, Timer::HandoffTimedOut(_)),
+        5_000,
+    )
+}
+
+/// The Desktop has asked to move the audio to the Phone: returns the state
+/// and the Handoff's limit.
+fn asked_for_phone(state: State) -> (State, Timer) {
+    let (state, effects) = run(state, [Input::MoveAudio(AudioLocation::Phone)]);
+    let limit =
+        to_phone_timer(&effects).unwrap_or_else(|| panic!("no timer for the limit: {effects:?}"));
+    (state, limit)
+}
+
+/// Hands-free drops for the Handoff to the Phone (ADR-0005): the
+/// AudioGateway and the Call go, without the Call ending.
+fn dropped() -> Input {
+    Input::PhoneDisconnected {
+        address: ADDRESS.to_owned(),
+    }
+}
+
+/// Hands-free is back, and so is the Call, still active.
+fn back() -> [Input; 4] {
+    [
+        Input::PhoneConnected {
+            address: ADDRESS.to_owned(),
+        },
+        Input::PhoneCommandDone(PhoneCommand::MoveAudioToPhone),
+        Input::TransportChanged(Transport::Idle),
+        Input::CallChanged {
+            call: CALL,
+            state: CallState::Active,
+            at: Timestamp(9_000),
+        },
+    ]
+}
+
+#[test]
+fn moving_the_audio_to_the_phone_asks_the_phone_link_to_move_it() {
+    let state = live_here();
+    let input = Input::MoveAudio(AudioLocation::Phone);
+    assert_eq!(state.refusal(&input), None);
+
+    let (state, effects) = run(state, [input]);
+
+    assert_eq!(phone_commands(&effects), [PhoneCommand::MoveAudioToPhone]);
+    assert!(to_phone_timer(&effects).is_some(), "{effects:?}");
+    assert_eq!(reported(&effects), []);
+    assert_eq!(audio(&state), Some(LEAVING_DESKTOP));
+}
+
+#[test]
+fn hands_free_dropping_for_the_handoff_puts_the_audio_on_the_phone_and_keeps_the_call() {
+    let (state, _) = asked_for_phone(live_here());
+
+    let (state, effects) = run(state, [dropped()]);
+
+    assert_eq!(phone_commands(&effects), []);
+    assert_eq!(state.audio_location(), Some(AudioLocation::Phone));
+    assert_eq!(audio(&state), Some(ARRIVED_ON_PHONE));
+    // The Phone is still in range: its link is coming straight back.
+    assert_eq!(state.connection_state(), &ConnectionState::Connected);
+    assert_eq!(state.calls().len(), 1);
+}
+
+#[test]
+fn once_hands_free_and_the_call_are_back_the_handoff_to_the_phone_is_over() {
+    let (state, limit) = asked_for_phone(live_here());
+    let before = state.calls()[0].clone();
+    let (state, _) = run(state, [dropped()]);
+
+    let (state, effects) = run(state, back());
+
+    // RejectSCO is set again on the new AudioGateway, the audio isn't
+    // brought back here, and the same link needs no new Contacts sync.
+    assert_eq!(phone_commands(&effects), [PhoneCommand::KeepAudioOnPhone]);
+    assert!(!effects.contains(&Effect::SyncContacts), "{effects:?}");
+    assert_eq!(audio(&state), Some(ON_PHONE));
+    assert_eq!(state.connection_state(), &ConnectionState::Connected);
+    let after = &state.calls()[0];
+    assert_eq!(after.id(), before.id());
+    assert_eq!(after.active_since(), before.active_since());
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+    assert_eq!(effects, []);
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(window.notice, None);
+}
+
+#[test]
+fn the_audio_can_go_here_and_to_the_phone_twice_in_one_call() {
+    let (state, _) = asked_for_phone(live_here());
+    let (state, _) = run(state, [dropped()]);
+    let (state, _) = run(state, back());
+
+    let (state, effects) = run(state, [Input::MoveAudio(AudioLocation::Desktop)]);
+    assert_eq!(phone_commands(&effects), [PhoneCommand::MoveAudioToDesktop]);
+    let (state, _) = run(
+        state,
+        [
+            Input::PhoneCommandDone(PhoneCommand::MoveAudioToDesktop),
             Input::TransportChanged(Transport::Active),
         ],
     );
-    let input = Input::MoveAudio(AudioLocation::Phone);
-    assert_eq!(
-        state.refusal(&input),
-        Some(Failure::HandoffToPhoneUnavailable)
+    assert_eq!(audio(&state), Some(ON_DESKTOP));
+
+    let (state, _) = asked_for_phone(state);
+    let (state, _) = run(state, [dropped()]);
+    let (state, _) = run(state, back());
+
+    assert_eq!(audio(&state), Some(ON_PHONE));
+    assert_eq!(state.calls().len(), 1);
+    assert_eq!(state.calls()[0].id(), CALL);
+}
+
+#[test]
+fn while_the_audio_goes_to_the_phone_asking_again_does_nothing() {
+    let (state, _) = asked_for_phone(live_here());
+    let (state, effects) = run(
+        state,
+        [
+            Input::MoveAudio(AudioLocation::Desktop),
+            Input::MoveAudio(AudioLocation::Phone),
+        ],
+    );
+    assert_eq!(effects, []);
+
+    let (state, _) = run(state, [dropped()]);
+    let (_, effects) = run(
+        state,
+        [
+            Input::MoveAudio(AudioLocation::Desktop),
+            Input::MoveAudio(AudioLocation::Phone),
+        ],
+    );
+    assert_eq!(effects, []);
+}
+
+#[test]
+fn a_handoff_to_the_phone_the_phone_link_cant_start_says_how_to_do_it_on_the_phone() {
+    let (state, limit) = asked_for_phone(live_here());
+
+    let (state, effects) = run(
+        state,
+        [Input::PhoneCommandFailed(PhoneCommand::MoveAudioToPhone)],
     );
 
-    let (state, effects) = run(state, [input]);
+    assert_eq!(reported(&effects), [Failure::AudioNotMovedToPhone]);
     assert_eq!(phone_commands(&effects), []);
-    assert_eq!(reported(&effects), [Failure::HandoffToPhoneUnavailable]);
+    assert_eq!(state.calls().len(), 1);
     let window = state.surfaces().call_window.expect("the Call Window shows");
-    assert_eq!(window.notice, Some(Failure::HandoffToPhoneUnavailable));
+    assert_eq!(window.notice, Some(Failure::AudioNotMovedToPhone));
+    assert_eq!(window.audio, Some(ON_DESKTOP));
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+    assert_eq!(effects, []);
 
     // The user taps the audio button on the Phone.
     let (state, _) = run(state, [Input::TransportChanged(Transport::Idle)]);
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.notice, None);
     assert_eq!(window.audio, Some(ON_PHONE));
+}
+
+#[test]
+fn a_handoff_to_the_phone_that_never_starts_says_so_at_the_limit() {
+    let (state, limit) = asked_for_phone(live_here());
+
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+
+    assert_eq!(reported(&effects), [Failure::AudioNotMovedToPhone]);
+    assert_eq!(audio(&state), Some(ON_DESKTOP));
+    assert_eq!(state.calls().len(), 1);
+}
+
+#[test]
+fn if_hands_free_doesnt_come_back_the_phone_shows_disconnected() {
+    let (state, limit) = asked_for_phone(live_here());
+    let (state, _) = run(state, [dropped()]);
+
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+
+    assert_eq!(reported(&effects), []);
+    assert_eq!(state.connection_state(), &ConnectionState::Disconnected);
+    assert_eq!(audio(&state), Some(ON_PHONE));
+
+    // Reconnecting failed outright: the same.
+    let (state, _) = asked_for_phone(live_here());
+    let (state, _) = run(
+        state,
+        [
+            dropped(),
+            Input::PhoneCommandFailed(PhoneCommand::MoveAudioToPhone),
+        ],
+    );
+    assert_eq!(state.connection_state(), &ConnectionState::Disconnected);
+}
+
+#[test]
+fn the_call_ending_mid_handoff_to_the_phone_forgets_it() {
+    let (state, limit) = asked_for_phone(live_here());
+    let (state, _) = run(state, [dropped(), Input::CallEnded { call: CALL }]);
+
+    let (state, effects) = run(state, [Input::TimerFired(limit)]);
+    assert_eq!(effects, []);
+    // A later reconnect is an ordinary one.
+    let (_, effects) = run(
+        state,
+        [Input::PhoneConnected {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+    assert!(effects.contains(&Effect::SyncContacts), "{effects:?}");
 }
 
 #[test]

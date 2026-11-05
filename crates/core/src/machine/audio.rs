@@ -1,12 +1,13 @@
 //! Where the Call's audio goes: Handoff between the Phone and the Desktop, and
 //! Mute.
 
-use super::dialling::open_dialer;
+use super::dialling::{dial_failed, open_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
+use super::phone::{phone_connected, phone_disconnected};
 use super::view::CallWindowPhase;
 use super::{
     DEFAULT_MICROPHONE_VOLUME, Focus, HANDOFF_NOT_STARTED_MS, HANDOFF_TIMEOUT_MS,
-    MAX_MICROPHONE_VOLUME, MovingAudio, Muting, State,
+    HANDOFF_TO_PHONE_TIMEOUT_MS, MAX_MICROPHONE_VOLUME, MovingAudio, MovingToPhone, Muting, State,
 };
 use crate::call::{AudioLocation, Transport};
 use crate::connection::ConnectionState;
@@ -139,12 +140,129 @@ pub(super) fn move_audio(state: &mut State, location: AudioLocation, effects: &m
         }
         return;
     }
-    if location == AudioLocation::Desktop
-        && state.audio_location() == Some(AudioLocation::Phone)
-        && state.moving_audio.is_none()
+    if state.moving_audio.is_some() || state.moving_to_phone.is_some() {
+        return;
+    }
+    match (location, state.audio_location()) {
+        (AudioLocation::Desktop, Some(AudioLocation::Phone)) => {
+            state.audio_notice = None;
+            bring_audio_here(state, effects);
+        }
+        (AudioLocation::Phone, Some(AudioLocation::Desktop)) => {
+            state.audio_notice = None;
+            send_audio_to_phone(state, effects);
+        }
+        _ => {}
+    }
+}
+
+/// Starts a Handoff to the Phone: asks the Phone link to drop hands-free
+/// and connect it again (ADR-0005), and starts the Handoff's limit.
+fn send_audio_to_phone(state: &mut State, effects: &mut Vec<Effect>) {
+    effects.push(Effect::Phone(PhoneCommand::MoveAudioToPhone));
+    state.handoffs += 1;
+    let handoff = state.handoffs;
+    state.moving_to_phone = Some(MovingToPhone {
+        handoff,
+        dropped: false,
+        phone_back: false,
+        call_back: false,
+    });
+    effects.push(Effect::StartTimer {
+        timer: Timer::HandoffTimedOut(handoff),
+        after_ms: HANDOFF_TO_PHONE_TIMEOUT_MS,
+    });
+}
+
+/// Hands-free is up: back after dropping for a Handoff to the Phone, or
+/// connecting as usual. Back from the Handoff's drop, the new AudioGateway
+/// starts with `RejectSCO` set (ADR-0005); setting it again keeps the audio
+/// on the Phone even where that default is missing. It is the same link as
+/// before the drop, so the Contacts aren't synced again.
+pub(super) fn hands_free_up(state: &mut State, effects: &mut Vec<Effect>) {
+    match state.moving_to_phone.as_mut() {
+        Some(moving) if moving.dropped => {
+            moving.phone_back = true;
+            effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+            handoff_to_phone_over(state);
+        }
+        _ => phone_connected(state, effects),
+    }
+}
+
+/// Hands-free dropped. During a Handoff to the Phone, that puts the audio
+/// on the Phone; the Call goes with hands-free and the Phone link holds it
+/// until it comes back, so it stays as it is, and so does the connection.
+pub(super) fn hands_free_down(state: &mut State, effects: &mut Vec<Effect>) {
+    if let Some(moving) = state.moving_to_phone.as_mut() {
+        moving.dropped = true;
+        moving.phone_back = false;
+        moving.call_back = false;
+        state.transport = Transport::Idle;
+    } else {
+        phone_disconnected(state);
+        dial_failed(state, Failure::PhoneOutOfRange, effects);
+    }
+}
+
+/// The Phone reported a Call: after hands-free dropped for a Handoff to the
+/// Phone, that is the Call coming back with it.
+pub(super) fn call_back(state: &mut State) {
+    if let Some(moving) = state.moving_to_phone.as_mut()
+        && moving.dropped
     {
-        state.audio_notice = None;
-        bring_audio_here(state, effects);
+        moving.call_back = true;
+        handoff_to_phone_over(state);
+    }
+}
+
+/// Ends the Handoff to the Phone once hands-free and the Call are both
+/// back.
+fn handoff_to_phone_over(state: &mut State) {
+    if state
+        .moving_to_phone
+        .is_some_and(|moving| moving.phone_back && moving.call_back)
+    {
+        state.moving_to_phone = None;
+    }
+}
+
+/// Forgets the Handoff to the Phone. If hands-free dropped and isn't back,
+/// the Phone is now disconnected like any Phone whose hands-free dropped.
+pub(super) fn end_handoff_to_phone(state: &mut State) {
+    if let Some(moving) = state.moving_to_phone.take()
+        && moving.dropped
+        && !moving.phone_back
+    {
+        phone_disconnected(state);
+    }
+}
+
+/// The Phone link couldn't drop hands-free, or couldn't connect it again.
+/// Before the drop, the audio stayed here and the user is told how to move
+/// it on the Phone; after it, the Phone is disconnected until hands-free
+/// comes back by itself.
+pub(super) fn audio_not_moved_to_phone(state: &mut State, effects: &mut Vec<Effect>) {
+    match state.moving_to_phone {
+        Some(moving) if !moving.dropped => {
+            state.moving_to_phone = None;
+            state.audio_notice = Some(Failure::AudioNotMovedToPhone);
+            effects.push(Effect::ReportError(Failure::AudioNotMovedToPhone));
+        }
+        Some(moving) if !moving.phone_back => end_handoff_to_phone(state),
+        _ => {}
+    }
+}
+
+/// The Handoff to the Phone's limit: whatever hasn't happened by now
+/// isn't going to.
+pub(super) fn to_phone_timed_out(state: &mut State, handoff: u32, effects: &mut Vec<Effect>) {
+    if state
+        .moving_to_phone
+        .is_some_and(|moving| moving.handoff == handoff)
+    {
+        audio_not_moved_to_phone(state, effects);
+        end_handoff_to_phone(state);
     }
 }
 

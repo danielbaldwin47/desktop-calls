@@ -1,7 +1,7 @@
 //! The Phone link: the Phone connecting and dropping, its Contacts, the Calls
 //! an earlier run left, and how the Phone answers commands.
 
-use super::audio::{activated, ask_once_more};
+use super::audio::{activated, ask_once_more, audio_not_moved_to_phone};
 use super::dialling::{dial_failed, refresh_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
@@ -155,6 +155,7 @@ pub(super) fn command_failed(state: &mut State, command: &PhoneCommand, effects:
             effects.push(Effect::ReportError(Failure::HangUpFailed));
         }
         PhoneCommand::MoveAudioToDesktop => ask_once_more(state, effects),
+        PhoneCommand::MoveAudioToPhone => audio_not_moved_to_phone(state, effects),
         // Without these the Phone never dialled.
         PhoneCommand::AllowAudioOnDesktop | PhoneCommand::Dial(_) => {
             dial_failed(state, Failure::DialFailed, effects);

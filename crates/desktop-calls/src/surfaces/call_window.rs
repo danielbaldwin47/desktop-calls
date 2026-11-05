@@ -343,6 +343,7 @@ impl AudioRow {
             Label::MoveAudioHere,
             Label::MoveAudioToPhone,
             Label::MovingAudioHere,
+            Label::MovingAudioToPhone,
         ]));
         let shortcut = show_shortcut(&handoff, &handoff_label, HANDOFF_SHORTCUT);
         handoff.set_hexpand(false);
@@ -567,8 +568,13 @@ impl CallWindow {
     fn show_handoff(&self, audio: Option<CallAudio>) -> &'static str {
         let label = messages::label(match audio {
             Some(CallAudio {
-                moving_here: true, ..
+                moving: Some(AudioLocation::Desktop),
+                ..
             }) => Label::MovingAudioHere,
+            Some(CallAudio {
+                moving: Some(AudioLocation::Phone),
+                ..
+            }) => Label::MovingAudioToPhone,
             Some(CallAudio {
                 location: AudioLocation::Desktop,
                 ..
@@ -582,7 +588,7 @@ impl CallWindow {
         self.audio.handoff_label.set_text(label);
         self.audio
             .handoff
-            .set_sensitive(audio.is_some_and(|audio| !audio.moving_here));
+            .set_sensitive(audio.is_some_and(|audio| audio.moving.is_none()));
         label
     }
 

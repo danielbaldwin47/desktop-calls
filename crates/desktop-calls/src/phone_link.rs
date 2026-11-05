@@ -32,29 +32,35 @@
 //!   takes exactly one tone per `AT+VTS` and refuses more. So each tone goes
 //!   in a `SendTones` of its own, the next once the Phone has played the
 //!   last.
+//! - Telephony has no way to close the audio link from the Desktop: no
+//!   `Deactivate()`. The audio goes back to the Phone by BlueZ dropping
+//!   hands-free and connecting it again (ADR-0005), which takes the
+//!   AudioGateway and its Calls away for about a second; they come back at
+//!   the same paths, and the Calls as the same Calls.
+
+mod commands;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::{
-    CallId, CallState, Caller, Codec, Input, PhoneCommand, PhoneRefusal, Timestamp, Transport,
+    CallId, CallState, Caller, Codec, Input, PhoneCommand, Timestamp, Transport,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::stream;
 use glib::MainContext;
-use zbus::{Connection, OwnedVariant, Variant};
+use zbus::{Connection, OwnedVariant};
 
 use crate::logging::EventKind;
 use crate::object_manager::{self, Interfaces, ObjectEvent, WatchError, Watched};
+use commands::{command_name, execute};
 
 const SERVICE: &str = "org.pipewire.Telephony";
 const MANAGER_PATH: &str = "/org/pipewire/Telephony";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
 const CALL: &str = "org.pipewire.Telephony.Call1";
-const OFONO_CALL: &str = "org.ofono.VoiceCall";
-const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 
 /// How long a Call that vanished without going `disconnected` may take to
 /// come back as the same Call. The Pixel's took 0.5 to 1.1 s.
@@ -84,16 +90,26 @@ enum Event {
     GraceOver(Grace),
 }
 
-/// A Phone command with the object it goes to.
+/// A Phone command with where it goes.
 struct Resolved {
     command: PhoneCommand,
-    path: String,
+    target: Target,
+}
+
+/// Where a Phone command goes.
+enum Target {
+    /// This Telephony object.
+    Object(String),
+    /// The Phone with this Bluetooth address, through BlueZ.
+    Phone(String),
 }
 
 /// Runs the Phone link until the connection closes, taking `commands` and
-/// reporting to `inputs`.
+/// reporting to `inputs`. Telephony is on the `session` bus, BlueZ on the
+/// `system` bus.
 pub async fn run(
     session: Connection,
+    system: Connection,
     commands: UnboundedReceiver<Command>,
     inputs: UnboundedSender<Input>,
 ) -> Result<(), WatchError> {
@@ -136,7 +152,7 @@ pub async fn run(
         }
         Ok(())
     };
-    let executing = execute(&session, batches, &inputs);
+    let executing = execute(&session, &system, batches, &inputs);
     futures_util::future::try_join3(watching, following, async {
         executing.await;
         Ok(())
@@ -433,7 +449,7 @@ impl PhoneLink {
             if hang_up {
                 outcome.batch.push(Resolved {
                     command: PhoneCommand::HangUp(id),
-                    path: path.to_owned(),
+                    target: Target::Object(path.to_owned()),
                 });
             }
             outcome.inputs.push(Input::CallChanged {
@@ -641,7 +657,7 @@ impl PhoneLink {
     fn resolve(&mut self, commands: Vec<PhoneCommand>, inputs: &mut Vec<Input>) -> Vec<Resolved> {
         let mut batch = Vec::new();
         for command in commands {
-            let path = match &command {
+            let target = match &command {
                 PhoneCommand::Answer(id) | PhoneCommand::HangUp(id) => {
                     let found = self
                         .followed
@@ -658,17 +674,24 @@ impl PhoneLink {
                     if found.is_none() && self.hang_up_when_back(&command) {
                         continue;
                     }
-                    found
+                    found.map(Target::Object)
                 }
+                // Only a connected Phone has hands-free to drop.
+                PhoneCommand::MoveAudioToPhone => self
+                    .connected
+                    .as_ref()
+                    .and_then(|path| self.audio_gateways.get(path))
+                    .cloned()
+                    .map(Target::Phone),
                 PhoneCommand::MoveAudioToDesktop
                 | PhoneCommand::KeepAudioOnPhone
                 | PhoneCommand::AllowAudioOnDesktop
                 | PhoneCommand::Dial(_)
                 | PhoneCommand::SetMicrophoneVolume(_)
-                | PhoneCommand::SendTones(_) => self.connected.clone(),
+                | PhoneCommand::SendTones(_) => self.connected.clone().map(Target::Object),
             };
-            match path {
-                Some(path) => batch.push(Resolved { command, path }),
+            match target {
+                Some(target) => batch.push(Resolved { command, target }),
                 // With no Phone connected there is no audio to keep; the
                 // next connect asks again.
                 None if command == PhoneCommand::KeepAudioOnPhone => {}
@@ -686,237 +709,6 @@ impl PhoneLink {
             }
         }
         batch
-    }
-}
-
-/// Carries out each batch of Phone commands in order, one D-Bus call at a
-/// time, and reports each command done, or the first failure of each batch.
-async fn execute(
-    session: &Connection,
-    mut batches: UnboundedReceiver<Vec<Resolved>>,
-    inputs: &UnboundedSender<Input>,
-) {
-    while let Some(batch) = batches.next().await {
-        for Resolved { command, path } in batch {
-            let result = match &command {
-                PhoneCommand::Answer(_) => call(session, &path, CALL, "Answer", &()).await,
-                PhoneCommand::HangUp(_) => hang_up(session, &path).await,
-                PhoneCommand::MoveAudioToDesktop => {
-                    match set_reject_sco(session, &path, false).await {
-                        Ok(()) => call(session, &path, TRANSPORT, "Activate", &()).await,
-                        error => error,
-                    }
-                }
-                PhoneCommand::KeepAudioOnPhone => set_reject_sco(session, &path, true).await,
-                PhoneCommand::AllowAudioOnDesktop => set_reject_sco(session, &path, false).await,
-                PhoneCommand::Dial(number) => {
-                    tracing::debug!(
-                        event_kind = %EventKind::PhoneCommandSent,
-                        phone_number = %number,
-                        "Asking the Phone to dial"
-                    );
-                    call(session, &path, AUDIO_GATEWAY, "Dial", &(number.as_str(),)).await
-                }
-                PhoneCommand::SetMicrophoneVolume(volume) => {
-                    set_microphone_volume(session, &path, *volume).await
-                }
-                PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
-            };
-            let name = command_name(&command);
-            match result {
-                Ok(()) => {
-                    tracing::debug!(
-                        event_kind = %EventKind::PhoneCommandSent,
-                        command = %name,
-                        "The Phone did {name}"
-                    );
-                    let _ = inputs.unbounded_send(Input::PhoneCommandDone(command));
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        event_kind = %EventKind::PhoneCommandFailed,
-                        error_kind = error_kind(&error),
-                        command = %name,
-                        detail = %error,
-                        "The Phone refused {name}"
-                    );
-                    let input = match command {
-                        PhoneCommand::Dial(_) => Input::DialFailed(dial_refusal(&error)),
-                        command => Input::PhoneCommandFailed(command),
-                    };
-                    let _ = inputs.unbounded_send(input);
-                    break;
-                }
-            }
-        }
-    }
-}
-
-/// A Phone command as the log names it: a dialled number goes only in a
-/// `phone_number` field, never in a command's name.
-fn command_name(command: &PhoneCommand) -> String {
-    match command {
-        PhoneCommand::Dial(_) => "Dial".to_owned(),
-        command => format!("{command:?}"),
-    }
-}
-
-/// Why the Phone refused to dial. PipeWire passes a `+CME ERROR` on only as
-/// its description (`docs/research/2026-11-04-place-a-call.md`).
-fn dial_refusal(error: &zbus::Error) -> PhoneRefusal {
-    match error_name(error) {
-        Some("org.pipewire.Telephony.Error.InvalidFormat") => PhoneRefusal::InvalidFormat,
-        Some("org.pipewire.Telephony.Error.InvalidState") => PhoneRefusal::InvalidState,
-        Some("org.pipewire.Telephony.Error.InProgress") => PhoneRefusal::InProgress,
-        Some("org.pipewire.Telephony.Error.NotSupported") => PhoneRefusal::NotSupported,
-        Some("org.pipewire.Telephony.Error.CME") => match error_text(error).as_str() {
-            "dial string too long" | "invalid characters in dial string" => {
-                PhoneRefusal::InvalidFormat
-            }
-            "no network service" | "network not allowed - Emergency calls only" => {
-                PhoneRefusal::NoNetwork
-            }
-            "network Timeout" => PhoneRefusal::NetworkTimeout,
-            _ => PhoneRefusal::Failed,
-        },
-        _ => PhoneRefusal::Failed,
-    }
-}
-
-async fn call<B>(
-    session: &Connection,
-    path: &str,
-    interface: &str,
-    member: &str,
-    body: &B,
-) -> zbus::Result<()>
-where
-    B: zbus::export::serde::Serialize + zbus::DynamicType,
-{
-    session
-        .call_method(Some(SERVICE), path, Some(interface), member, body)
-        .await
-        .map(drop)
-}
-
-async fn set_reject_sco(session: &Connection, path: &str, reject: bool) -> zbus::Result<()> {
-    call(
-        session,
-        path,
-        PROPERTIES,
-        "Set",
-        &(TRANSPORT, "RejectSCO", Variant::from(reject)),
-    )
-    .await
-}
-
-async fn set_microphone_volume(session: &Connection, path: &str, volume: u8) -> zbus::Result<()> {
-    call(
-        session,
-        path,
-        PROPERTIES,
-        "Set",
-        &(AUDIO_GATEWAY, "MicrophoneVolume", Variant::from(volume)),
-    )
-    .await
-}
-
-/// Plays `tones` one at a time, each once the Phone has played the last.
-async fn send_tones(session: &Connection, path: &str, tones: &str) -> zbus::Result<()> {
-    let mut tone = [0; 4];
-    for character in tones.chars() {
-        let tone: &str = character.encode_utf8(&mut tone);
-        call(session, path, AUDIO_GATEWAY, "SendTones", &(tone,)).await?;
-    }
-    Ok(())
-}
-
-/// Hangs up the Call at `path`: through `Call1`, or `org.ofono.VoiceCall`
-/// where `Call1`'s method doesn't exist. An error that says the Call is
-/// already going, or gone, means it ended.
-async fn hang_up(session: &Connection, path: &str) -> zbus::Result<()> {
-    let result = match call(session, path, CALL, "Hangup", &()).await {
-        Err(error) if is_missing_method(&error) => {
-            // At info, so the journal records which hang-up path the Phone
-            // needs; the Real-Phone Checklist reports it.
-            tracing::info!(
-                event_kind = %EventKind::PhoneCommandFallback,
-                detail = %error,
-                "Call1.Hangup doesn't exist here; hanging up through org.ofono.VoiceCall"
-            );
-            call(session, path, OFONO_CALL, "Hangup", &()).await
-        }
-        result => result,
-    };
-    match result {
-        Err(error) if is_already_ending(&error) => {
-            tracing::debug!(
-                event_kind = %EventKind::PhoneCommandSent,
-                detail = %error,
-                "The Call was already ending"
-            );
-            Ok(())
-        }
-        result => result,
-    }
-}
-
-fn error_name(error: &zbus::Error) -> Option<&str> {
-    match error {
-        zbus::Error::MethodError(name, _, _) => Some(name.as_str()),
-        zbus::Error::FDO(error) => Some(match **error {
-            zbus::fdo::Error::UnknownMethod(_) => "org.freedesktop.DBus.Error.UnknownMethod",
-            zbus::fdo::Error::UnknownObject(_) => "org.freedesktop.DBus.Error.UnknownObject",
-            zbus::fdo::Error::InvalidArgs(_) => "org.freedesktop.DBus.Error.InvalidArgs",
-            _ => return None,
-        }),
-        _ => None,
-    }
-}
-
-fn error_text(error: &zbus::Error) -> String {
-    match error {
-        zbus::Error::MethodError(_, Some(text), _) => text.clone(),
-        zbus::Error::FDO(error) => error.to_string(),
-        _ => String::new(),
-    }
-}
-
-/// libdbus's reply for a method nobody handles: 'Method "Hangup" with
-/// signature "" on interface "…" doesn't exist'.
-fn is_missing_method(error: &zbus::Error) -> bool {
-    error_name(error) == Some("org.freedesktop.DBus.Error.UnknownMethod")
-        && error_text(error).contains("doesn't exist")
-}
-
-/// A hang-up error for a Call that is already being torn down or is gone:
-/// "Too few arguments" while it tears down, `InvalidState` once it is
-/// `disconnected`, or no object at all.
-fn is_already_ending(error: &zbus::Error) -> bool {
-    match error_name(error) {
-        Some("org.freedesktop.DBus.Error.InvalidArgs") => {
-            error_text(error).contains("Too few arguments")
-        }
-        Some(
-            "org.pipewire.Telephony.Error.InvalidState"
-            | "org.freedesktop.DBus.Error.UnknownObject"
-            | "org.freedesktop.DBus.Error.UnknownMethod",
-        ) => true,
-        _ => false,
-    }
-}
-
-/// The kind of a Phone command failure, for the log.
-fn error_kind(error: &zbus::Error) -> &'static str {
-    match error_name(error) {
-        Some("org.pipewire.Telephony.Error.InvalidState") => "invalid-state",
-        Some("org.pipewire.Telephony.Error.InvalidFormat") => "invalid-format",
-        Some("org.pipewire.Telephony.Error.InProgress") => "in-progress",
-        Some("org.pipewire.Telephony.Error.NotSupported") => "not-supported",
-        Some("org.pipewire.Telephony.Error.CME") => "cme",
-        Some("org.pipewire.Telephony.Error.Failed") => "failed",
-        Some(_) => "dbus-error",
-        None => "no-reply",
     }
 }
 

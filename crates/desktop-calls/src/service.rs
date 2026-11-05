@@ -135,13 +135,18 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .ok();
     let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
     let context = MainContext::default();
-    context.spawn_local(watch_bluez(system, input_sender.clone()));
+    context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
     context.spawn_local(contacts::run(
         session.clone(),
         contacts_commands,
         input_sender.clone(),
     ));
-    context.spawn_local(follow_phone(session, commands, input_sender.clone()));
+    context.spawn_local(follow_phone(
+        session,
+        system,
+        commands,
+        input_sender.clone(),
+    ));
     context.spawn_local(publish_surfaces(reports, publisher.clone()));
     context.spawn_local(decide(
         inputs,
@@ -200,10 +205,11 @@ async fn watch_bluez(system: Connection, inputs: UnboundedSender<Input>) {
 
 async fn follow_phone(
     session: Connection,
+    system: Connection,
     commands: UnboundedReceiver<Command>,
     inputs: UnboundedSender<Input>,
 ) {
-    if let Err(error) = phone_link::run(session, commands, inputs).await {
+    if let Err(error) = phone_link::run(session, system, commands, inputs).await {
         tracing::error!(
             event_kind = %EventKind::WatchFailed,
             error_kind = error.as_str(),

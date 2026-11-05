@@ -127,6 +127,10 @@ pub enum PhoneCommand {
     HangUp(CallId),
     /// Bring the live Call's audio to the Desktop.
     MoveAudioToDesktop,
+    /// Send the live Call's audio back to the Phone, by dropping hands-free
+    /// and connecting it again at once (ADR-0005). The Call goes with
+    /// hands-free and comes back with it, still live.
+    MoveAudioToPhone,
     /// Let the Phone bring the next Call's audio to the Desktop.
     AllowAudioOnDesktop,
     /// Place a Call to this number, already checked as dialable.

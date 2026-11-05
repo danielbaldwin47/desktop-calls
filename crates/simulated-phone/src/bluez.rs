@@ -18,6 +18,9 @@ use crate::objects::{
 
 pub const SERVICE: &str = "org.bluez";
 pub const DEVICE: &str = "org.bluez.Device1";
+/// The Phone's battery level, which BlueZ reads over hands-free, so it goes
+/// and comes back with it.
+pub const BATTERY: &str = "org.bluez.Battery1";
 const ADAPTER: &str = "org.bluez.Adapter1";
 const ADAPTER_PATH: &str = "/org/bluez/hci0";
 
@@ -217,13 +220,33 @@ fn device_interfaces(
         (DEVICE.to_owned(), properties),
         ("org.bluez.Network1".to_owned(), network),
         ("org.bluez.MediaControl1".to_owned(), media_control),
-        ("org.bluez.Battery1".to_owned(), battery),
+        (BATTERY.to_owned(), battery),
     ]))
 }
 
 /// BlueZ's path for a device: `/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF`.
 pub fn device_path(address: &str) -> zbus::Result<OwnedObjectPath> {
     path(&format!("{ADAPTER_PATH}/dev_{}", address.replace(':', "_")))
+}
+
+/// Removes `Battery1` from the device at `device`, as BlueZ does when
+/// hands-free drops: returns its properties.
+pub fn remove_battery(tree: &mut ObjectTree, device: &OwnedObjectPath) -> Option<Properties> {
+    let mut interfaces = tree.remove(device)?;
+    let battery = interfaces.remove(BATTERY);
+    tree.insert(device, interfaces, vec![PROPERTIES, INTROSPECTABLE]);
+    tree.capture_introspection(device, DEVICE_INTROSPECTION);
+    battery
+}
+
+/// Gives the device at `device` its `Battery1` back.
+pub fn restore_battery(tree: &mut ObjectTree, device: &OwnedObjectPath, battery: Properties) {
+    let Some(mut interfaces) = tree.remove(device) else {
+        return;
+    };
+    interfaces.insert(BATTERY.to_owned(), battery);
+    tree.insert(device, interfaces, vec![PROPERTIES, INTROSPECTABLE]);
+    tree.capture_introspection(device, DEVICE_INTROSPECTION);
 }
 
 /// Answers a method call on BlueZ.

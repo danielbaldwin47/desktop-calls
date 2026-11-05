@@ -1,7 +1,10 @@
 //! Calls coming and going: the Phone reporting them, answering, declining,
 //! hanging up and keypad tones, and the timers that close them.
 
-use super::audio::{ask_once_more, audio_not_moved, bring_audio_here, restore_audio};
+use super::audio::{
+    ask_once_more, audio_not_moved, bring_audio_here, call_back, end_handoff_to_phone,
+    restore_audio, to_phone_timed_out,
+};
 use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
@@ -88,6 +91,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
             {
                 audio_not_moved(state, effects);
             }
+            to_phone_timed_out(state, handoff, effects);
         }
         Timer::HandoffNotStarted(handoff) => {
             if state
@@ -152,6 +156,7 @@ pub(super) fn call_changed(
         restore.call_back = true;
     }
     restore_audio(state, effects);
+    call_back(state);
 }
 
 pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
@@ -246,6 +251,7 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
     if state.calls.is_empty() {
         state.codec = None;
         state.moving_audio = None;
+        end_handoff_to_phone(state);
         state.restore_audio = None;
         state.audio_notice = None;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));

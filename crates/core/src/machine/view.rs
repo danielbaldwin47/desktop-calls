@@ -66,8 +66,9 @@ pub struct CallWindowView {
 pub struct CallAudio {
     /// Where the audio is now.
     pub location: AudioLocation,
-    /// The Desktop has asked for the audio, and it hasn't come yet.
-    pub moving_here: bool,
+    /// Where the Desktop has asked the audio to go, until that Handoff is
+    /// over; `None` with no Handoff.
+    pub moving: Option<AudioLocation>,
 }
 
 /// Where the Call in the Call Window is.
@@ -114,6 +115,17 @@ impl State {
         }
     }
 
+    /// Where a Handoff under way is taking the audio, if one is.
+    fn audio_moving_to(&self) -> Option<AudioLocation> {
+        if self.moving_audio.is_some() {
+            Some(AudioLocation::Desktop)
+        } else if self.moving_to_phone.is_some() {
+            Some(AudioLocation::Phone)
+        } else {
+            None
+        }
+    }
+
     /// What the Desktop surfaces show.
     #[must_use]
     pub fn surfaces(&self) -> Surfaces {
@@ -155,7 +167,7 @@ impl State {
                 },
                 audio: call.state.is_live().then(|| CallAudio {
                     location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                    moving_here: self.moving_audio.is_some(),
+                    moving: self.audio_moving_to(),
                 }),
                 notice,
                 focused: self.focus == Focus::CallWindow,

@@ -15,7 +15,8 @@
 //! With `--scenario FILE` it also acts out a declarative scenario file once
 //! it is on the bus (see `scenario.rs`); `just demo` uses this.
 //!
-//! So far it can be a paired Phone whose hands-free link comes and goes, that
+//! So far it can be a paired Phone whose hands-free link comes and goes, or
+//! drops and comes back for the Desktop with the Call carrying on, that
 //! rings, that dials for the Desktop, whose Telephony service restarts as
 //! `WirePlumber` does, whose Calls can be answered, hung up
 //! and have their audio brought to the Desktop, and that opens a PBAP
@@ -23,6 +24,7 @@
 //! `Activate`, and switch on quirks other Phones show.
 
 mod bluez;
+mod hands_free;
 mod obex;
 mod objects;
 mod scenario;
@@ -104,6 +106,8 @@ struct World {
     obex: obex::Obex,
     next_audio_gateway_index: u32,
     audio_gateway: Option<OwnedObjectPath>,
+    /// Hands-free dropped for `DisconnectProfile`, until it is back.
+    dropped: Option<hands_free::Dropped>,
     behaviour: telephony::Behaviour,
     dialling: telephony::Dialling,
     recorded: Vec<(Bus, MethodCall)>,
@@ -148,6 +152,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         phone_address: arguments.address,
         next_audio_gateway_index: arguments.first_audio_gateway_index,
         audio_gateway: None,
+        dropped: None,
         behaviour: telephony::Behaviour::default(),
         dialling: telephony::Dialling::default(),
         recorded: Vec::new(),
@@ -165,6 +170,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let obex_calls = MessageStream::from(&obex);
     obex.request_name(obex::SERVICE).await?;
 
+    let telephony: TelephonyConnection = Arc::new(Mutex::new(Some(session.clone())));
     // The control name comes last, so a test that sees it can rely on the rest.
     let control = zbus::connection::Builder::session()
         .serve_at(
@@ -172,7 +178,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
             Control {
                 world: world.clone(),
                 system: system.clone(),
-                telephony: Arc::new(Mutex::new(Some(session.clone()))),
+                telephony: telephony.clone(),
             },
         )
         .name(CONTROL_BUS_NAME)
@@ -180,9 +186,21 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         .await?;
 
     futures_util::future::try_join4(
-        serve(system, system_calls, Service::Bluez, world.clone()),
-        serve(session, session_calls, Service::Telephony, world.clone()),
-        serve(obex, obex_calls, Service::Obex, world),
+        serve(
+            system,
+            system_calls,
+            Service::Bluez,
+            world.clone(),
+            telephony.clone(),
+        ),
+        serve(
+            session,
+            session_calls,
+            Service::Telephony,
+            world.clone(),
+            telephony.clone(),
+        ),
+        serve(obex, obex_calls, Service::Obex, world, telephony),
         act_out(&control, steps),
     )
     .await?;
@@ -213,12 +231,24 @@ async fn serve(
     mut messages: MessageStream,
     service: Service,
     world: SharedWorld,
+    telephony: TelephonyConnection,
 ) -> zbus::Result<()> {
     while let Some(message) = messages.next().await {
         let message = message?;
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
+        if matches!(service, Service::Bluez) && hands_free::handles(&call) {
+            lock(&world).recorded.push((service.bus(), call.clone()));
+            hands_free::answer(
+                world.clone(),
+                connection.clone(),
+                telephony.clone(),
+                call,
+                message,
+            );
+            continue;
+        }
         let (reply, signals, later, activate_later, slow) = {
             let mut world = lock(&world);
             world.recorded.push((service.bus(), call.clone()));
@@ -360,6 +390,8 @@ impl Control {
             if world.audio_gateway.is_some() {
                 return Ok(());
             }
+            // A drop for `DisconnectProfile` doesn't come back as well.
+            world.dropped = None;
             let device = bluez::device_path(&world.phone_address)?;
             world.bluez.set(
                 &device,
@@ -402,6 +434,8 @@ impl Control {
     ) -> zbus::fdo::Result<()> {
         let (device, gateway, calls) = {
             let mut world = lock(&self.world);
+            // Nor after going out of range.
+            world.dropped = None;
             let Some(gateway) = world.audio_gateway.take() else {
                 return Ok(());
             };
@@ -588,12 +622,12 @@ impl Control {
     /// Switches on a quirk other Phones, or other moments, show:
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
     /// `"get-calls-empty-while-dialling"`, `"slow-property-writes"`,
-    /// `"activate-ignored"`, `"activate-ignored-once"` or
-    /// `"earbuds-keep-audio"`.
+    /// `"activate-ignored"`, `"activate-ignored-once"`,
+    /// `"earbuds-keep-audio"` or `"disconnect-profile-refused"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once and earbuds-keep-audio"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio and disconnect-profile-refused"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);
@@ -839,8 +873,10 @@ fn come_back(
     *lock(holder) = Some(connection.clone());
     let serving = connection.clone();
     let world = world.clone();
+    let holder = holder.clone();
     std::thread::spawn(move || {
-        if let Err(error) = zbus::block_on(serve(serving, calls, Service::Telephony, world)) {
+        if let Err(error) = zbus::block_on(serve(serving, calls, Service::Telephony, world, holder))
+        {
             eprintln!("simulated-phone: the restarted Telephony service stopped: {error}");
         }
     });

@@ -20,8 +20,8 @@ mod phone;
 mod view;
 
 use audio::{
-    activate, microphone_volume_changed, move_audio, mute, release_mute, restore_audio,
-    still_silenced, transport_changed, unmute,
+    activate, hands_free_down, hands_free_up, microphone_volume_changed, move_audio, mute,
+    release_mute, restore_audio, still_silenced, transport_changed, unmute,
 };
 pub use calls::keypad_tones;
 use calls::{
@@ -30,10 +30,7 @@ use calls::{
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
 pub use input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
 use missed_calls::missed_call_input;
-use phone::{
-    command_done, command_failed, contacts_sync, phone_connected, phone_disconnected,
-    pick_up_earlier_run,
-};
+use phone::{command_done, command_failed, contacts_sync, pick_up_earlier_run};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Mute, Surfaces,
 };
@@ -65,6 +62,11 @@ const HANDOFF_TIMEOUT_MS: u32 = 3_000;
 /// ignored 3 of 4 `Activate()`s sent within a second of the Call going
 /// active, and the second one then worked (tickets #13 and #70).
 const HANDOFF_NOT_STARTED_MS: u32 = 1_000;
+/// How long a Handoff to the Phone may take, from the Desktop asking until
+/// hands-free and the Call are back. On the Pixel, hands-free was back 0.50
+/// to 0.96 s after it dropped and the Call 30 to 60 ms after that, 5 times
+/// in 5 (ticket #14's prototype).
+const HANDOFF_TO_PHONE_TIMEOUT_MS: u32 = 5_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -158,6 +160,22 @@ struct MovingAudio {
     retried: bool,
 }
 
+/// The Desktop asked to move the audio to the Phone, by dropping hands-free
+/// and connecting it again (ADR-0005), and hands-free or the Call isn't
+/// back yet. Meanwhile the Phone still shows as connected: it is in range,
+/// and hands-free is coming straight back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MovingToPhone {
+    /// Which Handoff this is, so only its own timer counts.
+    handoff: u32,
+    /// Hands-free has dropped, taking the audio to the Phone.
+    dropped: bool,
+    /// Hands-free is back since it dropped.
+    phone_back: bool,
+    /// The Phone has reported the Call again since hands-free dropped.
+    call_back: bool,
+}
+
 /// Hands-free dropped mid-Call with the audio on the Desktop, as it does
 /// when `WirePlumber` restarts: the audio comes back here once hands-free and
 /// the Call are both back.
@@ -201,8 +219,9 @@ pub struct State {
     /// The earlier run's Calls that haven't shown again yet.
     earlier_calls: Vec<EarlierCall>,
     moving_audio: Option<MovingAudio>,
+    moving_to_phone: Option<MovingToPhone>,
     restore_audio: Option<AudioToRestore>,
-    /// How many Handoffs to the Desktop the Desktop has started.
+    /// How many Handoffs the Desktop has started, either way.
     handoffs: u32,
     /// Why the audio isn't where the user asked: shown beside the Call until
     /// the audio moves, the user asks again, or the Call ends.
@@ -420,18 +439,8 @@ impl State {
                 Some(AudioLocation::Phone) => Some(Failure::MuteUnavailable),
                 Some(AudioLocation::Desktop) => None,
             },
-            Input::MoveAudio(location) => {
-                if !self.calls.iter().any(|call| call.state.is_live()) {
-                    Some(Failure::NoLiveCall)
-                } else if *location == AudioLocation::Phone
-                    && self.audio_location() == Some(AudioLocation::Desktop)
-                {
-                    // Until the Desktop can close the audio link itself
-                    // (ADR-0005), the user does it on the Phone.
-                    Some(Failure::HandoffToPhoneUnavailable)
-                } else {
-                    None
-                }
+            Input::MoveAudio(_) if !self.calls.iter().any(|call| call.state.is_live()) => {
+                Some(Failure::NoLiveCall)
             }
             Input::SendTones(tones) => {
                 if !self
@@ -510,11 +519,10 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             return (State::default(), effects);
         }
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
-            phone_connected(&mut state, &mut effects);
+            hands_free_up(&mut state, &mut effects);
         }
         Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
-            phone_disconnected(&mut state);
-            dial_failed(&mut state, Failure::PhoneOutOfRange, &mut effects);
+            hands_free_down(&mut state, &mut effects);
         }
         Input::CallAdded {
             call,

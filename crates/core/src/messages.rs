@@ -27,9 +27,9 @@ pub enum Failure {
     HangUpFailed,
     /// The Desktop asked for the Call's audio, and the Phone kept it.
     AudioNotMoved,
-    /// The Desktop can't move the audio to the Phone itself yet, so the user
-    /// does it on the Phone.
-    HandoffToPhoneUnavailable,
+    /// The Desktop asked to move the Call's audio to the Phone, and it
+    /// stayed on the Desktop.
+    AudioNotMovedToPhone,
     /// The Call asked about is over, or never existed.
     NoSuchCall,
     /// The Call asked about is no longer ringing.
@@ -83,7 +83,7 @@ impl Failure {
             Self::AnswerFailed => "answer-failed",
             Self::HangUpFailed => "hang-up-failed",
             Self::AudioNotMoved => "audio-not-moved",
-            Self::HandoffToPhoneUnavailable => "handoff-to-phone-unavailable",
+            Self::AudioNotMovedToPhone => "audio-not-moved-to-phone",
             Self::NoSuchCall => "no-such-call",
             Self::CallNotRinging => "call-not-ringing",
             Self::Undialable => "undialable",
@@ -152,8 +152,8 @@ pub fn failure(failure: Failure) -> Message {
             "Your phone kept the audio; to hear the Call here, tap the audio button on your phone's call screen.",
             None,
         ),
-        Failure::HandoffToPhoneUnavailable => (
-            "Tap the audio button on your phone's call screen to move the audio to your phone.",
+        Failure::AudioNotMovedToPhone => (
+            "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen.",
             None,
         ),
         Failure::NoSuchCall => ("That Call has already ended.", None),
@@ -302,7 +302,14 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),
-        IndicatorEntry::MoveAudio { moving: true, .. } => label(Label::MovingAudioHere).to_owned(),
+        IndicatorEntry::MoveAudio {
+            to: AudioLocation::Desktop,
+            moving: true,
+        } => label(Label::MovingAudioHere).to_owned(),
+        IndicatorEntry::MoveAudio {
+            to: AudioLocation::Phone,
+            moving: true,
+        } => label(Label::MovingAudioToPhone).to_owned(),
         IndicatorEntry::MoveAudio {
             to: AudioLocation::Desktop,
             ..
@@ -389,6 +396,9 @@ pub enum Label {
     MoveAudioToPhone,
     /// The Handoff button while the Phone brings the audio here.
     MovingAudioHere,
+    /// The Handoff button while the audio goes to the Phone, until
+    /// hands-free and the Call are back.
+    MovingAudioToPhone,
     /// Wideband speech.
     Hd,
     /// The Call Window's button that mutes the microphone.
@@ -440,6 +450,7 @@ pub fn label(label: Label) -> &'static str {
         Label::MoveAudioHere => "Move audio here",
         Label::MoveAudioToPhone => "Move audio to phone",
         Label::MovingAudioHere => "Moving audio here…",
+        Label::MovingAudioToPhone => "Moving audio to phone…",
         Label::Hd => "HD",
         Label::Mute => "Mute",
         Label::Unmute => "Unmute",

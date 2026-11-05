@@ -144,6 +144,14 @@ impl Harness {
         }
     }
 
+    /// The app's log so far, one JSON object per line: empty before the app
+    /// has logged anything.
+    #[must_use]
+    pub fn app_log(&self) -> String {
+        fs::read_to_string(self.directory.join("state/desktop-calls/desktop-calls.log"))
+            .unwrap_or_default()
+    }
+
     /// How long the app took, by its own log, from its first event matching
     /// `from` to its first event matching `to` at or after it. Waits up to
     /// `deadline` for both.

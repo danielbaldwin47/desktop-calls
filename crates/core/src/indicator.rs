@@ -180,11 +180,11 @@ impl State {
             }
             if let Some(audio) = window.audio {
                 menu.push(IndicatorEntry::MoveAudio {
-                    to: match audio.location {
+                    to: audio.moving.unwrap_or(match audio.location {
                         AudioLocation::Phone => AudioLocation::Desktop,
                         AudioLocation::Desktop => AudioLocation::Phone,
-                    },
-                    moving: audio.moving_here,
+                    }),
+                    moving: audio.moving.is_some(),
                 });
             }
         }

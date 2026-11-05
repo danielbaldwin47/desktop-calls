@@ -60,6 +60,7 @@ use crate::objects::{
     interfaces_added_body,
 };
 
+pub mod hands_free;
 mod methods;
 mod phone;
 mod tree;
@@ -127,6 +128,9 @@ pub enum Quirk {
     /// audio stays on them, as an Android call-establish audio policy of
     /// `POLICY_NOT_ALLOWED` would.
     EarbudsKeepAudio,
+    /// BlueZ refuses `DisconnectProfile` with `org.bluez.Error.Failed`, and
+    /// hands-free stays up: the Desktop can't move the audio to the Phone.
+    DisconnectProfileRefused,
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
@@ -143,6 +147,7 @@ impl Quirk {
             "activate-ignored" => Some(Self::ActivateIgnored),
             "activate-ignored-once" => Some(Self::ActivateIgnoredOnce),
             "earbuds-keep-audio" => Some(Self::EarbudsKeepAudio),
+            "disconnect-profile-refused" => Some(Self::DisconnectProfileRefused),
             _ => None,
         }
     }

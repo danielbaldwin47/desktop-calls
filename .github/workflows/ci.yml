@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # Pull requests run on pull_request only. Triggering on every push too
+  # ran CI twice per PR push, in different concurrency groups.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -9,7 +12,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel on main: a later wiki push must not cancel the run that
+  # verifies a merge (it did on 2026-11-05, for #41).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:

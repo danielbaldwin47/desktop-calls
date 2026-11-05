@@ -40,7 +40,8 @@ use presence::{Presence, forget_phone, presence_input};
 use setup::Setup;
 pub use setup::{SetupNotice, SetupStep, SetupWindowView};
 pub use view::{
-    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Mute, Surfaces,
+    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Mute, RingingCaller,
+    Surfaces,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so

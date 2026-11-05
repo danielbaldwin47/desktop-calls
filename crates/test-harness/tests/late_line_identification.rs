@@ -4,10 +4,10 @@
 //! `late-line-identification` quirk does that. Every surface showing the
 //! Call follows the number once it arrives: the Incoming Call Banner, the
 //! Missed Call notification, and the Dialer it opens. Until the number
-//! arrives, or the Phone has had long enough to send it, the Banner says it
-//! is identifying the caller rather than "Withheld number". Observed through the
-//! control interface's `Calls`, `Surfaces` and `MissedCall`, and the
-//! notification server stand-in.
+//! arrives, or the Phone has had long enough to send it, the Banner and the
+//! Indicator say the caller is being identified rather than "Withheld
+//! number". Observed through the control interface's `Calls`, `Surfaces` and
+//! `MissedCall`, and the notification server and tray stand-ins.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -157,6 +157,40 @@ fn a_withheld_number_shows_as_withheld_once_the_wait_is_over() {
         Some("Withheld number"),
         "{state:?}"
     );
+}
+
+/// Waits until the Indicator's tooltip reads `tooltip`.
+fn indicator_says(harness: &Harness, tooltip: &str) {
+    harness.tray().wait_for(
+        &format!("the Indicator says {tooltip:?}"),
+        DEADLINE,
+        |items| {
+            items
+                .iter()
+                .any(|item| item.tooltip.as_deref() == Some(tooltip))
+        },
+    );
+}
+
+/// While the caller is being identified, the Indicator's tooltip says the
+/// Banner's caller line, not "Call from Withheld number"; once the wait is
+/// over, both say the number is withheld.
+#[test]
+fn while_the_caller_is_identified_the_indicator_says_what_the_banner_says() {
+    let harness = synced_late();
+
+    let _path = harness.simulated_phone().ring("");
+    let state = harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
+        banner_caller(state).as_deref() == Some(IDENTIFYING)
+    });
+    indicator_says(&harness, &banner_caller(&state).unwrap_or_default());
+
+    harness.wait_for_app(
+        "the Banner says the number is withheld",
+        DEADLINE,
+        |state| banner_caller(state).as_deref() == Some("Withheld number"),
+    );
+    indicator_says(&harness, "Call from Withheld number");
 }
 
 /// A Call whose number came late rings out: the Missed Call names Alice,

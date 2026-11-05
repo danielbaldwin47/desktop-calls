@@ -58,6 +58,86 @@ pub struct Screenshot {
     pub height: u32,
 }
 
+/// A rectangle on screen, in layout coordinates: what clients and the
+/// pointer work in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Region {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+}
+
+impl Region {
+    /// The middle of the region, where a click lands squarely.
+    #[must_use]
+    pub fn centre(&self) -> (f64, f64) {
+        (
+            f64::midpoint(self.left, self.right),
+            f64::midpoint(self.top, self.bottom),
+        )
+    }
+
+    /// Whether the two regions overlap.
+    #[must_use]
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+}
+
+impl Screenshot {
+    /// The smallest region holding every pixel whose RGB colour satisfies
+    /// `matches`, or `None` if no pixel does.
+    ///
+    /// # Panics
+    ///
+    /// If the PNG can't be decoded.
+    #[must_use]
+    pub fn region_where(&self, matches: impl Fn([u8; 3]) -> bool) -> Option<Region> {
+        let file = fs::File::open(&self.path).expect("open the screenshot");
+        let mut decoder = png::Decoder::new(BufReader::new(file));
+        decoder.set_transformations(png::Transformations::normalize_to_color8());
+        let mut reader = decoder.read_info().expect("read the screenshot's header");
+        let mut pixels = vec![0; reader.output_buffer_size().expect("the screenshot's size")];
+        let frame = reader
+            .next_frame(&mut pixels)
+            .expect("decode the screenshot");
+        let channels = frame.color_type.samples();
+        let width = usize::try_from(frame.width).expect("the screenshot's width");
+        let (mut left, mut top, mut right, mut bottom) = (usize::MAX, usize::MAX, 0, 0);
+        for (row, line) in pixels[..frame.buffer_size()]
+            .chunks_exact(frame.line_size)
+            .enumerate()
+        {
+            for column in 0..width {
+                let pixel = &line[column * channels..column * channels + 3];
+                if matches([pixel[0], pixel[1], pixel[2]]) {
+                    left = left.min(column);
+                    right = right.max(column + 1);
+                    top = top.min(row);
+                    bottom = bottom.max(row + 1);
+                }
+            }
+        }
+        if left == usize::MAX {
+            return None;
+        }
+        let to_layout = |pixels: usize| {
+            let pixels = u32::try_from(pixels).expect("a screen coordinate");
+            f64::from(pixels) * LAYOUT_SIZE.0 / f64::from(SCREEN_SIZE.0)
+        };
+        Some(Region {
+            left: to_layout(left),
+            top: to_layout(top),
+            right: to_layout(right),
+            bottom: to_layout(bottom),
+        })
+    }
+}
+
 impl Screen {
     /// Starts sway in `directory` with `environment`, and returns once its
     /// clients can connect. Pushes the process onto `processes`.

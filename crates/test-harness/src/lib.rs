@@ -26,6 +26,7 @@
     reason = "test code: a failed setup step fails the scenario with its message"
 )]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::future::Future;
 use std::io::{BufRead as _, BufReader};
@@ -33,8 +34,9 @@ use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::process::{Child, ChildStdout, Command, Output, Stdio};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod client;
 mod input;
@@ -43,16 +45,17 @@ mod stand_ins;
 
 pub use client::TestClient;
 pub use input::Key;
-pub use screen::{LAYOUT_SIZE, SCREEN_SIZE, Screenshot};
-pub use stand_ins::{Notification, Theme, TrayItem};
+pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
+pub use stand_ins::{BAR_COLOUR, BAR_HEIGHT, Notification, Theme, TrayItem};
 
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
 use zbus::fdo::{DBusProxy, PropertiesProxy};
+use zbus::message::Type;
 use zbus::names::{BusName, InterfaceName};
 use zbus::proxy::CacheProperties;
-use zbus::{Connection, proxy};
+use zbus::{Connection, MatchRule, MessageStream, proxy};
 
 use crate::screen::{Screen, ScreenKind};
 use crate::stand_ins::StandIns;
@@ -83,6 +86,12 @@ trait SimulatedPhone1 {
     fn disconnect(&self) -> zbus::Result<()>;
 
     fn ring(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
+
+    fn set_codec(&self, codec: u8) -> zbus::Result<()>;
+
+    fn enable_quirk(&self, name: &str) -> zbus::Result<()>;
+
+    fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn audio_gateway(&self) -> zbus::Result<zbus::OwnedObjectPath>;
@@ -117,6 +126,54 @@ pub struct AppState {
     pub connection_state: String,
     /// `Phone`, or `None` while it is empty.
     pub phone: Option<PhoneIdentity>,
+    /// `Calls`, oldest first.
+    pub calls: Vec<AppCall>,
+    /// `AudioLocation`: `"desktop"`, `"phone"`, or `""` while there is no Call.
+    pub audio_location: String,
+    /// `Ringing`.
+    pub ringing: bool,
+    /// `Codec`'s name: `"cvsd"`, `"msbc"`, `"lc3-swb"`, or `""` while the
+    /// Desktop has negotiated none.
+    pub codec: String,
+    /// `Codec`'s wideband flag ("HD").
+    pub wideband: bool,
+    /// `Surfaces`: each shown surface (`"banner"`, `"call-window"`) with its
+    /// key content, as the surface shows it.
+    pub surfaces: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl AppState {
+    /// The key content of the surface named `surface`, if it is shown.
+    #[must_use]
+    pub fn surface(&self, surface: &str) -> Option<&BTreeMap<String, String>> {
+        self.surfaces.get(surface)
+    }
+}
+
+/// One Call, as the app's `Calls` property lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppCall {
+    /// The app-assigned stable Call id that `Answer`, `Decline` and `HangUp` take.
+    pub id: u32,
+    /// `"incoming"`, `"outgoing"` or `"unknown"`.
+    pub direction: String,
+    /// `"ringing"`, `"waiting"`, `"dialing"`, `"alerting"`, `"active"` or `"held"`.
+    pub state: String,
+    /// The other party's number as the Phone reports it, or `""` if withheld.
+    pub number: String,
+    /// The Contact's name, or `""`.
+    pub display_name: String,
+    /// When the Call connected, in milliseconds since the Unix epoch, or 0.
+    pub active_since_ms: u64,
+}
+
+/// One `Error` signal from the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppError {
+    /// The failure kind, such as `"answer-failed"`.
+    pub kind: String,
+    /// The sentence shown to the user.
+    pub message: String,
 }
 
 /// One of a scenario's two private buses.
@@ -141,7 +198,11 @@ pub struct Harness {
     system: Connection,
     stand_ins: StandIns,
     screen: Option<Screen>,
+    /// The stand-in for Omarchy's bar, if the scenario has one.
+    bar: Option<TestClient>,
     screenshot_directory: PathBuf,
+    /// Every `Error` signal the app has sent, in order.
+    app_errors: Arc<Mutex<Vec<AppError>>>,
     // Stopped in reverse order of starting: the app, the Simulated Phone,
     // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,
@@ -156,6 +217,8 @@ pub struct Builder {
     theme: Theme,
     scenario: Option<PathBuf>,
     screenshot_directory: Option<PathBuf>,
+    omarchy_bar: bool,
+    toast_column: Option<u32>,
 }
 
 impl Builder {
@@ -187,6 +250,22 @@ impl Builder {
         self
     }
 
+    /// Puts a stand-in for Omarchy's bar on the screen: [`BAR_HEIGHT`] tall
+    /// across the top, reserved as an exclusive zone, drawn in
+    /// [`BAR_COLOUR`]. Needs a screen.
+    pub fn omarchy_bar(mut self) -> Self {
+        self.omarchy_bar = true;
+        self
+    }
+
+    /// Runs the app under a Hyprland stand-in whose `hyprctl layers -j`
+    /// reports Omarchy's notification-toast column `width` wide. Without
+    /// it there is no Hyprland, as under sway.
+    pub fn hyprland_toast_column(mut self, width: u32) -> Self {
+        self.toast_column = Some(width);
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -214,6 +293,14 @@ impl Builder {
         let system_bus = start_bus(&directory, "system", &mut processes);
         let session_bus = start_bus(&directory, "session", &mut processes);
         let mut environment = environment(&directory, &system_bus, &session_bus);
+        if let Some(width) = self.toast_column {
+            stand_ins::serve_hyprland(&directory.join("runtime"), width)
+                .expect("serve the Hyprland stand-in");
+            environment.push((
+                "HYPRLAND_INSTANCE_SIGNATURE",
+                stand_ins::HYPRLAND_SIGNATURE.to_owned(),
+            ));
+        }
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &mut processes);
             environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));
@@ -244,6 +331,8 @@ impl Builder {
 
         let stand_ins = StandIns::start(&session_bus, self.theme)
             .expect("serve the desktop stand-ins on the private session bus");
+        // Subscribe before the app starts, so no Error signal is missed.
+        let app_errors = collect_app_errors(&session);
 
         let mut harness = Harness {
             directory,
@@ -256,9 +345,21 @@ impl Builder {
             system,
             stand_ins,
             screen,
+            bar: None,
             screenshot_directory,
+            app_errors,
             processes,
         };
+
+        if self.omarchy_bar {
+            let bar = harness.spawn_test_client(&["--bar"]);
+            bar.wait_for(
+                "the bar stand-in is drawn",
+                Duration::from_secs(10),
+                |line| line.starts_with("configured "),
+            );
+            harness.bar = Some(bar);
+        }
 
         let mut simulated_phone = harness.command("simulated-phone");
         simulated_phone
@@ -320,6 +421,35 @@ impl Harness {
             &self.environment,
             &self.screenshot_directory.join(format!("{name}.png")),
         )
+    }
+
+    /// Captures the screen as `<name>.png` until the capture satisfies
+    /// `shown`, and returns it. What the app reports can run a frame ahead
+    /// of what is on screen; this waits for the screen.
+    ///
+    /// # Panics
+    ///
+    /// If no capture satisfies `shown` within `deadline`; the panic names the
+    /// last capture.
+    #[must_use]
+    pub fn screenshot_when(
+        &self,
+        name: &str,
+        deadline: Duration,
+        shown: impl Fn(&Screenshot) -> bool,
+    ) -> Screenshot {
+        let started = Instant::now();
+        loop {
+            let screenshot = self.screenshot(name);
+            if shown(&screenshot) {
+                return screenshot;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the screen never showed {name} within {deadline:?}; see {}",
+                screenshot.path.display()
+            );
+        }
     }
 
     /// The address of the scenario's private session bus, for a test that
@@ -397,9 +527,25 @@ impl Harness {
     /// If the scenario has no screen, or the client can't start.
     #[must_use]
     pub fn start_test_client(&self) -> TestClient {
+        self.spawn_test_client(&[])
+    }
+
+    /// Starts the harness's test client fullscreen, as a video player would
+    /// be. See [`Harness::start_test_client`].
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the client can't be started.
+    #[must_use]
+    pub fn start_fullscreen_test_client(&self) -> TestClient {
+        self.spawn_test_client(&["--fullscreen"])
+    }
+
+    fn spawn_test_client(&self, arguments: &[&str]) -> TestClient {
         self.screen();
         let child = self
             .command("test-client")
+            .args(arguments)
             .stdout(Stdio::piped())
             .stderr(self.log_file("test-client.stderr"))
             .spawn()
@@ -500,6 +646,141 @@ impl Harness {
                 zbus::block_on(read_app_state(&self.session))
             ),
         }
+    }
+
+    /// Checks that the app's state satisfies `condition` at every change for
+    /// the whole of `window`, for something that must not happen, such as a
+    /// Call ending. Returns the last state.
+    ///
+    /// # Panics
+    ///
+    /// At the first state that fails `condition`, naming `description`.
+    pub fn app_holds(
+        &self,
+        description: &str,
+        window: Duration,
+        condition: impl Fn(&AppState) -> bool,
+    ) -> AppState {
+        let checked = zbus::block_on(async {
+            let properties = PropertiesProxy::builder(&self.session)
+                .destination(APP_BUS_NAME)
+                .path(APP_PATH)
+                .build()
+                .await?;
+            let mut changes = properties.receive_properties_changed().await?;
+            let mut state = read_app_state(&self.session).await?;
+            let watching = async {
+                loop {
+                    if !condition(&state) {
+                        return Some(state.clone());
+                    }
+                    changes.next().await?;
+                    state = read_app_state(&self.session).await.ok()?;
+                }
+            };
+            let broken = within(window, watching).await.flatten();
+            Ok::<_, zbus::Error>(broken)
+        });
+        match checked {
+            Ok(None) => self.app_state(),
+            Ok(Some(state)) => {
+                panic!("\"{description}\" stopped holding; the app's state is {state:?}")
+            }
+            Err(error) => panic!("watching \"{description}\": {error}"),
+        }
+    }
+
+    /// Waits until the app's log has a line containing `needle`, and returns
+    /// that line.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first.
+    pub fn wait_for_app_log(&self, needle: &str, deadline: Duration) -> String {
+        let log = self.directory.join("state/desktop-calls/desktop-calls.log");
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(line) = fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .find(|line| line.contains(needle))
+            {
+                return line.to_owned();
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the app logged nothing containing {needle:?} within {deadline:?}; see {}",
+                log.display()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Asks the app to answer the Call with this id, as any client of the
+    /// control interface could.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface refuses the call.
+    pub fn answer(&self, call: u32) {
+        self.call_app_method("Answer", call);
+    }
+
+    /// Asks the app to decline the ringing Call with this id.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface refuses the call.
+    pub fn decline(&self, call: u32) {
+        self.call_app_method("Decline", call);
+    }
+
+    /// Asks the app to hang up the Call with this id.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface refuses the call.
+    pub fn hang_up(&self, call: u32) {
+        self.call_app_method("HangUp", call);
+    }
+
+    fn call_app_method(&self, member: &str, call: u32) {
+        zbus::block_on(self.session.call_method(
+            Some(APP_BUS_NAME),
+            APP_PATH,
+            Some(APP_INTERFACE),
+            member,
+            &(call,),
+        ))
+        .unwrap_or_else(|error| panic!("{member}({call}) on the app: {error}"));
+    }
+
+    /// Waits for the app's first `Error` signal, and returns it.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first.
+    pub fn wait_for_app_error(&self, deadline: Duration) -> AppError {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(error) = self.app_errors().into_iter().next() {
+                return error;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "the app sent no Error within {deadline:?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Every `Error` signal the app has sent so far, in order.
+    #[must_use]
+    pub fn app_errors(&self) -> Vec<AppError> {
+        self.app_errors
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Calls a method on the Phone's side of one of the private buses, as any
@@ -813,6 +1094,45 @@ impl SimulatedPhone<'_> {
             .to_string()
     }
 
+    /// Makes the Phone's audio link negotiate the codec with this hands-free
+    /// id from now on: 1 CVSD, 2 mSBC, 3 LC3-SWB (the Pixel's, by default).
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_codec(&self, codec: u8) {
+        zbus::block_on(async { self.proxy().await?.set_codec(codec).await })
+            .expect("set the Simulated Phone's codec");
+    }
+
+    /// Switches on a quirk: `"call1-hangup-missing"` (only
+    /// `org.ofono.VoiceCall.Hangup` works) or `"hangup-too-few-arguments"`
+    /// (`Hangup` fails with "Too few arguments" while the Call ends anyway).
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't know the quirk.
+    pub fn enable_quirk(&self, name: &str) {
+        zbus::block_on(async { self.proxy().await?.enable_quirk(name).await })
+            .unwrap_or_else(|error| panic!("enable quirk {name:?}: {error}"));
+    }
+
+    /// Unregisters the Call at `call` and registers it again `after` later,
+    /// in the same state, as PipeWire does when the hands-free profile
+    /// briefly drops mid-Call. Returns once the Call is gone.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such Call.
+    pub fn reregister_call(&self, call: &str, after: Duration) {
+        let after_ms = u32::try_from(after.as_millis()).unwrap_or(u32::MAX);
+        zbus::block_on(async {
+            let call = zbus::ObjectPath::try_from(call)?;
+            self.proxy().await?.reregister_call(&call, after_ms).await
+        })
+        .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
+    }
+
     /// The object path of the current AudioGateway, or `"/"` while there is
     /// none.
     ///
@@ -862,7 +1182,7 @@ impl SimulatedPhone<'_> {
 }
 
 async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
-    // One GetAll, so the two properties come from the same moment.
+    // One GetAll, so the properties come from the same moment.
     let properties = PropertiesProxy::builder(session)
         .destination(APP_BUS_NAME)
         .path(APP_PATH)
@@ -871,20 +1191,68 @@ async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
     let all = properties
         .get_all(InterfaceName::try_from(APP_INTERFACE)?)
         .await?;
-    let connection_state = all
-        .get("ConnectionState")
-        .ok_or_else(|| zbus::Error::Failure("no ConnectionState property".to_owned()))?
-        .try_clone()?;
-    let phone = all
-        .get("Phone")
-        .ok_or_else(|| zbus::Error::Failure("no Phone property".to_owned()))?
-        .try_clone()?;
-    let connection_state = String::try_from(connection_state)?;
-    let (name, address) = <(String, String)>::try_from(phone)?;
+    let property = |name: &str| {
+        all.get(name)
+            .ok_or_else(|| zbus::Error::Failure(format!("no {name} property")))?
+            .try_clone()
+    };
+    let connection_state = String::try_from(property("ConnectionState")?)?;
+    let (name, address) = <(String, String)>::try_from(property("Phone")?)?;
+    let calls = <Vec<(u32, String, String, String, String, u64)>>::try_from(property("Calls")?)?
+        .into_iter()
+        .map(
+            |(id, direction, state, number, display_name, active_since_ms)| AppCall {
+                id,
+                direction,
+                state,
+                number,
+                display_name,
+                active_since_ms,
+            },
+        )
+        .collect();
+    let (codec, wideband) = <(String, bool)>::try_from(property("Codec")?)?;
+    let surfaces = <BTreeMap<String, BTreeMap<String, String>>>::try_from(property("Surfaces")?)?;
     Ok(AppState {
         connection_state,
         phone: (!address.is_empty()).then_some(PhoneIdentity { name, address }),
+        calls,
+        audio_location: String::try_from(property("AudioLocation")?)?,
+        ringing: bool::try_from(property("Ringing")?)?,
+        codec,
+        wideband,
+        surfaces,
     })
+}
+
+/// Collects every `Error` signal the app sends on `session`, from now on.
+fn collect_app_errors(session: &Connection) -> Arc<Mutex<Vec<AppError>>> {
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let stream = zbus::block_on(async {
+        let rule = MatchRule::builder()
+            .msg_type(Type::Signal)
+            .path(APP_PATH)
+            .interface(APP_INTERFACE)
+            .member("Error")
+            .build()?;
+        MessageStream::for_match_rule(rule, session, None).await
+    })
+    .expect("subscribe to the app's Error signal");
+    let collected = errors.clone();
+    thread::spawn(move || {
+        zbus::block_on(async move {
+            let mut stream = stream;
+            while let Some(Ok(message)) = stream.next().await {
+                if let Ok((kind, message)) = message.body().deserialize::<(String, String)>() {
+                    collected
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(AppError { kind, message });
+                }
+            }
+        });
+    });
+    errors
 }
 
 /// Runs `future`, giving up after `deadline`.

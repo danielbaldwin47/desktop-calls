@@ -22,6 +22,9 @@ glib-unix.workspace = true
 socket2.workspace = true
 futures-util.workspace = true
 futures-channel.workspace = true
+gtk.workspace = true
+adw.workspace = true
+gtk4-layer-shell.workspace = true
 
 [lints]
 workspace = true

@@ -16,7 +16,9 @@
 //! it is on the bus (see `scenario.rs`); `just demo` uses this.
 //!
 //! So far it can be a paired Phone whose hands-free link comes and goes, that
-//! rings, and that opens a PBAP session.
+//! rings, whose Calls can be answered, hung up and have their audio brought
+//! to the Desktop, and that opens a PBAP session. Tests can pick the codec and
+//! switch on quirks other Phones show.
 
 mod bluez;
 mod obex;
@@ -100,8 +102,7 @@ struct World {
     obex: obex::Obex,
     next_audio_gateway_index: u32,
     audio_gateway: Option<OwnedObjectPath>,
-    /// N in the next Call's path, `agM/callN`. Each AudioGateway starts at 1.
-    next_call_index: u32,
+    behaviour: telephony::Behaviour,
     recorded: Vec<(Bus, MethodCall)>,
 }
 
@@ -144,7 +145,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         phone_address: arguments.address,
         next_audio_gateway_index: arguments.first_audio_gateway_index,
         audio_gateway: None,
-        next_call_index: 1,
+        behaviour: telephony::Behaviour::default(),
         recorded: Vec::new(),
     }));
 
@@ -214,21 +215,30 @@ async fn serve(
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
         };
-        let (reply, added) = {
+        let (reply, added, signals) = {
             let mut world = lock(&world);
             world.recorded.push((service.bus(), call.clone()));
+            let world = &mut *world;
             match service {
-                Service::Bluez => (bluez::answer(&world.bluez, &call, &message), None),
+                Service::Bluez => (
+                    bluez::answer(&world.bluez, &call, &message),
+                    None,
+                    Vec::new(),
+                ),
                 Service::Telephony => {
-                    let audio_gateways: Vec<OwnedObjectPath> =
-                        world.audio_gateway.iter().cloned().collect();
-                    let reply =
-                        telephony::answer(&world.telephony, &audio_gateways, &call, &message);
-                    (reply, None)
+                    let (reply, signals) = telephony::answer(
+                        &mut world.telephony,
+                        world.audio_gateway.as_ref(),
+                        &world.behaviour,
+                        &call,
+                        &message,
+                    );
+                    (reply, None, signals)
                 }
                 Service::Obex => {
-                    let world = &mut *world;
-                    obex::answer(&mut world.obex, &world.phone_address, &call, &message)
+                    let (reply, added) =
+                        obex::answer(&mut world.obex, &world.phone_address, &call, &message);
+                    (reply, added, Vec::new())
                 }
             }
         };
@@ -244,6 +254,11 @@ async fn serve(
                 .await?;
         }
         reply.send(&connection, &message.header()).await?;
+        // As the real service, which replies once the Phone confirms, and
+        // then reports the change the Phone makes.
+        for signal in signals {
+            signal.emit(&connection).await?;
+        }
     }
     Ok(())
 }
@@ -281,7 +296,6 @@ impl Control {
             let address = world.phone_address.clone();
             let interfaces = telephony::add_audio_gateway(&mut world.telephony, &gateway, &address);
             world.audio_gateway = Some(gateway.clone());
-            world.next_call_index = 1;
             (device, gateway, interfaces)
         };
         emit_properties_changed(&self.system, &device, bluez::DEVICE, "Connected", true).await?;
@@ -330,24 +344,9 @@ impl Control {
         // As PipeWire does when hands-free drops mid-Call: each Call goes
         // first, then the AudioGateway.
         for call in calls {
-            self.session
-                .emit_signal(
-                    None::<&str>,
-                    gateway.as_str(),
-                    objects::OBJECT_MANAGER,
-                    "InterfacesRemoved",
-                    &(&call, vec![telephony::CALL]),
-                )
-                .await?;
-            self.session
-                .emit_signal(
-                    None::<&str>,
-                    gateway.as_str(),
-                    telephony::VOICE_CALL_MANAGER,
-                    "CallRemoved",
-                    &(&call,),
-                )
-                .await?;
+            for signal in telephony::unannounce_call(&gateway, &call) {
+                signal.emit(&self.session).await?;
+            }
         }
         self.session
             .emit_signal(
@@ -367,40 +366,76 @@ impl Control {
     /// incoming Call on the AudioGateway and announces it. Returns the Call's
     /// object path. Fails while hands-free is down.
     async fn ring(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
-        let (gateway, call, interfaces) = {
+        let (call, signals) = {
             let mut world = lock(&self.world);
+            let world = &mut *world;
             let Some(gateway) = world.audio_gateway.clone() else {
                 return Err(zbus::fdo::Error::Failed(
                     "hands-free is not connected, so the Phone cannot ring".to_owned(),
                 ));
             };
-            let index = world.next_call_index;
-            world.next_call_index += 1;
-            let (call, interfaces) =
-                telephony::add_incoming_call(&mut world.telephony, &gateway, index, &number)?;
-            (gateway, call, interfaces)
+            telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?
         };
-        let body = interfaces_added_body(&interfaces);
-        self.session
-            .emit_signal(
-                None::<&str>,
-                gateway.as_str(),
-                objects::OBJECT_MANAGER,
-                "InterfacesAdded",
-                &(&call, &body),
-            )
-            .await?;
-        let properties = body.get(telephony::CALL).cloned().unwrap_or_default();
-        self.session
-            .emit_signal(
-                None::<&str>,
-                gateway.as_str(),
-                telephony::VOICE_CALL_MANAGER,
-                "CallAdded",
-                &(&call, properties),
-            )
-            .await?;
+        for signal in signals {
+            signal.emit(&self.session).await?;
+        }
         Ok(call)
+    }
+
+    /// Makes the Phone's audio link negotiate the codec with this hands-free
+    /// id from now on: 1 CVSD, 2 mSBC, 3 LC3-SWB (the Pixel's).
+    fn set_codec(&self, codec: u8) -> zbus::fdo::Result<()> {
+        if codec == 0 {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "codec 0 means no audio link; pick 1, 2 or 3".to_owned(),
+            ));
+        }
+        lock(&self.world).behaviour.codec = codec;
+        Ok(())
+    }
+
+    /// Switches on a quirk other Phones, or other moments, show:
+    /// `"call1-hangup-missing"` or `"hangup-too-few-arguments"`.
+    fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
+        let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
+            zbus::fdo::Error::InvalidArgs(format!(
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing and hangup-too-few-arguments"
+            ))
+        })?;
+        lock(&self.world).behaviour.quirks.insert(quirk);
+        Ok(())
+    }
+
+    /// Unregisters the Call at `call` and registers it again `after_ms`
+    /// later, at the same path and in the same state, as PipeWire does when
+    /// the hands-free profile briefly drops mid-Call. Returns once the Call
+    /// is gone.
+    async fn reregister_call(&self, call: OwnedObjectPath, after_ms: u32) -> zbus::fdo::Result<()> {
+        let (removed, added) = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let gateway = world.audio_gateway.clone().ok_or_else(|| {
+                zbus::fdo::Error::Failed("hands-free is not connected".to_owned())
+            })?;
+            telephony::reregister_call(&mut world.telephony, &gateway, &call).ok_or_else(|| {
+                zbus::fdo::Error::InvalidArgs(format!("there is no Call at {call}"))
+            })?
+        };
+        for signal in removed {
+            signal.emit(&self.session).await?;
+        }
+        let session = self.session.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(after_ms)));
+            zbus::block_on(async {
+                for signal in added {
+                    if signal.emit(&session).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        });
+        Ok(())
     }
 
     /// The current AudioGateway's object path, or `/` while there is none.

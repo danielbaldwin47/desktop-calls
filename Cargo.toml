@@ -30,7 +30,15 @@ glib-unix = "0.22"
 socket2 = "0.6"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 futures-channel = "0.3"
+# The Desktop surfaces: the Incoming Call Banner and the Call Window.
+gtk = { version = "0.11", package = "gtk4", features = ["v4_12"] }
+adw = { version = "0.9", package = "libadwaita" }
+gtk4-layer-shell = "0.8"
+# Formats phone numbers for reading, by libphonenumber's rules.
+phonenumber = "0.3"
 tempfile = "3"
+# Reads the harness's screenshots, to find surfaces on screen.
+png = "0.18"
 # The test harness's synthetic keyboard and pointer, and its test client.
 wayland-client = "0.31"
 # Only to route wayland-backend's error messages through `log`, which has no

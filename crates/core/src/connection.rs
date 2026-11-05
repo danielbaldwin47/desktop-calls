@@ -1,5 +1,4 @@
-//! The Call state machine: one function from (state, input) to (new state,
-//! effects). So far it decides only whether the Phone is connected.
+//! The Phone and whether the Desktop is connected to it.
 
 use std::fmt;
 use std::str::FromStr;
@@ -63,95 +62,5 @@ impl FromStr for ConnectionState {
         .into_iter()
         .find(|state| state.as_str() == name)
         .ok_or(UnknownConnectionState)
-    }
-}
-
-/// Something that happened, as the shell adapters report it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Input {
-    /// A paired Phone that can carry Calls exists on the Desktop.
-    PhonePaired(Phone),
-    /// The paired Phone with this address is gone.
-    PhoneUnpaired { address: String },
-    /// The Phone with this address is connected for Calls.
-    PhoneConnected { address: String },
-    /// The Phone with this address is no longer connected for Calls.
-    PhoneDisconnected { address: String },
-}
-
-/// Something the shell adapters must do.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Effect {
-    /// Follow the Phone with this address: report when it connects and
-    /// disconnects for Calls.
-    AttachPhone { address: String },
-    /// Stop following the Phone.
-    DetachPhone,
-}
-
-/// Everything the Call state machine knows.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct State {
-    phone: Option<Phone>,
-    connection_state: ConnectionState,
-}
-
-impl State {
-    /// The Phone the Desktop works with, once one is paired.
-    #[must_use]
-    pub fn phone(&self) -> Option<&Phone> {
-        self.phone.as_ref()
-    }
-
-    #[must_use]
-    pub fn connection_state(&self) -> &ConnectionState {
-        &self.connection_state
-    }
-
-    fn is_our_phone(&self, address: &str) -> bool {
-        self.phone
-            .as_ref()
-            .is_some_and(|phone| phone.address.eq_ignore_ascii_case(address))
-    }
-}
-
-/// Works out the new state and the effects that follow from `input`.
-#[must_use]
-pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
-    match input {
-        // Desktop Calls works with one Phone: the first one paired.
-        Input::PhonePaired(phone) if state.phone.is_none() => {
-            let effects = vec![Effect::AttachPhone {
-                address: phone.address.clone(),
-            }];
-            let state = State {
-                phone: Some(phone),
-                connection_state: ConnectionState::Connecting,
-            };
-            (state, effects)
-        }
-        Input::PhoneUnpaired { address } if state.is_our_phone(&address) => {
-            (State::default(), vec![Effect::DetachPhone])
-        }
-        Input::PhoneConnected { address } if state.is_our_phone(&address) => (
-            State {
-                connection_state: ConnectionState::Connected,
-                ..state
-            },
-            Vec::new(),
-        ),
-        Input::PhoneDisconnected { address }
-            if state.is_our_phone(&address)
-                && state.connection_state == ConnectionState::Connected =>
-        {
-            (
-                State {
-                    connection_state: ConnectionState::Disconnected,
-                    ..state
-                },
-                Vec::new(),
-            )
-        }
-        _ => (state, Vec::new()),
     }
 }

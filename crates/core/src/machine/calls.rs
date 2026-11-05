@@ -1,0 +1,253 @@
+//! Calls coming and going: the Phone reporting them, answering, declining,
+//! hanging up and keypad tones, and the timers that close them.
+
+use super::audio::{ask_once_more, audio_not_moved, bring_audio_here, restore_audio};
+use super::dialling::{adopt_dialled, dial_failed};
+use super::input::{Effect, Input, PhoneCommand, Timer};
+use super::missed_calls::missed;
+use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
+use crate::call::{Call, CallId, CallState, Direction, Request, Timestamp};
+use crate::messages::Failure;
+use crate::missed::Unconfirmed;
+
+/// The Phone reported `call`, unless it already had.
+pub(super) fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
+    if state.calls.iter().any(|known| known.id == call.id) {
+        return;
+    }
+    if state
+        .ended
+        .as_ref()
+        .is_some_and(|ended| ended.id == call.id)
+    {
+        state.ended = None;
+    }
+    if call.direction == Direction::Outgoing {
+        adopt_dialled(state, &mut call, effects);
+    }
+    if call.active_since.is_some()
+        && let Some(index) = state
+            .earlier_calls
+            .iter()
+            .position(|earlier| earlier.caller == call.caller)
+    {
+        // Connected before this run started: the Call it had then.
+        let earlier = state.earlier_calls.remove(index);
+        call.direction = earlier.direction;
+        call.active_since = Some(earlier.active_since);
+    }
+    if state.recent_calls.len() == RECENT_CALLS {
+        state.recent_calls.remove(0);
+    }
+    state.recent_calls.push((call.id, call.caller.clone()));
+    state.calls.push(call);
+}
+
+/// The Phone reports the Call over: it leaves the Desktop, and if it rang
+/// out, it may be a Missed Call.
+pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    let ended = state.calls.iter().find(|known| known.id == call).cloned();
+    end_call(state, call, effects);
+    if let Some(ended) = ended {
+        call_ended(state, &ended, effects);
+    }
+}
+
+pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
+    match timer {
+        Timer::ForgetEarlierRun => state.earlier_calls.clear(),
+        Timer::DismissDial(attempt) => {
+            if state
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.attempt == attempt)
+            {
+                state.notice = None;
+            }
+            if state
+                .hung_up_dial
+                .as_ref()
+                .is_some_and(|hung_up| hung_up.attempt == attempt)
+            {
+                state.hung_up_dial = None;
+            }
+        }
+        Timer::DialTimedOut(attempt) => {
+            if state
+                .dialling
+                .as_ref()
+                .is_some_and(|dialling| dialling.attempt == attempt)
+            {
+                dial_failed(state, Failure::DialFailed, effects);
+            }
+        }
+        Timer::HandoffTimedOut(handoff) => {
+            if state
+                .moving_audio
+                .is_some_and(|moving| moving.handoff == handoff)
+            {
+                audio_not_moved(state, effects);
+            }
+        }
+        Timer::HandoffNotStarted(handoff) => {
+            if state
+                .moving_audio
+                .is_some_and(|moving| moving.handoff == handoff && !moving.retried)
+                && !state.transport.is_up()
+            {
+                ask_once_more(state, effects);
+            }
+        }
+        Timer::CloseCallWindow(call) => {
+            if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
+                state.ended = None;
+            }
+        }
+    }
+}
+
+/// The keypad tones in `typed`: digits, `*` and `#`, leaving out the
+/// spaces, dashes, dots and brackets a pasted number may carry. `None` if
+/// it has anything else, or no tone at all.
+#[must_use]
+pub fn keypad_tones(typed: &str) -> Option<String> {
+    let mut tones = String::new();
+    for character in typed.chars() {
+        match character {
+            '0'..='9' | '*' | '#' => tones.push(character),
+            ' ' | '-' | '.' | '(' | ')' => {}
+            _ => return None,
+        }
+    }
+    (!tones.is_empty()).then_some(tones)
+}
+
+pub(super) fn send_tones(state: &State, typed: String, effects: &mut Vec<Effect>) {
+    let input = Input::SendTones(typed);
+    if let Some(failure) = state.refusal(&input) {
+        effects.push(Effect::ReportError(failure));
+    } else if let Input::SendTones(typed) = input
+        && let Some(tones) = keypad_tones(&typed)
+    {
+        effects.push(Effect::Phone(PhoneCommand::SendTones(tones)));
+    }
+}
+
+/// The Phone reported a Call's new state.
+pub(super) fn call_changed(
+    state: &mut State,
+    call: CallId,
+    call_state: CallState,
+    at: Timestamp,
+    effects: &mut Vec<Effect>,
+) {
+    let Some(known) = state.call_mut(call) else {
+        return;
+    };
+    known.state = call_state;
+    if call_state.is_connected() && known.active_since.is_none() {
+        known.active_since = Some(at);
+    }
+    if let Some(restore) = &mut state.restore_audio {
+        restore.call_back = true;
+    }
+    restore_audio(state, effects);
+}
+
+pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if known.rings_here() => {
+            known.request = Request::Answer;
+            effects.push(Effect::Phone(PhoneCommand::Answer(call)));
+            bring_audio_here(state, effects);
+        }
+        Some(known) if known.request == Request::Answer => {}
+        Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+pub(super) fn decline(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if known.rings_here() => {
+            known.request = Request::Decline;
+            effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
+        }
+        Some(known) if known.request == Request::Decline => {}
+        Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+pub(super) fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if matches!(known.request, Request::HangUp | Request::Decline) => {}
+        Some(known) => {
+            known.request = if known.rings_here() {
+                Request::Decline
+            } else {
+                Request::HangUp
+            };
+            effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
+        }
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+/// A Call the Phone had is over, and now in the Phone's Call History, so
+/// the Desktop refreshes it. A Call that rang out here waits for that
+/// refresh to say whether the Phone lists it as missed; if there can be no
+/// refresh, it is missed.
+fn call_ended(state: &mut State, ended: &Call, effects: &mut Vec<Effect>) {
+    let refreshes = state.may_sync_contacts();
+    if refreshes {
+        effects.push(Effect::RefreshCallHistory);
+        state.missed.refreshes_asked = state.missed.refreshes_asked.saturating_add(1);
+    }
+    if !ended.rang_out() {
+        return;
+    }
+    if refreshes {
+        state.missed.unconfirmed.push(Unconfirmed {
+            call: ended.id,
+            caller: ended.caller.clone(),
+            at: ended.added_at,
+            before: state.call_history.clone(),
+            refresh: state.missed.refreshes_asked,
+        });
+    } else {
+        missed(
+            state,
+            ended.id,
+            ended.caller.clone(),
+            ended.added_at,
+            effects,
+        );
+    }
+}
+
+fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    let Some(index) = state.calls.iter().position(|known| known.id == call) else {
+        return;
+    };
+    let ended = state.calls.remove(index);
+    if state.unwanted == Some(call) {
+        state.unwanted = None;
+    } else if ended.has_call_window() {
+        state.ended = Some(EndedCall {
+            id: ended.id,
+            caller: ended.caller,
+        });
+        effects.push(Effect::StartTimer {
+            timer: Timer::CloseCallWindow(call),
+            after_ms: CALL_ENDED_MS,
+        });
+    }
+    if state.calls.is_empty() {
+        state.codec = None;
+        state.moving_audio = None;
+        state.restore_audio = None;
+        state.audio_notice = None;
+        effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}

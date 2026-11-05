@@ -241,6 +241,65 @@ fn wait_for_phone_listed(harness: &Harness) -> AppState {
     })
 }
 
+/// Moves keyboard focus back from the step to Set up audio, which takes
+/// none by itself, and presses it.
+fn press_set_up_audio(harness: &Harness) {
+    harness.keyboard().press_with_shift(Key::Tab);
+    harness.wait_for_app("Set up audio has focus", DEADLINE, |state| {
+        field(state, "focused") == Some("true")
+    });
+    harness.keyboard().press(Key::Return);
+}
+
+fn window_field<'state>(state: &'state AppState, name: &str) -> Option<&'state str> {
+    state.surface("setup-window")?.get(name).map(String::as_str)
+}
+
+#[test]
+fn with_audio_not_set_up_enter_on_the_code_confirms_it_and_leaves_audio_alone() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_unpaired()
+        .wireplumber_config("51-music.conf", ROLES_WITHOUT_HANDS_FREE)
+        .start();
+    wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    harness.wait_for_app("the Desktop is discoverable", DEADLINE, |state| {
+        window_field(state, "desktop").is_some()
+    });
+
+    harness
+        .simulated_phone()
+        .pair_from_phone()
+        .expect("the Phone finds the Desktop");
+    harness.wait_for_app("the code shows, with focus", DEADLINE, |state| {
+        window_field(state, "step") == Some("confirm")
+            && window_field(state, "focused") == Some("true")
+    });
+    harness.keyboard().press(Key::Return);
+
+    let give_up = std::time::Instant::now() + DEADLINE;
+    loop {
+        let requests = harness.simulated_phone().pairing_requests();
+        if requests.last().is_some_and(|(_, outcome)| outcome == "confirmed") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < give_up,
+            "the code isn't confirmed after {DEADLINE:?}: {requests:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    harness.simulated_phone().recorded_holds(
+        "WirePlumber not restarted",
+        BEFORE_CONSENT,
+        |recorded| !restarts_wireplumber(recorded),
+    );
+    assert!(
+        !harness.wireplumber_drop_ins().contains_key(DROP_IN),
+        "no drop-in written"
+    );
+}
+
 #[test]
 fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
     let harness = Harness::builder()
@@ -311,7 +370,8 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
         |recorded| !restarts_wireplumber(recorded) && harness.wireplumber_drop_ins() == before,
     );
 
-    harness.keyboard().press(Key::Return);
+    wait_for_phone_listed(&harness);
+    press_set_up_audio(&harness);
 
     harness.simulated_phone().wait_for_recorded(
         "WirePlumber is restarted",
@@ -340,8 +400,9 @@ fn keeping_audio_off_the_phone_turned_off_alone_is_a_problem_even_in_an_odd_drop
         .wireplumber_config("51-odd.conf", ODD)
         .start();
     wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
 
-    harness.keyboard().press(Key::Return);
+    press_set_up_audio(&harness);
 
     harness.simulated_phone().wait_for_recorded(
         "WirePlumber is restarted",
@@ -390,8 +451,9 @@ monitor.bluez.rules = [
         .wireplumber_config("51-music.conf", MUSIC_ONLY)
         .start();
     wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
 
-    harness.keyboard().press(Key::Return);
+    press_set_up_audio(&harness);
 
     harness.simulated_phone().wait_for_recorded(
         "WirePlumber is restarted",
@@ -417,8 +479,9 @@ fn a_drop_in_of_the_users_own_by_the_same_name_keeps_everything_else_in_it() {
         .wireplumber_config(DROP_IN, ROLES_WITHOUT_HANDS_FREE)
         .start();
     wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
 
-    harness.keyboard().press(Key::Return);
+    press_set_up_audio(&harness);
 
     harness.simulated_phone().wait_for_recorded(
         "WirePlumber is restarted",
@@ -446,8 +509,9 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
         .wireplumber_config_folder(DROP_IN)
         .start();
     wait_for_problems(&harness, "audio-not-set-up", STARTUP);
+    wait_for_phone_listed(&harness);
 
-    harness.keyboard().press(Key::Return);
+    press_set_up_audio(&harness);
 
     let folder = harness
         .directory()
@@ -586,7 +650,7 @@ fn a_problem_stays_while_the_phone_comes_and_goes_and_setting_up_audio_keeps_aud
     let output = harness.cli(&["connect"]);
     assert!(output.status.success(), "{output:?}");
     wait_for_problems(&harness, "audio-not-set-up", DEADLINE);
-    harness.keyboard().press(Key::Return);
+    press_set_up_audio(&harness);
 
     harness.simulated_phone().wait_for_recorded(
         "WirePlumber restarted, and audio kept on the Phone again after it",

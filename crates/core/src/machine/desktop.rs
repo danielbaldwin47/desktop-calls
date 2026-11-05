@@ -99,8 +99,9 @@ pub struct SetupProblemsView {
     pub fixing: Option<DesktopFix>,
     /// Why putting a Problem right didn't work, until the user tries again.
     pub notice: Option<FixFailure>,
-    /// A Problem keeps the Phone away, so it comes before pairing: its
-    /// button takes keyboard focus. Contacts support missing doesn't.
+    /// Bluetooth is off or blocked while choosing a Phone, so nothing can
+    /// pair until it is put right: the Problem's button takes keyboard
+    /// focus. Other Problems, and later steps, leave Enter to the step.
     pub takes_focus: bool,
 }
 
@@ -151,7 +152,13 @@ impl State {
             problems,
             fixing: self.desktop.fixing,
             notice: self.desktop.notice,
-            takes_focus: self.desktop_keeps_phone_away(),
+            // Only while choosing a Phone, and only for what stops pairing:
+            // later steps keep Enter for themselves.
+            takes_focus: self.desktop.bluetooth_off()
+                && self
+                    .setup
+                    .as_ref()
+                    .is_some_and(super::setup::Setup::choosing),
         })
     }
 }

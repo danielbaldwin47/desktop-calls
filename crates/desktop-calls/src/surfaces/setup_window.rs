@@ -308,7 +308,9 @@ impl SetupWindow {
             self.step_reached(step);
         } else if relisted
             && self.list.focus_child().is_none()
-            && !(self.top_keeps_focus.get() && self.top_has_focus())
+            // Before the first Phone shows, focus on top is GTK's default
+            // and goes to the Phone; after, the user put it there.
+            && !(self.top_has_focus() && (self.top_keeps_focus.get() || self.listed.get()))
         {
             self.focus_default();
         }

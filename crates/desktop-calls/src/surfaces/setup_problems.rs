@@ -1,10 +1,10 @@
 //! The Desktop's Problems, at the top of the Setup Window: each with its
 //! heading, one plain sentence, and either the button that puts it right
 //! once pressed (Turn on, Set up audio) or the command to run and a button
-//! that copies it. When a Problem that keeps the Phone away shows, or the
-//! Problems or the step change, the first one's button has keyboard focus,
-//! so Enter presses it; Tab moves on. Contacts support missing alone takes
-//! no focus, so Enter still pairs.
+//! that copies it. While Bluetooth is off or blocked on the choose step,
+//! the first button has keyboard focus, so Enter presses it; otherwise the
+//! step keeps focus, so Enter pairs or confirms, and Shift+Tab reaches the
+//! Problems.
 //!
 //! It reports `setup-problems` while shown, with `problems` (kinds),
 //! `headings`, `messages`, `commands` and `buttons` (one per line, in

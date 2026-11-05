@@ -113,6 +113,13 @@ pub enum SetupStep {
     Done { phone: Phone },
 }
 
+impl Setup {
+    /// Whether the window is at its first step, choosing a Phone.
+    pub(super) fn choosing(&self) -> bool {
+        matches!(self.step, Step::Choose)
+    }
+}
+
 impl SetupStep {
     /// The lower-case name the control interface's `Surfaces` and the
     /// journal use.

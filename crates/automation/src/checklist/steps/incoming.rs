@@ -268,10 +268,11 @@ pub(super) fn decline_on_the_pixel(sitting: &mut Sitting) -> Result<(), Stop> {
 }
 
 /// 2.7: under Omarchy's Do Not Disturb a Call still shows the Banner, but
-/// the Desktop never rings, and Decline on the Desktop still works. The
-/// runner sees `DoNotDisturb`, the Banner and `Ringing`; it asks only
-/// whether the speakers stayed silent. It ends with Do Not Disturb off, as
-/// the steps after it need.
+/// the Desktop never rings. Decline on the Desktop still works, and a
+/// second Call answered on the Pixel is told apart from it. The runner sees
+/// `DoNotDisturb`, the Banner and `Ringing`; it asks only whether the
+/// speakers stayed silent. It ends with Do Not Disturb off, as the steps
+/// after it need.
 pub(super) fn do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.say(
         "Turn Do Not Disturb on: click the bell in Omarchy's bar, or press Super+Ctrl+Alt+Comma.",
@@ -282,6 +283,31 @@ pub(super) fn do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
     })?;
     sitting.observed("Desktop Calls saw Do Not Disturb turn on.".to_owned());
     let quiet_since = sitting.mark();
+    declined_under_do_not_disturb(sitting)?;
+    answered_on_the_pixel_under_do_not_disturb(sitting)?;
+    let rang = sitting.seen_since(quiet_since, |state| state.ringing);
+    sitting.check(
+        rang.is_none(),
+        if rang.is_none() {
+            "The Banner showed for both Calls and the Desktop never rang (Ringing stayed false)."
+                .to_owned()
+        } else {
+            "The Desktop rang under Do Not Disturb (Ringing was true).".to_owned()
+        },
+    );
+    sitting.say(
+        "Turn Do Not Disturb off again, the same way.",
+        &["do-not-disturb-off"],
+    );
+    sitting.wait_for("Do Not Disturb turning off", ACT_DEADLINE, |state| {
+        !state.do_not_disturb
+    })?;
+    sitting.observed("Desktop Calls saw Do Not Disturb turn off.".to_owned());
+    Ok(())
+}
+
+/// 2.7's first Call: the user listens, then declines on the Desktop.
+fn declined_under_do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
     let call = helper_calls(sitting, "Ask your helper to call you.")?;
     sitting.say(
         "Listen to the Desktop's speakers for a few seconds, then click Decline on the Banner.",
@@ -290,15 +316,6 @@ pub(super) fn do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
     let declined = sitting.wait_for("Decline on the Desktop", ACT_DEADLINE, |state| {
         handled_on_desktop(state, call) || stopped_ringing(state, call)
     })?;
-    let rang = sitting.seen_since(quiet_since, |state| state.ringing);
-    sitting.check(
-        rang.is_none(),
-        if rang.is_none() {
-            "The Banner showed and the Desktop never rang (Ringing stayed false).".to_owned()
-        } else {
-            "The Desktop rang under Do Not Disturb (Ringing was true).".to_owned()
-        },
-    );
     let silent =
         sitting.ask("Apart from the Pixel itself, was the Desktop silent while the Call rang?")?;
     sitting.check(
@@ -334,14 +351,50 @@ pub(super) fn do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
     if sitting.now().call(call).is_some() {
         call_ends(sitting, call, "Hang up, on either device.", &["hang-up"])?;
     }
+    Ok(())
+}
+
+/// 2.7's second Call: answered on the Pixel, which the runner must not take
+/// for Answer or Decline on the Desktop, though under Do Not Disturb both
+/// close the Banner. The control interface publishes the Call answered
+/// before the Banner closing (ticket #107), so the two can't be confused.
+fn answered_on_the_pixel_under_do_not_disturb(sitting: &mut Sitting) -> Result<(), Stop> {
+    let call = helper_calls(sitting, "Ask your helper to call you again.")?;
     sitting.say(
-        "Turn Do Not Disturb off again, the same way.",
-        &["do-not-disturb-off"],
+        "This time answer on the Pixel, not on the Desktop.",
+        &["answer-on-phone"],
     );
-    sitting.wait_for("Do Not Disturb turning off", ACT_DEADLINE, |state| {
-        !state.do_not_disturb
+    let answered = sitting.wait_for("the Call being answered", ACT_DEADLINE, |state| {
+        handled_on_desktop(state, call) || stopped_ringing(state, call)
     })?;
-    sitting.observed("Desktop Calls saw Do Not Disturb turn off.".to_owned());
+    if handled_on_desktop(&answered.state, call) {
+        sitting.check(
+            false,
+            "The Banner closed while the Call still rang: handled on the Desktop, not answered on the Pixel.".to_owned(),
+        );
+    } else if answered.state.call(call).is_none() {
+        sitting.check(false, "The Call ended without being answered.".to_owned());
+        return Ok(());
+    } else {
+        let closed = sitting.wait_for("the Banner closing", APP_DEADLINE, |state| {
+            !state.shows("banner")
+        })?;
+        sitting.check(
+            true,
+            format!(
+                "Told apart from Decline on the Desktop: answered on the Pixel, and the Banner closed {} after.",
+                seconds(closed.at - answered.at)
+            ),
+        );
+    }
+    if sitting.now().call(call).is_some() {
+        call_ends(
+            sitting,
+            call,
+            "Hang up, on either device.",
+            &["hang-up-on-phone"],
+        )?;
+    }
     Ok(())
 }
 

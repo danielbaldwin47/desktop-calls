@@ -12,7 +12,7 @@ use futures_util::StreamExt as _;
 use zbus::fdo::PropertiesProxy;
 
 use super::app::{
-    AppCallHistoryEntry, AppDialerRow, AppError, AppState, MissedCall, ShownSurfaces,
+    AppCallHistoryEntry, AppDialerRow, AppError, AppState, MissedCall, Published, ShownSurfaces,
     read_app_state,
 };
 use super::{APP_BUS_NAME, APP_INTERFACE, APP_PATH, DESKTOP_FILE, Harness, within};
@@ -21,6 +21,10 @@ use super::{APP_BUS_NAME, APP_INTERFACE, APP_PATH, DESKTOP_FILE, Harness, within
 /// the app's stall watch ticks every 20 ms and notices a held-up main loop
 /// on the first tick after it is free again.
 const STALL_REPORT: Duration = Duration::from_millis(200);
+
+/// How long the harness may take to collect a `PropertiesChanged` signal
+/// the app has already sent.
+const SIGNALS_ARRIVE: Duration = Duration::from_secs(2);
 
 impl Harness {
     /// Reads the app's state from its control interface.
@@ -669,10 +673,49 @@ impl Harness {
     /// briefly.
     #[must_use]
     pub fn surfaces_seen(&self) -> Vec<ShownSurfaces> {
-        self.surfaces_seen
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        let mut seen: Vec<ShownSurfaces> = Vec::new();
+        for published in self.published() {
+            // A signal that changed only `Calls` leaves `Surfaces` as it was.
+            if seen.last().unwrap_or(&ShownSurfaces::new()) != &published.surfaces {
+                seen.push(published.surfaces);
+            }
+        }
+        seen
+    }
+
+    /// The app's `Calls` and `Surfaces` just after each of its
+    /// `PropertiesChanged` signals that changed either, since the scenario
+    /// started, in the order the app sent them: what a client following the
+    /// control interface saw, step by step. Returns once the signals
+    /// collected have caught up with the state the app publishes now.
+    ///
+    /// # Panics
+    ///
+    /// If they haven't caught up within [`SIGNALS_ARRIVE`].
+    #[must_use]
+    pub fn published(&self) -> Vec<Published> {
+        let started = Instant::now();
+        loop {
+            let now = self.app_state();
+            let published = self
+                .published
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            let last = published.last().cloned().unwrap_or_default();
+            if last.calls == now.calls && last.surfaces == now.surfaces {
+                return published;
+            }
+            assert!(
+                started.elapsed() < SIGNALS_ARRIVE,
+                "the app's PropertiesChanged signals collected show {last:?}, \
+                 but it publishes {:?} and {:?}{}",
+                now.calls,
+                now.surfaces,
+                self.timeline.render()
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Asks the app to Call `number`, a number or a `tel:` link, as any

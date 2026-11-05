@@ -43,6 +43,9 @@ pub struct BannerView {
     /// The Call rings while another is connected, so the Banner offers Hold
     /// & answer, End & answer and Decline instead of Answer and Decline.
     pub waiting: bool,
+    /// The Call rang with no number, and the Phone may still report one,
+    /// so the Banner doesn't yet say the number is withheld.
+    pub awaiting_number: bool,
 }
 
 /// The Call Window's content.
@@ -168,7 +171,7 @@ impl State {
         let banner = self
             .calls
             .iter()
-            .filter(|_| !self.presence.absent)
+            .filter(|_| !self.presence.absent())
             .find(|call| call.rings_here())
             .map(|call| BannerView {
                 call: call.id,
@@ -178,6 +181,8 @@ impl State {
                 waiting: self
                     .waiting_call()
                     .is_some_and(|waiting| waiting.id == call.id),
+                awaiting_number: call.caller == Caller::Withheld
+                    && self.awaiting_number.contains(&call.id),
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.

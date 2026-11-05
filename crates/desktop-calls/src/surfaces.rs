@@ -43,7 +43,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
 
-use crate::control::ShownSurfaces;
+use crate::control::{Published, ShownSurfaces};
 use crate::hyprland::{self, Unknown};
 use crate::logging::EventKind;
 use crate::theme::Theme;
@@ -186,8 +186,10 @@ impl Surfaces {
         self.first_frames.while_quiet(quiet);
     }
 
-    /// Shows, updates or hides each surface to match `view`.
-    pub fn render(&self, view: &desktop_calls_core::Surfaces) {
+    /// Shows, updates or hides each surface to match `view`, once the state
+    /// it follows from is `_published`, so `Surfaces` never runs ahead of
+    /// the Calls on the control interface.
+    pub fn render(&self, view: &desktop_calls_core::Surfaces, _published: &Published) {
         if view.banner.is_some() && !self.banner.surface.window.is_visible() {
             // The toast column may have changed since; the Banner moves if so.
             self.place_beside_toasts();

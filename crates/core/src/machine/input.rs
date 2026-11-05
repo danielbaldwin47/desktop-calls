@@ -166,6 +166,10 @@ pub enum PhoneCommand {
     /// and connecting it again at once (ADR-0005). The Call goes with
     /// hands-free and comes back with it, still live.
     MoveAudioToPhone,
+    /// Connect hands-free to the Phone again, after it dropped for
+    /// [`PhoneCommand::MoveAudioToPhone`] and didn't come back. Hands-free
+    /// coming up is reported as [`Input::PhoneConnected`], whenever it does.
+    ConnectHandsFree,
     /// Let the Phone bring the next Call's audio to the Desktop.
     AllowAudioOnDesktop,
     /// Place a Call to this number, already checked as dialable.
@@ -251,6 +255,9 @@ pub enum Timer {
     /// The Call Window has said for long enough why the Phone refused Hold &
     /// answer, End & answer or Swap, by the refusal with this number.
     DismissCallWaitingNotice(u32),
+    /// The Phone has had long enough to report the number of this Call,
+    /// which rang with none: if it hasn't by now, the number is withheld.
+    NumberLate(CallId),
 }
 
 /// Something the shell adapters must do.

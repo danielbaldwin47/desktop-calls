@@ -1,9 +1,10 @@
 //! Whether the Phone is within reach: connecting it again while it is away,
-//! suspend and resume, the pairing lost, and a Call that loses the Bluetooth
-//! connection to the Phone.
+//! or while hands-free hasn't come back after a Handoff to the Phone,
+//! suspend and resume, the pairing lost, and a Call that loses the
+//! connection to the Phone either way.
 
 use super::audio::end_handoff_to_phone;
-use super::input::{ConnectFailure, Effect, Input, Timer};
+use super::input::{ConnectFailure, Effect, Input, PhoneCommand, Timer};
 use super::{CONNECTION_LOST_MS, ConnectionLost, LOST_CALL_BACK_MS, RECONNECT_WAITS_MS, State};
 use crate::call::{CallId, Transport};
 use crate::connection::ConnectionState;
@@ -12,14 +13,36 @@ use crate::earlier_run::EarlierCall;
 /// Whether the Phone is within reach, and what the Desktop does about it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Presence {
-    /// BlueZ reported the Phone's Bluetooth connection down, and not up
-    /// again since.
-    pub(super) absent: bool,
+    reach: Reach,
     /// The Desktop is suspending, or suspended.
     suspended: bool,
     /// The Phone answered a connect, and no longer has the Desktop paired.
     pub(super) pairing_lost: bool,
     reconnect: Reconnect,
+}
+
+/// How much of the Phone the Desktop reaches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Reach {
+    /// The Phone has a Bluetooth connection to the Desktop, as far as BlueZ
+    /// has said.
+    #[default]
+    Present,
+    /// BlueZ reported the Phone's Bluetooth connection down, and not up
+    /// again since.
+    Absent,
+    /// The Phone is present, and hands-free dropped for a Handoff to the
+    /// Phone and didn't come back: the Desktop connects hands-free again
+    /// (ticket #101).
+    HandsFreeLost,
+}
+
+impl Presence {
+    /// BlueZ reported the Phone's Bluetooth connection down, and not up
+    /// again since.
+    pub(super) fn absent(&self) -> bool {
+        self.reach == Reach::Absent
+    }
 }
 
 /// How the Desktop is connecting the Phone again while it is away.
@@ -40,10 +63,21 @@ struct Reconnect {
 
 impl State {
     /// Whether the Desktop should be connecting the Phone: it is paired,
-    /// away, the Desktop is awake, and the Phone still has it paired.
+    /// away or without hands-free, the Desktop is awake, and the Phone still
+    /// has it paired.
     fn wants_phone(&self) -> bool {
         let presence = &self.presence;
-        self.phone.is_some() && presence.absent && !presence.suspended && !presence.pairing_lost
+        self.phone.is_some()
+            && presence.reach != Reach::Present
+            && !presence.suspended
+            && !presence.pairing_lost
+    }
+
+    /// Whether the Calls are out of the Desktop's reach: the Phone is away,
+    /// or hands-free didn't come back after a Handoff to the Phone. The Phone
+    /// link giving up on a Call then says nothing about how it ended.
+    pub(super) fn calls_out_of_reach(&self) -> bool {
+        self.presence.reach != Reach::Present
     }
 }
 
@@ -76,7 +110,9 @@ pub(super) fn forget_phone(state: &State) -> State {
 
 /// The Phone has a Bluetooth connection to the Desktop again, or still.
 fn phone_present(state: &mut State) {
-    state.presence.absent = false;
+    if state.presence.absent() {
+        state.presence.reach = Reach::Present;
+    }
     state.presence.reconnect.failures = 0;
     // Any wait under way is over.
     state.presence.reconnect.wait += 1;
@@ -96,12 +132,51 @@ pub(super) fn pairing_found(state: &mut State) {
 /// or its Bluetooth is off. A connected Call carries on on the Phone, and
 /// the Call Window says so. The Desktop starts connecting it again at once.
 fn phone_absent(state: &mut State, effects: &mut Vec<Effect>) {
-    let was_absent = state.presence.absent;
-    state.presence.absent = true;
+    let was_absent = state.presence.absent();
+    // Connecting the Phone brings hands-free back with it.
+    state.presence.reach = Reach::Absent;
     if !was_absent {
         lose_calls(state, effects);
     }
     connect_now(state, effects);
+}
+
+/// Hands-free dropped for a Handoff to the Phone and isn't coming back by
+/// itself, while the Phone is still present. The Call went to the Phone
+/// with the audio and carries on there, out of the Desktop's reach, as for
+/// a Phone out of range. The drop's own `ConnectProfile` counts as the
+/// first failed connect, so the Desktop asks BlueZ again after the first
+/// wait.
+pub(super) fn hands_free_lost(state: &mut State, effects: &mut Vec<Effect>) {
+    lose_calls(state, effects);
+    if state.presence.absent() {
+        return;
+    }
+    state.presence.reach = Reach::HandsFreeLost;
+    state.presence.reconnect.failures = 1;
+    if !state.presence.reconnect.connecting {
+        connect_later(state, effects);
+    }
+}
+
+/// Hands-free is up: any connect it needed is over.
+pub(super) fn hands_free_back(state: &mut State) {
+    if state.presence.reach == Reach::HandsFreeLost {
+        state.presence.reach = Reach::Present;
+        state.presence.reconnect.failures = 0;
+        state.presence.reconnect.wait += 1;
+        state.presence.reconnect.at_once = false;
+    }
+}
+
+/// BlueZ connected hands-free as the Desktop asked: it shows up by itself.
+pub(super) fn hands_free_connect_done(state: &mut State, effects: &mut Vec<Effect>) {
+    connect_done(state, effects);
+}
+
+/// BlueZ couldn't connect hands-free: the Desktop asks again after a wait.
+pub(super) fn hands_free_connect_failed(state: &mut State, effects: &mut Vec<Effect>) {
+    connect_failed(state, ConnectFailure::Unreachable, effects);
 }
 
 /// The Calls can't be acted on from here any more. The live one in the
@@ -211,7 +286,8 @@ pub(super) fn connection_lost_over(state: &mut State, loss: u32) {
 }
 
 /// Asks BlueZ to connect the Phone now, if the Desktop wants it, or as soon
-/// as the connect under way ends.
+/// as the connect under way ends. A Phone that is present only needs
+/// hands-free.
 fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
     if !state.wants_phone() {
         return;
@@ -225,9 +301,13 @@ fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
     };
     state.presence.reconnect.wait += 1;
     state.presence.reconnect.connecting = true;
-    effects.push(Effect::ConnectPhone {
-        address: phone.address.clone(),
-    });
+    if state.presence.absent() {
+        effects.push(Effect::ConnectPhone {
+            address: phone.address.clone(),
+        });
+    } else {
+        effects.push(Effect::Phone(PhoneCommand::ConnectHandsFree));
+    }
 }
 
 /// Waits a while, longer the more connects have failed, then connects.
@@ -262,7 +342,7 @@ fn connect_failed(state: &mut State, failure: ConnectFailure, effects: &mut Vec<
     match failure {
         ConnectFailure::PairingLost => {
             state.presence.reconnect.at_once = false;
-            if state.phone.is_some() && state.presence.absent {
+            if state.phone.is_some() && state.presence.absent() {
                 state.presence.pairing_lost = true;
                 state.connection = ConnectionState::PairingLost;
             }

@@ -1,8 +1,8 @@
 //! The BlueZ client: which paired Phones exist and whether each is within
-//! reach (ADR-0004), and the two writes the Desktop makes to BlueZ:
-//! connecting the Phone while it is away (ADR-0004), and dropping
-//! hands-free and connecting it again, which moves a Call's audio to the
-//! Phone (ADR-0005).
+//! reach (ADR-0004), and the writes the Desktop makes to BlueZ: connecting
+//! the Phone while it is away (ADR-0004), dropping hands-free and connecting
+//! it again, which moves a Call's audio to the Phone (ADR-0005), and
+//! connecting hands-free once more if it didn't come back (ticket #101).
 //!
 //! It reports each paired Bluetooth device that offers the Hands-Free Audio
 //! Gateway profile, which is what makes it a Phone that can carry Calls,
@@ -259,18 +259,48 @@ pub async fn bounce_hands_free(system: &Connection, address: &str) -> Result<(),
     {
         return Err(bounce_failed(BounceError::NotDropped, &error));
     }
+    connect_profile(system, &device)
+        .await
+        .map_err(|error| bounce_failed(BounceError::NotReconnected, &error))
+}
+
+/// Connects hands-free to the Phone at `address` again, after it dropped to
+/// move a Call's audio to the Phone and didn't come back: `ConnectProfile`
+/// for the Hands-Free Audio Gateway profile only, as the drop's own second
+/// step (ADR-0005). The Call comes back with hands-free.
+///
+/// # Errors
+///
+/// Why it didn't connect; the raw BlueZ error is logged here.
+pub async fn connect_hands_free(system: &Connection, address: &str) -> Result<(), BounceError> {
+    let device = device_path(system, address).await?;
+    connect_profile(system, &device).await.map_err(|error| {
+        tracing::info!(
+            event_kind = %EventKind::PhoneCommandFailed,
+            error_kind = BounceError::NotReconnected.as_str(),
+            phone_address = %address,
+            detail = %error,
+            "BlueZ couldn't connect hands-free again"
+        );
+        BounceError::NotReconnected
+    })
+}
+
+/// `ConnectProfile` for the Hands-Free Audio Gateway profile on BlueZ's
+/// `device`. `AlreadyConnected` and `InProgress` count as connected: the
+/// Phone connected hands-free itself, first.
+async fn connect_profile(system: &Connection, device: &str) -> zbus::Result<()> {
     match system
         .call_method(
             Some(SERVICE),
-            device.as_str(),
+            device,
             Some(DEVICE),
             "ConnectProfile",
-            &profile,
+            &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
         )
         .await
     {
         Ok(_) => Ok(()),
-        // The Phone connected hands-free again itself, first.
         Err(zbus::Error::MethodError(name, _, _))
             if matches!(
                 name.as_str(),
@@ -279,7 +309,7 @@ pub async fn bounce_hands_free(system: &Connection, address: &str) -> Result<(),
         {
             Ok(())
         }
-        Err(error) => Err(bounce_failed(BounceError::NotReconnected, &error)),
+        Err(error) => Err(error),
     }
 }
 

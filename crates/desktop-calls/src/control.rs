@@ -2,7 +2,8 @@
 //! CLI, tests, the keybinding and the Indicator.
 //!
 //! It publishes the Call state machine's state as properties with change
-//! signals, turns method calls into user intents for the state machine,
+//! signals, each state before the surfaces that follow from it (see
+//! [`Published`]), turns method calls into user intents for the state machine,
 //! signals failures as `Error(kind, message)` with the Messages text, and
 //! signals Missed Calls as `MissedCall`. Bus name, object path and interface
 //! are in `CODING_STANDARDS.md`.
@@ -19,6 +20,8 @@ use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, DBusError, interface};
+
+use crate::logging::EventKind;
 
 pub const BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls";
 pub const PATH: &str = "/io/github/danielbaldwin47/DesktopCalls";
@@ -458,6 +461,26 @@ impl ControlInterface {
     }
 }
 
+/// Proof that the control interface has published a state of the Call
+/// state machine: its change signals are sent. Rendering the surfaces and
+/// the Indicator takes one, and only [`Publisher::publish`] makes one, so
+/// nothing that follows from a state can show before the state is
+/// published. A client following the control interface therefore sees each
+/// Call change before the surface changes it causes, such as a Call answered
+/// on the Phone before its Banner closing (ticket #107).
+#[must_use = "the surfaces render only once their state is published"]
+pub struct Published(());
+
+/// Logs a change the control interface couldn't signal.
+pub fn publish_failed(error: &zbus::Error) {
+    tracing::warn!(
+        event_kind = %EventKind::PublishFailed,
+        error_kind = "publish-failed",
+        detail = %error,
+        "Couldn't publish the new state on the control interface"
+    );
+}
+
 /// Publishes new state on the control interface.
 #[derive(Clone)]
 pub struct Publisher {
@@ -485,8 +508,17 @@ impl Publisher {
         Ok(Self { interface })
     }
 
-    /// Publishes `state`, signalling each property that changed.
-    pub async fn publish(&self, state: &State) -> zbus::Result<()> {
+    /// Publishes `state`, signalling each property that changed, and hands
+    /// back the proof that rendering what follows from it needs. A signal
+    /// that can't be sent is logged: the surfaces still show.
+    pub async fn publish(&self, state: &State) -> Published {
+        if let Err(error) = self.signal_changes(state).await {
+            publish_failed(&error);
+        }
+        Published(())
+    }
+
+    async fn signal_changes(&self, state: &State) -> zbus::Result<()> {
         let emitter = self.interface.signal_emitter();
         let published = self.interface.get().await;
         let old = std::mem::replace(&mut *published.state(), state.clone());

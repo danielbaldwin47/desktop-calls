@@ -2,8 +2,8 @@
 //! hanging up and keypad tones, and the timers that close them.
 
 use super::audio::{
-    ask_once_more, audio_not_moved, bring_audio_here, call_back, end_handoff_to_phone,
-    restore_audio, to_phone_timed_out,
+    ask_once_more, audio_not_moved, bring_audio_here, call_back, call_gone_mid_handoff,
+    end_handoff_to_phone, restore_audio, to_phone_timed_out,
 };
 use super::call_waiting::{dismiss_notice, hold_and_answer};
 use super::dialling::{adopt_dialled, dial_failed};
@@ -51,9 +51,11 @@ pub(super) fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Ef
 }
 
 /// The Phone reports the Call over: it leaves the Desktop, and if it rang
-/// out, it may be a Missed Call.
+/// out, it may be a Missed Call. With the Calls out of reach, the Phone
+/// link has only given up on it.
 pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
-    if state.presence.absent {
+    call_gone_mid_handoff(state, effects);
+    if state.calls_out_of_reach() {
         lost_track(state, call);
         return;
     }
@@ -69,6 +71,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
         Timer::ForgetEarlierRun => state.earlier_calls.clear(),
         Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
+        Timer::NumberLate(call) => state.awaiting_number.retain(|id| *id != call),
         Timer::DismissDial(attempt) => {
             if state
                 .notice

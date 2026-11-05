@@ -111,6 +111,24 @@ const STATES: &[State] = &[
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
+        name: "incoming-call-banner-identifying",
+        title: "The Incoming Call Banner, ringing with no number yet, which may still come",
+        reach: |harness| {
+            connect(harness);
+            // A withheld number: the Banner identifies the caller for as long
+            // as the Phone may still report one, longer than the
+            // `late-line-identification` quirk's number takes.
+            let _path = harness.simulated_phone().ring("");
+            harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
+                state
+                    .surface("banner")
+                    .and_then(|banner| banner.get("caller"))
+                    .is_some_and(|caller| caller == "Identifying caller…")
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
         name: "call-window-live",
         title: "The Call Window, answered here, with HD audio on this computer",
         reach: |harness| {
@@ -257,6 +275,34 @@ const STATES: &[State] = &[
                     .is_some_and(|window| window.contains_key("held-caller"))
                     && state.surface("banner").is_none()
             });
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-window-connection-lost",
+        title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        reach: |harness| {
+            connect(harness);
+            let call = ring(harness);
+            harness.answer(call);
+            harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
+                state.audio_location == "desktop"
+            });
+            harness
+                .simulated_phone()
+                .enable_quirk("connect-profile-fails");
+            harness
+                .move_audio("phone")
+                .unwrap_or_else(|error| panic!("move the audio to the phone: {error:?}"));
+            harness.wait_for_app(
+                "the Call Window says the connection is lost",
+                DEADLINE,
+                |state| {
+                    state
+                        .surface("call-window")
+                        .is_some_and(|window| window.contains_key("notice"))
+                },
+            );
         },
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },

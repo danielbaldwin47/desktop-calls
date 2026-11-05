@@ -189,19 +189,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
     };
     let connection_state = String::try_from(property("ConnectionState")?)?;
     let (name, address) = <(String, String)>::try_from(property("Phone")?)?;
-    let calls = <Vec<(u32, String, String, String, String, u64)>>::try_from(property("Calls")?)?
-        .into_iter()
-        .map(
-            |(id, direction, state, number, display_name, active_since_ms)| AppCall {
-                id,
-                direction,
-                state,
-                number,
-                display_name,
-                active_since_ms,
-            },
-        )
-        .collect();
+    let calls = read_calls(property("Calls")?)?;
     let (codec, wideband) = <(String, bool)>::try_from(property("Codec")?)?;
     let surfaces = <BTreeMap<String, BTreeMap<String, String>>>::try_from(property("Surfaces")?)?;
     let (state, contacts, call_history, deadline_ms, reason) =
@@ -234,6 +222,25 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         },
         problems,
     })
+}
+
+/// Reads a value of the `Calls` property.
+fn read_calls(value: zbus::OwnedVariant) -> zbus::Result<Vec<AppCall>> {
+    Ok(
+        <Vec<(u32, String, String, String, String, u64)>>::try_from(value)?
+            .into_iter()
+            .map(
+                |(id, direction, state, number, display_name, active_since_ms)| AppCall {
+                    id,
+                    direction,
+                    state,
+                    number,
+                    display_name,
+                    active_since_ms,
+                },
+            )
+            .collect(),
+    )
 }
 
 /// Collects every `Error` signal the app sends on `session`, from now on.
@@ -297,9 +304,20 @@ fn collect_signal<T: Send + 'static>(
     signals
 }
 
-/// Collects every value of the app's `Surfaces` property that its
-/// `PropertiesChanged` signals carry, from now on.
-pub(super) fn collect_surfaces(session: &Connection) -> Arc<Mutex<Vec<ShownSurfaces>>> {
+/// The app's `Calls` and `Surfaces` as published just after one of its
+/// `PropertiesChanged` signals that carried either.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Published {
+    /// `Calls`, oldest first.
+    pub calls: Vec<AppCall>,
+    /// `Surfaces`: each shown surface with its key content.
+    pub surfaces: ShownSurfaces,
+}
+
+/// Collects, from now on, the app's `Calls` and `Surfaces` after each of its
+/// `PropertiesChanged` signals that carries either, in the order the app
+/// sent them.
+pub(super) fn collect_published(session: &Connection) -> Arc<Mutex<Vec<Published>>> {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let stream = zbus::block_on(async {
         let rule = MatchRule::builder()
@@ -315,6 +333,7 @@ pub(super) fn collect_surfaces(session: &Connection) -> Arc<Mutex<Vec<ShownSurfa
     thread::spawn(move || {
         zbus::block_on(async move {
             let mut stream = stream;
+            let mut published = Published::default();
             while let Some(Ok(message)) = stream.next().await {
                 let Ok((_, mut changed, _)) = message.body().deserialize::<(
                     String,
@@ -323,15 +342,25 @@ pub(super) fn collect_surfaces(session: &Connection) -> Arc<Mutex<Vec<ShownSurfa
                 )>() else {
                     continue;
                 };
-                let Some(surfaces) = changed.remove("Surfaces") else {
+                let calls = changed
+                    .remove("Calls")
+                    .and_then(|calls| read_calls(calls).ok());
+                let surfaces = changed
+                    .remove("Surfaces")
+                    .and_then(|surfaces| ShownSurfaces::try_from(surfaces).ok());
+                if calls.is_none() && surfaces.is_none() {
                     continue;
-                };
-                if let Ok(surfaces) = ShownSurfaces::try_from(surfaces) {
-                    collected
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(surfaces);
                 }
+                if let Some(calls) = calls {
+                    published.calls = calls;
+                }
+                if let Some(surfaces) = surfaces {
+                    published.surfaces = surfaces;
+                }
+                collected
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(published.clone());
             }
         });
     });

@@ -24,6 +24,7 @@ use zbus::fdo::DBusProxy;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, OwnedObjectPath, OwnedVariant, Variant, interface};
 
+use crate::control::Published;
 use crate::logging::EventKind;
 
 const WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
@@ -117,8 +118,9 @@ impl Indicator {
         Ok(Self { item, menu })
     }
 
-    /// Shows `view`, signalling the tray of each change.
-    pub async fn render(&self, view: &IndicatorView) -> zbus::Result<()> {
+    /// Shows `view`, signalling the tray of each change, once the state it
+    /// follows from is `_published` on the control interface.
+    pub async fn render(&self, view: &IndicatorView, _published: &Published) -> zbus::Result<()> {
         let emitter = self.item.signal_emitter();
         let mut item = self.item.get_mut().await;
         let old = std::mem::replace(&mut item.view, view.clone());

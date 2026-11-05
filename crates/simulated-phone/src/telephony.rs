@@ -136,6 +136,13 @@ pub enum Quirk {
     /// BlueZ refuses `DisconnectProfile` with `org.bluez.Error.Failed`, and
     /// hands-free stays up: the Desktop can't move the audio to the Phone.
     DisconnectProfileRefused,
+    /// After `DisconnectProfile`, BlueZ fails `ConnectProfile` with
+    /// `org.bluez.Error.Failed`, every time: hands-free stays down, and the
+    /// Calls carry on on the Phone (ticket #101).
+    ConnectProfileFails,
+    /// The same, the next time only: a later `ConnectProfile` brings
+    /// hands-free and the Calls back.
+    ConnectProfileFailsOnce,
     /// A ringing Call appears with no `LineIdentification`, and the caller's
     /// number follows [`LATE_LINE_IDENTIFICATION`] later in a
     /// `PropertiesChanged`, as PipeWire 1.6.9 reports a Phone without
@@ -171,6 +178,8 @@ impl Quirk {
             "activate-ignored-once" => Some(Self::ActivateIgnoredOnce),
             "earbuds-keep-audio" => Some(Self::EarbudsKeepAudio),
             "disconnect-profile-refused" => Some(Self::DisconnectProfileRefused),
+            "connect-profile-fails" => Some(Self::ConnectProfileFails),
+            "connect-profile-fails-once" => Some(Self::ConnectProfileFailsOnce),
             "late-line-identification" => Some(Self::LateLineIdentification),
             "hold-refused" => Some(Self::HoldRefused),
             _ => None,

@@ -247,12 +247,13 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
         "{declined:#}"
     );
     // 2.7: under Do Not Disturb the Banner shows, the Desktop never rings,
-    // and Decline on the Desktop is still told from the Pixel's.
+    // and Decline on the Desktop and Answer on the Pixel are told apart.
     let quiet = step(&result, "2.7");
     for seen in [
         "saw Do Not Disturb turn on",
         "never rang",
         "after Decline",
+        "Told apart from Decline on the Desktop: answered on the Pixel",
         "saw Do Not Disturb turn off",
     ] {
         assert!(

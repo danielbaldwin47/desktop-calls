@@ -4,8 +4,8 @@
 //! number formatting at startup). zbus and GTK run on it, zbus
 //! through [`GlibRuntime`]; the BlueZ client, the Phone link, the control
 //! interface, the Contacts sync and the surfaces turn what happens into
-//! inputs; the Call state machine decides; this module carries out its effects, renders the
-//! surfaces and publishes the state on the control interface.
+//! inputs; the Call state machine decides; this module carries out its effects,
+//! publishes the state on the control interface, then renders the surfaces.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -21,7 +21,7 @@ use futures_util::stream;
 use glib::MainContext;
 use zbus::Connection;
 
-use crate::control::{DialRequest, DialVerdict, Publisher, ShownSurfaces};
+use crate::control::{DialRequest, DialVerdict, Publisher, ShownSurfaces, publish_failed};
 use crate::do_not_disturb::DoNotDisturb;
 use crate::glib_runtime::GlibRuntime;
 use crate::indicator::Indicator;
@@ -339,7 +339,7 @@ impl Shell {
 }
 
 /// Feeds every input to the Call state machine, carries out its effects,
-/// renders the surfaces and publishes the new state. A Dial request's
+/// publishes the new state, then renders the surfaces. A Dial request's
 /// verdict waits for what the Call state machine says became of its dial
 /// attempt: placed, or not placed and why.
 async fn decide(
@@ -386,20 +386,23 @@ async fn decide(
             audio_moved(to);
         }
         if let Some(surfaces) = &shell.surfaces {
+            // Before publishing, so no first-frame work runs while it waits.
             surfaces.prepare_first_frames(
                 *next.connection_state() == ConnectionState::Connected
                     && next.calls().is_empty()
                     && shown == desktop_calls_core::Surfaces::default(),
             );
-            surfaces.render(&shown);
+        }
+        // Cause, then effect: rendering needs the proof that `next` is
+        // published (ticket #107).
+        let published = shell.publisher.publish(&next).await;
+        if let Some(surfaces) = &shell.surfaces {
+            surfaces.render(&shown, &published);
         }
         if let Some(indicator) = &shell.indicator
-            && let Err(error) = indicator.render(&next.indicator(&shown)).await
+            && let Err(error) = indicator.render(&next.indicator(&shown), &published).await
         {
             indicator_failed(&error);
-        }
-        if let Err(error) = shell.publisher.publish(&next).await {
-            publish_failed(&error);
         }
         state = next;
     }
@@ -487,13 +490,4 @@ fn place(location: AudioLocation) -> &'static str {
         AudioLocation::Desktop => "Desktop",
         AudioLocation::Phone => "Phone",
     }
-}
-
-fn publish_failed(error: &zbus::Error) {
-    tracing::warn!(
-        event_kind = %EventKind::PublishFailed,
-        error_kind = "publish-failed",
-        detail = %error,
-        "Couldn't publish the new state on the control interface"
-    );
 }

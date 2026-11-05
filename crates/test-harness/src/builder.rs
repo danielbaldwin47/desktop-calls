@@ -13,7 +13,7 @@ use std::time::Duration;
 use zbus::Connection;
 use zbus::fdo::DBusProxy;
 
-use super::app::{collect_app_errors, collect_missed_calls, collect_surfaces};
+use super::app::{collect_app_errors, collect_missed_calls, collect_published};
 use super::simulated_phone::PhoneIdentity;
 use super::{Harness, JOURNAL_SOCKET};
 use crate::process_group::ProcessGroup;
@@ -291,7 +291,7 @@ impl Builder {
         // Subscribe before the app starts, so no Error signal is missed.
         let app_errors = collect_app_errors(&session);
         let missed_calls = collect_missed_calls(&session);
-        let surfaces_seen = collect_surfaces(&session);
+        let published = collect_published(&session);
 
         let mut harness = Harness {
             directory,
@@ -310,7 +310,7 @@ impl Builder {
             screenshot_directory,
             app_errors,
             missed_calls,
-            surfaces_seen,
+            published,
             processes,
             timeline,
             group,

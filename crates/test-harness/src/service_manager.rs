@@ -14,7 +14,8 @@
 //! Over D-Bus it answers what the Real-Phone tools ask the real one:
 //! `Manager.GetUnit`, `Manager.StartUnit` and `Manager.StopUnit` (each
 //! returning a job at once and doing the work after), and the unit's
-//! `ActiveState`.
+//! `ActiveState` and `Job`. `Job` names a start job until the start ends,
+//! active or not, as systemd's does; stop jobs aren't shown there.
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::os::unix::fs::DirBuilderExt as _;
@@ -137,10 +138,16 @@ struct Running {
     history: Vec<&'static str>,
     /// Set once the scenario ends: nothing starts again.
     shut: bool,
+    /// The start job still running, or 0.
+    job: u32,
 }
 
 impl Running {
+    /// Moves to `state`. Any state but `activating` ends a start job.
     fn set(&mut self, state: &'static str) {
+        if state != "activating" {
+            self.job = 0;
+        }
         if self.active_state != state {
             self.active_state = state;
             self.history.push(state);
@@ -243,10 +250,8 @@ impl Unit {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn next_job(&self) -> Result<OwnedObjectPath, ManagerError> {
-        let job = self.jobs.fetch_add(1, Ordering::Relaxed) + 1;
-        OwnedObjectPath::try_from(format!("{MANAGER_PATH}/job/{job}"))
-            .map_err(|error| ManagerError::Failed(error.to_string()))
+    fn next_job(&self) -> u32 {
+        self.jobs.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     fn installed(&self) -> bool {
@@ -256,7 +261,11 @@ impl Unit {
     /// Starts the service unless it is running, and watches it.
     fn start(unit: &Arc<Self>) {
         let mut running = unit.running();
-        if running.shut || matches!(running.active_state, "active" | "activating") {
+        if running.shut || running.active_state == "active" {
+            running.job = 0;
+            return;
+        }
+        if running.active_state == "activating" {
             return;
         }
         let Some(file) = UnitFile::read(&unit.file) else {
@@ -447,18 +456,28 @@ impl Manager {
     fn start_unit(&self, name: &str, mode: &str) -> Result<OwnedObjectPath, ManagerError> {
         self.known(name)?;
         let _ = mode;
+        let job = self.unit.next_job();
+        // Before the reply, so a caller never sees the unit without its job.
+        self.unit.running().job = job;
         let unit = self.unit.clone();
-        thread::spawn(move || Unit::start(&unit));
-        self.unit.next_job()
+        // systemd runs the job from its event loop after it replies; a tick
+        // later keeps a caller that reads ActiveState too soon from passing
+        // by luck.
+        thread::spawn(move || {
+            thread::sleep(TICK);
+            Unit::start(&unit);
+        });
+        job_path(job)
     }
 
     /// Every `mode` acts as `"replace"`, the one the tools pass.
     fn stop_unit(&self, name: &str, mode: &str) -> Result<OwnedObjectPath, ManagerError> {
         self.known(name)?;
         let _ = mode;
+        let job = self.unit.next_job();
         let unit = self.unit.clone();
         thread::spawn(move || unit.stop());
-        self.unit.next_job()
+        job_path(job)
     }
 }
 
@@ -472,6 +491,11 @@ impl Manager {
     }
 }
 
+fn job_path(job: u32) -> Result<OwnedObjectPath, ManagerError> {
+    OwnedObjectPath::try_from(format!("{MANAGER_PATH}/job/{job}"))
+        .map_err(|error| ManagerError::Failed(error.to_string()))
+}
+
 struct UnitObject {
     unit: Arc<Unit>,
 }
@@ -481,6 +505,20 @@ impl UnitObject {
     #[zbus(property)]
     fn active_state(&self) -> String {
         self.unit.running().active_state.to_owned()
+    }
+
+    /// The start job still running, as systemd's `(uo)`: its number and
+    /// path, or `(0, "/")`.
+    #[zbus(property)]
+    fn job(&self) -> zbus::fdo::Result<(u32, OwnedObjectPath)> {
+        let job = self.unit.running().job;
+        let path = if job == 0 {
+            OwnedObjectPath::try_from("/")
+        } else {
+            OwnedObjectPath::try_from(format!("{MANAGER_PATH}/job/{job}"))
+        };
+        path.map(|path| (job, path))
+            .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))
     }
 }
 

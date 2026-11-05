@@ -45,6 +45,14 @@ demo scenario="crates/simulated-phone/scenarios/demo.scenario":
 test-call *args:
     @python3 tools/real-phone/test_call.py "$@"
 
+# The only way to merge: GitHub can't enforce green checks on this repo.
+# `just merge --help` for options and the conditions it checks.
+# Squash-merge PR once its checks pass on a head containing origin/main.
+[positional-arguments]
+[no-exit-message]
+merge pr *args:
+    @python3 tools/merge.py "$@"
+
 # Walk through the Real-Phone Checklist one step at a time: all groups, or
 # one (`just real-phone-checklist 2`). Results go to docs/real-phone-checklist/;
 # a rerun resumes at the first step that didn't pass. `--demo` runs it

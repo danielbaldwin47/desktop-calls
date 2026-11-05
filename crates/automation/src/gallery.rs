@@ -761,9 +761,13 @@ pub fn run(options: &Options) -> ExitCode {
                     .screenshot_directory(output.clone())
                     .start();
                 (state.reach)(&harness);
-                // A frame is judged after it is taken, and the app reports a
-                // change before the screen shows it: so a frame judged while
-                // the app still reports the state shows that state.
+                // A frame is judged after it is taken. A surface queues its
+                // new content for `Surfaces` as it renders it, and a task on
+                // the same GLib main context publishes it. That task runs at
+                // default priority, before GTK's redraw, which GLib runs at a
+                // lower one. Only that scheduling order, not any proof in the
+                // code, makes a frame judged while the app still reports the
+                // state show that state.
                 let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
                     (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
                 });

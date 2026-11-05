@@ -159,17 +159,29 @@ fn a_withheld_number_shows_as_withheld_once_the_wait_is_over() {
     );
 }
 
-/// Waits until the Indicator's tooltip reads `tooltip`.
-fn indicator_says(harness: &Harness, tooltip: &str) {
-    harness.tray().wait_for(
-        &format!("the Indicator says {tooltip:?}"),
-        DEADLINE,
-        |items| {
-            items
+/// Waits until the Banner's caller line reads `caller` and, in the same
+/// look, the Indicator's tooltip reads `tooltip`: both observed together,
+/// so neither wait can use up the time the other needs.
+fn banner_and_indicator_say(harness: &Harness, caller: &str, tooltip: &str) {
+    let started = Instant::now();
+    loop {
+        let state = harness.app_state();
+        let items = harness.tray().items();
+        if banner_caller(&state).as_deref() == Some(caller)
+            && items
                 .iter()
                 .any(|item| item.tooltip.as_deref() == Some(tooltip))
-        },
-    );
+        {
+            return;
+        }
+        assert!(
+            started.elapsed() < DEADLINE,
+            "the Banner didn't say {caller:?} while the Indicator said {tooltip:?} \
+             within {DEADLINE:?}: the Banner last said {:?}, the tray items {items:?}",
+            banner_caller(&state)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// While the caller is being identified, the Indicator's tooltip says the
@@ -180,17 +192,8 @@ fn while_the_caller_is_identified_the_indicator_says_what_the_banner_says() {
     let harness = synced_late();
 
     let _path = harness.simulated_phone().ring("");
-    let state = harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
-        banner_caller(state).as_deref() == Some(IDENTIFYING)
-    });
-    indicator_says(&harness, &banner_caller(&state).unwrap_or_default());
-
-    harness.wait_for_app(
-        "the Banner says the number is withheld",
-        DEADLINE,
-        |state| banner_caller(state).as_deref() == Some("Withheld number"),
-    );
-    indicator_says(&harness, "Call from Withheld number");
+    banner_and_indicator_say(&harness, IDENTIFYING, IDENTIFYING);
+    banner_and_indicator_say(&harness, "Withheld number", "Call from Withheld number");
 }
 
 /// A Call whose number came late rings out: the Missed Call names Alice,

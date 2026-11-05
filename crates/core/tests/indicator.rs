@@ -129,8 +129,7 @@ fn the_tooltip_says_the_state_in_words() {
     );
 }
 
-/// A Call that rang with no number, while the Phone may still report one,
-/// and once it has had long enough.
+/// A Call that rang with no number, while the Phone may still report one.
 fn ringing_with_no_number_yet() -> State {
     run(
         connected(),

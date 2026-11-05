@@ -33,6 +33,7 @@ use crate::logging::{self, EventKind};
 use crate::notifications::Notifier;
 use crate::phone_link::Command;
 use crate::ringer::Ringer;
+use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{bluez, chosen_phone, contacts, earlier_run, logind, pairing, phone_link};
@@ -159,6 +160,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
     // Held until the service stops.
     let _do_not_disturb = DoNotDisturb::follow(input_sender.clone());
+    let setup_checks = SetupChecks::start(system.clone(), session.clone(), input_sender.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
     context.spawn_local(watch_sleep(system.clone(), input_sender.clone()));
@@ -179,6 +181,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         dials,
         Shell {
             pairing: pairing::Pairing::new(system.clone(), input_sender.clone()),
+            setup_checks,
             inputs: input_sender,
             system,
             commands: command_sender,
@@ -291,6 +294,8 @@ struct Shell {
     stall_watch: StallWatch,
     /// Carries out the Setup Window's pairing on BlueZ.
     pairing: pairing::Pairing,
+    /// Finds what the Desktop lacks, and puts it right.
+    setup_checks: SetupChecks,
 }
 
 impl Shell {
@@ -350,6 +355,8 @@ impl Shell {
                 | Effect::AnswerPairingCode { .. }
                 | Effect::TrustPhone { .. }
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
+                Effect::CheckDesktop => self.setup_checks.check_again(),
+                Effect::Fix(fix) => self.setup_checks.fix(fix),
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
                 Effect::EarlierCallsForgotten(calls) => earlier_run::forgotten(calls),

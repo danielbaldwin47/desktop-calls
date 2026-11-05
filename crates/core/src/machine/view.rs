@@ -1,5 +1,6 @@
 //! What the Desktop surfaces show, worked out from the state.
 
+use super::desktop::SetupProblemsView;
 use super::setup::SetupWindowView;
 use super::{Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
@@ -13,6 +14,8 @@ pub struct Surfaces {
     pub call_window: Option<CallWindowView>,
     pub dialer: Option<DialerView>,
     pub setup_window: Option<SetupWindowView>,
+    /// The Desktop's Problems, shown at the top of the open Setup Window.
+    pub setup_problems: Option<SetupProblemsView>,
 }
 
 /// The Dialer's content. While open it has keyboard focus.
@@ -315,6 +318,7 @@ impl State {
             call_window,
             dialer: self.dialer_view(),
             setup_window: self.setup_window_view(),
+            setup_problems: self.setup_problems_view(),
         }
     }
 

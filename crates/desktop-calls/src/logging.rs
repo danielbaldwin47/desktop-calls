@@ -134,6 +134,9 @@ pub enum EventKind {
     FirstFramesPrepared,
     FirstFramesUnprepared,
     FirstFramesAbandoned,
+    DesktopChecked,
+    DesktopFixed,
+    DesktopFixFailed,
 }
 
 impl EventKind {
@@ -226,6 +229,9 @@ impl EventKind {
             Self::FirstFramesPrepared => "first-frames-prepared",
             Self::FirstFramesUnprepared => "first-frames-unprepared",
             Self::FirstFramesAbandoned => "first-frames-abandoned",
+            Self::DesktopChecked => "desktop-checked",
+            Self::DesktopFixed => "desktop-fixed",
+            Self::DesktopFixFailed => "desktop-fix-failed",
         }
     }
 }

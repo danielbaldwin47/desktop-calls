@@ -14,6 +14,7 @@ use crate::missed::MissedCalls;
 mod audio;
 mod call_waiting;
 mod calls;
+mod desktop;
 mod dialling;
 mod input;
 mod missed_calls;
@@ -32,6 +33,8 @@ use calls::{
     answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
     send_tones, timer_fired,
 };
+use desktop::DesktopChecks;
+pub use desktop::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, SetupProblemsView};
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
 pub use input::{
     ConnectFailure, DialProgress, Effect, Input, PairingFailure, PhoneCommand, PhoneRefusal, Timer,
@@ -310,6 +313,8 @@ pub struct State {
     /// Incoming Calls that rang with no number, while the Phone may still
     /// report one.
     awaiting_number: Vec<CallId>,
+    /// What the setup checks found of the Desktop.
+    desktop: DesktopChecks,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -396,21 +401,32 @@ impl State {
 
     /// What is wrong that the user can put right.
     #[must_use]
+    /// The Desktop's own come first: without them, the Phone's can't be
+    /// put right.
     pub fn problems(&self) -> Vec<Problem> {
+        let mut kinds = self.desktop.problems();
         if self.presence.pairing_lost {
-            return vec![Problem {
-                kind: ProblemKind::PairingLost,
-            }];
+            kinds.push(ProblemKind::PairingLost);
+        } else {
+            match self.contacts_sync {
+                ContactsState::Denied => kinds.push(ProblemKind::ContactsDenied),
+                ContactsState::Unavailable(Unavailable::PromptTimedOut) => {
+                    kinds.push(ProblemKind::ContactsPromptUnanswered);
+                }
+                _ => {}
+            }
         }
-        match self.contacts_sync {
-            ContactsState::Denied => vec![Problem {
-                kind: ProblemKind::ContactsDenied,
-            }],
-            ContactsState::Unavailable(Unavailable::PromptTimedOut) => vec![Problem {
-                kind: ProblemKind::ContactsPromptUnanswered,
-            }],
-            _ => Vec::new(),
-        }
+        kinds.into_iter().map(|kind| Problem { kind }).collect()
+    }
+
+    /// Whether a Problem of the Desktop's own keeps the Phone from
+    /// connecting for Calls.
+    #[must_use]
+    pub fn desktop_keeps_phone_away(&self) -> bool {
+        self.desktop
+            .problems()
+            .iter()
+            .any(|kind| *kind != ProblemKind::ContactsSupportMissing)
     }
 
     /// What the next run needs if this one stops now: each connected Call,
@@ -750,6 +766,10 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
         | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
+        Input::DesktopChecked(check) => desktop::checked(&mut state, check, &mut effects),
+        Input::Fix(problem) => desktop::fix(&mut state, problem, &mut effects),
+        Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),
+        Input::FixFailed(failure) => desktop::fix_failed(&mut state, failure),
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
@@ -822,6 +842,7 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         chosen_phone: state.chosen_phone.clone(),
         paired_phones: state.paired_phones.clone(),
         nearby_phones: state.nearby_phones.clone(),
+        desktop: state.desktop.clone(),
         ..forget_phone(state)
     }
 }

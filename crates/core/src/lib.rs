@@ -29,9 +29,10 @@ pub use contacts::{
 pub use earlier_run::{EarlierCall, EarlierRun};
 pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView};
 pub use machine::{
-    BannerView, CallAudio, CallWindowPhase, CallWindowView, ConnectFailure, DialProgress,
-    DialerView, Effect, HeldCall, Input, Mute, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
-    RingingCaller, SetupNotice, SetupStep, SetupWindowView, State, Surfaces, Timer, WaitingOptions,
+    BannerView, BluetoothPower, CallAudio, CallWindowPhase, CallWindowView, ConnectFailure,
+    DesktopCheck, DesktopFix, DialProgress, DialerView, Effect, FixFailure, HeldCall, Input, Mute,
+    PairingFailure, PhoneCommand, PhoneRefusal, Problem, RingingCaller, SetupNotice,
+    SetupProblemsView, SetupStep, SetupWindowView, State, Surfaces, Timer, WaitingOptions,
     keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};

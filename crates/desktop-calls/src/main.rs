@@ -18,9 +18,11 @@ mod pairing;
 mod phone_link;
 mod ringer;
 mod service;
+mod setup_checks;
 mod stall_watch;
 mod surfaces;
 mod theme;
+mod wireplumber;
 
 use std::process::ExitCode;
 

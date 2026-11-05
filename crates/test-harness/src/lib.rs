@@ -44,6 +44,7 @@ mod builder;
 mod client;
 mod control;
 mod desktop;
+mod desktop_conditions;
 mod hyprland;
 mod input;
 mod omarchy_quiet;

@@ -358,6 +358,9 @@ fn connect(
     call: &MethodCall,
     message: &Message,
 ) -> zbus::Result<()> {
+    if !crate::desktop::powered(&lock(world)) {
+        return zbus::block_on(crate::desktop::not_ready().send(system, &message.header()));
+    }
     let other = {
         let world = lock(world);
         world.pairing.is_other_phone(&call.path).then(|| {

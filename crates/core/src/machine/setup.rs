@@ -288,6 +288,17 @@ fn retry(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
+/// The Desktop's Bluetooth came on: a Setup Window that couldn't look for
+/// Phones without it looks now.
+pub(super) fn bluetooth_on(state: &mut State, effects: &mut Vec<Effect>) {
+    if let Some(setup) = state.setup.as_mut()
+        && setup.notice == Some(SetupNotice::BluetoothUnavailable)
+    {
+        setup.notice = None;
+        effects.push(Effect::StartSetup);
+    }
+}
+
 fn open(state: &mut State, effects: &mut Vec<Effect>) {
     if state.setup.is_some() {
         return;

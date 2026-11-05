@@ -183,6 +183,8 @@ fn assert_keys_do_nothing(harness: &Harness) {
         [],
         "a greyed-out control was pressed through"
     );
+    let state = harness.app_state();
+    assert_eq!(call_window(&state, "keypad"), None, "K showed the keypad");
 }
 
 /// Waits until the Indicator's tooltip says `tooltip`, and returns its menu.

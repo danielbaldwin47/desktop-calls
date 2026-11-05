@@ -28,7 +28,8 @@ What it does, in order:
      tests in parallel it measures how much of the Desktop other programs
      (agents' builds) are using, and runs that many tests at a time and no
      more: all the CPUs on a quiet Desktop, down to MIN_THREADS on a busy one
-     (CI's runners have two CPUs). The first-frame timings run at normal
+     (CI's runners have two CPUs). The first-frame timings wait, for up to
+     CALM_WAIT_SECONDS, until others use few CPUs, then run at normal
      priority, since under nice they wait behind every build. Each job's last
      line says how much others used while it ran, and a failure says whether
      that was enough to blame (ticket #167).
@@ -125,6 +126,12 @@ SAMPLE_SECONDS = 3
 # Others using at least this share of the CPUs while a job ran make a timing
 # failure likely to be theirs.
 BUSY_SHARE = 0.4
+# The timings judge milliseconds of one app's first paint and keystrokes, which
+# a build's bursts stretch (a Dialer keystroke is 12 to 25 ms, and 50 to 56 ms
+# beside a build). They start once others use at most this share of the CPUs,
+# or after this long, if the Desktop doesn't calm down before.
+CALM_SHARE = 0.2
+CALM_WAIT_SECONDS = 120
 # Before any job, with the network: the pinned toolchain (rust-toolchain.toml)
 # and the crates.
 PREPARE = "rustup toolchain install && cargo fetch --locked"
@@ -438,6 +445,31 @@ class Usage:
         return max(0.0, busy - self.busy - (children_cpu_seconds() - self.ours)) / elapsed
 
 
+def wait_for_calm(log: Log, cpus: int, give_up_after: float = CALM_WAIT_SECONDS) -> None:
+    """Returns once others use at most CALM_SHARE of the CPUs, or after
+    `give_up_after` seconds, saying which."""
+    started = time.monotonic()
+    announced = False
+    while True:
+        others = watch_others()
+        if others <= CALM_SHARE * cpus:
+            if announced:
+                log.line(f"   calm after {time.monotonic() - started:.0f} s")
+            return
+        if time.monotonic() - started >= give_up_after:
+            log.line(
+                f"   not calm after {give_up_after:.0f} s (others use about {others:.0f} of "
+                f"{cpus} CPUs): running anyway"
+            )
+            return
+        if not announced:
+            log.line(
+                f"   waiting for others to use at most {CALM_SHARE * cpus:.0f} of {cpus} CPUs "
+                f"(now about {others:.0f}), for up to {give_up_after:.0f} s"
+            )
+            announced = True
+
+
 def blame(others: float, cpus: int, failed: bool) -> str:
     """What a job's last line says about the load it ran under."""
     used = f"other programs used about {others:.0f} of {cpus} CPUs while it ran"
@@ -472,10 +504,12 @@ def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Pa
         cpus = os.cpu_count() or 1
         for job in jobs:
             threads = None
+            log.line(f"== {job}: {JOBS[job]}")
             if job in PARALLEL_JOBS:
                 others = watch_others()
                 threads = threads_for(others, cpus)
-            log.line(f"== {job}: {JOBS[job]}")
+            if job in UNHURRIED_JOBS:
+                wait_for_calm(log, cpus)
             if threads is not None:
                 log.line(
                     f"   {threads} at a time: other programs are using about {others:.0f} of "

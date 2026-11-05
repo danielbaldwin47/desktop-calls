@@ -198,6 +198,30 @@ class Load(unittest.TestCase):
         self.assertIn("about 1 of 20 CPUs", said)
         self.assertIn("treat the failure as the change's", said)
 
+    def test_the_timings_start_at_once_on_a_calm_desktop(self):
+        log = mock.Mock()
+        with mock.patch.object(ci_local, "watch_others", return_value=1.0) as watch:
+            ci_local.wait_for_calm(log, 20)
+        watch.assert_called_once()
+        log.line.assert_not_called()
+
+    def test_the_timings_wait_for_a_build_to_end_and_say_so(self):
+        log = mock.Mock()
+        with mock.patch.object(ci_local, "watch_others", side_effect=[15.0, 12.0, 3.0]) as watch:
+            ci_local.wait_for_calm(log, 20)
+        self.assertEqual(watch.call_count, 3)
+        said = [call.args[0] for call in log.line.call_args_list]
+        self.assertIn("waiting for others to use at most 4 of 20 CPUs (now about 15)", said[0])
+        self.assertTrue(said[1].startswith("   calm after"))
+
+    def test_the_timings_run_anyway_when_the_desktop_never_calms(self):
+        log = mock.Mock()
+        with mock.patch.object(ci_local, "watch_others", return_value=15.0), \
+                mock.patch.object(ci_local.time, "monotonic", side_effect=[0.0, 1.0, 130.0]):
+            ci_local.wait_for_calm(log, 20, give_up_after=120)
+        self.assertIn("not calm after 120 s", log.line.call_args.args[0])
+        self.assertIn("running anyway", log.line.call_args.args[0])
+
     def test_only_the_parallel_jobs_are_held_to_the_spare_cpus_and_timings_are_not_polite(self):
         self.assertTrue(ci_local.PARALLEL_JOBS <= set(ci_local.JOBS))
         self.assertTrue(ci_local.UNHURRIED_JOBS <= set(ci_local.JOBS))

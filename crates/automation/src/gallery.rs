@@ -8,8 +8,11 @@
 
 use std::fmt::Write as _;
 use std::fs;
-use std::path::PathBuf;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
@@ -17,6 +20,9 @@ use test_harness::{
     AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
     draw_tray_icon,
 };
+
+/// How many temporary captures the muted Call Window's state has taken.
+static BEFORE_KEYPAD_CAPTURES: AtomicUsize = AtomicUsize::new(0);
 
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -193,7 +199,10 @@ const STATES: &[State] = &[
             // Click the window, to give it the keyboard, then show the
             // keypad and type tones. The screenshot and the click both wait
             // for the muted Call Window to be drawn (#53).
-            let screenshot = harness.screenshot("call-window-before-keypad");
+            // Named apart from the other looks' captures, which render at
+            // the same time into the same directory.
+            let unique = BEFORE_KEYPAD_CAPTURES.fetch_add(1, Ordering::Relaxed);
+            let screenshot = harness.screenshot(&format!("call-window-before-keypad-{unique}"));
             let window = app_region(&screenshot);
             let _ = fs::remove_file(&screenshot.path);
             if let Some(window) = window {
@@ -752,27 +761,12 @@ pub fn run(options: &Options) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    let shots: Vec<(&State, Look)> = states
+        .iter()
+        .flat_map(|state| LOOKS.map(|look| (*state, look)))
+        .collect();
     for repetition in 1..=options.repeat {
-        for state in &states {
-            for look in LOOKS {
-                let harness = (state.prepare)(look.builder())
-                    .headless_screen()
-                    .omarchy_bar()
-                    .screenshot_directory(output.clone())
-                    .start();
-                (state.reach)(&harness);
-                // A frame is judged after it is taken. A surface queues its
-                // new content for `Surfaces` as it renders it, and a task on
-                // the same GLib main context publishes it. That task runs at
-                // default priority, before GTK's redraw, which GLib runs at a
-                // lower one. Only that scheduling order, not any proof in the
-                // code, makes a frame judged while the app still reports the
-                // state show that state.
-                let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
-                    (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
-                });
-            }
-        }
+        render_all(&shots, &output);
         if options.repeat > 1 {
             println!("Rendered {repetition} of {} times.", options.repeat);
         }
@@ -824,6 +818,43 @@ pub fn run(options: &Options) -> ExitCode {
     );
     println!("{}", index.display());
     ExitCode::SUCCESS
+}
+
+/// Renders each of `shots` into `output`, several at a time: one scenario
+/// per CPU. Each has its own compositor, buses and app, so they don't meet.
+/// One at a time, the 56 shots took 139 s of a CI run (#118).
+fn render_all(shots: &[(&State, Look)], output: &Path) {
+    let next = AtomicUsize::new(0);
+    let workers = thread::available_parallelism().map_or(1, NonZeroUsize::get);
+    thread::scope(|scope| {
+        for _ in 0..workers.min(shots.len()) {
+            scope.spawn(|| {
+                while let Some(&(state, look)) = shots.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    render(state, look, output);
+                }
+            });
+        }
+    });
+}
+
+/// Renders `state` under `look` into `output`.
+fn render(state: &State, look: Look, output: &Path) {
+    let harness = (state.prepare)(look.builder())
+        .headless_screen()
+        .omarchy_bar()
+        .screenshot_directory(output.to_owned())
+        .start();
+    (state.reach)(&harness);
+    // A frame is judged after it is taken. A surface queues its
+    // new content for `Surfaces` as it renders it, and a task on
+    // the same GLib main context publishes it. That task runs at
+    // default priority, before GTK's redraw, which GLib runs at a
+    // lower one. Only that scheduling order, not any proof in the
+    // code, makes a frame judged while the app still reports the
+    // state show that state.
+    let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
+        (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
+    });
 }
 
 /// A state's file name under `look`, without `.png`.

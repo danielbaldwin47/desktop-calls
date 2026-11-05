@@ -23,6 +23,8 @@ trait SimulatedPhone1 {
 
     fn return_to_range_after(&self, delay_ms: u32) -> zbus::Result<()>;
 
+    fn connect_other_phone(&self) -> zbus::Result<()>;
+
     fn forget_pairing(&self) -> zbus::Result<()>;
 
     fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
@@ -164,6 +166,18 @@ impl SimulatedPhone<'_> {
     pub fn disconnect(&self) {
         zbus::block_on(async { self.proxy().await?.disconnect().await })
             .expect("tell the Simulated Phone to disconnect");
+    }
+
+    /// The other paired Phone (`Builder::old_phone_paired`) comes into range
+    /// and connects with hands-free, beside the Phone, with an AudioGateway
+    /// of its own.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses, because there is no other Phone.
+    pub fn connect_other_phone(&self) {
+        zbus::block_on(async { self.proxy().await?.connect_other_phone().await })
+            .expect("bring the other Phone into range");
     }
 
     /// Comes back into range without connecting by itself: the Desktop's

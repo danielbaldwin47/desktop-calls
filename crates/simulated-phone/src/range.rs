@@ -238,6 +238,49 @@ pub fn connected_without_hands_free(world: &mut World) -> zbus::Result<Change> {
     Ok(change)
 }
 
+/// Brings the other paired Phone into range, connected with hands-free:
+/// BlueZ marks it connected, and PipeWire registers an AudioGateway for its
+/// address at the next index, then sends `ModemAdded`. `None` if it is
+/// connected already.
+///
+/// # Errors
+///
+/// There is no other Phone: the Simulated Phone started without
+/// `--old-phone`, or it was unpaired.
+pub fn other_phone_up(world: &mut World) -> zbus::Result<Option<Change>> {
+    let device = bluez::device_path(crate::pairing::OLD_PHONE_ADDRESS)?;
+    if !world.pairing.is_other_phone(device.as_str()) {
+        return Err(zbus::Error::Failure("there is no other Phone".to_owned()));
+    }
+    if !world.bluez.set(
+        &device,
+        bluez::DEVICE,
+        "Connected",
+        OwnedVariant::from(true),
+    ) {
+        return Ok(None);
+    }
+    let mut change = Change::default();
+    change.bluez(connected_changed(&device, true));
+    let gateway = telephony::audio_gateway_path(world.next_audio_gateway_index)?;
+    world.next_audio_gateway_index += 1;
+    let interfaces = telephony::add_audio_gateway(
+        &mut world.telephony,
+        &gateway,
+        crate::pairing::OLD_PHONE_ADDRESS,
+        &world.behaviour,
+    );
+    change.telephony([
+        Signal::InterfacesAdded {
+            manager: OwnedObjectPath::try_from(telephony::MANAGER_PATH)?,
+            object: gateway.clone(),
+            interfaces,
+        },
+        Signal::ModemAdded { modem: gateway },
+    ]);
+    Ok(Some(change))
+}
+
 fn keep_away(world: &mut World, away: Away) {
     for (call, properties) in away.calls {
         let name = call

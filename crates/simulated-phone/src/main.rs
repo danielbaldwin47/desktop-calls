@@ -47,6 +47,7 @@ use zbus::object_server::SignalEmitter;
 use zbus::{Connection, Message, MessageStream, OwnedObjectPath, interface};
 
 use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply};
+use crate::range::other_phone_up;
 use crate::scenario::Step;
 
 const CONTROL_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone";
@@ -445,6 +446,17 @@ impl Control {
             range::hands_free_down(&mut world)?
         };
         self.range_changed(change, &emitter).await
+    }
+
+    /// The other paired Phone (`--old-phone`) comes into range and connects
+    /// with hands-free, beside the Phone: BlueZ marks it connected and
+    /// PipeWire registers an AudioGateway for it.
+    async fn connect_other_phone(&self) -> zbus::fdo::Result<()> {
+        let change = other_phone_up(&mut lock(&self.world))?;
+        if let Some(change) = change {
+            range::emit(&self.system, &self.telephony, change).await?;
+        }
+        Ok(())
     }
 
     /// Comes back into range without connecting: the Phone answers the

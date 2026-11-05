@@ -13,6 +13,10 @@ use crate::missed::MissedCallNotice;
 pub enum Input {
     /// What the run before this one left, at startup.
     EarlierRun(EarlierRun),
+    /// The Phone the user chose last in the Setup Window, as an earlier run
+    /// kept it, at startup and before any Phone is reported: Desktop Calls
+    /// follows it, and no other Phone, whatever BlueZ lists first.
+    ChosenPhoneKept { address: String },
     /// A paired Phone that can carry Calls exists on the Desktop.
     PhonePaired(Phone),
     /// The paired Phone with this address is gone.
@@ -361,6 +365,9 @@ pub enum Effect {
     /// Answer the pairing code asked about last: `confirm` if the user
     /// confirmed it.
     AnswerPairingCode { confirm: bool },
+    /// Keep the Phone with this address as the Phone the user chose last,
+    /// for the next run to follow.
+    KeepChosenPhone { address: String },
     /// Let the Phone with this address connect without asking each time.
     TrustPhone { address: String },
     /// Ask the Phone with this address for hands-free alone. A refusal

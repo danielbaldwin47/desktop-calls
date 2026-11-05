@@ -362,6 +362,18 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
         .phone
         .as_ref()
         .is_some_and(|followed| followed.address.eq_ignore_ascii_case(&phone.address));
+    // The user chose it, so a restart follows it, not the Phone BlueZ lists
+    // first.
+    if !state
+        .chosen_phone
+        .as_ref()
+        .is_some_and(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+    {
+        state.chosen_phone = Some(phone.address.clone());
+        effects.push(Effect::KeepChosenPhone {
+            address: phone.address.clone(),
+        });
+    }
     if !already_followed {
         if state.phone.is_some() {
             switch_away(state, effects);

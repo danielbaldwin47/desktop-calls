@@ -295,6 +295,10 @@ pub struct State {
     setup_offered: bool,
     /// How many times the Setup Window has opened.
     setup_openings: u32,
+    /// The address of the Phone the user chose last in the Setup Window.
+    /// Once there is one, no other Phone is followed, and it outlives the
+    /// Phone being unpaired, so a restart never picks another silently.
+    chosen_phone: Option<String>,
     /// Phones nearby that aren't paired with the Desktop, in the order
     /// BlueZ found them.
     nearby_phones: Vec<Phone>,
@@ -571,6 +575,13 @@ impl State {
         }
     }
 
+    /// Whether the user's choice of Phone allows following `phone`.
+    fn may_follow(&self, phone: &Phone) -> bool {
+        self.chosen_phone
+            .as_ref()
+            .is_none_or(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+    }
+
     fn is_our_phone(&self, address: &str) -> bool {
         self.phone
             .as_ref()
@@ -624,7 +635,11 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhonePaired(phone) if state.setup_pairs(&phone.address) => {
             setup::paired(&mut state, phone, &mut effects);
         }
-        Input::PhonePaired(phone) if state.phone.is_none() => {
+        Input::ChosenPhoneKept { address } => state.chosen_phone = Some(address),
+        // Whichever Phone BlueZ lists first is followed, unless the user
+        // chose one: then only that one, and with it unpaired the Setup
+        // Window opens once BlueZ has listed everything.
+        Input::PhonePaired(phone) if state.phone.is_none() && state.may_follow(&phone) => {
             phone_paired(&mut state, phone, &mut effects);
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),
@@ -777,6 +792,7 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         setup: state.setup.clone(),
         setup_offered: state.setup_offered,
         setup_openings: state.setup_openings,
+        chosen_phone: state.chosen_phone.clone(),
         nearby_phones: state.nearby_phones.clone(),
         ..forget_phone(state)
     }

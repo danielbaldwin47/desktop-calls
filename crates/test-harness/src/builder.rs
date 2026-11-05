@@ -203,7 +203,9 @@ impl Builder {
     }
 
     /// Another Phone named `name` is paired with the Desktop, and out of
-    /// range: the Phone the user switches from.
+    /// range: the Phone the user switches from. It lists before the Phone
+    /// in BlueZ's objects, by its address.
+    /// `SimulatedPhone::connect_other_phone` brings it into range.
     pub fn old_phone_paired(mut self, name: &str) -> Self {
         self.nearby.push("--old-phone".to_owned());
         self.nearby.push(name.to_owned());

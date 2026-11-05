@@ -22,8 +22,15 @@
 //!   connect; `when-asked` connects media alone, and brings hands-free up
 //!   only for `ConnectProfile`; `refused` fails that `ConnectProfile` with
 //!   `org.bluez.Error.Failed` `"br-connection-refused"` (inferred).
-//! - With `--old-phone`, another Phone is paired too, and never in range:
-//!   connects to it page and time out.
+//! - With `--old-phone`, another Phone is paired too, and out of range:
+//!   connects to it page and time out. The control interface's
+//!   `ConnectOtherPhone` brings it into range, connected with hands-free
+//!   and its own AudioGateway, beside the Phone; `RingOnOtherPhone` makes a
+//!   Call ring on it.
+//! - `Adapter1.RemoveDevice` unpairs a device that isn't connected, as the
+//!   user does in Bluetooth settings: `InterfacesRemoved`. A connected one
+//!   fails `org.bluez.Error.Failed`, because the simulation doesn't model
+//!   BlueZ disconnecting it first: the test disconnects it, then removes it.
 //!
 //! [`Connected`]: https://git.kernel.org/pub/scm/bluetooth/bluez.git/tree/doc/org.bluez.Device.rst
 
@@ -48,7 +55,11 @@ const ADAPTER: &str = "org.bluez.Adapter1";
 const AGENT_MANAGER: &str = "org.bluez.AgentManager1";
 const AGENT: &str = "org.bluez.Agent1";
 const HEADPHONES_ADDRESS: &str = "00:1B:66:00:00:02";
-const OLD_PHONE_ADDRESS: &str = "48:A4:93:00:00:03";
+/// The other Phone's address. Its first octet is 00, below any address the
+/// harness gives the Phone (locally administered, so at least 02): it sorts
+/// first by device path, which is the order the app follows when the user
+/// has chosen none.
+pub const OLD_PHONE_ADDRESS: &str = "00:A4:93:00:00:03";
 
 /// Who and what is nearby, from the command line.
 #[derive(clap::Args)]
@@ -102,6 +113,9 @@ pub struct Pairing {
     requests: Vec<(u32, String)>,
     /// Paired Phones other than the Phone, never in range.
     others: Vec<OwnedObjectPath>,
+    /// The AudioGateway of the other Phone, while it is connected with
+    /// hands-free.
+    pub other_gateway: Option<OwnedObjectPath>,
 }
 
 impl Pairing {
@@ -161,7 +175,7 @@ pub fn handles(call: &MethodCall) -> bool {
         AGENT_MANAGER => true,
         ADAPTER => matches!(
             call.member.as_str(),
-            "StartDiscovery" | "StopDiscovery" | "SetDiscoveryFilter"
+            "StartDiscovery" | "StopDiscovery" | "SetDiscoveryFilter" | "RemoveDevice"
         ),
         bluez::DEVICE => call.member == "Pair",
         PROPERTIES => call.member == "Set",
@@ -240,12 +254,56 @@ fn answer_now(world: &mut World, call: &MethodCall, message: &Message) -> (Reply
                 Vec::new(),
             ),
         },
+        "RemoveDevice" => remove_device(world, message),
         "Set" => set_property(world, call, message),
         _ => (Reply::unknown_method(call), Vec::new()),
     }
 }
 
 const ADAPTER_PATH: &str = "/org/bluez/hci0";
+
+/// `Adapter1.RemoveDevice`: unpairs the device at the path it is given.
+fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
+    let Ok(device) = message.body().deserialize::<OwnedObjectPath>() else {
+        return (invalid("RemoveDevice takes (o)"), Vec::new());
+    };
+    let connected = world
+        .bluez
+        .get(&device, bluez::DEVICE, "Connected")
+        .and_then(|connected| bool::try_from(connected.clone()).ok());
+    match connected {
+        None => (
+            Reply::Error("org.bluez.Error.DoesNotExist", "Does Not Exist".to_owned()),
+            Vec::new(),
+        ),
+        Some(true) => (
+            Reply::Error(
+                "org.bluez.Error.Failed",
+                "The simulation removes only a device that isn't connected".to_owned(),
+            ),
+            Vec::new(),
+        ),
+        Some(false) => {
+            let removed = world.bluez.remove(&device).unwrap_or_default();
+            world.pairing.others.retain(|other| *other != device);
+            let interfaces = [
+                bluez::DEVICE,
+                "org.bluez.Network1",
+                "org.bluez.MediaControl1",
+                bluez::BATTERY,
+            ]
+            .into_iter()
+            .filter(|name| removed.contains_key(*name))
+            .collect();
+            let signal = Signal::InterfacesRemoved {
+                manager: OwnedObjectPath::try_from("/").unwrap_or_default(),
+                object: device,
+                interfaces,
+            };
+            (Reply::body(()), vec![signal])
+        }
+    }
+}
 
 /// `Properties.Set` for what the Desktop sets: the adapter's
 /// `Discoverable`, `Pairable`, `DiscoverableTimeout` and `Alias`, and a

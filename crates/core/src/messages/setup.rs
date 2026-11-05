@@ -35,7 +35,7 @@ pub fn setup_window(view: &SetupWindowView) -> SetupWindowText {
     let mut code = None;
     let mut empty_list = None;
     let mut summary = None;
-    let (heading, instructions, buttons): (String, Vec<String>, Vec<&'static str>) =
+    let (heading, instructions, buttons): StepText =
         match &view.step {
             SetupStep::Choose { .. } => {
                 empty_list = Some("Looking for phones nearby…");
@@ -82,20 +82,14 @@ pub fn setup_window(view: &SetupWindowView) -> SetupWindowText {
                 vec!["Close"],
             ),
             SetupStep::PhoneCallsOff { phone } => {
-                summary = Some(format!(
-                    "{} is paired, but isn't sharing Calls with this computer.",
-                    phone.name
-                ));
-                (
-                "Turn on Phone calls".to_owned(),
-                vec![
-                    "On your phone: open Settings, then Connected devices.".to_owned(),
-                    format!("On your phone: tap the settings icon next to {desktop}."),
-                    "On your phone: switch Phone calls on.".to_owned(),
-                    "Then choose Try again here.".to_owned(),
-                ],
-                vec!["Try again", "Close"],
-            )
+                let (text, rest) = phone_calls_off_text(&phone.name, &desktop);
+                summary = Some(text);
+                rest
+            }
+            SetupStep::PhoneUnreachable { phone } => {
+                let (text, rest) = unreachable_text(&phone.name);
+                summary = Some(text);
+                rest
             }
             SetupStep::Done { phone } => {
                 summary = Some(
@@ -125,6 +119,41 @@ pub fn setup_window(view: &SetupWindowView) -> SetupWindowText {
         buttons,
         keys,
     }
+}
+
+/// A step's heading, instructions and buttons.
+type StepText = (String, Vec<String>, Vec<&'static str>);
+
+/// The summary, then the step's text, for a Phone that refused hands-free.
+fn phone_calls_off_text(name: &str, desktop: &str) -> (String, StepText) {
+    (
+        format!("{name} is paired, but isn't sharing Calls with this computer."),
+        (
+            "Turn on Phone calls".to_owned(),
+            vec![
+                "On your phone: open Settings, then Connected devices.".to_owned(),
+                format!("On your phone: tap the settings icon next to {desktop}."),
+                "On your phone: switch Phone calls on.".to_owned(),
+                "Then choose Try again here.".to_owned(),
+            ],
+            vec!["Try again", "Close"],
+        ),
+    )
+}
+
+/// The summary, then the step's text, for a Phone that didn't answer.
+fn unreachable_text(name: &str) -> (String, StepText) {
+    (
+        format!("Can't reach {name}; bring it close with Bluetooth on."),
+        (
+            format!("Can't reach {name}"),
+            vec![
+                "On your phone: turn Bluetooth on, and keep it close to this computer.".to_owned(),
+                "Then choose Try again here.".to_owned(),
+            ],
+            vec!["Try again", "Close"],
+        ),
+    )
 }
 
 /// Why the last attempt didn't work, and what to do about it.

@@ -2,6 +2,13 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
+## 2026-11-05 the repo went public (new repository, scrubbed history)
+
+- `danielbaldwin47/desktop-calls` is now a new public repository. Its history was rewritten with placeholders: the Pixel's and the Desktop's Bluetooth addresses, the Phone's Bluetooth name, the hostname, the user name and home paths are gone, and every commit's author email is the GitHub noreply address. `refs/pull/*` were dropped.
+- The old repository is `danielbaldwin47/desktop-calls-archive`, private for good. Commit SHAs in this wiki and in docs from before today refer to the archive.
+- Issue numbers are preserved: every issue was recreated under its old number, with comments headed "_Originally posted <date>_". **Old PR numbers live only in the archive**: in the new repository they are deleted placeholders. The in-flight PRs were re-opened: #119 is now #129, #124 is #130, #126 is #131, #128 is #132. PR #127 (the audit) was folded into main as `beacfbd`.
+- `just check` now rejects a Bluetooth address that isn't a placeholder, a home directory, and the local Test Number (`_no-personal-data`). `main` requires the "CI passed" check and refuses force-pushes.
+
 ## 2026-11-05 batch 3 landed (supersedes the entries below)
 
 - **Merged:** #17 (PR #105, `417411e`), #19 (PR #108, `6bf11cb`), #47 (PR #106, `3def480`), #101 (PR #110, `f7a35a6`; ADR-0005 note `83e378b`), #103 (PR #114, `f6ecaae`), #107 (PR #113, `7032137`). What each changed is on [product-shape](product-shape.md), [telephony-api-quirks](telephony-api-quirks.md), [hardware-and-stack](hardware-and-stack.md), [polish-scorecard](polish-scorecard.md) and the new [testing](testing.md) page.

@@ -350,10 +350,11 @@ fn a_phone_leaving_during_the_contacts_pull_leaves_contacts_not_synced_across_a_
 
     phone_leaves(&harness);
 
-    // The pull under way fails with the link, once it would have ended;
-    // nothing was cached, and
+    // The pull under way fails with the link, once it would have ended.
+    // Once the whole sync is over, with anything it saves written, nothing
+    // was cached, and
     // restarted, the app still has no Contacts.
-    harness.wait_for_app_log("contacts-sync-failed", SYNC_DEADLINE);
+    harness.wait_for_app_log("contacts-sync-ended", SYNC_DEADLINE);
     let cache = harness.directory().join("cache/desktop-calls");
     let cached = std::fs::read_dir(&cache).map_or(0, Iterator::count);
     assert_eq!(cached, 0, "nothing cached in {}", cache.display());

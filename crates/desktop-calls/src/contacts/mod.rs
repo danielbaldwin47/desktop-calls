@@ -212,8 +212,13 @@ impl ContactsSync {
         self.report(Input::ContactsSyncProgress(SyncProgress::Shared));
         let pulled = self.sync_in(&session, address, held).await;
         self.close_session(&session).await;
-        if let Err(stop) = pulled {
-            self.stopped(stop);
+        match pulled {
+            Ok(()) => tracing::info!(
+                event_kind = %EventKind::ContactsSyncEnded,
+                outcome = "synced",
+                "The Contacts sync ended: synced"
+            ),
+            Err(stop) => self.stopped(stop),
         }
     }
 
@@ -364,6 +369,15 @@ impl ContactsSync {
             Stop::Denied => SyncFailure::Denied,
             Stop::Unavailable(reason) => SyncFailure::Unavailable(reason),
         };
+        let outcome = match failure {
+            SyncFailure::Denied => "denied",
+            SyncFailure::Unavailable(reason) => reason.as_str(),
+        };
+        tracing::info!(
+            event_kind = %EventKind::ContactsSyncEnded,
+            outcome,
+            "The Contacts sync ended: {outcome}"
+        );
         self.report(Input::ContactsSyncFailed(failure));
     }
 

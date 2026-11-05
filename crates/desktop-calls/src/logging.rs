@@ -113,6 +113,8 @@ pub enum EventKind {
     ContactsPulled,
     ContactsSynced,
     ContactsSyncFailed,
+    /// A sync is over, whatever came of it, with all it saved written.
+    ContactsSyncEnded,
     ContactsCacheFailed,
     CallHistoryRefreshed,
     CallHistoryRefreshFailed,
@@ -212,6 +214,7 @@ impl EventKind {
             Self::ContactsPulled => "contacts-pulled",
             Self::ContactsSynced => "contacts-synced",
             Self::ContactsSyncFailed => "contacts-sync-failed",
+            Self::ContactsSyncEnded => "contacts-sync-ended",
             Self::ContactsCacheFailed => "contacts-cache-failed",
             Self::CallHistoryRefreshed => "call-history-refreshed",
             Self::CallHistoryRefreshFailed => "call-history-refresh-failed",

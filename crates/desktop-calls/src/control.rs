@@ -158,6 +158,13 @@ impl ControlInterface {
         self.state().muted()
     }
 
+    /// Whether the Desktop's Do Not Disturb is on. False on a Desktop
+    /// without Omarchy's.
+    #[zbus(property)]
+    fn do_not_disturb(&self) -> bool {
+        self.state().do_not_disturb()
+    }
+
     /// The codec the Desktop's Call audio negotiated (`"cvsd"`, `"msbc"`,
     /// `"lc3-swb"`, `"other"`, or empty) and whether it is wideband ("HD").
     #[zbus(property)]
@@ -472,6 +479,9 @@ impl Publisher {
         }
         if old.muted() != state.muted() {
             published.muted_changed(emitter).await?;
+        }
+        if old.do_not_disturb() != state.do_not_disturb() {
+            published.do_not_disturb_changed(emitter).await?;
         }
         if old.codec() != state.codec() {
             published.codec_changed(emitter).await?;

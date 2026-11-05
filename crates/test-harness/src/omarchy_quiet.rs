@@ -11,6 +11,23 @@
 //! `\w`, `\b`, `\d` and case folding are ASCII only. Omarchy lifts a
 //! browser's origin anchor off the body before detection; this port treats
 //! every sender as not a browser.
+//!
+//! It also keeps Omarchy 4.5's record of whether Do Not Disturb is on, the
+//! way Omarchy's shell keeps it (`Service.qml`'s store, `Store.js`
+//! `serialiseQuiet`): `~/.local/state/omarchy/notifications/quiet.json`, in
+//! a private directory. The shell creates the file empty at startup, which
+//! means off, and on each toggle replaces the whole file by an atomic
+//! rename with `{"dnd":true}` or `{"dnd":false}`. Omarchy 4.0's
+//! `~/.local/state/omarchy/notifications.json` is gone: 4.5's migration
+//! (`/usr/share/omarchy/migrations/1792648436.sh`) deletes it.
+
+use std::fs::{self, DirBuilder, OpenOptions, Permissions};
+use std::io::{self, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::path::{Path, PathBuf};
+
+/// Omarchy 4.5's notification state directory, under the home directory.
+const STATE_DIRECTORY: &str = ".local/state/omarchy/notifications";
 
 /// `Security.js` `MAX_SUMMARY`, `MAX_BODY` and `MAX_CODES`.
 const MAX_SUMMARY: usize = 2_048;
@@ -34,6 +51,52 @@ pub(crate) fn silenced(
     let bypasses =
         app_name == "omarchy-action" || (app_name == "notify-send" && urgency == CRITICAL);
     do_not_disturb && !bypasses && codes.is_empty()
+}
+
+/// Prepares Omarchy's notification state under `home` as its shell does at
+/// startup: the directory, private, and an empty `quiet.json` (off).
+pub(crate) fn prepare_state(home: &Path) -> io::Result<()> {
+    let directory = state_directory(home)?;
+    write_private(&directory.join("quiet.json"), b"")
+}
+
+/// Records Do Not Disturb `on` under `home` as Omarchy's shell does on each
+/// toggle: the whole of `quiet.json`, replaced atomically, keeping its mode.
+pub(crate) fn write_do_not_disturb(home: &Path, on: bool) -> io::Result<()> {
+    // `JSON.stringify({ dnd: !!state.dnd }) + "\n"`.
+    replace_quiet_file(home, &format!("{{\"dnd\":{on}}}\n"))
+}
+
+/// Replaces `quiet.json` under `home` with `contents`, atomically, as the
+/// shell replaces it.
+pub(crate) fn replace_quiet_file(home: &Path, contents: &str) -> io::Result<()> {
+    let directory = state_directory(home)?;
+    let temporary = directory.join("quiet.json.new");
+    write_private(&temporary, contents.as_bytes())?;
+    fs::rename(&temporary, directory.join("quiet.json"))
+}
+
+/// The state directory under `home`, created private if it isn't there.
+fn state_directory(home: &Path) -> io::Result<PathBuf> {
+    let directory = home.join(STATE_DIRECTORY);
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&directory)?;
+    // `mkdir -p` leaves an existing directory's mode; the shell then sets it.
+    fs::set_permissions(&directory, Permissions::from_mode(0o700))?;
+    Ok(directory)
+}
+
+/// Writes `contents` to `path` as a new file only its owner can read.
+fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(contents)
 }
 
 /// The verification codes Omarchy finds in a notification and offers to

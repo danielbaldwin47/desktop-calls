@@ -11,7 +11,8 @@ use crate::screen::Screen;
 use crate::stand_ins::StandIns;
 use crate::timeline::Timeline;
 use crate::{
-    Key, LAYOUT_SIZE, MenuEntry, Notification, OmarchyTheme, TestClient, TrayItem, stand_ins,
+    Key, LAYOUT_SIZE, MenuEntry, Notification, OmarchyTheme, TestClient, TrayItem, omarchy_quiet,
+    stand_ins,
 };
 
 impl Harness {
@@ -34,16 +35,30 @@ impl Harness {
     }
 
     /// Turns Omarchy's Do Not Disturb on or off, by rewriting its state file
-    /// as Omarchy does. The notification server stand-in silences the
+    /// as Omarchy 4.5 does: `~/.local/state/omarchy/notifications/quiet.json`,
+    /// replaced atomically. The notification server stand-in silences the
     /// notifications that arrive from now on as Omarchy would.
     ///
     /// # Panics
     ///
     /// If the file can't be written.
     pub fn set_do_not_disturb(&self, on: bool) {
-        stand_ins::write_do_not_disturb(&self.directory.join("home"), on)
-            .expect("write Omarchy's notification state file");
+        omarchy_quiet::write_do_not_disturb(&self.directory.join("home"), on)
+            .expect("write Omarchy's Do Not Disturb state file");
         self.stand_ins.set_do_not_disturb(on);
+    }
+
+    /// Replaces Omarchy's Do Not Disturb state file with `contents`,
+    /// atomically, as Omarchy's shell replaces it, for contents its shell
+    /// doesn't write itself: what its migration from 4.0 left, or a hand
+    /// edit. The notification server stand-in is left as it was.
+    ///
+    /// # Panics
+    ///
+    /// If the file can't be written.
+    pub fn replace_omarchy_quiet_file(&self, contents: &str) {
+        omarchy_quiet::replace_quiet_file(&self.directory.join("home"), contents)
+            .expect("write Omarchy's Do Not Disturb state file");
     }
 
     /// Switches Omarchy's current theme to `theme`, as `omarchy-theme-set`

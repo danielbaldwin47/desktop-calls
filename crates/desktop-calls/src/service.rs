@@ -20,6 +20,7 @@ use glib::MainContext;
 use zbus::Connection;
 
 use crate::control::{DialRequest, DialVerdict, Publisher, ShownSurfaces};
+use crate::do_not_disturb::DoNotDisturb;
 use crate::glib_runtime::GlibRuntime;
 use crate::indicator::Indicator;
 use crate::logging::{self, EventKind};
@@ -134,6 +135,8 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .inspect_err(indicator_failed)
         .ok();
     let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
+    // Held until the service stops.
+    let _do_not_disturb = DoNotDisturb::follow(input_sender.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
     context.spawn_local(contacts::run(

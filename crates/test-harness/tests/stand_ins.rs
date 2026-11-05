@@ -3,7 +3,10 @@
 //! would use them.
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::Read as _;
+use std::os::unix::fs::MetadataExt as _;
+use std::path::Path;
 use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -123,28 +126,63 @@ fn the_tray_watcher_records_a_registration_with_its_status_and_icon() {
         });
 }
 
-#[test]
-fn toggling_do_not_disturb_rewrites_omarchys_notification_state_file() {
-    let harness = Harness::start();
-    // Where Omarchy keeps it: `~/.local/state/omarchy/notifications.json`.
-    let state_file = harness
-        .directory()
-        .join("home/.local/state/omarchy/notifications.json");
-    assert!(
-        !state_file.exists(),
-        "no state file until the first toggle, which a reader treats as off"
-    );
+/// Omarchy 4.5's notification state directory, under the scenario's home.
+const OMARCHY_NOTIFICATIONS: &str = "home/.local/state/omarchy/notifications";
 
+#[test]
+fn omarchys_do_not_disturb_state_starts_empty_and_toggles_as_omarchy_45_writes_it() {
+    let harness = Harness::start();
+    let directory = harness.directory().join(OMARCHY_NOTIFICATIONS);
+    let quiet = directory.join("quiet.json");
+    // As Omarchy's shell prepares it at startup: a private directory and an
+    // empty `quiet.json`, which means off.
+    assert_eq!(mode(&directory), 0o700, "the directory is private");
+    assert_eq!(read(&quiet), "", "empty until the first toggle");
+    assert_eq!(mode(&quiet), 0o600);
+
+    // `JSON.stringify({ dnd }) + "\n"`, from Omarchy 4.5's `Store.js`.
     harness.set_do_not_disturb(true);
-    assert_eq!(
-        read_json(&state_file),
-        serde_json::json!({ "version": 3, "dnd": true })
-    );
+    assert_eq!(read(&quiet), "{\"dnd\":true}\n");
+    assert_eq!(mode(&quiet), 0o600, "an atomic write keeps the mode");
 
     harness.set_do_not_disturb(false);
-    assert_eq!(
-        read_json(&state_file),
-        serde_json::json!({ "version": 3, "dnd": false })
+    assert_eq!(read(&quiet), "{\"dnd\":false}\n");
+
+    assert!(
+        !harness
+            .directory()
+            .join("home/.local/state/omarchy/notifications.json")
+            .exists(),
+        "Omarchy 4.5 has no `notifications.json`; its migration deletes 4.0's"
+    );
+}
+
+#[test]
+fn a_scenario_can_start_with_do_not_disturb_on() {
+    let harness = Harness::builder().do_not_disturb().start();
+    let quiet = harness
+        .directory()
+        .join(OMARCHY_NOTIFICATIONS)
+        .join("quiet.json");
+    assert_eq!(read(&quiet), "{\"dnd\":true}\n");
+
+    // The notification server silences from the start too.
+    let notification = notify(
+        &harness,
+        "Desktop Calls",
+        NORMAL,
+        "Missed call from Alice",
+        "",
+    );
+    assert!(notification.silenced, "{notification:?}");
+}
+
+#[test]
+fn a_scenario_can_start_without_omarchys_notification_state() {
+    let harness = Harness::builder().no_omarchy_notification_state().start();
+    assert!(
+        !harness.directory().join(OMARCHY_NOTIFICATIONS).exists(),
+        "as on a Desktop without Omarchy"
     );
 }
 
@@ -315,9 +353,17 @@ impl TrayIcon {
     clippy::expect_used,
     reason = "a test helper fails its test the way the test itself would"
 )]
-fn read_json(path: &std::path::Path) -> serde_json::Value {
-    let text = std::fs::read_to_string(path).expect("read the state file");
-    serde_json::from_str(&text).expect("the state file is JSON")
+fn read(path: &Path) -> String {
+    fs::read_to_string(path).expect("read the state file")
+}
+
+/// `path`'s permission bits.
+#[expect(
+    clippy::expect_used,
+    reason = "a test helper fails its test the way the test itself would"
+)]
+fn mode(path: &Path) -> u32 {
+    fs::metadata(path).expect("stat the state file").mode() & 0o777
 }
 
 /// Waits for `child` to exit, and returns its status and standard output.

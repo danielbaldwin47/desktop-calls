@@ -20,7 +20,7 @@ use crate::process_group::ProcessGroup;
 use crate::screen::{Screen, ScreenKind};
 use crate::stand_ins::StandIns;
 use crate::timeline::{Timeline, unique_name};
-use crate::{OmarchyTheme, Theme, hyprland, stand_ins};
+use crate::{OmarchyTheme, Theme, hyprland, omarchy_quiet, stand_ins};
 
 /// Chooses what a scenario's world has beyond the buses, the Simulated Phone
 /// and the app. [`Harness::builder`] makes one.
@@ -38,6 +38,31 @@ pub struct Builder {
     omarchy_theme: Option<OmarchyTheme>,
     hyprland: Option<HyprlandSettings>,
     installed: bool,
+    notification_state: NotificationState,
+}
+
+/// What Omarchy's Do Not Disturb state file holds when the app starts.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum NotificationState {
+    /// Empty, as Omarchy's shell creates it: off.
+    #[default]
+    Prepared,
+    /// Written with Do Not Disturb on.
+    DoNotDisturb,
+    /// Not there at all: no Omarchy.
+    Absent,
+}
+
+impl NotificationState {
+    /// Leaves Omarchy's Do Not Disturb state file under `home` like this.
+    fn set_up(self, home: &Path) {
+        match self {
+            Self::Prepared => omarchy_quiet::prepare_state(home),
+            Self::DoNotDisturb => omarchy_quiet::write_do_not_disturb(home, true),
+            Self::Absent => Ok(()),
+        }
+        .expect("set up Omarchy's Do Not Disturb state file");
+    }
 }
 
 /// What the Hyprland stand-in reports.
@@ -169,6 +194,21 @@ impl Builder {
         self
     }
 
+    /// Turns Omarchy's Do Not Disturb on before the app starts, as a
+    /// Desktop that was left with it on. See [`Harness::set_do_not_disturb`].
+    pub fn do_not_disturb(mut self) -> Self {
+        self.notification_state = NotificationState::DoNotDisturb;
+        self
+    }
+
+    /// Leaves out Omarchy's notification state, as on a Desktop without
+    /// Omarchy. By default it is there as Omarchy 4.5's shell prepares it at
+    /// startup, with Do Not Disturb never yet turned on.
+    pub fn no_omarchy_notification_state(mut self) -> Self {
+        self.notification_state = NotificationState::Absent;
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -216,6 +256,7 @@ impl Builder {
             stand_ins::switch_omarchy_theme(&directory.join("home"), theme)
                 .expect("make the Omarchy theme current");
         }
+        self.notification_state.set_up(&directory.join("home"));
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &group, &mut processes);
             environment.push(("WAYLAND_DISPLAY", screen.wayland_display.clone()));
@@ -246,6 +287,7 @@ impl Builder {
 
         let stand_ins = StandIns::start(&session_bus, self.theme)
             .expect("serve the desktop stand-ins on the private session bus");
+        stand_ins.set_do_not_disturb(self.notification_state == NotificationState::DoNotDisturb);
         // Subscribe before the app starts, so no Error signal is missed.
         let app_errors = collect_app_errors(&session);
         let missed_calls = collect_missed_calls(&session);

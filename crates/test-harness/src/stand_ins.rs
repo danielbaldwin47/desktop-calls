@@ -9,7 +9,9 @@
 //!   registration and reads each item's status and icon;
 //! - the settings portal, `org.freedesktop.portal.Settings`, which tells GTK
 //!   whether the Desktop is light or dark;
-//! - Omarchy's notification state file, whose `dnd` field is Do Not Disturb;
+//! - Omarchy 4.5's Do Not Disturb state file,
+//!   `~/.local/state/omarchy/notifications/quiet.json`, kept in
+//!   [`crate::omarchy_quiet`];
 //! - Omarchy's current theme, `~/.local/state/omarchy/current/theme/`,
 //!   switched the way `omarchy-theme-set` switches it;
 //! - Omarchy's bar: `test-client --bar`, a layer-shell surface across the
@@ -654,20 +656,6 @@ async fn all_properties(
     Ok(properties
         .get_all(InterfaceName::try_from(ITEM_INTERFACE)?)
         .await?)
-}
-
-/// Writes Omarchy's notification state file under `home` as Omarchy does on
-/// each toggle: the whole file, replaced atomically.
-pub(crate) fn write_do_not_disturb(home: &Path, on: bool) -> std::io::Result<()> {
-    let directory = home.join(".local/state/omarchy");
-    fs::create_dir_all(&directory)?;
-    let temporary = directory.join("notifications.json.tmp");
-    // `JSON.stringify({ version: 3, dnd }, null, 2) + "\n"`.
-    fs::write(
-        &temporary,
-        format!("{{\n  \"version\": 3,\n  \"dnd\": {on}\n}}\n"),
-    )?;
-    fs::rename(&temporary, directory.join("notifications.json"))
 }
 
 struct NotificationServer {

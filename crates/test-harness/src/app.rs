@@ -21,6 +21,10 @@ pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
 
 /// The app's state, as its control interface publishes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one of the control interface's boolean properties, read as published"
+)]
 pub struct AppState {
     /// `ConnectionState`: `"not-set-up"`, `"connecting"`, `"connected"` or
     /// `"disconnected"`.
@@ -35,6 +39,8 @@ pub struct AppState {
     pub ringing: bool,
     /// `Muted`: whether the Desktop has muted its microphone.
     pub muted: bool,
+    /// `DoNotDisturb`: whether the Desktop's Do Not Disturb is on.
+    pub do_not_disturb: bool,
     /// `Codec`'s name: `"cvsd"`, `"msbc"`, `"lc3-swb"`, or `""` while the
     /// Desktop has negotiated none.
     pub codec: String,
@@ -215,6 +221,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         audio_location: String::try_from(property("AudioLocation")?)?,
         ringing: bool::try_from(property("Ringing")?)?,
         muted: bool::try_from(property("Muted")?)?,
+        do_not_disturb: bool::try_from(property("DoNotDisturb")?)?,
         codec,
         wideband,
         surfaces,

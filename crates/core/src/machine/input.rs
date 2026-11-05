@@ -116,6 +116,9 @@ pub enum Input {
     ContactsPermissionNeeded { deadline: Timestamp },
     /// A sync, or a refresh, ended without Contacts.
     ContactsSyncFailed(SyncFailure),
+    /// The Desktop's Do Not Disturb is on (`true`) or off, as read at
+    /// startup and on every change.
+    DoNotDisturbChanged(bool),
 }
 
 /// What the Phone link can be asked to do with Calls.

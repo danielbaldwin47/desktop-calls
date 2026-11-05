@@ -236,6 +236,7 @@ pub struct State {
     /// The other party of each recent Call, oldest first.
     recent_calls: Vec<(CallId, Caller)>,
     missed: MissedCalls,
+    do_not_disturb: bool,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -366,6 +367,13 @@ impl State {
     #[must_use]
     pub fn muted(&self) -> bool {
         matches!(self.muting, Muting::On { .. } | Muting::Restoring { .. })
+    }
+
+    /// Whether the Desktop's Do Not Disturb is on. Off until said otherwise,
+    /// as on a Desktop without one.
+    #[must_use]
+    pub fn do_not_disturb(&self) -> bool {
+        self.do_not_disturb
     }
 }
 
@@ -513,11 +521,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             state.phone = Some(phone);
             state.connection = ConnectionState::Connecting;
         }
-        Input::PhoneUnpaired { address } if state.is_our_phone(&address) => {
-            let mut effects = vec![Effect::DetachPhone];
-            phone_unpaired(&state, &mut effects);
-            return (State::default(), effects);
-        }
+        Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
             hands_free_up(&mut state, &mut effects);
         }
@@ -592,10 +596,23 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             restore_audio(&mut state, &mut effects);
         }
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
+        Input::DoNotDisturbChanged(on) => state.do_not_disturb = on,
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps
+/// its own settings.
+fn unpair(state: &State) -> (State, Vec<Effect>) {
+    let mut effects = vec![Effect::DetachPhone];
+    phone_unpaired(state, &mut effects);
+    let unpaired = State {
+        do_not_disturb: state.do_not_disturb,
+        ..State::default()
+    };
+    (unpaired, effects)
 }

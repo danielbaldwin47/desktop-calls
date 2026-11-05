@@ -4,6 +4,7 @@ mod bluez;
 mod cli;
 mod contacts;
 mod control;
+mod do_not_disturb;
 mod earlier_run;
 mod glib_runtime;
 mod hyprland;

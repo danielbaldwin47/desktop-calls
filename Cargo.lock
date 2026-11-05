@@ -259,6 +259,7 @@ dependencies = [
  "libadwaita",
  "serde_json",
  "socket2",
+ "tempfile",
  "toml",
  "tracing",
  "tracing-subscriber",

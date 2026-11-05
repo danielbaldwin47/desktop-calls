@@ -18,7 +18,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Map, Value};
-use test_harness::{Harness, Key, TestClient};
+use test_harness::{Bus, Harness, Key, TestClient};
 use zbus::Connection;
 use zbus::Variant;
 
@@ -518,6 +518,11 @@ impl Sitting {
 ///   `move-audio-to-phone-and-back` (each move waited for);
 /// - the Phone and its surroundings: `callee-answers` (the Test Number
 ///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
+/// - a first run: `forget-pairing` (the Phone forgets the Desktop and the
+///   Desktop removes the Phone, which stays nearby), `restart-app` (as
+///   `just install` restarts it), `open-setup-window` (`desktop-calls
+///   connect`), `contacts-access-off` (the Phone asks again before it
+///   shares Contacts), `allow-contacts` (Allow on the Phone's prompt);
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
 pub struct Demo {
     /// The user's own window, which has keyboard focus until the keybinding
@@ -593,6 +598,10 @@ fn user_cache() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// The demo's Omarchy bindings: one of the user's own.
+const DEMO_BINDINGS: &str = "-- Keep only your personal keybinding overrides here.\n\
+                             o.bind(\"SUPER + SHIFT + R\", \"SSH\", \"alacritty -e ssh your-server\")\n";
+
 /// How long the keybinding's focus, or the user's window, may take to
 /// arrive in the demo.
 const FOCUS_DEADLINE: Duration = Duration::from_secs(5);
@@ -606,6 +615,16 @@ impl Demo {
         // As a real Phone, hands-free comes up a moment after BlueZ marks
         // the Phone connected, so a reconnect takes time to measure.
         harness.simulated_phone().enable_quirk("slow-service-level");
+        // Omarchy's personal bindings, for step 1.2 to add the keybinding to.
+        let bindings = harness.directory().join("config/hypr/bindings.lua");
+        let written = bindings
+            .parent()
+            .map(fs::create_dir_all)
+            .and_then(Result::ok)
+            .and_then(|()| fs::write(&bindings, DEMO_BINDINGS).ok());
+        if written.is_none() {
+            println!("  demo: couldn't write {}.", bindings.display());
+        }
         Self {
             _window: window,
             harness,
@@ -648,6 +667,25 @@ impl Demo {
         let phone = self.harness.simulated_phone();
         phone.set_pbap_folder("cch", &self.missed.concat());
         phone.caller_hangs_up(path);
+    }
+
+    /// The Phone forgets the Desktop, which drops the connection, and the
+    /// Desktop removes the Phone in its Bluetooth settings.
+    fn forget_pairing(&self) {
+        self.harness.simulated_phone().forget_pairing();
+        let address = self.harness.phone().address.replace(':', "_");
+        let device = format!("/org/bluez/hci0/dev_{address}");
+        match zbus::ObjectPath::try_from(device.as_str()) {
+            Ok(device) => drop(self.harness.call_phone_method(
+                Bus::System,
+                "org.bluez",
+                "/org/bluez/hci0",
+                "org.bluez.Adapter1",
+                "RemoveDevice",
+                &(device,),
+            )),
+            Err(error) => println!("  demo: {device} isn't a device path: {error}"),
+        }
     }
 
     /// The user clicks the newest notification from Desktop Calls.
@@ -712,6 +750,16 @@ impl Demo {
                 );
             }
             "ring-out" => self.ring_out(),
+            "forget-pairing" => self.forget_pairing(),
+            "restart-app" => self.harness.restart_app(),
+            "open-setup-window" => drop(self.harness.cli(&["connect"])),
+            "contacts-access-off" => self.harness.simulated_phone().set_contacts_prompt("ask"),
+            // Android remembers the answer for the Desktop.
+            "allow-contacts" => {
+                let phone = self.harness.simulated_phone();
+                phone.answer_contacts_prompt("grant");
+                phone.set_contacts_prompt("grant");
+            }
             "click-notification" => self.click_notification(),
             "enter" => self.harness.keyboard().press(Key::Return),
             "phone-dials" => self.phone_dials(),
@@ -841,7 +889,8 @@ impl Demo {
                     "  demo: unknown action {other:?}. The actions: call, call-withheld, \
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, mute, unmute, keybinding, escape, a, d, \
-                     click-notification, enter, phone-dials, indicator-click, indicator-mute, \
+                     click-notification, enter, phone-dials, forget-pairing, restart-app, \
+                     open-setup-window, contacts-access-off, allow-contacts, indicator-click, indicator-mute, \
                      indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-wrong-number, \
                      type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
                      earbuds-on, out-of-range, return-to-range, suspend, resume, resume-slowly, \

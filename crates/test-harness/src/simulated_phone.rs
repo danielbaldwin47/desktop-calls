@@ -62,6 +62,14 @@ trait SimulatedPhone1 {
 
     fn set_pull_delay(&self, delay_ms: u32) -> zbus::Result<()>;
 
+    fn set_pull_delay_per_vcard(&self, contacts_ms: u32, call_history_ms: u32) -> zbus::Result<()>;
+
+    fn fail_history_pulls_from(&self, offset: u16) -> zbus::Result<()>;
+
+    fn answer_contacts_prompt(&self, answer: &str) -> zbus::Result<()>;
+
+    fn contacts_prompts(&self) -> zbus::Result<Vec<(u64, u64, String)>>;
+
     fn set_activate_delay(&self, delay_ms: u32) -> zbus::Result<()>;
 
     fn set_microphone_volume(&self, volume: u8) -> zbus::Result<()>;
@@ -459,7 +467,8 @@ impl SimulatedPhone<'_> {
 
     /// How the person holding the Phone answers its "Allow access to
     /// contacts and call history?" prompt for each new PBAP session:
-    /// `"grant"` (the default), `"deny"` or `"ignore"`.
+    /// `"grant"` (the default), `"deny"` or `"ignore"`; or `"ask"`, and the
+    /// test answers with [`SimulatedPhone::answer_contacts_prompt`].
     ///
     /// # Panics
     ///
@@ -478,6 +487,65 @@ impl SimulatedPhone<'_> {
         let delay_ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
         zbus::block_on(async { self.proxy().await?.set_pull_delay(delay_ms).await })
             .expect("set the Simulated Phone's pull delay");
+    }
+
+    /// Makes every PBAP pull take longer for each vCard it gives: `contacts`
+    /// from Contacts, `call_history` from a Call History folder.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_pull_delay_per_vcard(&self, contacts: Duration, call_history: Duration) {
+        let millis = |delay: Duration| u32::try_from(delay.as_millis()).unwrap_or(u32::MAX);
+        let (contacts_ms, call_history_ms) = (millis(contacts), millis(call_history));
+        zbus::block_on(async {
+            self.proxy()
+                .await?
+                .set_pull_delay_per_vcard(contacts_ms, call_history_ms)
+                .await
+        })
+        .expect("set the Simulated Phone's pull delay for each vCard");
+    }
+
+    /// Makes each pull from a Call History folder at `offset` or later
+    /// fail with `Failed`, as a Phone that drops the transfer.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn fail_history_pulls_from(&self, offset: u16) {
+        zbus::block_on(async { self.proxy().await?.fail_history_pulls_from(offset).await })
+            .expect("make the Simulated Phone fail later Call History pulls");
+    }
+
+    /// Answers the "Allow access to contacts and call history?" prompt the
+    /// Phone shows, as the person holding it: `"grant"` or `"deny"`.
+    ///
+    /// # Panics
+    ///
+    /// If no prompt is showing.
+    pub fn answer_contacts_prompt(&self, answer: &str) {
+        zbus::block_on(async { self.proxy().await?.answer_contacts_prompt(answer).await })
+            .unwrap_or_else(|error| panic!("answer the contacts prompt {answer:?}: {error}"));
+    }
+
+    /// Each "Allow access to contacts and call history?" prompt the Phone
+    /// showed, oldest first.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone can't be asked.
+    #[must_use]
+    pub fn contacts_prompts(&self) -> Vec<ContactsPrompt> {
+        zbus::block_on(async { self.proxy().await?.contacts_prompts().await })
+            .expect("ask the Simulated Phone for its contacts prompts")
+            .into_iter()
+            .map(|(shown_at, deadline, outcome)| ContactsPrompt {
+                shown_at,
+                deadline,
+                outcome,
+            })
+            .collect()
     }
 
     /// Makes the Phone take `delay` after each `Activate` before it opens
@@ -664,4 +732,16 @@ impl SimulatedPhone<'_> {
             .build()
             .await
     }
+}
+
+/// One showing of the Phone's "Allow access to contacts and call history?"
+/// prompt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContactsPrompt {
+    /// When it appeared, in milliseconds since the Unix epoch.
+    pub shown_at: u64,
+    /// When it goes away unanswered, likewise.
+    pub deadline: u64,
+    /// `"waiting"`, `"granted"`, `"denied"` or `"timed-out"`.
+    pub outcome: String,
 }

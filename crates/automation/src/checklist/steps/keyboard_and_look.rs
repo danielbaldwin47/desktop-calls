@@ -104,7 +104,7 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
 
 /// The Test Number, after saying which country code was assumed for it;
 /// or `None`, once the step has recorded why it can't be used.
-fn test_number_or_why_not(sitting: &mut Sitting) -> Option<Fingerprint> {
+pub(super) fn test_number_or_why_not(sitting: &mut Sitting) -> Option<Fingerprint> {
     match sitting.test_number() {
         TestNumber::Ready { number, assumed } => {
             if let Some(code) = assumed {
@@ -136,7 +136,11 @@ fn test_number_or_why_not(sitting: &mut Sitting) -> Option<Fingerprint> {
 /// Whether `call` went to the Test Number, once the Phone has said which
 /// number it went to: some Phones report it only after the Call appears.
 /// A Call that didn't, or might not have, is hung up, and the step fails.
-fn went_to(sitting: &mut Sitting, call: u32, test_number: &Fingerprint) -> Result<bool, Stop> {
+pub(super) fn went_to(
+    sitting: &mut Sitting,
+    call: u32,
+    test_number: &Fingerprint,
+) -> Result<bool, Stop> {
     let numbered = sitting.happens_within("the Call's number", NUMBER_DEADLINE, |state| {
         state
             .call(call)

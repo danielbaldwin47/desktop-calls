@@ -43,7 +43,9 @@ use missed_calls::missed_call_input;
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
 use presence::{Presence, forget_phone, presence_input};
 use setup::Setup;
-pub use setup::{SetupNotice, SetupStep, SetupWindowView};
+pub use setup::{
+    ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
+};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute,
     RingingCaller, Surfaces, WaitingOptions,
@@ -233,6 +235,10 @@ struct ConnectionLost {
 
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent fact about a different part of the Desktop, not a mode"
+)]
 pub struct State {
     phone: Option<Phone>,
     connection: ConnectionState,
@@ -281,6 +287,9 @@ pub struct State {
     waiting_notices: u32,
     focus: Focus,
     contacts_sync: ContactsState,
+    /// Contacts have been read for this Phone: from the cache, or by a sync
+    /// that finished.
+    contacts_held: bool,
     contacts: Contacts,
     call_history: CallHistory,
     dialer: Option<Dialer>,
@@ -509,16 +518,23 @@ impl State {
     }
 
     /// The Contacts state once the Phone leaves: a sync under way can't go
-    /// on, leaving ready if anything is held.
+    /// on, leaving ready only if Contacts were read before. Recent Calls a
+    /// first sync read before it was cut short don't make it ready.
     fn held_contacts_state(&self) -> ContactsState {
         match self.contacts_sync {
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
-                if self.contacts.directory().is_empty()
-                    && self.call_history.entries().is_empty() =>
+            ContactsState::Syncing
+            | ContactsState::PermissionNeeded { .. }
+            | ContactsState::Unavailable(Unavailable::Failed)
+                if self.contacts_held =>
             {
+                ContactsState::Ready
+            }
+            // A failure as the link dropped is the sync cut short too.
+            ContactsState::Syncing
+            | ContactsState::PermissionNeeded { .. }
+            | ContactsState::Unavailable(Unavailable::Failed) => {
                 ContactsState::Unavailable(Unavailable::NotSynced)
             }
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => ContactsState::Ready,
             other => other,
         }
     }
@@ -662,7 +678,8 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     } else {
         release_mute(&mut state, &mut effects);
     }
-    setup::follow_connection(&mut state);
+    setup::follow_connection(&mut state, &mut effects);
+    setup::follow_contacts(&mut state, &mut effects);
     (state, effects)
 }
 
@@ -714,6 +731,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }
         | Input::ContactsPermissionNeeded { .. }
+        | Input::ContactsSyncProgress(_)
         | Input::ContactsSyncFailed(_)) => contacts_sync(&mut state, input, &mut effects),
         input @ (Input::CallHistoryRefreshed(_)
         | Input::CallHistoryRefreshFailed
@@ -769,7 +787,17 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PairingFailed(_)
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
-        | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
+        | Input::RetryHandsFree
+        | Input::RetryContacts
+        | Input::SkipContacts
+        | Input::ContinueContacts
+        | Input::KeybindingChecked(_)
+        | Input::AddKeybinding
+        | Input::ConfirmKeybinding
+        | Input::CancelKeybinding
+        | Input::KeybindingAdded
+        | Input::KeybindingNotAdded
+        | Input::KeybindingConfigChanged(_)) => setup::setup_input(&mut state, input, &mut effects),
         Input::DesktopChecked(check) => desktop::checked(&mut state, check, &mut effects),
         Input::Fix(problem) => desktop::fix(&mut state, problem, &mut effects),
         Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),

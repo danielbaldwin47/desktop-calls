@@ -7,18 +7,25 @@
 //! listed has focus, the arrow keys move between Phones and Enter chooses.
 //! Escape or closing the window cancels.
 //!
-//! It reports `setup-window` with `step`, `heading`, `instructions` and
-//! `buttons` (one per line), `phones` (names, one per line), `code`,
-//! `notice`, `desktop` and `focused`, and logs when each step and the first
-//! Phone listed reached the screen, timed from the window opening.
+//! It reports `setup-window` with `step`, `heading`, `instructions`,
+//! `buttons` and `progress` (one per line), `phones` (names, one per line),
+//! `summary`, `code`, `countdown`, `line`, `tip`, `notice`, `desktop` and
+//! `focused`, and logs when each step and the first Phone listed reached the
+//! screen, timed from the window opening.
+//!
+//! While the Phone asks whether to share Contacts, the countdown changes by
+//! the second, and so does the time left reading Contacts: the window shows
+//! them anew as they change, and draws nothing in between.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::messages::{self, SetupWindowText};
-use desktop_calls_core::{Input, Phone, SetupStep, SetupWindowView};
+use desktop_calls_core::{
+    Input, KeybindingCheck, KeybindingStage, Phone, SetupStep, SetupWindowView, Timestamp,
+};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -37,7 +44,13 @@ const CSS: &str = "
 }
 .desktop-calls-setup .setup-phone { padding: 10px 12px; font-weight: bold; }
 .desktop-calls-setup .setup-keys { font-size: 0.85em; opacity: 0.75; }
+.desktop-calls-setup .setup-line { font-family: monospace; padding: 8px; }
+.desktop-calls-setup .setup-tip { opacity: 0.75; }
 ";
+
+/// How often the window checks whether the countdown, or the time left
+/// reading Contacts, changed: often enough that it changes on time.
+const TICK: Duration = Duration::from_millis(200);
 
 /// The Setup Window.
 pub(super) struct SetupWindow {
@@ -46,6 +59,9 @@ pub(super) struct SetupWindow {
     summary: gtk::Label,
     instructions: gtk::Box,
     code: gtk::Label,
+    progress: gtk::Label,
+    line: gtk::Label,
+    tip: gtk::Label,
     notice: gtk::Label,
     list: gtk::ListBox,
     buttons: gtk::Box,
@@ -67,19 +83,17 @@ pub(super) struct SetupWindow {
     top: RefCell<Option<gtk::Widget>>,
     /// Whether what is on top keeps keyboard focus when a Phone appears.
     top_keeps_focus: Cell<bool>,
+    /// What is shown, so it is drawn again only when it changes.
+    shown: RefCell<Option<(SetupWindowView, SetupWindowText)>>,
+    /// The buttons shown, by label.
+    shown_buttons: RefCell<Vec<&'static str>>,
+    /// Shows the countdown anew while it runs.
+    ticking: RefCell<Option<glib::SourceId>>,
 }
 
 impl SetupWindow {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
-        if let Some(display) = gtk::gdk::Display::default() {
-            let provider = gtk::CssProvider::new();
-            provider.load_from_string(CSS);
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &provider,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
+        add_css();
         let window = gtk::Window::new();
         window.set_default_size(WIDTH, -1);
         window.set_resizable(false);
@@ -97,6 +111,24 @@ impl SetupWindow {
         let code = gtk::Label::new(None);
         code.add_css_class("setup-code");
         code.set_selectable(false);
+        let progress = gtk::Label::new(None);
+        progress.set_xalign(0.0);
+        let line = gtk::Label::new(None);
+        line.add_css_class("setup-line");
+        line.add_css_class("card");
+        line.set_xalign(0.0);
+        line.set_wrap(true);
+        line.set_wrap_mode(gtk::pango::WrapMode::Char);
+        line.set_max_width_chars(50);
+        // Selectable with the pointer, to copy; Tab still moves only
+        // between the buttons.
+        line.set_selectable(true);
+        line.set_focusable(false);
+        let tip = gtk::Label::new(None);
+        tip.add_css_class("setup-tip");
+        tip.set_xalign(0.0);
+        tip.set_wrap(true);
+        tip.set_max_width_chars(50);
         let notice = gtk::Label::new(None);
         notice.add_css_class("error");
         notice.set_xalign(0.0);
@@ -117,8 +149,11 @@ impl SetupWindow {
             summary.upcast_ref(),
             instructions.upcast_ref(),
             code.upcast_ref(),
+            progress.upcast_ref(),
+            line.upcast_ref(),
             notice.upcast_ref(),
             list.upcast_ref(),
+            tip.upcast_ref(),
             buttons.upcast_ref(),
             keys.upcast_ref(),
         ] {
@@ -132,6 +167,9 @@ impl SetupWindow {
             summary,
             instructions,
             code,
+            progress,
+            line,
+            tip,
             notice,
             list,
             buttons,
@@ -146,6 +184,9 @@ impl SetupWindow {
             listed: Cell::default(),
             top: RefCell::default(),
             top_keeps_focus: Cell::default(),
+            shown: RefCell::default(),
+            shown_buttons: RefCell::default(),
+            ticking: RefCell::default(),
         });
         setup.connect();
         // Pre-warm, as for the other surfaces.
@@ -179,12 +220,14 @@ impl SetupWindow {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let intents = self.intents.clone();
-        keys.connect_key_pressed(move |_, key, _, _| {
-            if key != gtk::gdk::Key::Escape {
-                return glib::Propagation::Proceed;
+        let (window, buttons) = (self.window.clone(), self.buttons.clone());
+        keys.connect_key_pressed(move |_, key, _, _| match key {
+            gtk::gdk::Key::Escape => {
+                let _ = intents.unbounded_send(Input::CloseSetupWindow);
+                glib::Propagation::Stop
             }
-            let _ = intents.unbounded_send(Input::CloseSetupWindow);
-            glib::Propagation::Stop
+            gtk::gdk::Key::Tab => round_from_the_last_button(&window, &buttons),
+            _ => glib::Propagation::Proceed,
         });
         self.window.add_controller(keys);
 
@@ -254,13 +297,54 @@ impl SetupWindow {
         let _ = self.intents.unbounded_send(input);
     }
 
-    pub(super) fn render(&self, view: Option<&SetupWindowView>) {
+    pub(super) fn render(self: &Rc<Self>, view: Option<&SetupWindowView>) {
         let Some(view) = view else {
             self.opened.set(None);
             self.step.set(None);
+            self.shown.replace(None);
+            self.shown_buttons.borrow_mut().clear();
+            self.tick(false);
             self.window.set_visible(false);
             return;
         };
+        self.tick(matches!(
+            view.step,
+            SetupStep::ContactsPrompt { .. } | SetupStep::ContactsSyncing { .. }
+        ));
+        let text = messages::setup_window(view, now());
+        let shown = (view.clone(), text.clone());
+        if self.shown.borrow().as_ref() == Some(&shown) {
+            return;
+        }
+        self.shown.replace(Some(shown));
+        self.show(view, &text);
+    }
+
+    /// While `on`, shows the window anew as the time left changes.
+    fn tick(self: &Rc<Self>, on: bool) {
+        let mut ticking = self.ticking.borrow_mut();
+        match (on, ticking.is_some()) {
+            (true, false) => {
+                let weak = Rc::downgrade(self);
+                *ticking = Some(glib::timeout_add_local(TICK, move || {
+                    let Some(setup) = weak.upgrade() else {
+                        return glib::ControlFlow::Break;
+                    };
+                    let view = setup.shown.borrow().as_ref().map(|(view, _)| view.clone());
+                    setup.render(view.as_ref());
+                    glib::ControlFlow::Continue
+                }));
+            }
+            (false, true) => {
+                if let Some(source) = ticking.take() {
+                    source.remove();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn show(&self, view: &SetupWindowView, text: &SetupWindowText) {
         let opening = self
             .opened
             .get()
@@ -270,17 +354,25 @@ impl SetupWindow {
             self.step.set(None);
             self.listed.set(false);
         }
-        let text = messages::setup_window(view);
         let step = view.step.as_str();
         let new_step = self.step.replace(Some(step)) != Some(step);
+        let new_buttons = *self.shown_buttons.borrow() != text.buttons;
         self.window.set_title(Some(text.title));
         self.heading.set_text(&text.heading);
         self.summary
             .set_text(text.summary.as_deref().unwrap_or_default());
         self.summary.set_visible(text.summary.is_some());
         self.show_instructions(&text.instructions);
-        self.code.set_text(text.code.as_deref().unwrap_or_default());
-        self.code.set_visible(text.code.is_some());
+        // The pairing code, or the countdown: both big digits.
+        let digits = text.code.as_deref().or(text.countdown.as_deref());
+        self.code.set_text(digits.unwrap_or_default());
+        self.code.set_visible(digits.is_some());
+        self.progress.set_text(&text.progress.join("\n"));
+        self.progress.set_visible(!text.progress.is_empty());
+        self.line.set_text(text.line.as_deref().unwrap_or_default());
+        self.line.set_visible(text.line.is_some());
+        self.tip.set_text(text.tip.unwrap_or_default());
+        self.tip.set_visible(text.tip.is_some());
         self.notice.set_text(text.notice.unwrap_or_default());
         self.notice.set_visible(text.notice.is_some());
         self.keys.set_text(&text.keys);
@@ -288,12 +380,13 @@ impl SetupWindow {
             SetupStep::Choose { phones } => phones.as_slice(),
             _ => &[],
         };
-        let relisted = self.show_phones(phones, &text, new_step);
-        if new_step {
-            self.show_buttons(&view.step, &text);
+        let relisted = self.show_phones(phones, text, new_step);
+        if new_step || new_buttons {
+            self.show_buttons(&view.step, text);
+            self.shown_buttons.replace(text.buttons.clone());
         }
 
-        let content = report(view, &text);
+        let content = report(view, text);
         let unchanged = *self.content.borrow() == content;
         *self.content.borrow_mut() = content;
         if !self.window.is_visible() {
@@ -303,8 +396,10 @@ impl SetupWindow {
                 .borrow_mut()
                 .set(NAME, Some(reported(&self.content.borrow(), &self.window)));
         }
-        if new_step {
+        if new_step || new_buttons {
             self.focus_default();
+        }
+        if new_step {
             self.step_reached(step);
         } else if relisted
             && self.list.focus_child().is_none()
@@ -457,19 +552,75 @@ impl SetupWindow {
     }
 }
 
+/// Tab on the last button moves round to the first: GTK would move focus
+/// out of the window. Shift+Tab is GTK's own, so from the first button it
+/// reaches the Problems above.
+fn round_from_the_last_button(window: &gtk::Window, buttons: &gtk::Box) -> glib::Propagation {
+    let (Some(first), Some(last)) = (buttons.first_child(), buttons.last_child()) else {
+        return glib::Propagation::Proceed;
+    };
+    if gtk::prelude::GtkWindowExt::focus(window).as_ref() != Some(&last) {
+        return glib::Propagation::Proceed;
+    }
+    first.grab_focus();
+    glib::Propagation::Stop
+}
+
 /// What each of a step's buttons asks for, in the order of its labels.
+/// Adds the Setup Window's styles to the display.
+fn add_css() {
+    if let Some(display) = gtk::gdk::Display::default() {
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(CSS);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
 fn button_intents(step: &SetupStep) -> Vec<Input> {
     match step {
         SetupStep::Confirm { .. } => vec![Input::ConfirmPairing, Input::RejectPairing],
         SetupStep::PhoneCallsOff { .. } | SetupStep::PhoneUnreachable { .. } => {
             vec![Input::RetryHandsFree, Input::CloseSetupWindow]
         }
+        SetupStep::ContactsPromptTimedOut { .. } => {
+            vec![Input::RetryContacts, Input::SkipContacts]
+        }
+        SetupStep::ContactsPhoneAway { back: true, .. } => {
+            vec![Input::ContinueContacts, Input::CloseSetupWindow]
+        }
+        SetupStep::Done {
+            keybinding: KeybindingStage::Checked(KeybindingCheck::Available { .. }),
+            ..
+        } => vec![Input::AddKeybinding, Input::CloseSetupWindow],
+        SetupStep::Done {
+            keybinding: KeybindingStage::Confirming(_),
+            ..
+        } => vec![Input::ConfirmKeybinding, Input::CancelKeybinding],
         SetupStep::Choose { .. }
         | SetupStep::Pairing { .. }
         | SetupStep::Confirmed { .. }
         | SetupStep::Connecting { .. }
+        | SetupStep::ContactsWarning { .. }
+        | SetupStep::ContactsPrompt { .. }
+        | SetupStep::ContactsSyncing { .. }
+        | SetupStep::ContactsPhoneAway { back: false, .. }
         | SetupStep::Done { .. } => vec![Input::CloseSetupWindow],
     }
+}
+
+/// Now, for the countdown.
+fn now() -> Timestamp {
+    Timestamp(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            }),
+    )
 }
 
 /// What the window reports for `view`.
@@ -490,6 +641,22 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     }
     if let Some(code) = &text.code {
         content.insert("code".to_owned(), code.clone());
+    }
+    if let Some(countdown) = &text.countdown {
+        content.insert("countdown".to_owned(), countdown.clone());
+    }
+    // What the countdown counts to, in ms since the epoch.
+    if let SetupStep::ContactsPrompt { deadline, .. } = &view.step {
+        content.insert("deadline".to_owned(), deadline.0.to_string());
+    }
+    if !text.progress.is_empty() {
+        content.insert("progress".to_owned(), text.progress.join("\n"));
+    }
+    if let Some(line) = &text.line {
+        content.insert("line".to_owned(), line.clone());
+    }
+    if let Some(tip) = text.tip {
+        content.insert("tip".to_owned(), tip.to_owned());
     }
     if let Some(notice) = text.notice {
         content.insert("notice".to_owned(), notice.to_owned());

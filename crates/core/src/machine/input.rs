@@ -4,11 +4,13 @@
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
 use crate::connection::Phone;
-use crate::contacts::{CallHistory, Contacts, SyncFailure};
+use crate::contacts::{CallHistory, Contacts, SyncFailure, SyncProgress};
 use crate::earlier_run::EarlierRun;
 use crate::messages::Failure;
 use crate::messages::ProblemKind;
 use crate::missed::MissedCallNotice;
+
+use crate::keybinding::HyprlandConfig;
 
 /// Something that happened, as the shell adapters report it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +150,14 @@ pub enum Input {
     ContactsPermissionNeeded { deadline: Timestamp },
     /// A sync, or a refresh, ended without Contacts.
     ContactsSyncFailed(SyncFailure),
+    /// How far the sync under way has got.
+    ContactsSyncProgress(SyncProgress),
+    /// The user asked the Phone to ask again whether to share Contacts,
+    /// after nobody answered it in time.
+    RetryContacts,
+    /// The user chose to go on without Contacts, after nobody answered the
+    /// Phone in time.
+    SkipContacts,
     /// The Desktop's Do Not Disturb is on (`true`) or off, as read at
     /// startup and on every change.
     DoNotDisturbChanged(bool),
@@ -197,6 +207,26 @@ pub enum Input {
     FixDone(DesktopFix),
     /// What [`Effect::Fix`] asked didn't work.
     FixFailed(FixFailure),
+    /// What the Desktop's Hyprland config holds, as
+    /// [`Effect::CheckKeybinding`] asked.
+    KeybindingChecked(HyprlandConfig),
+    /// The Phone is back after leaving during the Setup Window's Contacts
+    /// step: the user asked to carry on.
+    ContinueContacts,
+    /// The user asked to add the Desktop Calls keybinding: show the line
+    /// first.
+    AddKeybinding,
+    /// The user confirmed the line shown: write it.
+    ConfirmKeybinding,
+    /// The user declined the line shown.
+    CancelKeybinding,
+    /// The line was written, as [`Effect::AddKeybinding`] asked.
+    KeybindingAdded,
+    /// The line couldn't be written.
+    KeybindingNotAdded,
+    /// Nothing was written: the file changed since the line was offered,
+    /// and holds this now.
+    KeybindingConfigChanged(HyprlandConfig),
 }
 
 /// Why pairing with a Phone didn't happen.
@@ -397,4 +427,17 @@ pub enum Effect {
     /// Put a Desktop Problem right, as the user asked. Ends in
     /// [`Input::FixDone`] or [`Input::FixFailed`].
     Fix(DesktopFix),
+    /// Find what the Desktop's Hyprland config can take for the Desktop
+    /// Calls keybinding. Answered by [`Input::KeybindingChecked`].
+    CheckKeybinding,
+    /// Write `added` to the Hyprland config `file`, which held `seen` when
+    /// the user saw and confirmed the line: `added` is `seen` with that
+    /// line. Only if `file` still holds `seen`. Answered by
+    /// [`Input::KeybindingAdded`], [`Input::KeybindingNotAdded`] or
+    /// [`Input::KeybindingConfigChanged`].
+    AddKeybinding {
+        file: String,
+        seen: String,
+        added: String,
+    },
 }

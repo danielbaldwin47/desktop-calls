@@ -31,6 +31,9 @@
 //!   user does in Bluetooth settings: `InterfacesRemoved`. A connected one
 //!   fails `org.bluez.Error.Failed`, because the simulation doesn't model
 //!   BlueZ disconnecting it first: the test disconnects it, then removes it.
+//!   The Phone, removed while in range, is nearby and unpaired again:
+//!   discovery finds it, as a Phone on its "Pair new device" screen
+//!   (inferred).
 //!
 //! [`Connected`]: https://git.kernel.org/pub/scm/bluetooth/bluez.git/tree/doc/org.bluez.Device.rst
 
@@ -295,6 +298,13 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
             .into_iter()
             .filter(|name| removed.contains_key(*name))
             .collect();
+            let phone = bluez::device_path(&world.phone_address).ok();
+            if phone.as_ref() == Some(&device) && world.range.reachable {
+                world
+                    .pairing
+                    .undiscovered
+                    .push((device.clone(), unpaired(removed)));
+            }
             let signal = Signal::InterfacesRemoved {
                 manager: OwnedObjectPath::try_from("/").unwrap_or_default(),
                 object: device,
@@ -303,6 +313,17 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
             (Reply::body(()), vec![signal])
         }
     }
+}
+
+/// A device's interfaces as discovery finds it unpaired.
+fn unpaired(mut interfaces: Interfaces) -> Interfaces {
+    if let Some(device) = interfaces.get_mut(bluez::DEVICE) {
+        for name in ["Paired", "Bonded", "Trusted", "Connected"] {
+            device.insert(name.to_owned(), OwnedVariant::from(false));
+        }
+        device.insert("RSSI".to_owned(), OwnedVariant::from(-52_i16));
+    }
+    interfaces
 }
 
 /// `Properties.Set` for what the Desktop sets: the adapter's

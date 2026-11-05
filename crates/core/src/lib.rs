@@ -12,6 +12,7 @@ mod connection;
 mod contacts;
 mod earlier_run;
 mod indicator;
+pub mod keybinding;
 mod machine;
 pub mod matching;
 pub mod messages;
@@ -24,16 +25,17 @@ pub use call::{
 pub use connection::{ConnectionState, Phone, UnknownConnectionState};
 pub use contacts::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Contact, ContactNumber, Contacts,
-    ContactsState, NumberLabel, SyncFailure, Unavailable,
+    ContactsState, NumberLabel, SyncFailure, SyncProgress, Unavailable,
 };
 pub use earlier_run::{EarlierCall, EarlierRun};
 pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView};
+pub use keybinding::{ConfigFile, HyprlandConfig, KeybindingCheck, RequiredFile};
 pub use machine::{
     BannerView, BluetoothPower, CallAudio, CallWindowPhase, CallWindowView, ConnectFailure,
-    DesktopCheck, DesktopFix, DialProgress, DialerView, Effect, FixFailure, HeldCall, Input, Mute,
-    PairingFailure, PhoneCommand, PhoneRefusal, Problem, RingingCaller, SetupNotice,
-    SetupProblemsView, SetupStep, SetupWindowView, State, Surfaces, Timer, WaitingOptions,
-    keypad_tones, step,
+    ContactsOutcome, DesktopCheck, DesktopFix, DialProgress, DialerView, Effect, FixFailure,
+    HeldCall, Input, KeybindingStage, Mute, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
+    ReadingContacts, RingingCaller, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView,
+    State, Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

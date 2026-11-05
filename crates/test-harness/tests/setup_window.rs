@@ -187,13 +187,14 @@ fn choosing_the_phone_pairs_with_the_same_code_trusts_and_connects_it() {
             .map(|(_, outcome)| outcome),
         Some("confirmed".to_owned())
     );
-    wait_for_step(&harness, "done", DEADLINE);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
     for step in [
         "choose",
         "pairing",
         "confirm",
         "confirmed",
         "connecting",
+        "contacts-warning",
         "done",
     ] {
         harness.wait_for_app_log(&format!(r#""step":"{step}""#), DEADLINE);
@@ -213,7 +214,7 @@ fn a_phone_pairing_from_its_own_screen_shows_the_same_code_while_the_window_is_o
     same_code_shown(&harness);
     harness.keyboard().press(Key::Return);
     connected(&harness);
-    wait_for_step(&harness, "done", DEADLINE);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
 
     harness.keyboard().press(Key::Return);
     closed(&harness);
@@ -241,7 +242,7 @@ fn a_phone_connecting_media_without_hands_free_is_asked_for_hands_free() {
             && call.arguments.contains(HANDS_FREE_AUDIO_GATEWAY)),
         "ConnectProfile for hands-free: {calls:?}"
     );
-    wait_for_step(&harness, "done", DEADLINE);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
 #[test]
@@ -268,7 +269,7 @@ fn a_phone_refusing_hands_free_shows_where_to_switch_phone_calls_on() {
     harness.simulated_phone().set_hands_free("when-asked");
     harness.keyboard().press(Key::Return);
     connected(&harness);
-    wait_for_step(&harness, "done", DEADLINE);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
 #[test]

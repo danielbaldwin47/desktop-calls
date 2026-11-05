@@ -4,8 +4,9 @@
 //! Phone shares Calls, and switching to another Phone.
 
 use desktop_calls_core::{
-    ConnectFailure, ConnectionState, Effect, IndicatorEntry, Input, PairingFailure, Phone,
-    PhoneCommand, SetupNotice, SetupStep, SetupWindowView, State, Timer,
+    ConnectFailure, ConnectionState, ContactsOutcome, Effect, IndicatorEntry, Input,
+    KeybindingStage, PairingFailure, Phone, PhoneCommand, SetupNotice, SetupStep, SetupWindowView,
+    State, Timer, Timestamp,
     messages::{self, ProblemKind},
     step,
 };
@@ -206,7 +207,7 @@ fn once_paired_the_phone_is_followed_trusted_and_connected() {
 }
 
 #[test]
-fn the_setup_is_done_once_the_phone_is_connected_for_calls() {
+fn once_the_phone_is_connected_for_calls_the_window_goes_on_to_contacts() {
     let (state, _) = paired();
     let (state, _) = run(
         state,
@@ -223,7 +224,10 @@ fn the_setup_is_done_once_the_phone_is_connected_for_calls() {
     );
 
     assert_eq!(state.connection_state(), &ConnectionState::Connected);
-    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::ContactsWarning { phone: pixel() })
+    );
 }
 
 #[test]
@@ -321,7 +325,10 @@ fn a_phone_connected_without_hands_free_is_asked_for_it_alone() {
             Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
         ],
     );
-    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::ContactsWarning { phone: pixel() })
+    );
 }
 
 #[test]
@@ -452,7 +459,10 @@ fn pair_again_after_the_phone_forgot_the_pairing_pairs_from_the_phone() {
 
     assert!(effects.contains(&Effect::AnswerPairingCode { confirm: true }));
     assert!(state.problems().is_empty());
-    assert_eq!(setup_step(&state), Some(SetupStep::Done { phone: pixel() }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::ContactsWarning { phone: pixel() })
+    );
 }
 
 #[test]
@@ -490,25 +500,34 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         notice: None,
         opened: 1,
     };
-    let choose = messages::setup_window(&view(SetupStep::Choose {
-        phones: vec![pixel()],
-    }));
+    let choose = messages::setup_window(
+        &view(SetupStep::Choose {
+            phones: vec![pixel()],
+        }),
+        Timestamp(0),
+    );
     assert_eq!(
         choose.keys,
         "Up and Down choose a phone, Enter pairs it; Escape closes"
     );
 
-    let confirm = messages::setup_window(&view(SetupStep::Confirm {
-        phone: pixel(),
-        code: 42,
-    }));
+    let confirm = messages::setup_window(
+        &view(SetupStep::Confirm {
+            phone: pixel(),
+            code: 42,
+        }),
+        Timestamp(0),
+    );
     assert_eq!(confirm.code.as_deref(), Some("000042"));
     assert_eq!(
         confirm.keys,
         "Enter: Confirm; Tab moves between buttons; Escape closes"
     );
 
-    let off = messages::setup_window(&view(SetupStep::PhoneCallsOff { phone: pixel() }));
+    let off = messages::setup_window(
+        &view(SetupStep::PhoneCallsOff { phone: pixel() }),
+        Timestamp(0),
+    );
     assert_eq!(
         off.summary.as_deref(),
         Some("My Pixel is paired, but isn't sharing Calls with this computer.")
@@ -519,11 +538,26 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
             .all(|line| !line.contains("is paired"))
     );
 
-    let done = messages::setup_window(&view(SetupStep::Done { phone: pixel() }));
-    assert!(done.instructions.is_empty());
+    let done = messages::setup_window(
+        &view(SetupStep::Done {
+            connected: true,
+            phone: pixel(),
+            contacts: ContactsOutcome::Synced {
+                contacts: 1,
+                calls: 1,
+            },
+            keybinding: KeybindingStage::Checking,
+        }),
+        Timestamp(0),
+    );
     assert_eq!(
         done.summary.as_deref(),
-        Some("Calls to your phone ring here now, and you can Call from here.")
+        Some("Synced 1 Contact and 1 recent Call.")
+    );
+    assert!(
+        done.instructions
+            .iter()
+            .all(|line| !line.contains("Synced"))
     );
     assert_eq!(done.keys, "Enter: Done; Escape closes");
 }

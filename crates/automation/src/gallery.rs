@@ -3,7 +3,7 @@
 //! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
 //! Each surface ticket adds its states to [`STATES`]. The Indicator's
-//! states, in [`INDICATOR_STATES`], are drawn as Omarchy's bar draws its
+//! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark.
 
 use std::fmt::Write as _;
@@ -16,9 +16,14 @@ use std::thread;
 use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
+
+mod indicator;
+
+use indicator::{
+    INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, draw_indicator, indicator_path,
+};
 use test_harness::{
     AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
-    draw_tray_icon,
 };
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -487,116 +492,95 @@ const STATES: &[State] = &[
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
     State {
+        name: "setup-window-contacts-prompt",
+        title: "The Setup Window, counting down while the Phone asks whether to share Contacts",
+        still: |state| setup_window_shows(state, "step", "contacts-prompt"),
+        prepare: fresh_install,
+        reach: |harness| {
+            harness.simulated_phone().set_contacts_prompt("ask");
+            pair_through_setup_window(harness);
+            setup_window_at(harness, "contacts-prompt");
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-contacts-syncing",
+        title: "The Setup Window, with recent Calls read and Contacts still being read",
+        still: |state| setup_window_shows(state, "step", "contacts-syncing"),
+        prepare: fresh_install,
+        reach: |harness| {
+            let phone = harness.simulated_phone();
+            phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
+            phone.set_pbap_folder("cch", &vcards::call_history(200));
+            // At the Pixel's pace: 312 Contacts take 9.4 s.
+            phone.set_pull_delay_per_vcard(Duration::from_millis(30), Duration::from_millis(5));
+            pair_through_setup_window(harness);
+            harness.wait_for_app("Contacts are being read", DEADLINE, |state| {
+                state
+                    .surface("setup-window")
+                    .and_then(|window| window.get("progress"))
+                    .is_some_and(|progress| progress.starts_with("✓ Recent Calls\n312 Contacts…"))
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
         name: "setup-window-done",
-        title: "The Setup Window, paired and connected for Calls",
+        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding",
         still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
+            with_hyprland_config(harness);
+            with_contacts(harness);
             pair_through_setup_window(harness);
             setup_window_at(harness, "done");
+            harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Add keybinding\nDone")
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-keybinding",
+        title: "The Setup Window, showing the exact keybinding line before writing it",
+        still: |_| true,
+        prepare: fresh_install,
+        reach: |harness| {
+            with_hyprland_config(harness);
+            with_contacts(harness);
+            pair_through_setup_window(harness);
+            harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Add keybinding\nDone")
+            });
+            harness.keyboard().press(Key::Return);
+            harness.wait_for_app("the line is shown", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Confirm\nCancel")
+            });
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];
 
-/// One state of the Indicator the gallery shows.
-struct IndicatorState {
-    /// The file name stem, after `indicator-`.
-    name: &'static str,
-    /// The caption.
-    title: &'static str,
-    /// Brings the scenario into the state.
-    reach: fn(&Harness),
-    /// What the Indicator's tooltip says once it shows the state.
-    tooltip: &'static str,
+/// Omarchy's Hyprland config in the scenario's home, so the Setup Window
+/// offers to add the keybinding to it.
+fn with_hyprland_config(harness: &Harness) {
+    let directory = harness.directory().join("config/hypr");
+    fs::create_dir_all(&directory)
+        .and_then(|()| {
+            fs::write(
+                directory.join("bindings.lua"),
+                "-- Keep only your personal keybinding overrides here.\n",
+            )
+        })
+        .unwrap_or_else(|error| panic!("write the Hyprland config: {error}"));
 }
 
-/// The Indicator is drawn in Omarchy's light and dark themes.
-const INDICATOR_THEMES: [OmarchyTheme; 2] = [OmarchyTheme::Light, OmarchyTheme::Dark];
-
-const INDICATOR_STATES: &[IndicatorState] = &[
-    IndicatorState {
-        name: "connected",
-        title: "The Indicator, the Phone connected",
-        reach: |harness| harness.simulated_phone().connect(),
-        tooltip: "Simulated Pixel connected",
-    },
-    IndicatorState {
-        name: "disconnected",
-        title: "The Indicator, the Phone out of range",
-        reach: |harness| {
-            connect(harness);
-            harness.simulated_phone().disconnect();
-        },
-        tooltip: "Simulated Pixel out of range",
-    },
-    IndicatorState {
-        name: "ringing",
-        title: "The Indicator, a Call ringing",
-        reach: |harness| {
-            connect(harness);
-            let _path = harness.simulated_phone().ring(NUMBER);
-        },
-        tooltip: "Call from +44 7700 900123",
-    },
-    IndicatorState {
-        name: "in-call",
-        title: "The Indicator, in a Call",
-        reach: |harness| {
-            connect(harness);
-            let _path = harness.simulated_phone().ring(NUMBER);
-            let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
-            harness.answer(state.calls.first().map_or(0, |call| call.id));
-        },
-        tooltip: "In a Call with +44 7700 900123",
-    },
-    IndicatorState {
-        name: "problem",
-        title: "The Indicator, a Problem: Contacts not shared",
-        reach: |harness| {
-            harness.simulated_phone().set_contacts_prompt("deny");
-            harness.simulated_phone().connect();
-        },
-        tooltip: "Simulated Pixel connected · Contacts not shared",
-    },
-];
-
-/// Where the Indicator in `state` under `theme` is drawn.
-fn indicator_path(
-    state: &IndicatorState,
-    theme: OmarchyTheme,
-    output: &std::path::Path,
-) -> PathBuf {
-    output.join(format!("indicator-{}-{}.png", state.name, theme.as_str()))
-}
-
-/// Brings a scenario under `theme` into `state` and draws the Indicator
-/// as Omarchy's bar shows it, in the theme's background and foreground,
-/// at its `indicator_path`.
-fn draw_indicator(
-    state: &IndicatorState,
-    theme: OmarchyTheme,
-    output: &std::path::Path,
-) -> Result<(), String> {
-    let harness = Look::Omarchy(theme).builder().start();
-    (state.reach)(&harness);
-    let items = harness.tray().wait_for(
-        &format!("the Indicator says {:?}", state.tooltip),
-        DEADLINE,
-        |items| {
-            items
-                .iter()
-                .any(|item| item.tooltip.as_deref() == Some(state.tooltip))
-        },
-    );
-    let path = indicator_path(state, theme, output);
-    let item = items.first().ok_or("no tray item")?;
-    draw_tray_icon(
-        item,
-        theme.colour("background"),
-        theme.colour("foreground"),
-        &path,
-    )
+/// Contacts and recent Calls on the Phone, so the finish page reports
+/// a sync the size of a real one.
+fn with_contacts(harness: &Harness) {
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
+    phone.set_pbap_folder("cch", &vcards::call_history(200));
 }
 
 /// Syncs Contacts and a Call History with a Missed Call from the Phone,

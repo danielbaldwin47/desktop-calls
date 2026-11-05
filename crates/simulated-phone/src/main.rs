@@ -29,6 +29,7 @@
 mod bluez;
 mod desktop;
 mod hands_free;
+mod later;
 mod logind;
 mod obex;
 mod objects;
@@ -45,9 +46,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use clap::Parser;
 use futures_util::StreamExt as _;
 use zbus::object_server::SignalEmitter;
-use zbus::{Connection, Message, MessageStream, OwnedObjectPath, interface};
+use zbus::{Connection, MessageStream, OwnedObjectPath, interface};
 
-use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply};
+use crate::later::{answer, run_activate_later, run_obex_later};
+use crate::objects::{MethodCall, ObjectTree, PROPERTIES};
 use crate::range::other_phone_up;
 use crate::scenario::Step;
 
@@ -347,64 +349,6 @@ pub(crate) async fn serve(
     Ok(())
 }
 
-/// Has the Phone act on an `Activate` once its delay has passed, on a
-/// thread of its own so the service keeps answering meanwhile.
-fn run_activate_later(world: SharedWorld, connection: Connection, later: telephony::ActivateLater) {
-    std::thread::spawn(move || {
-        std::thread::sleep(later.after);
-        let signals = {
-            let mut world = lock(&world);
-            let world = &mut *world;
-            telephony::activate_later(
-                &mut world.telephony,
-                world.audio_gateway.as_ref(),
-                &mut world.behaviour,
-                &later,
-            )
-        };
-        zbus::block_on(async {
-            for signal in signals {
-                if signal.emit(&connection).await.is_err() {
-                    break;
-                }
-            }
-        });
-    });
-}
-
-/// Sends `reply` to `message`, then emits `signals`: as the real service,
-/// which replies once the Phone confirms, and then reports the change the
-/// Phone makes.
-async fn answer(
-    connection: &Connection,
-    message: &Message,
-    reply: Reply,
-    signals: Vec<telephony::Signal>,
-) -> zbus::Result<()> {
-    reply.send(connection, &message.header()).await?;
-    for signal in signals {
-        signal.emit(connection).await?;
-    }
-    Ok(())
-}
-
-/// Does what obexd does `after` a method call, on a thread of its own so
-/// the service keeps answering meanwhile: replies to `message` if a reply is
-/// still owed, and sends the signals.
-fn run_obex_later(
-    world: SharedWorld,
-    connection: Connection,
-    message: zbus::Message,
-    after: std::time::Duration,
-    later: obex::Later,
-) {
-    std::thread::spawn(move || {
-        std::thread::sleep(after);
-        let (reply, signals) = obex::run_later(&mut lock(&world).obex, later);
-        zbus::block_on(answer(&connection, &message, reply, signals))
-    });
-}
-
 /// The connection the Telephony service is on. A restart replaces it; it is
 /// `None` while the service is off the bus.
 type TelephonyConnection = Arc<Mutex<Option<Connection>>>;
@@ -449,6 +393,7 @@ impl Control {
         let change = {
             let mut world = lock(&self.world);
             world.range.reachable = false;
+            world.obex.link_lost();
             range::hands_free_down(&mut world)?
         };
         self.range_changed(change, &emitter).await
@@ -841,11 +786,12 @@ impl Control {
 
     /// How the person holding the Phone answers its prompt to share
     /// Contacts, for each new PBAP session: `"grant"`, `"deny"` or
-    /// `"ignore"`.
+    /// `"ignore"`; or `"ask"`, and the test answers with
+    /// `AnswerContactsPrompt`.
     fn set_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
         let prompt = obex::Prompt::from_name(answer).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown answer {answer:?}; the answers are grant, deny and ignore"
+                "unknown answer {answer:?}; the answers are grant, deny, ignore and ask"
             ))
         })?;
         lock(&self.world).obex.prompt = prompt;
@@ -855,6 +801,33 @@ impl Control {
     /// Makes every PBAP pull take `delay_ms` before it completes.
     fn set_pull_delay(&self, delay_ms: u32) {
         lock(&self.world).obex.pull_delay = std::time::Duration::from_millis(u64::from(delay_ms));
+    }
+
+    /// Makes every PBAP pull take longer for each vCard it gives:
+    /// `contacts_ms` from `pb`, `call_history_ms` from a Call History folder.
+    fn set_pull_delay_per_vcard(&self, contacts_ms: u32, call_history_ms: u32) {
+        lock(&self.world).obex.pull_delay_per_vcard = obex::per_vcard(contacts_ms, call_history_ms);
+    }
+
+    /// Makes each pull from a Call History folder at `offset` or later
+    /// fail, as a Phone that drops the transfer; `u16::MAX` for none.
+    fn fail_history_pulls_from(&self, offset: u16) {
+        lock(&self.world).obex.fail_history_pulls_from =
+            (offset != u16::MAX).then_some(usize::from(offset));
+    }
+
+    /// Answers the prompt to share Contacts that the Phone shows, as the
+    /// person holding it does: `"grant"` or `"deny"`. Fails if none shows.
+    fn answer_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
+        lock(&self.world).obex.answer_prompt(answer)
+    }
+
+    /// Each prompt to share Contacts the Phone showed, oldest first: when
+    /// it appeared and when it goes away unanswered, in milliseconds since
+    /// the Unix epoch, and `"waiting"`, `"granted"`, `"denied"` or
+    /// `"timed-out"`.
+    fn contacts_prompts(&self) -> Vec<(u64, u64, String)> {
+        lock(&self.world).obex.prompts()
     }
 
     /// Makes the Phone take `delay_ms` after each `Activate` before it acts

@@ -247,3 +247,18 @@ pub enum SyncFailure {
     /// See [`Unavailable`].
     Unavailable(Unavailable),
 }
+
+/// How far a sync has got, as it goes: what the Setup Window shows while
+/// Contacts and Call History are read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SyncProgress {
+    /// The Phone agreed to share Contacts and Call History, after asking
+    /// the person holding it or not: the sync is reading them.
+    Shared,
+    /// The newest Calls of the Call History are read, before Contacts.
+    CallHistory(CallHistory),
+    /// The sync is reading Contacts, this many if the Phone said, from `at`.
+    ReadingContacts { count: Option<u32>, at: Timestamp },
+    /// The sync has read everything it could, and reported it.
+    Finished,
+}

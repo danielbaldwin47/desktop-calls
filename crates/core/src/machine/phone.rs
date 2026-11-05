@@ -9,10 +9,13 @@ use super::presence::{
     hands_free_back, hands_free_connect_done, hands_free_connect_failed, pairing_found,
     wait_for_lost_call,
 };
+use super::setup::{contacts_read, hold_sync, sync_progress};
 use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
 use crate::call::{AudioLocation, Request, Transport};
 use crate::connection::{ConnectionState, Phone};
-use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
+use crate::contacts::{
+    CallHistory, Contacts, ContactsState, SyncFailure, SyncProgress, Unavailable,
+};
 use crate::earlier_run::EarlierRun;
 use crate::messages::Failure;
 
@@ -41,6 +44,7 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             if state.contacts_sync == ContactsState::Unavailable(Unavailable::NotSynced) {
                 state.contacts_sync = ContactsState::Ready;
             }
+            state.contacts_held = true;
             state.contacts = contacts;
             state.call_history = call_history;
         }
@@ -49,16 +53,33 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             call_history,
         } => {
             state.contacts_sync = ContactsState::Ready;
+            state.contacts_held = true;
             state.contacts = contacts;
             state.call_history = call_history;
+            contacts_read(state);
         }
         Input::CallHistoryRefreshed(call_history) => state.call_history = call_history,
         Input::ContactsPermissionNeeded { deadline } => {
             state.contacts_sync = ContactsState::PermissionNeeded { deadline };
         }
+        Input::ContactsSyncProgress(progress) => {
+            match &progress {
+                SyncProgress::Shared => {
+                    if let ContactsState::PermissionNeeded { .. } = state.contacts_sync {
+                        state.contacts_sync = ContactsState::Syncing;
+                    }
+                }
+                SyncProgress::CallHistory(call_history) => {
+                    state.call_history = call_history.clone();
+                }
+                SyncProgress::ReadingContacts { .. } | SyncProgress::Finished => {}
+            }
+            sync_progress(state, &progress);
+        }
         Input::ContactsSyncFailed(SyncFailure::Denied) => {
             // The person said no: keep nothing of theirs.
             state.contacts_sync = ContactsState::Denied;
+            state.contacts_held = false;
             state.contacts = Contacts::default();
             state.call_history = CallHistory::default();
             effects.push(Effect::ForgetContacts);
@@ -77,9 +98,12 @@ pub(super) fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
     hands_free_back(state);
     wait_for_lost_call(state, effects);
     // Every connect syncs, so the Desktop catches up with changes made on
-    // the Phone while apart.
-    state.contacts_sync = ContactsState::Syncing;
-    effects.push(Effect::SyncContacts);
+    // the Phone while apart; the Setup Window first warns that the Phone
+    // is about to ask whether to share Contacts.
+    if !hold_sync(state) {
+        state.contacts_sync = ContactsState::Syncing;
+        effects.push(Effect::SyncContacts);
+    }
     if state.has_desktop_audio() {
         state.connection = ConnectionState::Connected;
     } else {

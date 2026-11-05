@@ -29,6 +29,15 @@
 //! - Setting `RejectSCO` emits no signal. `Activate` does nothing while it is
 //!   true; otherwise the transport reports its codec, then `pending`, then
 //!   `active`, as the Pixel does.
+//! - `SpeakerVolume` and `MicrophoneVolume` are bytes, and setting one
+//!   reports the new value with `PropertiesChanged`. PipeWire reads the
+//!   value without checking its type (a wrong one crashed `WirePlumber`), so
+//!   anything but a byte is refused here, to catch it.
+//! - `SendTones` needs an `active` Call (`InvalidState`) and only `0-9`,
+//!   `A-D`, `*` and `#` (`InvalidFormat`), as PipeWire checks. PipeWire sends
+//!   the whole string in one `AT+VTS`, and Android accepts exactly one tone
+//!   per `AT+VTS`, answering anything longer with `+CME ERROR: 25`, so a
+//!   longer string fails with `CME` here too.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -51,6 +60,11 @@ const VOICE_CALL: &str = "org.ofono.VoiceCall";
 
 const INVALID_STATE: &str = "org.pipewire.Telephony.Error.InvalidState";
 const INVALID_STATE_MESSAGE: &str = "The current state does not allow this method call";
+const INVALID_FORMAT: &str = "org.pipewire.Telephony.Error.InvalidFormat";
+const INVALID_FORMAT_MESSAGE: &str = "Invalid phone number or tones";
+const CME: &str = "org.pipewire.Telephony.Error.CME";
+/// PipeWire's text for `+CME ERROR: 25`.
+const CME_25_MESSAGE: &str = "invalid characters in text string";
 
 /// `Introspect` on `/org/pipewire/Telephony`, captured from the real service.
 const MANAGER_INTROSPECTION: &str = include_str!("../introspection/telephony-manager.xml");
@@ -92,6 +106,8 @@ impl Quirk {
 pub struct Behaviour {
     /// The codec id the audio link negotiates: 1 CVSD, 2 mSBC, 3 LC3-SWB.
     pub codec: u8,
+    /// The hands-free microphone gain a new AudioGateway reports.
+    pub microphone_volume: u8,
     pub quirks: BTreeSet<Quirk>,
 }
 
@@ -100,6 +116,7 @@ impl Default for Behaviour {
     fn default() -> Self {
         Self {
             codec: 3,
+            microphone_volume: 15,
             quirks: BTreeSet::new(),
         }
     }
@@ -264,6 +281,7 @@ pub fn add_audio_gateway(
     tree: &mut ObjectTree,
     path: &OwnedObjectPath,
     address: &str,
+    behaviour: &Behaviour,
 ) -> Interfaces {
     let mut gateway = Properties::new();
     gateway.insert(
@@ -271,7 +289,10 @@ pub fn add_audio_gateway(
         OwnedVariant::from(Str::from(address.to_owned())),
     );
     gateway.insert("SpeakerVolume".into(), OwnedVariant::from(15_u8));
-    gateway.insert("MicrophoneVolume".into(), OwnedVariant::from(15_u8));
+    gateway.insert(
+        "MicrophoneVolume".into(),
+        OwnedVariant::from(behaviour.microphone_volume),
+    );
     let mut transport = Properties::new();
     transport.insert("Codec".into(), OwnedVariant::from(0_u8));
     transport.insert("State".into(), OwnedVariant::from(Str::from("idle")));
@@ -322,6 +343,35 @@ pub fn ring(
         ));
     }
     Ok((path, signals))
+}
+
+/// Sets the AudioGateway's `MicrophoneVolume`, as the Phone's `+VGM` or a
+/// `Properties.Set` does, and returns the signal that reports it.
+pub fn set_microphone_volume(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    volume: u8,
+) -> Vec<Signal> {
+    set_volume(tree, audio_gateway, "MicrophoneVolume", volume)
+}
+
+fn set_volume(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    name: &str,
+    volume: u8,
+) -> Vec<Signal> {
+    tree.set(
+        audio_gateway,
+        AUDIO_GATEWAY,
+        name,
+        OwnedVariant::from(volume),
+    );
+    vec![Signal::PropertiesChanged {
+        path: audio_gateway.clone(),
+        interface: AUDIO_GATEWAY,
+        changed: Properties::from([(name.to_owned(), OwnedVariant::from(volume))]),
+    }]
 }
 
 /// Unregisters the Call at `call` and registers it again at the same path
@@ -408,7 +458,10 @@ pub fn answer(
             ),
             Vec::new(),
         ),
-        (PROPERTIES, "Set", Some(_), _) => (set_property(tree, call, message), Vec::new()),
+        (PROPERTIES, "Set", Some(_), _) => set_property(tree, call, message),
+        (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SendTones", Some(gateway), _) => {
+            (send_tones(tree, gateway, message), Vec::new())
+        }
         (AUDIO_GATEWAY_TRANSPORT, "Activate", Some(gateway), _) => {
             (Reply::body(()), activate(tree, gateway, behaviour))
         }
@@ -427,31 +480,68 @@ pub fn answer(
     }
 }
 
-/// `Properties.Set` on an AudioGateway: only `RejectSCO` is writable here,
-/// and setting it emits nothing.
-fn set_property(tree: &mut ObjectTree, call: &MethodCall, message: &Message) -> Reply {
+/// `Properties.Set` on an AudioGateway: `RejectSCO`, which emits nothing,
+/// and the two volumes, which report the new value.
+fn set_property(
+    tree: &mut ObjectTree,
+    call: &MethodCall,
+    message: &Message,
+) -> (Reply, Vec<Signal>) {
+    let invalid = |text: String| {
+        (
+            Reply::Error("org.freedesktop.DBus.Error.InvalidArgs", text),
+            Vec::new(),
+        )
+    };
     let Ok((interface, name, value)) = message
         .body()
         .deserialize::<(String, String, OwnedVariant)>()
     else {
+        return invalid("Invalid arguments".to_owned());
+    };
+    let Ok(path) = OwnedObjectPath::try_from(call.path.as_str()) else {
+        return (Reply::unknown_method(call), Vec::new());
+    };
+    match (interface.as_str(), name.as_str()) {
+        (AUDIO_GATEWAY_TRANSPORT, "RejectSCO") if bool::try_from(&value).is_ok() => {
+            tree.set(&path, AUDIO_GATEWAY_TRANSPORT, "RejectSCO", value);
+            (Reply::body(()), Vec::new())
+        }
+        (AUDIO_GATEWAY, "MicrophoneVolume" | "SpeakerVolume") => match u8::try_from(&value) {
+            Ok(volume) => (Reply::body(()), set_volume(tree, &path, &name, volume)),
+            Err(_) => invalid(format!(
+                "{name} is a byte ('y'), not '{}'; PipeWire would read it unchecked",
+                value.value_signature()
+            )),
+        },
+        _ => invalid(format!("No such writable property '{name}'")),
+    }
+}
+
+/// `SendTones` on an AudioGateway.
+fn send_tones(tree: &ObjectTree, audio_gateway: &OwnedObjectPath, message: &Message) -> Reply {
+    let Ok(tones) = message.body().deserialize::<String>() else {
         return Reply::Error(
             "org.freedesktop.DBus.Error.InvalidArgs",
             "Invalid arguments".to_owned(),
         );
     };
-    let Ok(path) = OwnedObjectPath::try_from(call.path.as_str()) else {
-        return Reply::unknown_method(call);
-    };
-    match (interface.as_str(), name.as_str()) {
-        (AUDIO_GATEWAY_TRANSPORT, "RejectSCO") if bool::try_from(&value).is_ok() => {
-            tree.set(&path, AUDIO_GATEWAY_TRANSPORT, "RejectSCO", value);
-            Reply::body(())
-        }
-        _ => Reply::Error(
-            "org.freedesktop.DBus.Error.InvalidArgs",
-            format!("No such writable property '{name}'"),
-        ),
+    if !tones
+        .chars()
+        .all(|tone| tone.is_ascii_digit() || matches!(tone, 'A'..='D' | '*' | '#'))
+    {
+        return Reply::Error(INVALID_FORMAT, INVALID_FORMAT_MESSAGE.to_owned());
     }
+    let active = calls(tree, audio_gateway.as_str())
+        .iter()
+        .any(|(_, properties)| call_state(properties) == "active");
+    if !active {
+        return invalid_state();
+    }
+    if tones.chars().count() != 1 {
+        return Reply::Error(CME, CME_25_MESSAGE.to_owned());
+    }
+    Reply::body(())
 }
 
 /// `Activate`: brings the Call audio to the Desktop, unless SCO is rejected

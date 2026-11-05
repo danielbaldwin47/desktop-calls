@@ -32,6 +32,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Mute the microphone during a Call, or unmute it if it is muted.
+    Mute,
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
     Service,
@@ -40,6 +42,7 @@ enum Command {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Command::Status { json }) => cli::status(json),
+        Some(Command::Mute) => cli::mute(),
         Some(Command::Service) => service::run(),
         // What the Desktop Calls keybinding runs.
         None => cli::activate(),

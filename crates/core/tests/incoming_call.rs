@@ -2,7 +2,7 @@
 //! ringing, answer, decline, hang up, Audio Location, codec and surfaces.
 
 use desktop_calls_core::{
-    AudioLocation, CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone,
+    AudioLocation, CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Mute, Phone,
     PhoneCommand, State, Timer, Timestamp, Transport, messages::Failure, step,
 };
 
@@ -142,6 +142,7 @@ fn once_active_with_the_transport_up_the_audio_is_on_the_desktop_with_a_timer() 
             active_since: Timestamp(2_000),
             audio_location: AudioLocation::Desktop,
             wideband: true,
+            mute: Mute::Off,
         }
     );
 }
@@ -306,6 +307,7 @@ fn answered_on_the_phone_the_desktop_leaves_the_audio_there() {
             active_since: Timestamp(2_000),
             audio_location: AudioLocation::Phone,
             wideband: false,
+            mute: Mute::Unavailable,
         }
     );
 }

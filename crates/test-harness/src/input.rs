@@ -38,11 +38,13 @@ const KEYMAP: &str = "xkb_keymap {\n\
 /// `wl_keyboard.keymap_format.xkb_v1`.
 const KEYMAP_FORMAT_XKB_V1: u32 = 1;
 
-/// The Shift modifier's bit in the keymap above.
+/// The Shift and Control modifiers' bits in the keymap above.
 const SHIFT_MASK: u32 = 1;
+const CONTROL_MASK: u32 = 4;
 
 /// Key codes from `linux/input-event-codes.h`.
 const KEY_LEFTSHIFT: u32 = 42;
+const KEY_LEFTCTRL: u32 = 29;
 const BTN_LEFT: u32 = 0x110;
 
 /// Sub-pixel precision for absolute pointer motion.
@@ -179,6 +181,22 @@ impl SyntheticInput {
                 self.keyboard.modifiers(0, 0, 0, 0);
             }
         }
+        self.sync()
+    }
+
+    /// Presses and releases `character`'s key while holding Control.
+    pub fn press_with_control(&mut self, character: char) -> Result<(), String> {
+        let (code, false) = character_key(character)
+            .ok_or_else(|| format!("the harness can't type {character:?}"))?
+        else {
+            return Err(format!("{character:?} needs Shift as well as Control"));
+        };
+        self.key(KEY_LEFTCTRL, true);
+        self.keyboard.modifiers(CONTROL_MASK, 0, 0, 0);
+        self.key(code, true);
+        self.key(code, false);
+        self.key(KEY_LEFTCTRL, false);
+        self.keyboard.modifiers(0, 0, 0, 0);
         self.sync()
     }
 

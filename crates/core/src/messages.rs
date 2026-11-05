@@ -26,6 +26,18 @@ pub enum Failure {
     NoSuchCall,
     /// The Call asked about is no longer ringing.
     CallNotRinging,
+    /// There is no connected Call to act on.
+    NoLiveCall,
+    /// Mute works only while the Audio Location is the Desktop.
+    MuteUnavailable,
+    /// The Phone did not mute the microphone.
+    MuteFailed,
+    /// The Phone did not turn the microphone back on.
+    UnmuteFailed,
+    /// Keypad tones can only be digits, `*` and `#`.
+    InvalidTones,
+    /// The Phone did not play the keypad tones.
+    TonesNotSent,
     /// The keybinding has nothing to focus, and the Dialer it would open
     /// isn't built yet.
     DialerUnavailable,
@@ -44,6 +56,12 @@ impl Failure {
             Self::AudioNotMoved => "audio-not-moved",
             Self::NoSuchCall => "no-such-call",
             Self::CallNotRinging => "call-not-ringing",
+            Self::NoLiveCall => "no-live-call",
+            Self::MuteUnavailable => "mute-unavailable",
+            Self::MuteFailed => "mute-failed",
+            Self::UnmuteFailed => "unmute-failed",
+            Self::InvalidTones => "invalid-tones",
+            Self::TonesNotSent => "tones-not-sent",
             Self::DialerUnavailable => "dialer-unavailable",
         }
     }
@@ -95,9 +113,30 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::NoSuchCall => ("That Call has already ended.", None),
         Failure::CallNotRinging => ("That Call isn't ringing any more.", None),
+        Failure::NoLiveCall => ("There's no connected Call right now.", None),
+        Failure::MuteUnavailable => (
+            "Mute works only while the Call's audio is on this computer; mute on your phone instead.",
+            None,
+        ),
+        Failure::MuteFailed => (
+            "Your phone didn't mute the microphone, so the other person can still hear you.",
+            None,
+        ),
+        Failure::UnmuteFailed => (
+            "Your phone didn't turn the microphone back on, so you're still muted; try again.",
+            None,
+        ),
+        Failure::InvalidTones => ("Only digits, * and # can be sent as tones.", None),
+        Failure::TonesNotSent => ("Your phone didn't send the tones; try again.", None),
         Failure::DialerUnavailable => ("Desktop Calls can't open the Dialer yet.", None),
     };
     Message { text, next_action }
+}
+
+/// What `desktop-calls mute` did.
+#[must_use]
+pub fn mute_toggled(muted: bool) -> &'static str {
+    if muted { "Muted." } else { "Unmuted." }
 }
 
 /// One sentence saying whether the Phone is connected.
@@ -140,6 +179,16 @@ pub enum Label {
     AudioOnPhone,
     /// Wideband speech.
     Hd,
+    /// The Call Window's button that mutes the microphone.
+    Mute,
+    /// The same button while the microphone is muted.
+    Unmute,
+    /// The Call Window's button that shows the keypad's buttons.
+    Keypad,
+    /// What the Call Window says, unmistakably, while muted.
+    MicrophoneMuted,
+    /// The keypad's tone entry, before anything is typed.
+    KeypadPlaceholder,
 }
 
 /// The text of `label`.
@@ -156,6 +205,11 @@ pub fn label(label: Label) -> &'static str {
         Label::AudioOnDesktop => "Audio on this computer",
         Label::AudioOnPhone => "Audio on phone",
         Label::Hd => "HD",
+        Label::Mute => "Mute",
+        Label::Unmute => "Unmute",
+        Label::Keypad => "Keypad",
+        Label::MicrophoneMuted => "Microphone muted",
+        Label::KeypadPlaceholder => "Type or paste digits to send tones",
     }
 }
 

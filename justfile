@@ -14,7 +14,7 @@ check: && _core-is-pure _dbus-set-is-signed
     cargo deny --locked check
 
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
-# Screen scenarios need sway and grim: sudo pacman -S --needed sway grim
+# Screen scenarios need sway, grim and wl-clipboard: sudo pacman -S --needed sway grim wl-clipboard
 test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}

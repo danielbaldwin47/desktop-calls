@@ -75,6 +75,62 @@ async fn call_activate(runtime: GlibRuntime) -> Result<(), Failure> {
         .map_err(|error| failure_of(&error))
 }
 
+/// Why a command the CLI sent didn't happen.
+enum Refusal {
+    /// The CLI couldn't talk to the long-running process.
+    Failure(Failure),
+    /// The long-running process refused, with this sentence for the user.
+    Refused(String),
+}
+
+/// `desktop-calls mute`: mutes the Desktop's microphone, or unmutes it if
+/// it is muted.
+pub fn mute() -> ExitCode {
+    let context = MainContext::default();
+    match context.block_on(toggle_mute(GlibRuntime::new(context.clone()))) {
+        Ok(muted) => {
+            println!("{}", messages::mute_toggled(muted));
+            ExitCode::SUCCESS
+        }
+        Err(Refusal::Failure(failure)) => report(failure),
+        Err(Refusal::Refused(text)) => {
+            eprintln!("{text}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Flips `Muted`, and returns what it is now.
+async fn toggle_mute(runtime: GlibRuntime) -> Result<bool, Refusal> {
+    let session = connect(runtime).await.map_err(Refusal::Failure)?;
+    let properties = get_all(&session)
+        .await
+        .map_err(|error| Refusal::Failure(failure_of(&error)))?;
+    let muted = properties
+        .get("Muted")
+        .cloned()
+        .and_then(|value| bool::try_from(value).ok())
+        .ok_or(Refusal::Failure(Failure::UnexpectedReply))?;
+    let reply = session
+        .call_method(
+            Some(control::BUS_NAME),
+            control::PATH,
+            Some(INTERFACE),
+            "SetMuted",
+            &(!muted,),
+        )
+        .await;
+    match reply {
+        Ok(_) => Ok(!muted),
+        Err(zbus::Error::MethodError(name, Some(text), _))
+            if name.starts_with(control::ERROR_PREFIX) =>
+        {
+            Err(Refusal::Refused(text))
+        }
+        Err(error) => Err(Refusal::Failure(failure_of(&error))),
+    }
+}
+
 async fn connect(runtime: GlibRuntime) -> Result<Connection, Failure> {
     zbus::connection::Builder::session()
         .runtime(runtime)

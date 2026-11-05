@@ -281,6 +281,7 @@ impl Control {
     ) -> zbus::fdo::Result<()> {
         let (device, gateway, interfaces) = {
             let mut world = lock(&self.world);
+            let world = &mut *world;
             if world.audio_gateway.is_some() {
                 return Ok(());
             }
@@ -294,7 +295,12 @@ impl Control {
             let gateway = telephony::audio_gateway_path(world.next_audio_gateway_index)?;
             world.next_audio_gateway_index += 1;
             let address = world.phone_address.clone();
-            let interfaces = telephony::add_audio_gateway(&mut world.telephony, &gateway, &address);
+            let interfaces = telephony::add_audio_gateway(
+                &mut world.telephony,
+                &gateway,
+                &address,
+                &world.behaviour,
+            );
             world.audio_gateway = Some(gateway.clone());
             (device, gateway, interfaces)
         };
@@ -392,6 +398,25 @@ impl Control {
         }
         lock(&self.world).behaviour.codec = codec;
         Ok(())
+    }
+
+    /// Makes the Phone report this hands-free microphone gain, as its `+VGM`
+    /// does: 0 to 15, or 255, which is how PipeWire sends its -1 ("the Phone
+    /// hasn't said"). The current AudioGateway reports it at once, and later
+    /// ones start with it.
+    async fn set_microphone_volume(&self, volume: u8) -> zbus::fdo::Result<()> {
+        let signals = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            world.behaviour.microphone_volume = volume;
+            match world.audio_gateway.clone() {
+                Some(gateway) => {
+                    telephony::set_microphone_volume(&mut world.telephony, &gateway, volume)
+                }
+                None => Vec::new(),
+            }
+        };
+        self.emit(signals).await
     }
 
     /// Switches on a quirk other Phones, or other moments, show:

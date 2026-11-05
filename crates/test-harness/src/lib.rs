@@ -93,6 +93,8 @@ trait SimulatedPhone1 {
 
     fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
 
+    fn set_microphone_volume(&self, volume: u8) -> zbus::Result<()>;
+
     fn answer_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
 
     fn decline_on_phone(&self, call: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
@@ -138,6 +140,8 @@ pub struct AppState {
     pub audio_location: String,
     /// `Ringing`.
     pub ringing: bool,
+    /// `Muted`: whether the Desktop has muted its microphone.
+    pub muted: bool,
     /// `Codec`'s name: `"cvsd"`, `"msbc"`, `"lc3-swb"`, or `""` while the
     /// Desktop has negotiated none.
     pub codec: String,
@@ -173,10 +177,12 @@ pub struct AppCall {
     pub active_since_ms: u64,
 }
 
-/// One `Error` signal from the app.
+/// One `Error` signal from the app, or the error a method of its control
+/// interface returned.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppError {
-    /// The failure kind, such as `"answer-failed"`.
+    /// The failure kind, such as `"answer-failed"`; for a method's error,
+    /// the D-Bus error name.
     pub kind: String,
     /// The sentence shown to the user.
     pub message: String,
@@ -525,6 +531,44 @@ impl Harness {
         }
     }
 
+    /// Puts `text` on the screen's clipboard, as copying it in another app
+    /// does, and waits until a paste would get it.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, `wl-copy` (from `wl-clipboard`) can't
+    /// start, or a paste doesn't get `text` within 5 s.
+    pub fn set_clipboard(&self, text: &str) -> Clipboard {
+        self.screen();
+        let owner = self
+            .external_command("wl-copy")
+            .args(["--foreground", "--", text])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("start wl-copy, from wl-clipboard");
+        let clipboard = Clipboard { owner };
+        let started = Instant::now();
+        loop {
+            let pasted = self
+                .external_command("wl-paste")
+                .args(["--no-newline", "--type", "text/plain"])
+                .stdin(Stdio::null())
+                .output()
+                .expect("run wl-paste, from wl-clipboard");
+            if pasted.status.success() && pasted.stdout == text.as_bytes() {
+                return clipboard;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "the clipboard never held {text:?}; wl-paste said {:?}",
+                String::from_utf8_lossy(&pasted.stderr)
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Moves and clicks the screen's synthetic pointer.
     ///
     /// # Panics
@@ -760,6 +804,45 @@ impl Harness {
     /// If the control interface refuses the call.
     pub fn hang_up(&self, call: u32) {
         self.call_app_method("HangUp", call);
+    }
+
+    /// Asks the app to mute (`true`) or unmute the Desktop's microphone, and
+    /// returns the error the control interface answers with, if any.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn set_muted(&self, muted: bool) -> Result<(), AppError> {
+        self.try_app_method("SetMuted", &(muted,))
+    }
+
+    /// Asks the app to send keypad tones during the Call.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn send_tones(&self, tones: &str) -> Result<(), AppError> {
+        self.try_app_method("SendTones", &(tones,))
+    }
+
+    fn try_app_method<B>(&self, member: &str, body: &B) -> Result<(), AppError>
+    where
+        B: zbus::export::serde::Serialize + zbus::DynamicType,
+    {
+        match zbus::block_on(self.session.call_method(
+            Some(APP_BUS_NAME),
+            APP_PATH,
+            Some(APP_INTERFACE),
+            member,
+            body,
+        )) {
+            Ok(_) => Ok(()),
+            Err(zbus::Error::MethodError(name, message, _)) => Err(AppError {
+                kind: name.to_string(),
+                message: message.unwrap_or_default(),
+            }),
+            Err(error) => panic!("{member} on the app: {error}"),
+        }
     }
 
     fn call_app_method(&self, member: &str, call: u32) {
@@ -1040,6 +1123,32 @@ impl Keyboard<'_> {
             panic!("press {key:?}: {error}");
         }
     }
+
+    /// Presses `character`'s key while holding Control, such as Ctrl+V.
+    ///
+    /// # Panics
+    ///
+    /// If the US layout has no unshifted key for `character`, or the
+    /// compositor is gone.
+    pub fn press_with_control(&self, character: char) {
+        if let Err(error) = self.screen.input().press_with_control(character) {
+            panic!("press Ctrl+{character}: {error}");
+        }
+    }
+}
+
+/// The program holding the screen's clipboard. Dropping it empties the
+/// clipboard. See [`Harness::set_clipboard`].
+#[must_use = "the clipboard empties when this is dropped"]
+pub struct Clipboard {
+    owner: Child,
+}
+
+impl Drop for Clipboard {
+    fn drop(&mut self) {
+        let _ = self.owner.kill();
+        let _ = self.owner.wait();
+    }
 }
 
 /// The screen's synthetic pointer, in layout coordinates: the headless
@@ -1151,6 +1260,18 @@ impl SimulatedPhone<'_> {
         .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
     }
 
+    /// Makes the Phone report this hands-free microphone gain, as `+VGM`
+    /// does: 0 to 15, or 255, which is how PipeWire sends its -1 ("the Phone
+    /// hasn't said"). A later AudioGateway starts with it too.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn set_microphone_volume(&self, volume: u8) {
+        zbus::block_on(async { self.proxy().await?.set_microphone_volume(volume).await })
+            .expect("set the Simulated Phone's microphone volume");
+    }
+
     /// Answers the ringing Call at `call` on the Phone, as the person holding
     /// it does. Returns once the Phone has reported the Call active.
     ///
@@ -1163,6 +1284,33 @@ impl SimulatedPhone<'_> {
             self.proxy().await?.answer_on_phone(&call).await
         })
         .unwrap_or_else(|error| panic!("answer the Call at {call} on the Phone: {error}"));
+    }
+
+    /// Waits until the method calls the Simulated Phone has received satisfy
+    /// `condition`, and returns them.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first; the panic names `description` and every
+    /// call received.
+    pub fn wait_for_recorded(
+        &self,
+        description: &str,
+        deadline: Duration,
+        condition: impl Fn(&[RecordedMethodCall]) -> bool,
+    ) -> Vec<RecordedMethodCall> {
+        let started = Instant::now();
+        loop {
+            let recorded = self.recorded_method_calls();
+            if condition(&recorded) {
+                return recorded;
+            }
+            assert!(
+                started.elapsed() < deadline,
+                "\"{description}\" did not happen within {deadline:?}; the Simulated Phone received {recorded:#?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Declines the ringing Call at `call` on the Phone, as the person holding
@@ -1280,6 +1428,7 @@ async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
         calls,
         audio_location: String::try_from(property("AudioLocation")?)?,
         ringing: bool::try_from(property("Ringing")?)?,
+        muted: bool::try_from(property("Muted")?)?,
         codec,
         wideband,
         surfaces,

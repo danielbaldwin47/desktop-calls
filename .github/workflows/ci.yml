@@ -29,13 +29,14 @@ jobs:
       options: --shm-size=1g
     steps:
       # sway is the screen harness's headless compositor, grim its screenshot
-      # tool, and libnotify's notify-send a client of the notification stand-in.
+      # tool, wl-clipboard its clipboard for pasting, and libnotify's
+      # notify-send a client of the notification stand-in.
       - name: Install system packages
         run: >-
           pacman -Syu --noconfirm --needed
           base-devel git rustup just cargo-deny
           gtk4 gtk4-layer-shell libadwaita dbus python
-          sway grim libnotify
+          sway grim wl-clipboard libnotify
 
       - uses: actions/checkout@v5
 

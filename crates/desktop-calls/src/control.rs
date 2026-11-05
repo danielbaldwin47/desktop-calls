@@ -12,14 +12,39 @@ use desktop_calls_core::messages::{self, Failure};
 use desktop_calls_core::{CallId, Caller, Input, State};
 use futures_channel::mpsc::UnboundedSender;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
-use zbus::{Connection, interface};
+use zbus::{Connection, DBusError, interface};
 
 pub const BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls";
 pub const PATH: &str = "/io/github/danielbaldwin47/DesktopCalls";
+/// The prefix of the D-Bus error names for [`Refused`] requests.
+pub const ERROR_PREFIX: &str = "io.github.danielbaldwin47.DesktopCalls1.Error.";
 
 /// Each shown surface's key content, by surface name (`"banner"`,
 /// `"call-window"`), as the surfaces report it.
 pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
+
+/// A request the Desktop refuses, as the D-Bus error a method returns: the
+/// failure kind as the error name, and the Messages sentence.
+#[derive(Debug, DBusError)]
+#[zbus(prefix = "io.github.danielbaldwin47.DesktopCalls1.Error")]
+pub enum Refused {
+    NoLiveCall(String),
+    MuteUnavailable(String),
+    InvalidTones(String),
+    Failed(String),
+}
+
+impl From<Failure> for Refused {
+    fn from(failure: Failure) -> Self {
+        let text = messages::failure(failure).text.to_owned();
+        match failure {
+            Failure::NoLiveCall => Self::NoLiveCall(text),
+            Failure::MuteUnavailable => Self::MuteUnavailable(text),
+            Failure::InvalidTones => Self::InvalidTones(text),
+            _ => Self::Failed(text),
+        }
+    }
+}
 
 /// What the control interface publishes, and where its intents go.
 pub struct ControlInterface {
@@ -87,6 +112,12 @@ impl ControlInterface {
         self.state.ringing()
     }
 
+    /// Whether the Desktop has muted its microphone for the Call.
+    #[zbus(property)]
+    fn muted(&self) -> bool {
+        self.state.muted()
+    }
+
     /// The codec the Desktop's Call audio negotiated (`"cvsd"`, `"msbc"`,
     /// `"lc3-swb"`, `"other"`, or empty) and whether it is wideband ("HD").
     #[zbus(property)]
@@ -117,6 +148,19 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
     }
 
+    /// Mutes (`true`) or unmutes the Desktop's microphone. Mute works only
+    /// while the Call's audio is on the Desktop; otherwise this fails with
+    /// the reason.
+    fn set_muted(&self, muted: bool) -> Result<(), Refused> {
+        self.pass_on(Input::SetMuted(muted))
+    }
+
+    /// Plays keypad tones to the other party: digits, `*` and `#`, in order.
+    /// Spaces, dashes, dots and brackets are left out; anything else fails.
+    fn send_tones(&self, tones: String) -> Result<(), Refused> {
+        self.pass_on(Input::SendTones(tones))
+    }
+
     /// What the Desktop Calls keybinding does: gives keyboard focus to the
     /// Incoming Call Banner while a Call rings, otherwise to the Call Window
     /// while a Call is live. It never answers, declines or ends a Call.
@@ -128,6 +172,18 @@ impl ControlInterface {
     /// sentence to show.
     #[zbus(signal)]
     async fn error(emitter: &SignalEmitter<'_>, kind: &str, message: &str) -> zbus::Result<()>;
+}
+
+impl ControlInterface {
+    /// Sends `intent` to the Call state machine, unless the state published
+    /// now refuses it.
+    fn pass_on(&self, intent: Input) -> Result<(), Refused> {
+        if let Some(failure) = self.state.refusal(&intent) {
+            return Err(failure.into());
+        }
+        let _ = self.intents.unbounded_send(intent);
+        Ok(())
+    }
 }
 
 /// Publishes new state on the control interface.
@@ -174,6 +230,9 @@ impl Publisher {
         }
         if old.ringing() != state.ringing() {
             published.ringing_changed(emitter).await?;
+        }
+        if old.muted() != state.muted() {
+            published.muted_changed(emitter).await?;
         }
         if old.codec() != state.codec() {
             published.codec_changed(emitter).await?;

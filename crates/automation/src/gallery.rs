@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use test_harness::{BAR_COLOUR, Harness, Screenshot, Theme};
+use test_harness::{BAR_COLOUR, Harness, Region, Screenshot, Theme};
 
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -29,9 +29,11 @@ struct State {
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
 
-/// The Answer button's green and the Decline and Hang up buttons' red.
+/// The Answer button's green, the Decline and Hang up buttons' red, and the
+/// orange that marks the microphone muted.
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
+const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
 
 const STATES: &[State] = &[
     State {
@@ -66,6 +68,70 @@ const STATES: &[State] = &[
         shown: |screenshot| shows(screenshot, RED) && !shows(screenshot, GREEN),
     },
     State {
+        name: "call-window-muted",
+        title: "The Call Window, muted, with the keypad shown and tones sent",
+        reach: |harness| {
+            connect(harness);
+            let call = ring(harness);
+            harness.answer(call);
+            harness.wait_for_app("the Call Window offers Mute", DEADLINE, |state| {
+                state
+                    .surface("call-window")
+                    .is_some_and(|window| window.get("mute").is_some_and(|mute| mute == "Mute"))
+            });
+            harness
+                .set_muted(true)
+                .unwrap_or_else(|error| panic!("mute: {error:?}"));
+            // Click the Call Window, to give it the keyboard, then show the
+            // keypad and type tones.
+            let screenshot = harness.screenshot("call-window-before-keypad");
+            let window = app_region(&screenshot);
+            let _ = fs::remove_file(&screenshot.path);
+            if let Some(window) = window {
+                harness.pointer().click(window.left + 8.0, window.top + 8.0);
+            }
+            harness.keyboard().type_text("k123#");
+            harness.wait_for_app("the keypad shows the tones", DEADLINE, |state| {
+                state.muted
+                    && state.surface("call-window").is_some_and(|window| {
+                        window.contains_key("keypad")
+                            && window.get("tones").is_some_and(|tones| tones == "123#")
+                    })
+            });
+        },
+        // Once the keypad is drawn the window is over 300 px tall; without
+        // it, about 220.
+        shown: |screenshot| {
+            shows(screenshot, RED)
+                && shows(screenshot, ORANGE)
+                && app_region(screenshot).is_some_and(|window| window.bottom - window.top > 300.0)
+        },
+    },
+    State {
+        name: "call-window-mute-unavailable",
+        title: "The Call Window, answered on the phone, so Mute is unavailable",
+        reach: |harness| {
+            connect(harness);
+            let path = harness.simulated_phone().ring(NUMBER);
+            harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+                state.surface("banner").is_some()
+            });
+            harness.simulated_phone().answer_on_phone(&path);
+            harness.wait_for_app(
+                "the Call Window says why Mute is unavailable",
+                DEADLINE,
+                |state| {
+                    state
+                        .surface("call-window")
+                        .is_some_and(|window| window.contains_key("mute-unavailable"))
+                },
+            );
+        },
+        shown: |screenshot| {
+            shows(screenshot, RED) && !shows(screenshot, GREEN) && !shows(screenshot, ORANGE)
+        },
+    },
+    State {
         name: "call-window-ended",
         title: "The Call Window, just after the Call ended",
         reach: |harness| {
@@ -86,12 +152,7 @@ const STATES: &[State] = &[
             });
         },
         // Hang up is dimmed once the Call has ended.
-        shown: |screenshot| {
-            !shows(screenshot, RED)
-                && screenshot
-                    .region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
-                    .is_some()
-        },
+        shown: |screenshot| !shows(screenshot, RED) && app_region(screenshot).is_some(),
     },
 ];
 
@@ -109,6 +170,12 @@ fn ring(harness: &Harness) -> u32 {
         state.surface("banner").is_some()
     });
     state.calls.first().map_or(0, |call| call.id)
+}
+
+/// Where the app's surfaces are: everything that is neither the black
+/// background nor the bar stand-in.
+fn app_region(screenshot: &Screenshot) -> Option<Region> {
+    screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }
 
 /// Whether `colour`, give or take antialiasing, is on screen.

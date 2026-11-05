@@ -24,6 +24,13 @@
 //!   going counts as success.
 //! - `RejectSCO` is written with `Properties.Set`, and audio moves with
 //!   `Activate()`, which does nothing while `RejectSCO` is true.
+//! - Mute is the AudioGateway's `MicrophoneVolume`, a byte written with
+//!   `Properties.Set`. PipeWire reads the value without checking its type,
+//!   and a wrong one crashed `WirePlumber`, so it always goes as a byte.
+//! - PipeWire sends `SendTones`' whole string in one `AT+VTS`, but Android
+//!   takes exactly one tone per `AT+VTS` and refuses more. So each tone goes
+//!   in a `SendTones` of its own, the next once the Phone has played the
+//!   last.
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -167,6 +174,8 @@ struct Vanished {
 struct PhoneLink {
     /// Every AudioGateway the service has, by object path: its address.
     audio_gateways: HashMap<String, String>,
+    /// Each AudioGateway's latest `MicrophoneVolume`, by object path.
+    microphone_volumes: HashMap<String, u8>,
     /// The address of the Phone being followed.
     attached: Option<String>,
     /// The AudioGateway of the followed Phone, while it is connected.
@@ -247,6 +256,9 @@ impl PhoneLink {
                 path = %path,
                 "An AudioGateway appeared"
             );
+            if let Some(volume) = gateway.get("MicrophoneVolume").and_then(byte) {
+                self.microphone_volumes.insert(path.clone(), volume);
+            }
             self.audio_gateways.insert(path, address);
             self.adopt_matching_gateway(outcome);
             if let Some(transport) = interfaces.get(TRANSPORT)
@@ -277,6 +289,14 @@ impl PhoneLink {
         match interface {
             TRANSPORT if self.connected.as_deref() == Some(path) => {
                 transport_changed(changed, outcome);
+            }
+            AUDIO_GATEWAY => {
+                if let Some(volume) = changed.get("MicrophoneVolume").and_then(byte) {
+                    self.microphone_volumes.insert(path.to_owned(), volume);
+                    if self.connected.as_deref() == Some(path) {
+                        outcome.inputs.push(Input::MicrophoneVolumeChanged(volume));
+                    }
+                }
             }
             CALL => {
                 let Some(state) = changed.get("State").and_then(string) else {
@@ -485,6 +505,9 @@ impl PhoneLink {
         outcome.inputs.push(Input::PhoneConnected {
             address: address.clone(),
         });
+        if let Some(volume) = self.microphone_volumes.get(path) {
+            outcome.inputs.push(Input::MicrophoneVolumeChanged(*volume));
+        }
         let calls: Vec<String> = self.call_objects.keys().cloned().collect();
         for call in calls {
             self.follow_call(&call, outcome);
@@ -494,6 +517,7 @@ impl PhoneLink {
     /// The AudioGateway at `path` is gone. If it was the followed Phone's, the
     /// Phone disconnected, unless another of its AudioGateways remains.
     fn forget(&mut self, path: &str, outcome: &mut Outcome) {
+        self.microphone_volumes.remove(path);
         let Some(address) = self.audio_gateways.remove(path) else {
             return;
         };
@@ -539,9 +563,10 @@ impl PhoneLink {
                         None => None,
                     }
                 }
-                PhoneCommand::MoveAudioToDesktop | PhoneCommand::KeepAudioOnPhone => {
-                    self.connected.clone()
-                }
+                PhoneCommand::MoveAudioToDesktop
+                | PhoneCommand::KeepAudioOnPhone
+                | PhoneCommand::SetMicrophoneVolume(_)
+                | PhoneCommand::SendTones(_) => self.connected.clone(),
             };
             match path {
                 Some(path) => batch.push(Resolved { command, path }),
@@ -583,6 +608,10 @@ async fn execute(
                     }
                 }
                 PhoneCommand::KeepAudioOnPhone => set_reject_sco(session, &path, true).await,
+                PhoneCommand::SetMicrophoneVolume(volume) => {
+                    set_microphone_volume(session, &path, *volume).await
+                }
+                PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
             };
             match result {
                 Ok(()) => tracing::debug!(
@@ -631,6 +660,27 @@ async fn set_reject_sco(session: &Connection, path: &str, reject: bool) -> zbus:
         &(TRANSPORT, "RejectSCO", Variant::from(reject)),
     )
     .await
+}
+
+async fn set_microphone_volume(session: &Connection, path: &str, volume: u8) -> zbus::Result<()> {
+    call(
+        session,
+        path,
+        PROPERTIES,
+        "Set",
+        &(AUDIO_GATEWAY, "MicrophoneVolume", Variant::from(volume)),
+    )
+    .await
+}
+
+/// Plays `tones` one at a time, each once the Phone has played the last.
+async fn send_tones(session: &Connection, path: &str, tones: &str) -> zbus::Result<()> {
+    let mut tone = [0; 4];
+    for character in tones.chars() {
+        let tone: &str = character.encode_utf8(&mut tone);
+        call(session, path, AUDIO_GATEWAY, "SendTones", &(tone,)).await?;
+    }
+    Ok(())
 }
 
 /// Hangs up the Call at `path`: through `Call1`, or `org.ofono.VoiceCall`
@@ -773,6 +823,10 @@ fn unknown_state(state: &str) {
         call_state = state,
         "Ignored an unknown Call state"
     );
+}
+
+fn byte(value: &OwnedVariant) -> Option<u8> {
+    u8::try_from(value).ok()
 }
 
 fn string(value: &OwnedVariant) -> Option<String> {

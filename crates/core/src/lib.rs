@@ -18,6 +18,6 @@ pub use call::{
 };
 pub use connection::{ConnectionState, Phone, UnknownConnectionState};
 pub use machine::{
-    BannerView, CallWindowPhase, CallWindowView, Effect, Input, PhoneCommand, State, Surfaces,
-    Timer, step,
+    BannerView, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand, State,
+    Surfaces, Timer, keypad_tones, step,
 };

@@ -10,6 +10,13 @@ use crate::messages::Failure;
 /// How long the Call Window shows "Call ended" before it closes.
 const CALL_ENDED_MS: u32 = 2_000;
 
+/// The hands-free microphone gain to restore when the Phone's own value is
+/// unusable: 15, the top of the hands-free range (0 to 15), which is also
+/// PipeWire's default (`bluez5.hfp-hf.default-mic-volume`).
+const DEFAULT_MICROPHONE_VOLUME: u8 = 15;
+/// The top of the hands-free gain range.
+const MAX_MICROPHONE_VOLUME: u8 = 15;
+
 /// Something that happened, as the shell adapters report it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -40,12 +47,19 @@ pub enum Input {
     TransportChanged(Transport),
     /// The audio link's codec changed; `None` is the Phone's 0, "no link".
     CodecChanged(Option<Codec>),
+    /// The Phone reported the hands-free microphone gain, 0 to 15. PipeWire
+    /// reports 255 (its -1, sent as a byte) before the Phone has said.
+    MicrophoneVolumeChanged(u8),
     /// The user asked to answer this Call on the Desktop.
     Answer(CallId),
     /// The user asked to decline this ringing Call.
     Decline(CallId),
     /// The user asked to hang up this Call.
     HangUp(CallId),
+    /// The user asked to mute (`true`) or unmute the Desktop's microphone.
+    SetMuted(bool),
+    /// The user typed or pasted these keypad tones.
+    SendTones(String),
     /// The user pressed the Desktop Calls keybinding: do the most useful
     /// thing for what is happening now.
     Activate,
@@ -68,6 +82,11 @@ pub enum PhoneCommand {
     MoveAudioToDesktop,
     /// Keep the next Call's audio on the Phone unless the Desktop asks for it.
     KeepAudioOnPhone,
+    /// Set the hands-free microphone gain: 0 mutes.
+    SetMicrophoneVolume(u8),
+    /// Play these keypad tones (digits, `*` and `#`) to the other party, in
+    /// order.
+    SendTones(String),
 }
 
 /// A timer the state machine can ask for.
@@ -134,9 +153,31 @@ pub enum CallWindowPhase {
         active_since: Timestamp,
         audio_location: AudioLocation,
         wideband: bool,
+        mute: Mute,
     },
     /// Over; the window closes shortly.
     Ended,
+}
+
+/// The Call Window's Mute control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mute {
+    /// The microphone is on; Mute mutes it.
+    Off,
+    /// The microphone is muted; Mute unmutes it.
+    On,
+    /// Mute works only while the Audio Location is the Desktop.
+    Unavailable,
+}
+
+/// Whether the Desktop muted the microphone, and the gain to put back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Muting {
+    #[default]
+    Off,
+    On {
+        restore: u8,
+    },
 }
 
 /// Which surface the user gave keyboard focus with the keybinding. Each
@@ -168,6 +209,9 @@ pub struct State {
     /// The codec the Desktop's audio negotiated during the current Calls.
     codec: Option<Codec>,
     ended: Option<EndedCall>,
+    /// The Phone's latest report of its hands-free microphone gain.
+    microphone_volume: Option<u8>,
+    muting: Muting,
     focus: Focus,
 }
 
@@ -217,6 +261,21 @@ impl State {
         self.codec
     }
 
+    /// Whether the Desktop has muted its microphone for the Call.
+    #[must_use]
+    pub fn muted(&self) -> bool {
+        matches!(self.muting, Muting::On { .. })
+    }
+
+    /// What the Call Window's Mute control offers.
+    fn mute(&self) -> Mute {
+        match self.muting {
+            Muting::On { .. } => Mute::On,
+            Muting::Off if self.audio_location() == Some(AudioLocation::Desktop) => Mute::Off,
+            Muting::Off => Mute::Unavailable,
+        }
+    }
+
     /// What the Desktop surfaces show.
     #[must_use]
     pub fn surfaces(&self) -> Surfaces {
@@ -241,6 +300,7 @@ impl State {
                         active_since,
                         audio_location: self.audio_location().unwrap_or(AudioLocation::Phone),
                         wideband: self.codec.is_some_and(Codec::is_wideband),
+                        mute: self.mute(),
                     },
                     _ => CallWindowPhase::Connecting,
                 },
@@ -257,6 +317,34 @@ impl State {
         Surfaces {
             banner,
             call_window,
+        }
+    }
+
+    /// Why the Desktop refuses `input` now, if it does. The control
+    /// interface asks before passing an intent on, so a refused request
+    /// fails at once with the reason; [`step`] refuses the same way.
+    #[must_use]
+    pub fn refusal(&self, input: &Input) -> Option<Failure> {
+        match input {
+            Input::SetMuted(true) if !self.muted() => match self.audio_location() {
+                None => Some(Failure::NoLiveCall),
+                Some(AudioLocation::Phone) => Some(Failure::MuteUnavailable),
+                Some(AudioLocation::Desktop) => None,
+            },
+            Input::SendTones(tones) => {
+                if !self
+                    .calls
+                    .iter()
+                    .any(|call| call.state == CallState::Active)
+                {
+                    Some(Failure::NoLiveCall)
+                } else if keypad_tones(tones).is_none() {
+                    Some(Failure::InvalidTones)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -291,6 +379,11 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
         (false, true) => effects.insert(0, Effect::StartRinging),
         (true, false) => effects.insert(0, Effect::StopRinging),
         _ => {}
+    }
+    // Mute is the Desktop's microphone. Once the audio leaves the Desktop,
+    // or the Call ends, the Phone's microphone must not stay silenced.
+    if state.audio_location() != Some(AudioLocation::Desktop) {
+        unmute(&mut state, &mut effects);
     }
     (state, effects)
 }
@@ -368,6 +461,10 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 state.codec = codec;
             }
         }
+        Input::MicrophoneVolumeChanged(volume) => state.microphone_volume = Some(volume),
+        Input::SetMuted(true) => mute(&mut state, &mut effects),
+        Input::SetMuted(false) => unmute(&mut state, &mut effects),
+        Input::SendTones(typed) => send_tones(&state, typed, &mut effects),
         Input::Answer(call) => answer(&mut state, call, &mut effects),
         Input::Decline(call) => decline(&mut state, call, &mut effects),
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
@@ -385,6 +482,58 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// The keypad tones in `typed`: digits, `*` and `#`, leaving out the
+/// spaces, dashes, dots and brackets a pasted number may carry. `None` if
+/// it has anything else, or no tone at all.
+#[must_use]
+pub fn keypad_tones(typed: &str) -> Option<String> {
+    let mut tones = String::new();
+    for character in typed.chars() {
+        match character {
+            '0'..='9' | '*' | '#' => tones.push(character),
+            ' ' | '-' | '.' | '(' | ')' => {}
+            _ => return None,
+        }
+    }
+    (!tones.is_empty()).then_some(tones)
+}
+
+fn send_tones(state: &State, typed: String, effects: &mut Vec<Effect>) {
+    let input = Input::SendTones(typed);
+    if let Some(failure) = state.refusal(&input) {
+        effects.push(Effect::ReportError(failure));
+    } else if let Input::SendTones(typed) = input
+        && let Some(tones) = keypad_tones(&typed)
+    {
+        effects.push(Effect::Phone(PhoneCommand::SendTones(tones)));
+    }
+}
+
+fn mute(state: &mut State, effects: &mut Vec<Effect>) {
+    if state.muted() {
+        return;
+    }
+    if let Some(failure) = state.refusal(&Input::SetMuted(true)) {
+        effects.push(Effect::ReportError(failure));
+        return;
+    }
+    // A gain of 0, or PipeWire's 255 for "the Phone hasn't said", would
+    // leave the microphone silent after unmuting.
+    let restore = match state.microphone_volume {
+        Some(volume @ 1..=MAX_MICROPHONE_VOLUME) => volume,
+        _ => DEFAULT_MICROPHONE_VOLUME,
+    };
+    state.muting = Muting::On { restore };
+    effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(0)));
+}
+
+fn unmute(state: &mut State, effects: &mut Vec<Effect>) {
+    if let Muting::On { restore } = state.muting {
+        state.muting = Muting::Off;
+        effects.push(Effect::Phone(PhoneCommand::SetMicrophoneVolume(restore)));
+    }
 }
 
 /// The keybinding: focus the Banner while a Call rings here, otherwise the
@@ -491,5 +640,21 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
         }
         // The shell has logged it; the next Call end or connect tries again.
         PhoneCommand::KeepAudioOnPhone => {}
+        PhoneCommand::SendTones(_) => effects.push(Effect::ReportError(Failure::TonesNotSent)),
+        PhoneCommand::SetMicrophoneVolume(0) => {
+            if state.muted() {
+                state.muting = Muting::Off;
+                effects.push(Effect::ReportError(Failure::MuteFailed));
+            }
+        }
+        PhoneCommand::SetMicrophoneVolume(restore) => {
+            // Unmuting the user asked for failed: the microphone is still
+            // silent, so say so. An unmute because the audio left the
+            // Desktop or the Call ended has no Mute left to show.
+            if !state.muted() && state.audio_location() == Some(AudioLocation::Desktop) {
+                state.muting = Muting::On { restore };
+                effects.push(Effect::ReportError(Failure::UnmuteFailed));
+            }
+        }
     }
 }

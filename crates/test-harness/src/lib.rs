@@ -262,6 +262,27 @@ pub struct AppCallHistoryEntry {
     pub at_ms: u64,
 }
 
+/// One row of the Dialer, as the app's `Search` method returns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppDialerRow {
+    /// `"contact"`, `"call-history"` or `"call-number"` (the number typed).
+    pub kind: String,
+    /// For a Call History row, `"incoming"`, `"outgoing"` or `"missed"`;
+    /// otherwise `""`.
+    pub call_kind: String,
+    /// The Contact's name, or the name the Phone gave, or `""`.
+    pub name: String,
+    /// The number's label, such as `"mobile"`, or `""`.
+    pub number_label: String,
+    /// The number Enter dials, or `""` if it was withheld or can't be dialled.
+    pub number: String,
+    /// The number grouped for reading, or `""` if withheld.
+    pub shown_number: String,
+    /// For a Call History row, when, in milliseconds since the Unix epoch;
+    /// otherwise 0.
+    pub at_ms: u64,
+}
+
 impl AppState {
     /// The key content of the surface named `surface`, if it is shown.
     #[must_use]
@@ -1177,6 +1198,95 @@ impl Harness {
                     number,
                     display_name,
                     number_label,
+                    at_ms,
+                },
+            )
+            .collect()
+    }
+
+    /// Calls the app's `Activate`, as the keybinding does, without the
+    /// CLI's process start in the way of a timing.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface doesn't answer.
+    pub fn activate(&self) {
+        if let Err(error) = self.try_app_method("Activate", &()) {
+            panic!("Activate on the app: {error:?}");
+        }
+    }
+
+    /// Calls the app's `OpenDialer` with `query` typed and the Call with id
+    /// `call` selected (0 for none).
+    ///
+    /// # Panics
+    ///
+    /// If the control interface doesn't answer.
+    pub fn open_dialer(&self, query: &str, call: u32) {
+        if let Err(error) = self.try_app_method("OpenDialer", &(query, call)) {
+            panic!("OpenDialer on the app: {error:?}");
+        }
+    }
+
+    /// Starts the app from the app launcher: installs its desktop file and
+    /// launches it, as a launcher does, with no link.
+    ///
+    /// # Panics
+    ///
+    /// If `gio` can't launch it.
+    pub fn launch_from_app_launcher(&self) {
+        let applications = self.directory.join("home/.local/share/applications");
+        fs::create_dir_all(&applications).expect("create the applications directory");
+        let desktop_file = Path::new(DESKTOP_FILE);
+        let name = desktop_file
+            .file_name()
+            .expect("the desktop file has a name");
+        let installed = applications.join(name);
+        fs::copy(desktop_file, &installed).expect("install the desktop file");
+        let path = std::env::var("PATH").unwrap_or_default();
+        let output = self
+            .external_command("gio")
+            .arg("launch")
+            .arg(&installed)
+            .env("PATH", format!("{}:{path}", self.bin_directory.display()))
+            .output()
+            .expect("run gio");
+        assert!(
+            output.status.success(),
+            "gio launch failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// The Dialer's rows for `query`, best first, from the app's `Search`
+    /// method.
+    ///
+    /// # Panics
+    ///
+    /// If the control interface doesn't answer.
+    #[must_use]
+    pub fn search(&self, query: &str) -> Vec<AppDialerRow> {
+        let reply = zbus::block_on(self.session.call_method(
+            Some(APP_BUS_NAME),
+            APP_PATH,
+            Some(APP_INTERFACE),
+            "Search",
+            &(query,),
+        ))
+        .unwrap_or_else(|error| panic!("Search({query:?}) on the app: {error}"));
+        reply
+            .body()
+            .deserialize::<Vec<(String, String, String, String, String, String, u64)>>()
+            .expect("Search replies with a(sssssst)")
+            .into_iter()
+            .map(
+                |(kind, call_kind, name, number_label, number, shown_number, at_ms)| AppDialerRow {
+                    kind,
+                    call_kind,
+                    name,
+                    number_label,
+                    number,
+                    shown_number,
                     at_ms,
                 },
             )

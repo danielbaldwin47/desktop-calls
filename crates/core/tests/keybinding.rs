@@ -4,8 +4,7 @@
 //! never ends or declines a Call.
 
 use desktop_calls_core::{
-    CallId, CallState, Caller, Effect, Input, Phone, PhoneCommand, State, Timestamp,
-    messages::Failure, step,
+    CallId, CallState, Caller, Effect, Input, Phone, PhoneCommand, State, Timestamp, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -151,10 +150,11 @@ fn releasing_the_call_window_leaves_the_call_live() {
 }
 
 #[test]
-fn activating_with_nothing_ringing_or_live_says_the_dialer_is_not_here_yet() {
+fn activating_with_nothing_ringing_or_live_opens_the_dialer() {
     let (state, effects) = run(connected(), [Input::Activate]);
 
-    assert_eq!(effects, [Effect::ReportError(Failure::DialerUnavailable)]);
+    assert!(effects.is_empty(), "{effects:?}");
     assert_eq!(state.surfaces().banner, None);
     assert_eq!(state.surfaces().call_window, None);
+    assert!(state.surfaces().dialer.is_some());
 }

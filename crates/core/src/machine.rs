@@ -6,8 +6,12 @@ use crate::call::{
 };
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
-use crate::matching::{self, ContactMatch};
+use crate::matching::{self, ContactMatch, DialerRow};
 use crate::messages::{Failure, ProblemKind};
+
+/// How many recent Calls the Desktop remembers the other party of, so
+/// `OpenDialer` can select one.
+const RECENT_CALLS: usize = 16;
 
 /// How long the Call Window shows "Call ended" before it closes.
 const CALL_ENDED_MS: u32 = 2_000;
@@ -86,6 +90,23 @@ pub enum Input {
     Activate,
     /// The user let go of the surface that has keyboard focus (Escape).
     ReleaseFocus,
+    /// Open the Dialer with `query` typed, selecting the Call History row of
+    /// Call `select_call` if it has one.
+    OpenDialer {
+        query: String,
+        select_call: Option<CallId>,
+    },
+    /// What is typed in the Dialer changed.
+    DialerQuery(String),
+    /// Move the Dialer's selection by this many rows: down if positive, up
+    /// if negative, stopping at either end.
+    DialerMove(i32),
+    /// Enter in the Dialer: Call the selected row.
+    DialerEnter,
+    /// The user clicked the Dialer's row at this index: Call it.
+    DialerChoose(usize),
+    /// Escape in the Dialer: close it.
+    CloseDialer,
     /// The Phone did this command.
     PhoneCommandDone(PhoneCommand),
     /// The Phone refused, or never answered, this command.
@@ -199,6 +220,25 @@ pub enum Effect {
 pub struct Surfaces {
     pub banner: Option<BannerView>,
     pub call_window: Option<CallWindowView>,
+    pub dialer: Option<DialerView>,
+}
+
+/// The Dialer's content. While open it has keyboard focus.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DialerView {
+    /// What is typed.
+    pub query: String,
+    /// Who to Call, best first; with nothing typed, the Call History.
+    pub rows: Vec<DialerRow>,
+    /// The row Enter Calls, while there are rows.
+    pub selected: Option<usize>,
+    /// Why Enter can't Call the selected row, or why what is typed can't be
+    /// dialled.
+    pub notice: Option<Failure>,
+    /// Different each time the Dialer opens, so the shell knows to put
+    /// `query` in the Dialer's text entry afresh, and leave it alone while
+    /// the user types.
+    pub opened: u32,
 }
 
 /// The Incoming Call Banner's content.
@@ -338,6 +378,16 @@ struct Notice {
     not_placed: Option<Caller>,
 }
 
+/// The open Dialer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Dialer {
+    query: String,
+    rows: Vec<DialerRow>,
+    selected: usize,
+    notice: Option<Failure>,
+    opened: u32,
+}
+
 /// The Desktop asked the Phone to bring the audio here, and it hasn't yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct MovingAudio {
@@ -383,6 +433,11 @@ pub struct State {
     contacts_sync: ContactsState,
     contacts: Contacts,
     call_history: CallHistory,
+    dialer: Option<Dialer>,
+    /// How many times the Dialer has opened.
+    dialer_openings: u32,
+    /// The other party of each recent Call, oldest first.
+    recent_calls: Vec<(CallId, Caller)>,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -595,7 +650,44 @@ impl State {
         Surfaces {
             banner,
             call_window,
+            dialer: self.dialer_view(),
         }
+    }
+
+    fn dialer_view(&self) -> Option<DialerView> {
+        self.dialer.as_ref().map(|dialer| DialerView {
+            query: dialer.query.clone(),
+            rows: dialer.rows.clone(),
+            selected: (!dialer.rows.is_empty()).then_some(dialer.selected),
+            notice: dialer.notice,
+            opened: dialer.opened,
+        })
+    }
+
+    /// Why a Call can't be placed now, if it can't.
+    fn dial_refusal(&self) -> Option<Failure> {
+        match self.connection {
+            ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
+            ConnectionState::Connecting => Some(Failure::PhoneConnecting),
+            ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+            ConnectionState::Connected if !self.calls.is_empty() || self.dialling.is_some() => {
+                Some(Failure::CallInProgress)
+            }
+            ConnectionState::Connected => None,
+        }
+    }
+
+    /// Whether `a` and `b` are the same number, however each is written.
+    fn same_number(&self, a: &Caller, b: &Caller) -> bool {
+        let (Caller::Number(a_number), Caller::Number(b_number)) = (a, b) else {
+            return false;
+        };
+        let dialable = matching::dialable(a_number);
+        if dialable.is_some() && dialable == matching::dialable(b_number) {
+            return true;
+        }
+        let contact = self.contact(a);
+        contact.is_some() && contact == self.contact(b)
     }
 
     /// The Contacts state once the Phone leaves: a sync under way can't go
@@ -705,8 +797,13 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     (state, effects)
 }
 
-/// What the Contacts sync reports.
+/// What the Contacts sync reports. The open Dialer lists what it brings.
 fn contacts_sync(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    held_contacts(state, input, effects);
+    refresh_dialer(state);
+}
+
+fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
     match input {
         Input::ContactsLoaded {
             contacts,
@@ -790,6 +887,10 @@ fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
     if call.direction == Direction::Outgoing {
         adopt_dialled(state, &mut call, effects);
     }
+    if state.recent_calls.len() == RECENT_CALLS {
+        state.recent_calls.remove(0);
+    }
+    state.recent_calls.push((call.id, call.caller.clone()));
     state.calls.push(call);
 }
 
@@ -878,8 +979,14 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             dial_failed(&mut state, refusal_failure(refusal), &mut effects);
         }
         Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
-        Input::Activate => activate(&mut state, &mut effects),
+        Input::Activate => activate(&mut state),
         Input::ReleaseFocus => state.focus = Focus::None,
+        input @ (Input::OpenDialer { .. }
+        | Input::DialerQuery(_)
+        | Input::DialerMove(_)
+        | Input::DialerEnter
+        | Input::DialerChoose(_)
+        | Input::CloseDialer) => dialer_input(&mut state, input, &mut effects),
         Input::PhoneCommandDone(command) => command_done(&mut state, &command),
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::PhonePaired(_)
@@ -901,19 +1008,12 @@ fn dial(state: &mut State, text: &str, effects: &mut Vec<Effect>) {
         refuse(state, Failure::Undialable, attempt, caller, effects);
         return;
     };
-    let refusal = match state.connection {
-        ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
-        ConnectionState::Connecting => Some(Failure::PhoneConnecting),
-        ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
-        ConnectionState::Connected if !state.calls.is_empty() || state.dialling.is_some() => {
-            Some(Failure::CallInProgress)
-        }
-        ConnectionState::Connected => None,
-    };
-    if let Some(failure) = refusal {
+    if let Some(failure) = state.dial_refusal() {
         refuse(state, failure, attempt, Caller::Number(number), effects);
         return;
     }
+    // The Call is starting, so the Dialer's work is done.
+    state.dialer = None;
     state.ended = None;
     state.notice = None;
     state.hung_up_dial = None;
@@ -1159,11 +1259,14 @@ fn command_done(state: &mut State, command: &PhoneCommand) {
 }
 
 /// The keybinding: focus the Banner while a Call rings here, otherwise the
-/// Call Window while a Call is live. Neither touches the Call itself.
-fn activate(state: &mut State, effects: &mut Vec<Effect>) {
+/// Call Window while a Call is live, otherwise open the Dialer. Neither
+/// touches the Call itself. Only one surface can have the keyboard, so the
+/// Dialer closes when another takes it.
+fn activate(state: &mut State) {
     let surfaces = state.surfaces();
     if surfaces.banner.is_some() {
         state.focus = Focus::Banner;
+        state.dialer = None;
     } else if surfaces.call_window.is_some_and(|window| {
         !matches!(
             window.phase,
@@ -1171,9 +1274,131 @@ fn activate(state: &mut State, effects: &mut Vec<Effect>) {
         )
     }) {
         state.focus = Focus::CallWindow;
+        state.dialer = None;
+    } else if state.dialer.is_none() {
+        open_dialer(state, String::new(), None);
+    }
+}
+
+/// What the user does in the Dialer.
+fn dialer_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    match input {
+        Input::OpenDialer { query, select_call } => open_dialer(state, query, select_call),
+        Input::DialerQuery(query) => dialer_query(state, query),
+        Input::DialerMove(by) => dialer_move(state, by),
+        Input::DialerEnter => dialer_enter(state, None, effects),
+        Input::DialerChoose(index) => dialer_enter(state, Some(index), effects),
+        Input::CloseDialer => state.dialer = None,
+        _ => {}
+    }
+}
+
+/// Opens the Dialer afresh with `query` typed. It takes the keyboard.
+fn open_dialer(state: &mut State, query: String, select_call: Option<CallId>) {
+    state.focus = Focus::None;
+    state.dialer_openings = state.dialer_openings.wrapping_add(1);
+    let rows = matching::search(&query, &state.contacts, &state.call_history);
+    let caller = select_call.and_then(|call| {
+        state
+            .recent_calls
+            .iter()
+            .rev()
+            .find(|(id, _)| *id == call)
+            .map(|(_, caller)| caller)
+    });
+    let selected = caller
+        .and_then(|caller| {
+            rows.iter()
+                .position(|row| state.same_number(&row.caller, caller))
+        })
+        .unwrap_or(0);
+    state.dialer = Some(Dialer {
+        notice: undialable(&query, &rows),
+        query,
+        rows,
+        selected,
+        opened: state.dialer_openings,
+    });
+}
+
+/// What is typed can't be dialled and matches nothing: say so before Enter.
+fn undialable(query: &str, rows: &[DialerRow]) -> Option<Failure> {
+    (rows.is_empty() && matching::looks_undialable(query)).then_some(Failure::Undialable)
+}
+
+fn dialer_query(state: &mut State, query: String) {
+    if state
+        .dialer
+        .as_ref()
+        .is_none_or(|dialer| dialer.query == query)
+    {
+        return;
+    }
+    let rows = matching::search(&query, &state.contacts, &state.call_history);
+    if let Some(dialer) = state.dialer.as_mut() {
+        dialer.notice = undialable(&query, &rows);
+        dialer.query = query;
+        dialer.rows = rows;
+        dialer.selected = 0;
+    }
+}
+
+/// Contacts or the Call History changed: the open Dialer lists them anew,
+/// keeping the selection where it was as far as it can.
+fn refresh_dialer(state: &mut State) {
+    let Some(query) = state.dialer.as_ref().map(|dialer| dialer.query.clone()) else {
+        return;
+    };
+    let rows = matching::search(&query, &state.contacts, &state.call_history);
+    if let Some(dialer) = state.dialer.as_mut() {
+        dialer.selected = dialer.selected.min(rows.len().saturating_sub(1));
+        dialer.rows = rows;
+    }
+}
+
+fn dialer_move(state: &mut State, by: i32) {
+    let Some(dialer) = state.dialer.as_mut() else {
+        return;
+    };
+    let last = dialer.rows.len().saturating_sub(1);
+    let steps = usize::try_from(by.unsigned_abs()).unwrap_or(usize::MAX);
+    dialer.selected = if by >= 0 {
+        dialer.selected.saturating_add(steps).min(last)
     } else {
-        // The Dialer opens here once it exists (ticket #11).
-        effects.push(Effect::ReportError(Failure::DialerUnavailable));
+        dialer.selected.saturating_sub(steps)
+    };
+}
+
+/// Calls the Dialer's row at `index`, or the selected row. If it can't be
+/// called now, the Dialer stays open and says why.
+fn dialer_enter(state: &mut State, index: Option<usize>, effects: &mut Vec<Effect>) {
+    let Some(dialer) = state.dialer.as_mut() else {
+        return;
+    };
+    if let Some(index) = index.filter(|index| *index < dialer.rows.len()) {
+        dialer.selected = index;
+    }
+    let number = match dialer.rows.get(dialer.selected) {
+        None => Err(undialable(&dialer.query, &dialer.rows)),
+        Some(row) => row.dial().ok_or(Some(if row.caller == Caller::Withheld {
+            Failure::WithheldNumber
+        } else {
+            Failure::Undialable
+        })),
+    };
+    let failure = match number {
+        Ok(number) => match state.dial_refusal() {
+            None => {
+                dial(state, &number, effects);
+                return;
+            }
+            refusal => refusal,
+        },
+        Err(failure) => failure,
+    };
+    if let (Some(failure), Some(dialer)) = (failure, state.dialer.as_mut()) {
+        dialer.notice = Some(failure);
+        effects.push(Effect::ReportError(failure));
     }
 }
 

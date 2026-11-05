@@ -1,7 +1,7 @@
 //! The Messages module: every sentence the user reads.
 
 use desktop_calls_core::messages::{self, Failure};
-use desktop_calls_core::{ConnectionState, Phone};
+use desktop_calls_core::{ConnectionState, Phone, Timestamp};
 
 fn pixel() -> Phone {
     Phone {
@@ -81,4 +81,25 @@ fn call_failures_have_a_kind_and_never_raw_dbus_text() {
         assert!(!failure.as_str().is_empty());
     }
     assert_eq!(Failure::AnswerFailed.as_str(), "answer-failed");
+}
+
+/// 2026-11-05 09:30 UTC, in milliseconds since the Unix epoch.
+const NOW: Timestamp = Timestamp(1_793_871_000_000);
+
+#[test]
+fn when_a_call_was_is_the_time_today_yesterday_then_the_date() {
+    let at = |ms| messages::when(Timestamp(ms), NOW, 0);
+    assert_eq!(at(1_793_871_000_000 - 3_600_000), "08:30");
+    assert_eq!(at(1_793_790_000_000), "Yesterday 11:00");
+    assert_eq!(at(1_793_747_700_000), "3 Nov");
+    assert_eq!(at(1_767_168_000_000), "31 Dec 2025");
+}
+
+#[test]
+fn when_a_call_was_is_in_local_time() {
+    // 23:15 UTC on 3 November is 00:15 on the 4th an hour east.
+    assert_eq!(
+        messages::when(Timestamp(1_793_747_700_000), NOW, 3_600),
+        "Yesterday 00:15"
+    );
 }

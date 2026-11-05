@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::call::{Caller, Timestamp};
-use crate::matching::Directory;
+use crate::matching::{Directory, HistoryIndex};
 
 /// One of the Phone's Contacts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,21 +137,29 @@ impl fmt::Debug for Contacts {
     }
 }
 
-/// The Call History, newest first, cheap to clone.
+/// The Call History, newest first, indexed for search, cheap to clone.
 #[derive(Clone, Default)]
-pub struct CallHistory(Arc<Vec<CallHistoryEntry>>);
+pub struct CallHistory(Arc<(Vec<CallHistoryEntry>, HistoryIndex)>);
 
 impl CallHistory {
-    /// Sorts `entries` newest first; entries with no time go last.
+    /// Sorts `entries` newest first, entries with no time last, and indexes
+    /// them for search with the Contacts in `directory`, which they were
+    /// synced with. Slow for thousands of entries: build it off the main
+    /// thread.
     #[must_use]
-    pub fn new(mut entries: Vec<CallHistoryEntry>) -> Self {
+    pub fn new(mut entries: Vec<CallHistoryEntry>, directory: &Directory) -> Self {
         entries.sort_by_key(|entry| std::cmp::Reverse(entry.at));
-        Self(Arc::new(entries))
+        let index = HistoryIndex::new(&entries, directory);
+        Self(Arc::new((entries, index)))
     }
 
     #[must_use]
     pub fn entries(&self) -> &[CallHistoryEntry] {
-        &self.0
+        &self.0.0
+    }
+
+    pub(crate) fn index(&self) -> &HistoryIndex {
+        &self.0.1
     }
 }
 
@@ -165,7 +173,7 @@ impl Eq for CallHistory {}
 
 impl fmt::Debug for CallHistory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CallHistory({})", self.0.len())
+        write!(f, "CallHistory({})", self.0.0.len())
     }
 }
 

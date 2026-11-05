@@ -24,7 +24,7 @@ pub use contacts::{
     ContactsState, NumberLabel, SyncFailure, Unavailable,
 };
 pub use machine::{
-    BannerView, CallAudio, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand,
-    PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,
+    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Effect, Input, Mute,
+    PhoneCommand, PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};

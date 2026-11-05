@@ -7,6 +7,4 @@ Icon=call-start-symbolic
 Terminal=false
 Categories=Network;Telephony;
 MimeType=x-scheme-handler/tel;
-# Hidden from the launcher until the Dialer lands (#11); it handles tel: links.
-NoDisplay=true
 StartupNotify=false

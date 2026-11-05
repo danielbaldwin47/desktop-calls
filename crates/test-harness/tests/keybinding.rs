@@ -223,14 +223,3 @@ fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_leaves_t
             !recorded.iter().any(|recorded| recorded.member == "Hangup")
         });
 }
-
-#[test]
-fn with_nothing_ringing_or_live_the_keybinding_says_the_dialer_is_not_here_yet() {
-    let harness = Harness::start();
-
-    press_the_keybinding(&harness);
-
-    let error = harness.wait_for_app_error(DEADLINE);
-    assert_eq!(error.kind, "dialer-unavailable");
-    assert!(!error.message.is_empty());
-}

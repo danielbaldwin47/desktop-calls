@@ -1,0 +1,425 @@
+//! Scenarios: the Dialer on a screen of its own, opened from the CLI, the
+//! keybinding, `OpenDialer` and the app launcher, driven by synthetic keys,
+//! and observed through the control interface's `Surfaces`, what the
+//! Simulated Phone was asked to do, and screenshots.
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use test_harness::vcards::{self, CallKind};
+use test_harness::{AppState, BAR_COLOUR, BAR_HEIGHT, Harness, Key, LAYOUT_SIZE, Screenshot};
+
+/// How long the app may take to show a change.
+const DEADLINE: Duration = Duration::from_secs(5);
+/// How long a whole sync may take.
+const SYNC_DEADLINE: Duration = Duration::from_secs(15);
+/// How long a surface may take to be drawn on screen. Each capture and its
+/// scan take over a second on a busy CI runner, so this allows several.
+const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
+/// How long the Dialer may take to show after `Activate` (issue #11).
+const SHOW_DEADLINE: Duration = Duration::from_millis(150);
+/// How long the Dialer's rows may take to follow a keystroke (issue #11).
+const KEYSTROKE_DEADLINE: Duration = Duration::from_millis(50);
+/// How long something that must not happen is watched for.
+const HOLD: Duration = Duration::from_millis(500);
+
+fn contacts() -> String {
+    let mut all = String::new();
+    all.push_str(&vcards::contact("José Smith", &[("CELL", "+447700900001")]));
+    all.push_str(&vcards::contact(
+        "Alice Smith",
+        &[("CELL", "+44 7700 900123"), ("WORK", "020 7946 0123")],
+    ));
+    all.push_str(&vcards::contact(
+        "Joanna Smithers",
+        &[("CELL", "+447700900002")],
+    ));
+    all.push_str(&vcards::contacts(20, 1_000));
+    all
+}
+
+fn call_history() -> String {
+    [
+        vcards::call(CallKind::Missed, Some("+447700900999"), "20261104T110000"),
+        vcards::call(CallKind::Dialed, Some("+447700900123"), "20261104T100000"),
+        vcards::call(CallKind::Received, Some("+447700900001"), "20261104T090000"),
+    ]
+    .concat()
+}
+
+/// A connected, synced Phone, on a screen with Omarchy's bar.
+fn synced_on_screen() -> Harness {
+    let harness = Harness::builder().headless_screen().omarchy_bar().start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &contacts());
+    phone.set_pbap_folder("cch", &call_history());
+    phone.connect();
+    harness.wait_for_app(
+        "the Phone is connected, and Contacts and Call History synced",
+        SYNC_DEADLINE,
+        |state| {
+            state.connection_state == "connected"
+                && state.contacts.state == "ready"
+                && state.contacts.call_history == 3
+        },
+    );
+    harness
+}
+
+fn dialer(state: &AppState) -> Option<&BTreeMap<String, String>> {
+    state.surface("dialer")
+}
+
+fn shown<'a>(state: &'a AppState, key: &str) -> Option<&'a str> {
+    dialer(state)
+        .and_then(|dialer| dialer.get(key))
+        .map(String::as_str)
+}
+
+fn focused(state: &AppState) -> bool {
+    shown(state, "focused") == Some("true")
+}
+
+fn run(harness: &Harness, arguments: &[&str]) {
+    let output = harness.cli(arguments);
+    assert!(
+        output.status.success(),
+        "desktop-calls {arguments:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Opens the Dialer with `desktop-calls dialer` and waits until it has the
+/// keyboard.
+fn open(harness: &Harness) -> AppState {
+    run(harness, &["dialer"]);
+    harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused)
+}
+
+/// Types `text` into the Dialer and waits until it shows the rows for it.
+fn type_query(harness: &Harness, text: &str) -> AppState {
+    harness.keyboard().type_text(text);
+    harness.wait_for_app(
+        &format!("the Dialer searched for {text:?}"),
+        DEADLINE,
+        |state| shown(state, "query") == Some(text),
+    )
+}
+
+/// Types `text` into the Dialer and waits until it shows the rows for
+/// `query`.
+fn type_query_from(harness: &Harness, text: &str, query: &str) -> AppState {
+    harness.keyboard().type_text(text);
+    harness.wait_for_app(
+        &format!("the Dialer searched for {query:?}"),
+        DEADLINE,
+        |state| shown(state, "query") == Some(query),
+    )
+}
+
+fn dialled(harness: &Harness, number: &str) {
+    let expected = format!("(\"{number}\",)");
+    harness.simulated_phone().wait_for_recorded(
+        &format!("the Phone is asked to dial {number}"),
+        DEADLINE,
+        |calls| {
+            calls
+                .iter()
+                .any(|call| call.member == "Dial" && call.arguments == expected)
+        },
+    );
+}
+
+fn never_dialled(harness: &Harness) {
+    harness
+        .simulated_phone()
+        .recorded_holds("the Phone is never asked to dial", HOLD, |calls| {
+            !calls.iter().any(|call| call.member == "Dial")
+        });
+}
+
+fn app_region(screenshot: &Screenshot) -> Option<test_harness::Region> {
+    screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
+}
+
+#[test]
+fn the_dialer_command_shows_the_dialer_centred_with_focus_listing_the_call_history() {
+    let harness = synced_on_screen();
+
+    let state = open(&harness);
+
+    assert_eq!(shown(&state, "query"), Some(""));
+    assert_eq!(shown(&state, "rows"), Some("3"));
+    assert_eq!(shown(&state, "selected"), Some("0"));
+    let row = |index: usize| shown(&state, &format!("row-{index}")).unwrap_or_default();
+    assert!(row(0).contains("Missed"), "{:?}", dialer(&state));
+    assert!(row(1).contains("Alice Smith"), "{:?}", dialer(&state));
+    assert!(row(2).contains("José Smith"), "{:?}", dialer(&state));
+    assert!(!row(1).contains("Missed") && !row(2).contains("Missed"));
+
+    let screenshot = harness.screenshot_when("dialer", SCREEN_DEADLINE, |screenshot| {
+        app_region(screenshot).is_some_and(|region| region.right - region.left > 300.0)
+    });
+    let region = app_region(&screenshot).expect("the Dialer is on screen");
+    let (x, y) = region.centre();
+    let (width, height) = LAYOUT_SIZE;
+    assert!(
+        (x - width / 2.0).abs() <= 2.0,
+        "not centred across: {region:?}"
+    );
+    // Centred in the space below the bar.
+    let middle = f64::midpoint(height, BAR_HEIGHT);
+    assert!((y - middle).abs() <= 2.0, "not centred down: {region:?}");
+}
+
+#[test]
+fn down_down_enter_dials_the_selected_row_and_the_dialer_closes_as_the_call_starts() {
+    let harness = synced_on_screen();
+    open(&harness);
+    let state = type_query(&harness, "smith");
+    let rows = harness.search("smith");
+    assert!(rows.len() >= 3, "{rows:?}");
+    assert_eq!(shown(&state, "rows"), Some(rows.len().to_string().as_str()));
+
+    harness.keyboard().press(Key::Down);
+    harness.keyboard().press(Key::Down);
+    harness.wait_for_app("the third row is selected", DEADLINE, |state| {
+        shown(state, "selected") == Some("2")
+    });
+    harness.keyboard().press(Key::Return);
+
+    dialled(&harness, &rows[2].number);
+    let state = harness.wait_for_app(
+        "the Dialer closes and the Call Window says Calling…",
+        DEADLINE,
+        |state| {
+            dialer(state).is_none()
+                && state
+                    .surface("call-window")
+                    .and_then(|window| window.get("status"))
+                    .is_some_and(|status| status == "Calling…")
+        },
+    );
+    assert_eq!(
+        state
+            .surface("call-window")
+            .and_then(|window| window.get("caller"))
+            .map(String::as_str),
+        Some(rows[2].name.as_str())
+    );
+}
+
+#[test]
+fn typing_a_dialable_number_shows_a_call_row_and_enter_dials_it() {
+    let harness = synced_on_screen();
+    open(&harness);
+
+    let state = type_query(&harness, "07700 900888");
+
+    assert_eq!(shown(&state, "row-0"), Some("Call 07700 900888"));
+    harness.keyboard().press(Key::Return);
+    dialled(&harness, "07700900888");
+}
+
+#[test]
+fn pasting_a_tel_link_finds_its_contact_and_enter_dials_it() {
+    let harness = synced_on_screen();
+    open(&harness);
+    let _clipboard = harness.set_clipboard("tel:+447700900001");
+
+    harness.keyboard().press_with_control('v');
+
+    let state = harness.wait_for_app("the Dialer searched for the link", DEADLINE, |state| {
+        shown(state, "query") == Some("tel:+447700900001")
+    });
+    assert!(
+        shown(&state, "row-0").is_some_and(|row| row.contains("José Smith")),
+        "{:?}",
+        dialer(&state)
+    );
+    harness.keyboard().press(Key::Return);
+    dialled(&harness, "+447700900001");
+}
+
+#[test]
+fn an_undialable_number_is_flagged_before_enter() {
+    let harness = synced_on_screen();
+    open(&harness);
+
+    let state = type_query(&harness, "07700 9x");
+
+    assert_eq!(shown(&state, "rows"), Some("0"));
+    assert_eq!(
+        shown(&state, "notice"),
+        Some("That isn't a number your phone can dial; use digits, spaces and + * # only.")
+    );
+    harness.keyboard().press(Key::Return);
+    never_dialled(&harness);
+}
+
+#[test]
+fn escape_closes_the_dialer_without_calling() {
+    let harness = synced_on_screen();
+    open(&harness);
+    type_query(&harness, "jose");
+
+    harness.keyboard().press(Key::Escape);
+
+    harness.wait_for_app("the Dialer closes", DEADLINE, |state| {
+        dialer(state).is_none()
+    });
+    never_dialled(&harness);
+    // It opens afresh, with nothing typed.
+    let state = open(&harness);
+    assert_eq!(shown(&state, "query"), Some(""));
+}
+
+#[test]
+fn with_the_phone_disconnected_the_dialer_searches_cached_contacts_and_enter_says_why_not() {
+    let harness = synced_on_screen();
+    harness.simulated_phone().disconnect();
+    harness.wait_for_app("the Phone is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+    open(&harness);
+
+    let state = type_query(&harness, "jose");
+    assert!(
+        shown(&state, "row-0").is_some_and(|row| row.contains("José Smith")),
+        "{:?}",
+        dialer(&state)
+    );
+    harness.keyboard().press(Key::Return);
+
+    let state = harness.wait_for_app("the Dialer says why not", DEADLINE, |state| {
+        shown(state, "notice").is_some()
+    });
+    assert_eq!(
+        shown(&state, "notice"),
+        Some("Phone not connected: it's out of range or has Bluetooth off.")
+    );
+    assert!(
+        state.surface("call-window").is_none(),
+        "{:?}",
+        state.surfaces
+    );
+    never_dialled(&harness);
+}
+
+#[test]
+fn during_a_live_call_enter_in_the_dialer_says_hang_up_the_current_call_first() {
+    let harness = synced_on_screen();
+    let _path = harness.simulated_phone().ring("+447700900123");
+    let state = harness.wait_for_app("the Phone rings", DEADLINE, |state| state.ringing);
+    harness.answer(state.calls[0].id);
+    harness.wait_for_app("the Call is live", DEADLINE, |state| {
+        state.calls.iter().any(|call| call.state == "active")
+    });
+    run(&harness, &["dialer", "jose"]);
+    let state = harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
+    assert_eq!(shown(&state, "query"), Some("jose"));
+    // Typing adds to the query it opened with.
+    let state = type_query_from(&harness, " sm", "jose sm");
+    assert!(
+        shown(&state, "row-0").is_some_and(|row| row.contains("José Smith")),
+        "{:?}",
+        dialer(&state)
+    );
+
+    harness.keyboard().press(Key::Return);
+
+    let state = harness.wait_for_app("the Dialer says why not", DEADLINE, |state| {
+        shown(state, "notice").is_some()
+    });
+    assert_eq!(
+        shown(&state, "notice"),
+        Some("Hang up the current Call first.")
+    );
+    never_dialled(&harness);
+}
+
+#[test]
+fn with_nothing_ringing_or_live_the_keybinding_opens_the_dialer() {
+    let harness = synced_on_screen();
+
+    run(&harness, &[]);
+
+    let state = harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
+    assert_eq!(shown(&state, "rows"), Some("3"));
+}
+
+#[test]
+fn the_app_launcher_opens_the_dialer() {
+    let harness = synced_on_screen();
+
+    harness.launch_from_app_launcher();
+
+    harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
+}
+
+#[test]
+fn open_dialer_selects_the_call_asked_for() {
+    let harness = synced_on_screen();
+    let path = harness.simulated_phone().ring("+447700900123");
+    let state = harness.wait_for_app("the Phone rings", DEADLINE, |state| state.ringing);
+    let call = state.calls[0].id;
+    harness.simulated_phone().caller_hangs_up(&path);
+    harness.wait_for_app("the Call is over", DEADLINE, |state| state.calls.is_empty());
+
+    harness.open_dialer("", call);
+
+    let state = harness.wait_for_app("the Dialer shows", DEADLINE, |state| {
+        dialer(state).is_some()
+    });
+    let selected: usize = shown(&state, "selected")
+        .and_then(|selected| selected.parse().ok())
+        .expect("a row is selected");
+    assert!(
+        shown(&state, &format!("row-{selected}")).is_some_and(|row| row.contains("Alice Smith")),
+        "{:?}",
+        dialer(&state)
+    );
+}
+
+#[test]
+fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
+    let harness = Harness::builder().headless_screen().omarchy_bar().start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(5_000, 0));
+    phone.set_pbap_folder("cch", &vcards::call_history(200));
+    phone.connect();
+    harness.wait_for_app("5000 Contacts are synced", SYNC_DEADLINE, |state| {
+        state.contacts.state == "ready"
+            && state.contacts.contacts == 5_000
+            && state.contacts.call_history == 200
+    });
+
+    let started = Instant::now();
+    harness.activate();
+    harness.wait_for_app("the Dialer shows", SHOW_DEADLINE, |state| {
+        dialer(state).is_some()
+    });
+    let shown_after = started.elapsed();
+    harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
+
+    let mut query = String::new();
+    let mut slowest = Duration::ZERO;
+    for character in "contact 49".chars() {
+        query.push(character);
+        let started = Instant::now();
+        harness.keyboard().type_text(&character.to_string());
+        harness.wait_for_app(
+            &format!("the Dialer shows the rows for {query:?}"),
+            KEYSTROKE_DEADLINE,
+            |state| shown(state, "query") == Some(query.as_str()),
+        );
+        slowest = slowest.max(started.elapsed());
+    }
+    eprintln!("Dialer shown after {shown_after:?}; slowest keystroke {slowest:?}");
+    let state = harness.app_state();
+    assert!(
+        shown(&state, "row-0").is_some_and(|row| row.starts_with("Contact 49")),
+        "{:?}",
+        dialer(&state)
+    );
+}

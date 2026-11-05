@@ -11,6 +11,7 @@ publish.workspace = true
 # Keep this list empty of I/O, GTK, D-Bus and logging crates; deny.toml enforces it.
 [dependencies]
 phonenumber.workspace = true
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

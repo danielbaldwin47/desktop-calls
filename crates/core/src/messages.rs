@@ -4,9 +4,10 @@
 //! out. The surfaces' labels and the Call timer's text come from here too. No
 //! other code writes text for the user.
 
-use crate::call::{AudioLocation, Caller};
+use crate::call::{AudioLocation, Caller, Timestamp};
+use crate::contacts::CallHistoryKind;
 use crate::contacts::NumberLabel;
-use crate::matching::ContactMatch;
+use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::{ConnectionState, Phone};
 
 /// A failure the user can be told about.
@@ -65,9 +66,8 @@ pub enum Failure {
     InvalidTones,
     /// The Phone did not play the keypad tones.
     TonesNotSent,
-    /// The keybinding has nothing to focus, and the Dialer it would open
-    /// isn't built yet.
-    DialerUnavailable,
+    /// The Call History row the user chose has a withheld number.
+    WithheldNumber,
 }
 
 impl Failure {
@@ -101,7 +101,7 @@ impl Failure {
             Self::UnmuteFailed => "unmute-failed",
             Self::InvalidTones => "invalid-tones",
             Self::TonesNotSent => "tones-not-sent",
-            Self::DialerUnavailable => "dialer-unavailable",
+            Self::WithheldNumber => "withheld-number",
         }
     }
 }
@@ -206,7 +206,10 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::InvalidTones => ("Only digits, * and # can be sent as tones.", None),
         Failure::TonesNotSent => ("Your phone didn't send the tones; try again.", None),
-        Failure::DialerUnavailable => ("Desktop Calls can't open the Dialer yet.", None),
+        Failure::WithheldNumber => (
+            "That caller withheld their number, so it can't be called back.",
+            None,
+        ),
     };
     Message { text, next_action }
 }
@@ -335,6 +338,18 @@ pub enum Label {
     MicrophoneMuted,
     /// The keypad's tone entry, before anything is typed.
     KeypadPlaceholder,
+    /// The Dialer's text entry, before anything is typed.
+    DialerPlaceholder,
+    /// What the Dialer lists when nothing matches what is typed.
+    NoMatches,
+    /// A Call History row's kind: a Missed Call.
+    Missed,
+    /// A Call History row's kind: an answered incoming Call.
+    Incoming,
+    /// A Call History row's kind: a Call placed from the Phone or here.
+    Outgoing,
+    /// A Call History row with a withheld number.
+    CantCallBack,
 }
 
 /// The text of `label`.
@@ -362,6 +377,12 @@ pub fn label(label: Label) -> &'static str {
         Label::Keypad => "Keypad",
         Label::MicrophoneMuted => "Microphone muted",
         Label::KeypadPlaceholder => "Type or paste digits to send tones",
+        Label::DialerPlaceholder => "Type a name or number",
+        Label::NoMatches => "No matches",
+        Label::Missed => "Missed",
+        Label::Incoming => "Incoming",
+        Label::Outgoing => "Outgoing",
+        Label::CantCallBack => "can't be called back",
     }
 }
 
@@ -409,6 +430,135 @@ pub fn caller(caller: &Caller) -> String {
 /// startup.
 pub fn prepare_caller() {
     crate::number::prepare();
+}
+
+/// A Dialer row as shown: a title, and a detail line that may be empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DialerRowText {
+    pub title: String,
+    pub detail: String,
+}
+
+impl DialerRowText {
+    /// The title and detail on one line, as the Dialer reports a row.
+    #[must_use]
+    pub fn line(&self) -> String {
+        if self.detail.is_empty() {
+            self.title.clone()
+        } else {
+            format!("{} · {}", self.title, self.detail)
+        }
+    }
+}
+
+/// What the Dialer shows for `row`: a Contact's name over the number's label
+/// and the number; for a Call History row who it was over its kind
+/// (Missed, Incoming or Outgoing) and `when`; for the number typed,
+/// "Call 07700 900123".
+#[must_use]
+pub fn dialer_row(row: &DialerRow, when: Option<&str>) -> DialerRowText {
+    let number_detail = || {
+        caller_detail(
+            &row.label.as_ref().map(number_label).unwrap_or_default(),
+            &row.shown_number,
+        )
+    };
+    match row.kind {
+        DialerRowKind::CallNumber => DialerRowText {
+            title: format!("Call {}", row.shown_number),
+            detail: String::new(),
+        },
+        DialerRowKind::Contact if !row.name.trim().is_empty() => DialerRowText {
+            title: row.name.clone(),
+            detail: number_detail(),
+        },
+        DialerRowKind::Contact => DialerRowText {
+            title: caller(&row.caller),
+            detail: row.label.as_ref().map(number_label).unwrap_or_default(),
+        },
+        DialerRowKind::CallHistory(kind) => {
+            let named = !row.name.trim().is_empty();
+            let title = if named {
+                row.name.clone()
+            } else {
+                caller(&row.caller)
+            };
+            let mut detail = vec![
+                label(match kind {
+                    CallHistoryKind::Missed => Label::Missed,
+                    CallHistoryKind::Incoming => Label::Incoming,
+                    CallHistoryKind::Outgoing => Label::Outgoing,
+                })
+                .to_owned(),
+            ];
+            if named {
+                detail.push(number_detail());
+            }
+            detail.extend(when.map(str::to_owned));
+            if row.caller == Caller::Withheld {
+                detail.push(label(Label::CantCallBack).to_owned());
+            }
+            DialerRowText {
+                title,
+                detail: detail.join(" · "),
+            }
+        }
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// When a Call was, as the Dialer shows it: the time if today, "Yesterday"
+/// and the time, otherwise the date, with the year if not this year.
+/// `utc_offset_seconds` is the Desktop's time zone's offset now.
+#[must_use]
+pub fn when(at: Timestamp, now: Timestamp, utc_offset_seconds: i64) -> String {
+    let local = |moment: Timestamp| {
+        i64::try_from(moment.0 / 1_000).unwrap_or(i64::MAX) + utc_offset_seconds
+    };
+    let (at, now) = (local(at), local(now));
+    let time = format!(
+        "{:02}:{:02}",
+        at.rem_euclid(86_400) / 3_600,
+        at.rem_euclid(3_600) / 60
+    );
+    let (day, today) = (at.div_euclid(86_400), now.div_euclid(86_400));
+    match today - day {
+        0 => time,
+        1 => format!("Yesterday {time}"),
+        _ => {
+            let (year, month, day) = civil_date(day);
+            let month = MONTHS[month - 1];
+            if year == civil_date(today).0 {
+                format!("{day} {month}")
+            } else {
+                format!("{day} {month} {year}")
+            }
+        }
+    }
+}
+
+/// The year, month (1 to 12) and day of the month of the day `days` after
+/// 1970-01-01, in the proleptic Gregorian calendar (Howard Hinnant's
+/// `civil_from_days`).
+fn civil_date(days: i64) -> (i64, usize, i64) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, usize::try_from(month).unwrap_or(1), day)
 }
 
 /// The Call timer's text for `seconds`: `m:ss`, or `h:mm:ss` from an hour.

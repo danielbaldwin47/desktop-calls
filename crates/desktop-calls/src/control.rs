@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use desktop_calls_core::matching::{self, DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure};
 use desktop_calls_core::{AudioLocation, CallId, Caller, ContactsState, Input, State};
 use futures_channel::mpsc::UnboundedSender;
@@ -215,6 +216,23 @@ impl ControlInterface {
             .collect()
     }
 
+    /// The Dialer's rows for `query` (what the user typed), best first, at
+    /// most 50: kind (`"contact"`, `"call-history"`, or `"call-number"`
+    /// for the number typed); for a Call History row its kind
+    /// (`"incoming"`, `"outgoing"`, `"missed"`, otherwise empty); the
+    /// Contact's name, or the name the Phone gave (or empty); the number's
+    /// label (or empty); the number Enter dials (empty if withheld or not
+    /// dialable); the number grouped for reading (empty if withheld); and
+    /// for a Call History row when, in milliseconds since the Unix epoch
+    /// (otherwise 0). With nothing typed, the rows are the Call History,
+    /// newest first.
+    fn search(&self, query: &str) -> Vec<SearchRow> {
+        matching::search(query, self.state.contacts(), self.state.call_history())
+            .iter()
+            .map(search_row)
+            .collect()
+    }
+
     /// Answers the ringing Call with this id on the Desktop.
     fn answer(&self, call: u32) {
         let _ = self.intents.unbounded_send(Input::Answer(CallId(call)));
@@ -273,15 +291,46 @@ impl ControlInterface {
 
     /// What the Desktop Calls keybinding does: gives keyboard focus to the
     /// Incoming Call Banner while a Call rings, otherwise to the Call Window
-    /// while a Call is live. It never answers, declines or ends a Call.
+    /// while a Call is live, otherwise opens the Dialer. It never answers,
+    /// declines or ends a Call.
     fn activate(&self) {
         let _ = self.intents.unbounded_send(Input::Activate);
+    }
+
+    /// Opens the Dialer afresh with `query` typed (empty for the Call
+    /// History), selecting the Call History row of the Call with id
+    /// `select_call_id` if there is one (0 for none).
+    fn open_dialer(&self, query: String, select_call_id: u32) {
+        let _ = self.intents.unbounded_send(Input::OpenDialer {
+            query,
+            select_call: (select_call_id != 0).then_some(CallId(select_call_id)),
+        });
     }
 
     /// Something the user asked for failed: the failure kind and the
     /// sentence to show.
     #[zbus(signal)]
     async fn error(emitter: &SignalEmitter<'_>, kind: &str, message: &str) -> zbus::Result<()>;
+}
+
+/// One row of `Search`'s reply.
+type SearchRow = (String, String, String, String, String, String, u64);
+
+fn search_row(row: &DialerRow) -> SearchRow {
+    (
+        row.kind.as_str().to_owned(),
+        match row.kind {
+            DialerRowKind::CallHistory(kind) => kind.as_str().to_owned(),
+            DialerRowKind::Contact | DialerRowKind::CallNumber => String::new(),
+        },
+        row.name.clone(),
+        row.label
+            .as_ref()
+            .map_or_else(String::new, messages::number_label),
+        row.dial().unwrap_or_default(),
+        row.shown_number.clone(),
+        row.at.map_or(0, |at| at.0),
+    )
 }
 
 fn contacts_state(state: &State) -> (String, u32, u32, u64, String) {

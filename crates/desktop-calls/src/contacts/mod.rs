@@ -544,10 +544,9 @@ impl Folder {
 
 /// Indexes Contacts for matching, and the Call History for the core.
 fn index(cached: &Cached, locale_region: Option<&str>) -> (Contacts, CallHistory) {
-    (
-        Contacts::new(Directory::new(cached.contacts.clone(), locale_region)),
-        CallHistory::new(cached.call_history.clone()),
-    )
+    let directory = Directory::new(cached.contacts.clone(), locale_region);
+    let call_history = CallHistory::new(cached.call_history.clone(), &directory);
+    (Contacts::new(directory), call_history)
 }
 
 fn contacts_from(cards: Vec<vcard::Card>) -> Vec<Contact> {

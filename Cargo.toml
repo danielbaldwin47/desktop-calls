@@ -38,6 +38,8 @@ gtk4-layer-shell = "0.8"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 # Formats phone numbers for reading, by libphonenumber's rules.
 phonenumber = "0.3"
+# Folds accents away for the Dialer's name search: canonical decomposition.
+unicode-normalization = "0.1"
 tempfile = "3"
 # Reads the harness's screenshots, to find surfaces on screen.
 png = "0.18"

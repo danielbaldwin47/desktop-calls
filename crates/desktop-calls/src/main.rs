@@ -48,6 +48,13 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Open the Dialer, to find someone in Contacts or the Call History and
+    /// Call them.
+    Dialer {
+        /// Text to start the search with: part of a name or number.
+        #[arg(default_value = "")]
+        query: String,
+    },
     /// Mute the microphone during a Call, or unmute it if it is muted.
     Mute,
     /// Move the Call's audio to this computer or to your phone.
@@ -84,6 +91,7 @@ fn main() -> ExitCode {
     match arguments.command {
         Some(Command::Dial { number }) => cli::dial(&number),
         Some(Command::Status { json }) => cli::status(json),
+        Some(Command::Dialer { query }) => cli::dialer(&query),
         Some(Command::Mute) => cli::mute(),
         Some(Command::Audio { to }) => cli::audio(to.into()),
         Some(Command::Service) => service::run(),

@@ -1,5 +1,5 @@
-//! The Desktop surfaces: the Incoming Call Banner and the Call Window, as
-//! GTK4 and libadwaita windows on the layer shell.
+//! The Desktop surfaces: the Incoming Call Banner, the Call Window and the
+//! Dialer, as GTK4 and libadwaita windows on the layer shell.
 //!
 //! They render what the Call state machine says to show, send the user's
 //! clicks back as intents, and report what is actually on screen (a surface
@@ -19,8 +19,12 @@
 //!   keybinding asks; Escape gives it back. Each of its actions has a
 //!   shortcut, shown on its button. Digits, `*` and `#` typed or pasted
 //!   anywhere in it are keypad tones.
-//! - Escape only ever gives keyboard focus back. It never ends or declines a
-//!   Call.
+//! - The Dialer is an overlay surface centred in the space the bar leaves,
+//!   like a launcher, with the keyboard to itself while open. Typing searches;
+//!   Up and Down move the selection; Enter or a click Calls the selected
+//!   row; Escape closes it.
+//! - Escape only ever gives keyboard focus back, or closes the Dialer. It
+//!   never ends or declines a Call.
 //! - Each surface reports `focused` while it has keyboard focus, as the
 //!   compositor says.
 //! - No output is chosen, so the compositor puts each on the focused output.
@@ -31,10 +35,11 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use desktop_calls_core::matching::{DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    AudioLocation, BannerView, CallAudio, CallId, CallWindowPhase, CallWindowView, Caller,
-    ContactMatch, Input, Mute, Timestamp, keypad_tones,
+    AudioLocation, BannerView, CallAudio, CallHistoryKind, CallId, CallWindowPhase, CallWindowView,
+    Caller, ContactMatch, DialerView, Input, Mute, Timestamp, keypad_tones,
 };
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib::{self, SourceId};
@@ -52,6 +57,12 @@ const FALLBACK_TOAST_COLUMN_WIDTH: i32 = 400;
 /// Space between a surface and what it sits next to.
 const GAP: i32 = 12;
 const WIDTH: i32 = 340;
+const DIALER_WIDTH: i32 = 560;
+/// The Dialer's list stays this tall, so the Dialer doesn't jump about as
+/// the matches change.
+const DIALER_LIST_HEIGHT: i32 = 420;
+/// How far Page Up and Page Down move the Dialer's selection.
+const DIALER_PAGE: i32 = 8;
 
 /// The Call Window's shortcuts, as GTK accelerators. Hang up needs Control,
 /// so a stray key can't end a Call.
@@ -80,6 +91,9 @@ const CSS: &str = "
 .desktop-calls-surface button.mute.muted { background: #e66100; color: #ffffff; }
 .desktop-calls-surface .shortcut { font-size: 0.85em; opacity: 0.75; }
 .desktop-calls-surface .caller { font-size: 1.4em; font-weight: bold; }
+.desktop-calls-surface .dialer-entry { font-size: 1.2em; }
+.desktop-calls-surface .dialer-row { padding: 6px 8px; }
+.desktop-calls-surface .dialer-row .title { font-weight: bold; }
 .desktop-calls-surface .hd {
     font-size: 0.8em; font-weight: bold; padding: 0 6px;
     border: 1px solid currentColor; border-radius: 4px;
@@ -90,6 +104,7 @@ const CSS: &str = "
 pub struct Surfaces {
     banner: Banner,
     call_window: Rc<CallWindow>,
+    dialer: Rc<Dialer>,
     _theme: Option<Theme>,
 }
 
@@ -135,7 +150,8 @@ impl Surfaces {
         }));
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
-            call_window: CallWindow::new(intents, report),
+            call_window: CallWindow::new(intents, report.clone()),
+            dialer: Dialer::new(intents, report),
             _theme: theme,
         };
         surfaces.place_beside_toasts();
@@ -150,6 +166,7 @@ impl Surfaces {
         }
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
+        self.dialer.render(view.dialer.as_ref());
     }
 
     /// Asks Hyprland, off the main thread, how wide the toast column is, and
@@ -227,10 +244,13 @@ fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMa
 }
 
 impl Surface {
+    /// A surface named `name` in the top-right corner. Escape sends
+    /// `escape`.
     fn new(
         name: &'static str,
         layer: Layer,
         keyboard: KeyboardMode,
+        escape: Input,
         intents: &UnboundedSender<Input>,
         report: SharedReport,
     ) -> Self {
@@ -288,7 +308,7 @@ impl Surface {
                     .set(name, Some(reported(&content.borrow(), window)));
             }
         });
-        surface.on_escape(intents);
+        surface.on_escape(escape, intents);
         let (mapped, report) = (surface.mapped.clone(), surface.report.clone());
         surface.window.connect_unmap(move |_| {
             mapped.set(false);
@@ -345,8 +365,8 @@ impl Surface {
     }
 
     /// Escape gives keyboard focus back, however the surface got it, and
-    /// tells the Call state machine so.
-    fn on_escape(&self, intents: &UnboundedSender<Input>) {
+    /// sends the Call state machine `escape`.
+    fn on_escape(&self, escape: Input, intents: &UnboundedSender<Input>) {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let (window, releasing, intents) =
@@ -359,7 +379,7 @@ impl Surface {
                 releasing.set(true);
                 window.set_keyboard_mode(KeyboardMode::None);
             }
-            let _ = intents.unbounded_send(Input::ReleaseFocus);
+            let _ = intents.unbounded_send(escape.clone());
             glib::Propagation::Stop
         });
         self.window.add_controller(keys);
@@ -462,6 +482,7 @@ impl Banner {
             "banner",
             Layer::Overlay,
             KeyboardMode::None,
+            Input::ReleaseFocus,
             intents,
             report,
         );
@@ -585,6 +606,7 @@ impl CallWindow {
             "call-window",
             Layer::Top,
             KeyboardMode::OnDemand,
+            Input::ReleaseFocus,
             intents,
             report,
         );
@@ -1162,9 +1184,247 @@ impl CallWindow {
 }
 
 fn seconds_since(since: Timestamp) -> u64 {
+    now().0.saturating_sub(since.0) / 1_000
+}
+
+fn now() -> Timestamp {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis());
-    let now = u64::try_from(now).unwrap_or(u64::MAX);
-    now.saturating_sub(since.0) / 1_000
+    Timestamp(u64::try_from(now).unwrap_or(u64::MAX))
+}
+
+/// The Dialer.
+struct Dialer {
+    surface: Surface,
+    entry: gtk::Entry,
+    list: gtk::ListBox,
+    scrolled: gtk::ScrolledWindow,
+    notice: gtk::Label,
+    /// Set while the Dialer writes the query into `entry`, so the write
+    /// isn't taken for typing.
+    writing: Cell<bool>,
+    /// Which opening of the Dialer is shown, while it is.
+    opened: Cell<Option<u32>>,
+    /// The rows the list shows.
+    rows: RefCell<Vec<DialerRow>>,
+}
+
+impl Dialer {
+    fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
+        let surface = Surface::new(
+            "dialer",
+            Layer::Overlay,
+            KeyboardMode::Exclusive,
+            Input::CloseDialer,
+            intents,
+            report,
+        );
+        surface.window.set_default_size(DIALER_WIDTH, -1);
+        if gtk4_layer_shell::is_supported() {
+            // Anchored to no edge, the compositor centres it in the space
+            // other surfaces' exclusive zones (the bar's) leave.
+            for edge in [Edge::Top, Edge::Right] {
+                surface.window.set_anchor(edge, false);
+                surface.window.set_margin(edge, 0);
+            }
+        }
+        let entry = gtk::Entry::new();
+        entry.add_css_class("dialer-entry");
+        entry.set_placeholder_text(Some(messages::label(Label::DialerPlaceholder)));
+        entry.set_hexpand(true);
+        let notice = notice_label();
+        notice.set_max_width_chars(60);
+        let list = gtk::ListBox::new();
+        list.set_selection_mode(gtk::SelectionMode::Single);
+        list.set_focusable(false);
+        let no_matches = gtk::Label::new(Some(messages::label(Label::NoMatches)));
+        no_matches.add_css_class("dim-label");
+        list.set_placeholder(Some(&no_matches));
+        let scrolled = gtk::ScrolledWindow::new();
+        scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+        scrolled.set_size_request(-1, DIALER_LIST_HEIGHT);
+        scrolled.set_focusable(false);
+        scrolled.set_child(Some(&list));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        content.append(&entry);
+        content.append(&notice);
+        content.append(&scrolled);
+        surface.window.set_child(Some(&content));
+        let dialer = Rc::new(Self {
+            surface,
+            entry,
+            list,
+            scrolled,
+            notice,
+            writing: Cell::new(false),
+            opened: Cell::default(),
+            rows: RefCell::default(),
+        });
+        dialer.connect(intents);
+        dialer
+    }
+
+    /// Typing searches, Up and Down move the selection, and Enter or a
+    /// click Calls the selected row.
+    fn connect(self: &Rc<Self>, intents: &UnboundedSender<Input>) {
+        let weak = Rc::downgrade(self);
+        let typed = intents.clone();
+        self.entry.connect_changed(move |entry| {
+            if weak.upgrade().is_some_and(|dialer| !dialer.writing.get()) {
+                let _ = typed.unbounded_send(Input::DialerQuery(entry.text().to_string()));
+            }
+        });
+        let chosen = intents.clone();
+        self.list.connect_row_activated(move |_, row| {
+            if let Ok(index) = usize::try_from(row.index()) {
+                let _ = chosen.unbounded_send(Input::DialerChoose(index));
+            }
+        });
+        let keys = gtk::EventControllerKey::new();
+        // Before the entry sees them, so Up and Down move the selection
+        // and Enter Calls whichever widget has the keyboard.
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pressed = intents.clone();
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if has_command_modifier(modifiers) {
+                return glib::Propagation::Proceed;
+            }
+            let intent = match key {
+                gtk::gdk::Key::Up | gtk::gdk::Key::KP_Up => Input::DialerMove(-1),
+                gtk::gdk::Key::Down | gtk::gdk::Key::KP_Down => Input::DialerMove(1),
+                gtk::gdk::Key::Page_Up | gtk::gdk::Key::KP_Page_Up => {
+                    Input::DialerMove(-DIALER_PAGE)
+                }
+                gtk::gdk::Key::Page_Down | gtk::gdk::Key::KP_Page_Down => {
+                    Input::DialerMove(DIALER_PAGE)
+                }
+                gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter | gtk::gdk::Key::ISO_Enter => {
+                    Input::DialerEnter
+                }
+                _ => return glib::Propagation::Proceed,
+            };
+            let _ = pressed.unbounded_send(intent);
+            glib::Propagation::Stop
+        });
+        self.surface.window.add_controller(keys);
+    }
+
+    fn render(&self, view: Option<&DialerView>) {
+        let Some(view) = view else {
+            self.opened.set(None);
+            self.surface.hide();
+            return;
+        };
+        let opening = self.opened.replace(Some(view.opened)) != Some(view.opened);
+        if opening {
+            // Afresh: what the Dialer opened with. After that the entry is
+            // the user's, and only follows them.
+            self.writing.set(true);
+            self.entry.set_text(&view.query);
+            self.entry.set_position(-1);
+            self.writing.set(false);
+        }
+        if *self.rows.borrow() != view.rows {
+            self.show_rows(&view.rows);
+        }
+        if let Some(row) = view
+            .selected
+            .and_then(|selected| i32::try_from(selected).ok())
+            .and_then(|selected| self.list.row_at_index(selected))
+        {
+            self.list.select_row(Some(&row));
+            self.scroll_to(&row);
+        }
+        let notice = view.notice.map(|failure| messages::failure(failure).text);
+        self.notice.set_text(notice.unwrap_or_default());
+        self.notice.set_visible(notice.is_some());
+
+        let mut content = BTreeMap::from([
+            ("query".to_owned(), view.query.clone()),
+            ("rows".to_owned(), view.rows.len().to_string()),
+        ]);
+        if let Some(selected) = view.selected {
+            content.insert("selected".to_owned(), selected.to_string());
+        }
+        if let Some(notice) = notice {
+            content.insert("notice".to_owned(), notice.to_owned());
+        }
+        let (now, offset) = (now(), utc_offset_seconds());
+        for (index, row) in view.rows.iter().enumerate() {
+            let text = row_text(row, now, offset);
+            content.insert(format!("row-{index}"), text.line());
+        }
+        self.surface.show(content);
+        self.surface.focus(true);
+        if opening {
+            // The cursor at the end, nothing selected: typing adds to the
+            // query rather than replacing it.
+            self.entry.grab_focus_without_selecting();
+            self.entry.set_position(-1);
+        }
+    }
+
+    /// Fills the list with `rows`, from the top.
+    fn show_rows(&self, rows: &[DialerRow]) {
+        self.list.remove_all();
+        let (now, offset) = (now(), utc_offset_seconds());
+        for row in rows {
+            let text = row_text(row, now, offset);
+            let title = gtk::Label::new(Some(&text.title));
+            title.add_css_class("title");
+            title.set_xalign(0.0);
+            title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            lines.add_css_class("dialer-row");
+            lines.append(&title);
+            if !text.detail.is_empty() {
+                let detail = gtk::Label::new(Some(&text.detail));
+                detail.set_xalign(0.0);
+                detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                // Missed Calls stand out in the theme's red.
+                detail.add_css_class(
+                    if row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed) {
+                        "error"
+                    } else {
+                        "dim-label"
+                    },
+                );
+                lines.append(&detail);
+            }
+            let list_row = gtk::ListBoxRow::new();
+            // The entry keeps the keyboard; the list only shows.
+            list_row.set_focusable(false);
+            list_row.set_child(Some(&lines));
+            self.list.append(&list_row);
+        }
+        self.scrolled.vadjustment().set_value(0.0);
+        *self.rows.borrow_mut() = rows.to_vec();
+    }
+
+    /// Scrolls the list just enough to show `row`.
+    fn scroll_to(&self, row: &gtk::ListBoxRow) {
+        let Some(bounds) = row.compute_bounds(&self.list) else {
+            return;
+        };
+        let adjustment = self.scrolled.vadjustment();
+        let top = f64::from(bounds.y());
+        let bottom = f64::from(bounds.y() + bounds.height());
+        if top < adjustment.value() {
+            adjustment.set_value(top);
+        } else if bottom > adjustment.value() + adjustment.page_size() {
+            adjustment.set_value(bottom - adjustment.page_size());
+        }
+    }
+}
+
+/// How `row` reads, with when a Call History row's Call was.
+fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRowText {
+    let when = row.at.map(|at| messages::when(at, now, offset));
+    messages::dialer_row(row, when.as_deref())
+}
+
+/// The Desktop's time zone's offset from UTC now, in seconds.
+fn utc_offset_seconds() -> i64 {
+    glib::DateTime::now_local().map_or(0, |now| now.utc_offset().as_seconds())
 }

@@ -51,28 +51,42 @@ pub fn status(json: bool) -> ExitCode {
 
 /// `desktop-calls` with no subcommand, which the keybinding runs: focuses
 /// the Incoming Call Banner while a Call rings, or the Call Window while one
-/// is live.
+/// is live, and otherwise opens the Dialer.
 pub fn activate() -> ExitCode {
+    call_app("Activate", &())
+}
+
+/// `desktop-calls dialer [QUERY]`: opens the Dialer with `query` typed.
+pub fn dialer(query: &str) -> ExitCode {
+    // No Call to select.
+    call_app("OpenDialer", &(query, 0_u32))
+}
+
+/// Calls `method` on the control interface, for a command with nothing to
+/// print.
+fn call_app<B>(method: &str, body: &B) -> ExitCode
+where
+    B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
+{
     let context = MainContext::default();
-    match context.block_on(call_activate(GlibRuntime::new(context.clone()))) {
+    let called = context.block_on(async {
+        let session = connect(GlibRuntime::new(context.clone())).await?;
+        session
+            .call_method(
+                Some(control::BUS_NAME),
+                control::PATH,
+                Some(INTERFACE),
+                method,
+                body,
+            )
+            .await
+            .map(drop)
+            .map_err(|error| failure_of(&error))
+    });
+    match called {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => report(failure),
     }
-}
-
-async fn call_activate(runtime: GlibRuntime) -> Result<(), Failure> {
-    let session = connect(runtime).await?;
-    session
-        .call_method(
-            Some(control::BUS_NAME),
-            control::PATH,
-            Some(INTERFACE),
-            "Activate",
-            &(),
-        )
-        .await
-        .map(drop)
-        .map_err(|error| failure_of(&error))
 }
 
 /// Why a command the CLI sent didn't happen.

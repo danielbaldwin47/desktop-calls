@@ -10,7 +10,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use test_harness::{BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot, Theme};
+use test_harness::vcards::{self, CallKind};
+use test_harness::{
+    AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
+};
 
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -262,7 +265,98 @@ const STATES: &[State] = &[
             !shows(screenshot, look.red()) && app_region(screenshot).is_some()
         },
     },
+    State {
+        name: "dialer-call-history",
+        title: "The Dialer, before typing: the Call History, newest first, Missed Calls marked",
+        reach: |harness| {
+            sync(harness);
+            open_dialer(harness, "");
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
+        name: "dialer-results",
+        title: "The Dialer, searching for smith, the second match selected",
+        reach: |harness| {
+            sync(harness);
+            open_dialer(harness, "smith");
+            harness.keyboard().press(Key::Down);
+            harness.wait_for_app("the second row is selected", DEADLINE, |state| {
+                dialer_shows(state, "selected", "1")
+            });
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
+        name: "dialer-not-connected",
+        title: "The Dialer, after Enter with the Phone out of range",
+        reach: |harness| {
+            sync(harness);
+            harness.simulated_phone().disconnect();
+            harness.wait_for_app("the Phone is disconnected", DEADLINE, |state| {
+                state.connection_state == "disconnected"
+            });
+            open_dialer(harness, "jose");
+            harness.keyboard().press(Key::Return);
+            harness.wait_for_app("the Dialer says why not", DEADLINE, |state| {
+                state
+                    .surface("dialer")
+                    .is_some_and(|dialer| dialer.contains_key("notice"))
+            });
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
 ];
+
+/// Syncs Contacts and a Call History with a Missed Call from the Phone,
+/// connected.
+fn sync(harness: &Harness) {
+    let phone = harness.simulated_phone();
+    let mut contacts = String::new();
+    for (name, number) in [
+        ("José Smith", "+447700900001"),
+        ("Alice Smith", "+447700900123"),
+        ("Joanna Smithers", "+447700900002"),
+    ] {
+        contacts.push_str(&vcards::contact(name, &[("CELL", number)]));
+    }
+    contacts.push_str(&vcards::contacts(20, 1_000));
+    phone.set_pbap_folder("pb", &contacts);
+    phone.set_pbap_folder(
+        "cch",
+        &[
+            vcards::call(CallKind::Missed, Some("+447700900999"), "20261104T110000"),
+            vcards::call(CallKind::Missed, None, "20261104T103000"),
+            vcards::call(CallKind::Dialed, Some(NUMBER), "20261104T100000"),
+            vcards::call(CallKind::Received, Some("+447700900001"), "20261103T090000"),
+        ]
+        .concat(),
+    );
+    connect(harness);
+    harness.wait_for_app("Contacts and Call History are synced", DEADLINE, |state| {
+        state.contacts.state == "ready" && state.contacts.call_history == 4
+    });
+}
+
+/// Opens the Dialer with `query` typed, and waits until it has the keyboard.
+fn open_dialer(harness: &Harness, query: &str) {
+    harness.open_dialer(query, 0);
+    harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, |state| {
+        dialer_shows(state, "focused", "true") && dialer_shows(state, "query", query)
+    });
+}
+
+fn dialer_shows(state: &AppState, key: &str, value: &str) -> bool {
+    state
+        .surface("dialer")
+        .and_then(|dialer| dialer.get(key))
+        .is_some_and(|shown| shown == value)
+}
+
+/// Whether the Dialer, wider than the other surfaces, is on screen.
+fn shows_dialer(screenshot: &Screenshot) -> bool {
+    app_region(screenshot).is_some_and(|region| region.right - region.left > 500.0)
+}
 
 /// Asks the app to Call [`NUMBER`] and waits for "Calling…".
 fn dial(harness: &Harness) {

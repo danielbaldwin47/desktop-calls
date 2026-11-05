@@ -93,15 +93,7 @@ pub(super) struct SetupWindow {
 
 impl SetupWindow {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
-        if let Some(display) = gtk::gdk::Display::default() {
-            let provider = gtk::CssProvider::new();
-            provider.load_from_string(CSS);
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &provider,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
+        add_css();
         let window = gtk::Window::new();
         window.set_default_size(WIDTH, -1);
         window.set_resizable(false);
@@ -590,6 +582,19 @@ fn between_buttons(window: &gtk::Window, buttons: &gtk::Box, forward: bool) -> g
 }
 
 /// What each of a step's buttons asks for, in the order of its labels.
+/// Adds the Setup Window's styles to the display.
+fn add_css() {
+    if let Some(display) = gtk::gdk::Display::default() {
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(CSS);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
 fn button_intents(step: &SetupStep) -> Vec<Input> {
     match step {
         SetupStep::Confirm { .. } => vec![Input::ConfirmPairing, Input::RejectPairing],

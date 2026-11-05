@@ -4,8 +4,8 @@
 use std::time::{Duration, Instant};
 
 use super::{
-    ACT_DEADLINE, LOG_LOOKBACK_US, TALK_DEADLINE, call_ends, helper_calls, helper_calls_as, millis,
-    no_call_left, stopped_ringing, unix_micros_at,
+    ACT_DEADLINE, APP_DEADLINE, LOG_LOOKBACK_US, TALK_DEADLINE, call_ends, helper_calls,
+    helper_calls_as, millis, no_call_left, stopped_ringing, unix_micros_at,
 };
 use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
 use crate::checklist::watch::{AppMissedCall, AppState};
@@ -222,13 +222,20 @@ pub(super) fn withheld_ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
          the number. They let it ring until it stops.",
         "call-withheld",
     )?;
-    let caller = sitting
-        .now()
-        .surfaces
-        .get("banner")
-        .and_then(|banner| banner.get("caller"))
-        .cloned()
-        .unwrap_or_default();
+    // The Banner identifies the caller until the Phone has had long enough
+    // to report a number.
+    let banner_caller = |state: &AppState| {
+        state
+            .surfaces
+            .get("banner")
+            .and_then(|banner| banner.get("caller"))
+            .cloned()
+    };
+    let named = sitting.wait_for("the Banner naming the caller", APP_DEADLINE, |state| {
+        state.call(call).is_none()
+            || banner_caller(state).is_some_and(|caller| caller != "Identifying caller…")
+    })?;
+    let caller = banner_caller(&named.state).unwrap_or_default();
     let shows_withheld = caller == "Withheld number";
     sitting.check(
         shows_withheld,

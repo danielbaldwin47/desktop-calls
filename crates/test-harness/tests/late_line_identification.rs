@@ -3,10 +3,13 @@
 //! comes with the `+CLIP` after the first `RING`. The Simulated Phone's
 //! `late-line-identification` quirk does that. Every surface showing the
 //! Call follows the number once it arrives: the Incoming Call Banner, the
-//! Missed Call notification, and the Dialer it opens. Observed through the
+//! Missed Call notification, and the Dialer it opens. Until the number
+//! arrives, or the Phone has had long enough to send it, the Banner says it
+//! is identifying the caller rather than "Withheld number". Observed through the
 //! control interface's `Calls`, `Surfaces` and `MissedCall`, and the
 //! notification server stand-in.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -96,6 +99,63 @@ fn the_banner_shows_the_contact_once_the_phone_reports_the_number_late() {
         banner.get("number-label").map(String::as_str),
         Some("mobile"),
         "{banner:?}"
+    );
+}
+
+/// What the Banner's caller line says while the Phone may still report
+/// the number.
+const IDENTIFYING: &str = "Identifying caller…";
+
+/// The Banner's caller line, while the Banner shows.
+fn banner_caller(state: &AppState) -> Option<String> {
+    banner(state)?.get("caller").cloned()
+}
+
+/// While the number is on its way, the Banner doesn't claim it is
+/// withheld: from the moment it shows until it names Alice, it never reads
+/// "Withheld number".
+#[test]
+fn the_banner_never_says_withheld_number_while_the_number_is_on_its_way() {
+    let harness = synced_late();
+    let seen = RefCell::new(Vec::new());
+
+    let _path = harness.simulated_phone().ring(ALICE);
+    harness.wait_for_app("the Banner names Alice", DEADLINE, |state| {
+        let caller = banner_caller(state);
+        if let Some(caller) = &caller {
+            seen.borrow_mut().push(caller.clone());
+        }
+        caller.as_deref() == Some("Alice")
+    });
+
+    let seen = seen.into_inner();
+    assert!(
+        !seen.iter().any(|caller| caller == "Withheld number"),
+        "the Banner's caller line read, in turn: {seen:?}"
+    );
+}
+
+/// A Call whose number is truly withheld: the Banner says it is
+/// identifying the caller, then, once the Phone has had long enough to
+/// report a number, "Withheld number".
+#[test]
+fn a_withheld_number_shows_as_withheld_once_the_wait_is_over() {
+    let harness = synced_late();
+
+    let _path = harness.simulated_phone().ring("");
+    harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
+        banner_caller(state).as_deref() == Some(IDENTIFYING)
+    });
+    let state = harness.wait_for_app(
+        "the Banner says the number is withheld",
+        DEADLINE,
+        |state| banner_caller(state).as_deref() != Some(IDENTIFYING),
+    );
+
+    assert_eq!(
+        banner_caller(&state).as_deref(),
+        Some("Withheld number"),
+        "{state:?}"
     );
 }
 

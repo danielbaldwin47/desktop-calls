@@ -330,3 +330,81 @@ fn the_caller_hanging_up_stops_the_ringing() {
     assert!(!state.ringing());
     assert_eq!(state.surfaces().banner, None);
 }
+
+/// A Call the Phone reports ringing with no number, as it does both for a
+/// withheld number and for a number it sends a moment later.
+fn ringing_with_no_number() -> (State, Vec<Effect>) {
+    run(
+        connected(),
+        [Input::CallAdded {
+            call: CALL,
+            state: CallState::Ringing,
+            caller: Caller::Withheld,
+            at: Timestamp(1_000),
+        }],
+    )
+}
+
+#[test]
+fn a_call_with_no_number_yet_shows_the_banner_awaiting_the_number() {
+    let (state, effects) = ringing_with_no_number();
+
+    let banner = state.surfaces().banner.expect("the Banner shows at once");
+    assert!(banner.awaiting_number, "{banner:?}");
+    assert!(
+        effects.contains(&Effect::StartTimer {
+            timer: Timer::NumberLate(CALL),
+            after_ms: 2_000,
+        }),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn a_number_that_comes_late_ends_the_wait() {
+    let (state, _) = ringing_with_no_number();
+
+    let (state, _) = run(
+        state,
+        [Input::CallerChanged {
+            call: CALL,
+            caller: caller(),
+        }],
+    );
+
+    let banner = state.surfaces().banner.expect("the Banner shows");
+    assert_eq!((banner.caller, banner.awaiting_number), (caller(), false));
+}
+
+#[test]
+fn with_no_number_by_the_end_of_the_wait_the_number_is_withheld() {
+    let (state, _) = ringing_with_no_number();
+
+    let (state, _) = run(state, [Input::TimerFired(Timer::NumberLate(CALL))]);
+
+    let banner = state.surfaces().banner.expect("the Banner still shows");
+    assert_eq!(
+        (banner.caller, banner.awaiting_number),
+        (Caller::Withheld, false)
+    );
+}
+
+#[test]
+fn a_call_with_its_number_starts_no_wait() {
+    let (_, effects) = run(
+        connected(),
+        [Input::CallAdded {
+            call: CALL,
+            state: CallState::Ringing,
+            caller: caller(),
+            at: Timestamp(1_000),
+        }],
+    );
+
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::StartTimer { .. })),
+        "{effects:?}"
+    );
+}

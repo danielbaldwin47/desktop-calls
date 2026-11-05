@@ -238,6 +238,9 @@ pub enum Timer {
     /// The Call Window has said for long enough, by the loss with this
     /// number, that the connection to the Phone was lost.
     ConnectionLost(u32),
+    /// The Phone has had long enough to report the number of this Call,
+    /// which rang with none: if it hasn't by now, the number is withheld.
+    NumberLate(CallId),
 }
 
 /// Something the shell adapters must do.

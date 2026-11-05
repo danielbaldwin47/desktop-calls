@@ -70,6 +70,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
         Timer::ForgetEarlierRun => state.earlier_calls.clear(),
         Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
+        Timer::NumberLate(call) => state.awaiting_number.retain(|id| *id != call),
         Timer::DismissDial(attempt) => {
             if state
                 .notice

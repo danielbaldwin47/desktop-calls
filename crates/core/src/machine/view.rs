@@ -40,6 +40,9 @@ pub struct BannerView {
     pub focused: bool,
     /// The Contact the caller is, if Contacts say.
     pub contact: Option<ContactMatch>,
+    /// The Call rang with no number, and the Phone may still report one,
+    /// so the Banner doesn't yet say the number is withheld.
+    pub awaiting_number: bool,
 }
 
 /// The Call Window's content.
@@ -156,6 +159,8 @@ impl State {
                 caller: call.caller.clone(),
                 focused: self.focus == Focus::Banner,
                 contact: self.contact(&call.caller),
+                awaiting_number: call.caller == Caller::Withheld
+                    && self.awaiting_number.contains(&call.id),
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.

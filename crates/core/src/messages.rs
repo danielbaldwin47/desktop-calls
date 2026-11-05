@@ -399,6 +399,10 @@ pub enum Label {
     /// The Incoming Call Banner's heading while it has keyboard focus: the
     /// keys that work.
     BannerKeys,
+    /// The Incoming Call Banner's caller line while a Call that rang with
+    /// no number may still get one: not yet "Withheld number", which may
+    /// be untrue.
+    IdentifyingCaller,
     Answer,
     Decline,
     HangUp,
@@ -463,6 +467,7 @@ pub fn label(label: Label) -> &'static str {
     match label {
         Label::IncomingCall => "Incoming call",
         Label::BannerKeys => "Press A to answer or D to decline",
+        Label::IdentifyingCaller => "Identifying caller…",
         Label::Answer => "Answer",
         Label::Decline => "Decline",
         Label::HangUp => "Hang up",

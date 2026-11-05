@@ -84,6 +84,12 @@ const CONNECTION_LOST_MS: u32 = 10_000;
 /// hands-free is back. The Phone link waits as long for a Call that went
 /// away briefly.
 const LOST_CALL_BACK_MS: u32 = 2_000;
+/// How long a Call that rang with no number may wait for the Phone to
+/// report one before the Banner says the number is withheld. PipeWire 1.6.9
+/// registers the Call on `+CIEV: callsetup,1` and sets the number from the
+/// `+CLIP` after the first `RING`; the Simulated Phone's
+/// `late-line-identification` quirk sends it 1 s late (ticket #86).
+const NUMBER_LATE_MS: u32 = 2_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -268,6 +274,9 @@ pub struct State {
     connection_lost: Option<ConnectionLost>,
     /// How many times the connection was lost mid-Call.
     losses: u32,
+    /// Incoming Calls that rang with no number, while the Phone may still
+    /// report one.
+    awaiting_number: Vec<CallId>,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -593,6 +602,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 added_at: at,
                 request: Request::None,
             };
+            await_number(&mut state, &call, &mut effects);
             call_added(&mut state, call, &mut effects);
         }
         Input::CallChanged {
@@ -654,6 +664,19 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// An incoming Call that rings with no number may get one a moment later:
+/// until [`NUMBER_LATE_MS`] has passed, the Banner doesn't say the number
+/// is withheld.
+fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
+    if call.caller == Caller::Withheld && call.direction == Direction::Incoming {
+        state.awaiting_number.push(call.id);
+        effects.push(Effect::StartTimer {
+            timer: Timer::NumberLate(call.id),
+            after_ms: NUMBER_LATE_MS,
+        });
+    }
 }
 
 /// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps

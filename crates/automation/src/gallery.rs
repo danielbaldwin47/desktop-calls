@@ -109,6 +109,24 @@ const STATES: &[State] = &[
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
+        name: "incoming-call-banner-identifying",
+        title: "The Incoming Call Banner, ringing with no number yet, which may still come",
+        reach: |harness| {
+            connect(harness);
+            // A withheld number: the Banner identifies the caller for as long
+            // as the Phone may still report one, longer than the
+            // `late-line-identification` quirk's number takes.
+            let _path = harness.simulated_phone().ring("");
+            harness.wait_for_app("the Banner is identifying the caller", DEADLINE, |state| {
+                state
+                    .surface("banner")
+                    .and_then(|banner| banner.get("caller"))
+                    .is_some_and(|caller| caller == "Identifying caller…")
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
         name: "call-window-live",
         title: "The Call Window, answered here, with HD audio on this computer",
         reach: |harness| {

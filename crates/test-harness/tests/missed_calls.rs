@@ -443,10 +443,17 @@ fn scenario_9_a_withheld_number_rings_then_is_missed_and_cant_be_called_back() {
     let mut last = None;
     for (count, (form, ring)) in (1_u32..).zip(forms) {
         let path = ring(&harness);
+        // The Banner identifies the caller until the Phone has had long
+        // enough to report a number.
         let state = harness.wait_for_app(
-            &format!("the Banner shows for a number withheld as {form}"),
+            &format!("the Banner names the caller for a number withheld as {form}"),
             DEADLINE,
-            |state| state.surface("banner").is_some(),
+            |state| {
+                state
+                    .surface("banner")
+                    .and_then(|banner| banner.get("caller"))
+                    .is_some_and(|caller| caller != "Identifying caller…")
+            },
         );
         let banner = state.surface("banner").expect("the Banner is shown");
         assert_eq!(

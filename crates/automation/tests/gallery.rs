@@ -32,6 +32,7 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     let states = [
         "bare-output",
         "incoming-call-banner",
+        "incoming-call-banner-identifying",
         "call-window-live",
         "call-window-muted",
         "call-window-mute-unavailable",

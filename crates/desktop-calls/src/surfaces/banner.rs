@@ -84,7 +84,14 @@ impl Banner {
             self.surface.hide();
             return;
         };
-        let who = Who::of(&view.caller, view.contact.as_ref());
+        let who = if view.awaiting_number {
+            Who {
+                caller: messages::label(Label::IdentifyingCaller).to_owned(),
+                detail: None,
+            }
+        } else {
+            Who::of(&view.caller, view.contact.as_ref())
+        };
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);
         // While focused, the heading says which keys do what.

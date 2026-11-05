@@ -24,6 +24,8 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [retros](retros.md): subagent-session retros and the improvements pursued.
 
+- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging (added 2026-11-05).
+
 - [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).
 
 - [docs-layout](docs-layout.md): what goes in GLOSSARY, ADRs, wiki, research, and the issue tracker.

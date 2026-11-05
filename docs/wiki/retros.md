@@ -10,3 +10,11 @@ Retros on subagent sessions, with what was pursued. Per chief-of-staff practice,
   - #43 (blocked by #42): `just test-ci-like`, an event timeline on every harness timeout, grim and sway exit status, `just ci-wait`, and logs uploaded `always()`.
 
   Not pursued separately: the debug probe branch, which #43 makes unnecessary.
+- 2026-11-05, ticket #42 (`just merge` plus the gallery "Call ended" capture). It took 2 h 13 min and 276 tool calls, 88 min of it waiting. About 60 min went on local gallery loops that couldn't pass on a shared Desktop: another agent's `pkill -f` killed one run, and busy loops pinned to the same CPU 0 starved another. Seven candidates came out of it. Pursued:
+  - Brief: kill only your own process IDs; don't pin to a fixed CPU; ship verified parts as `Part of #n` PRs; send a status report before a 15-minute wait or after 2 failed proofs; repeat only what is under test; no waiting on other agents' PRs; Monitors only for lines from a job that is still running.
+  - New page [chief-of-staff-practice](chief-of-staff-practice.md): one deliverable per ticket; no repeat-on-the-Desktop acceptance criteria; one file per ticket within a batch; let agents push without waiting.
+  - #43 amended: a machine-wide lock, a CPU quota instead of busy loops, and a TMPDIR per run.
+  - #53 amended: `automation screenshot --only <state> --repeat N`.
+  - #42's remaining criterion replaced by a deterministic capture test.
+
+  Not pursued: none.

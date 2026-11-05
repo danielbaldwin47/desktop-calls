@@ -21,6 +21,9 @@ The standing instructions for any agent implementing a ticket in this repo. The 
 - Try any write method that is new to you (a property `Set`, or a method that changes state) once with **no Call active** before using it during one.
 - Keep Bash commands literal, because the worktree sandbox refuses the rest. That rules out `$(...)`, loop variables, variable assignments (including `VAR=value command`), heredocs, and wrappers that start a shell (such as `taskset … bash`). Write a script to your scratchpad instead.
 - Don't run `sudo`. Don't edit `/etc`. Don't unpair the Phone.
+- **You share this machine with other agents.** Kill only process IDs you started yourself, never `pkill -f` or `killall`, because a pattern can match another agent's run. Don't pin load to a fixed CPU (`taskset -c 0`), since others copy the same recipe. Timing proofs under load use the repo's shared recipe (`just test-ci-like`, once #43 lands), which takes a machine-wide lock. If a run is slow or odd, suspect another agent before your code.
+- **Ship in parts, report early.** As soon as one part of the ticket is verified, open a PR for it with `Part of #<n>` rather than holding it for the rest. Before any wait expected to exceed 15 minutes, and after 2 failed attempts at the same proof, send the chief of staff a status report (SendMessage to `main`): what is verified, what you're waiting on, and what you propose. Don't keep looping.
+- Repeated-run proofs ("passes N times in a row") are evidence, not a gate you loop on. Repeat only the thing under test, not a whole suite. If a run fails for a reason unrelated to your change, report it rather than resetting the count.
 
 ## Finishing
 
@@ -28,5 +31,5 @@ The standing instructions for any agent implementing a ticket in this repo. The 
 2. Merge the tip of `origin/main` into your branch, re-run checks, and push the branch.
 3. Open a PR to `main` with `Closes #<n>`. The body follows `mattpocock-skills:pr` and ends with the attribution line from your system prompt.
 4. Record durable findings (hardware behaviour, quirks, decisions) as a dated research note in `docs/research/` within your PR. The chief of staff ingests them into the wiki.
-5. Wait on CI with one background `gh run watch <id> --exit-status`, never stacked watchers. If a run fails, download its artifacts before any `gh run rerun`, because a rerun discards them. Before replying, stop every Monitor and background command you started (TaskStop), so nothing outlives your session.
+5. Wait on CI with one background `gh run watch <id> --exit-status`, never stacked watchers. A background command already notifies you when it exits, so add a Monitor only to react to a line from a job that is still running. Don't wait for other agents' PRs to land: push, reply, and let `just merge` ask for an update if your branch falls behind. If a run fails, download its artifacts before any `gh run rerun`, because a rerun discards them. Before replying, stop every Monitor and background command you started (TaskStop), so nothing outlives your session.
 6. Reply in **10 lines or fewer**: PR URL, what you verified and how, anything left unverified, any follow-up a ticket should capture.

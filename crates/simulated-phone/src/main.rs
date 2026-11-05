@@ -47,6 +47,7 @@ use zbus::object_server::SignalEmitter;
 use zbus::{Connection, Message, MessageStream, OwnedObjectPath, interface};
 
 use crate::objects::{MethodCall, ObjectTree, PROPERTIES, Reply};
+use crate::range::other_phone_up;
 use crate::scenario::Step;
 
 const CONTROL_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.SimulatedPhone";
@@ -445,6 +446,35 @@ impl Control {
             range::hands_free_down(&mut world)?
         };
         self.range_changed(change, &emitter).await
+    }
+
+    /// The other paired Phone (`--old-phone`) comes into range and connects
+    /// with hands-free, beside the Phone: BlueZ marks it connected and
+    /// PipeWire registers an AudioGateway for it.
+    async fn connect_other_phone(&self) -> zbus::fdo::Result<()> {
+        let change = other_phone_up(&mut lock(&self.world))?;
+        if let Some(change) = change {
+            range::emit(&self.system, &self.telephony, change).await?;
+        }
+        Ok(())
+    }
+
+    /// A Call rings on the other Phone, as `Ring` does on the Phone, on the
+    /// AudioGateway of its own. Returns the Call's path. Fails while the
+    /// other Phone is not connected.
+    async fn ring_on_other_phone(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
+        let (call, signals) = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let Some(gateway) = world.pairing.other_gateway.clone() else {
+                return Err(zbus::fdo::Error::Failed(
+                    "the other Phone is not connected, so it cannot ring".to_owned(),
+                ));
+            };
+            telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?
+        };
+        self.emit(signals).await?;
+        Ok(call)
     }
 
     /// Comes back into range without connecting: the Phone answers the

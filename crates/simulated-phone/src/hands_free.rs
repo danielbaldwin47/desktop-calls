@@ -350,6 +350,26 @@ fn audio_gateway_returns(world: &SharedWorld) -> zbus::Result<Option<Returned>> 
 /// Why BlueZ refuses `call` before acting on it, if it does: the wrong
 /// object, arguments or profile.
 fn refusal(world: &World, call: &MethodCall, message: &Message) -> zbus::Result<Option<Reply>> {
+    if world.pairing.is_other_phone(&call.path) {
+        // The other paired Phone: connected (`ConnectOtherPhone`) has
+        // hands-free up already; away, it never answers the page.
+        let connected = zbus::OwnedObjectPath::try_from(call.path.as_str())
+            .ok()
+            .and_then(|path| world.bluez.get(&path, bluez::DEVICE, "Connected").cloned())
+            .and_then(|connected| bool::try_from(connected).ok())
+            .unwrap_or(false);
+        return Ok(Some(if connected {
+            Reply::Error(
+                "org.bluez.Error.AlreadyConnected",
+                "Already Connected".to_owned(),
+            )
+        } else {
+            Reply::Error(
+                "org.bluez.Error.Failed",
+                "br-connection-page-timeout".to_owned(),
+            )
+        }));
+    }
     if call.path != bluez::device_path(&world.phone_address)?.as_str() {
         return Ok(Some(Reply::unknown_method(call)));
     }

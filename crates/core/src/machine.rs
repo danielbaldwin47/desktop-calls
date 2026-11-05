@@ -297,6 +297,13 @@ pub struct State {
     setup_offered: bool,
     /// How many times the Setup Window has opened.
     setup_openings: u32,
+    /// The address of the Phone the user chose last in the Setup Window.
+    /// Once there is one, no other Phone is followed, and it outlives the
+    /// Phone being unpaired, so a restart never picks another silently.
+    chosen_phone: Option<String>,
+    /// Every Phone BlueZ has reported paired, followed or not, so the Setup
+    /// Window can offer the others when none is followed.
+    paired_phones: Vec<Phone>,
     /// Phones nearby that aren't paired with the Desktop, in the order
     /// BlueZ found them.
     nearby_phones: Vec<Phone>,
@@ -573,6 +580,33 @@ impl State {
         }
     }
 
+    /// Keeps `paired_phones` as BlueZ reports Phones paired and unpaired.
+    fn note_paired_phones(&mut self, input: &Input) {
+        match input {
+            Input::PhonePaired(phone) => {
+                match self
+                    .paired_phones
+                    .iter_mut()
+                    .find(|known| known.address.eq_ignore_ascii_case(&phone.address))
+                {
+                    Some(known) => *known = phone.clone(),
+                    None => self.paired_phones.push(phone.clone()),
+                }
+            }
+            Input::PhoneUnpaired { address } => self
+                .paired_phones
+                .retain(|known| !known.address.eq_ignore_ascii_case(address)),
+            _ => {}
+        }
+    }
+
+    /// Whether the user's choice of Phone allows following `phone`.
+    fn may_follow(&self, phone: &Phone) -> bool {
+        self.chosen_phone
+            .as_ref()
+            .is_none_or(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+    }
+
     fn is_our_phone(&self, address: &str) -> bool {
         self.phone
             .as_ref()
@@ -618,6 +652,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
 
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
+    state.note_paired_phones(&input);
     match input {
         // Desktop Calls works with one Phone: the first one paired.
         Input::EarlierRun(earlier) => pick_up_earlier_run(&mut state, earlier, &mut effects),
@@ -626,7 +661,11 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhonePaired(phone) if state.setup_pairs(&phone.address) => {
             setup::paired(&mut state, phone, &mut effects);
         }
-        Input::PhonePaired(phone) if state.phone.is_none() => {
+        Input::ChosenPhoneKept { address } => state.chosen_phone = Some(address),
+        // Whichever Phone BlueZ lists first is followed, unless the user
+        // chose one: then only that one, and with it unpaired the Setup
+        // Window opens once BlueZ has listed everything.
+        Input::PhonePaired(phone) if state.phone.is_none() && state.may_follow(&phone) => {
             phone_paired(&mut state, phone, &mut effects);
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),
@@ -709,6 +748,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::RejectPairing
         | Input::PairingFailed(_)
         | Input::HandsFreeRefused
+        | Input::HandsFreeUnreachable
         | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
@@ -779,6 +819,8 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         setup: state.setup.clone(),
         setup_offered: state.setup_offered,
         setup_openings: state.setup_openings,
+        chosen_phone: state.chosen_phone.clone(),
+        paired_phones: state.paired_phones.clone(),
         nearby_phones: state.nearby_phones.clone(),
         ..forget_phone(state)
     }

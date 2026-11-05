@@ -61,6 +61,7 @@ pub enum EventKind {
     SetupPhoneListed,
     PairingFailed,
     HandsFreeRefused,
+    HandsFreeUnreachable,
     ProfileAuthorized,
     PhonePresent,
     PhoneAbsent,
@@ -126,6 +127,9 @@ pub enum EventKind {
     EarlierRunLoaded,
     EarlierRunForgotten,
     EarlierRunFailed,
+    ChosenPhoneLoaded,
+    ChosenPhoneKept,
+    ChosenPhoneFailed,
     MainLoopStalled,
     FirstFramesPrepared,
     FirstFramesUnprepared,
@@ -149,6 +153,7 @@ impl EventKind {
             Self::SetupPhoneListed => "setup-phone-listed",
             Self::PairingFailed => "pairing-failed",
             Self::HandsFreeRefused => "hands-free-refused",
+            Self::HandsFreeUnreachable => "hands-free-unreachable",
             Self::ProfileAuthorized => "profile-authorized",
             Self::PhonePresent => "phone-present",
             Self::PhoneAbsent => "phone-absent",
@@ -214,6 +219,9 @@ impl EventKind {
             Self::EarlierRunLoaded => "earlier-run-loaded",
             Self::EarlierRunForgotten => "earlier-run-forgotten",
             Self::EarlierRunFailed => "earlier-run-failed",
+            Self::ChosenPhoneLoaded => "chosen-phone-loaded",
+            Self::ChosenPhoneKept => "chosen-phone-kept",
+            Self::ChosenPhoneFailed => "chosen-phone-failed",
             Self::MainLoopStalled => "main-loop-stalled",
             Self::FirstFramesPrepared => "first-frames-prepared",
             Self::FirstFramesUnprepared => "first-frames-unprepared",
@@ -283,9 +291,10 @@ fn journal_socket() -> Option<UnixDatagram> {
     UnixDatagram::unbound().ok()
 }
 
-/// `$XDG_STATE_HOME/desktop-calls/desktop-calls.log`, with the XDG default of
-/// `~/.local/state` when the variable is unset, empty or relative.
-fn log_file_path() -> Option<PathBuf> {
+/// `$XDG_STATE_HOME/desktop-calls`, with the XDG default of `~/.local/state`
+/// when the variable is unset, empty or relative: where the app keeps its
+/// log and what it must remember between runs.
+pub fn state_directory() -> Option<PathBuf> {
     let state_home = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -295,7 +304,11 @@ fn log_file_path() -> Option<PathBuf> {
                 .filter(|home| home.is_absolute())
                 .map(|home| home.join(".local/state"))
         })?;
-    Some(state_home.join("desktop-calls").join("desktop-calls.log"))
+    Some(state_home.join("desktop-calls"))
+}
+
+fn log_file_path() -> Option<PathBuf> {
+    Some(state_directory()?.join("desktop-calls.log"))
 }
 
 /// Opens the log file for appending. Only the user may read it, because debug

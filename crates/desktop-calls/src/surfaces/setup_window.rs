@@ -409,7 +409,7 @@ impl SetupWindow {
             tracing::info!(
                 event_kind = %EventKind::SetupPhoneListed,
                 since_opened_ms = opened_ms,
-                "The Setup Window listed a nearby Phone"
+                "The Setup Window listed a Phone"
             );
         });
     }
@@ -419,7 +419,9 @@ impl SetupWindow {
 fn button_intents(step: &SetupStep) -> Vec<Input> {
     match step {
         SetupStep::Confirm { .. } => vec![Input::ConfirmPairing, Input::RejectPairing],
-        SetupStep::PhoneCallsOff { .. } => vec![Input::RetryHandsFree, Input::CloseSetupWindow],
+        SetupStep::PhoneCallsOff { .. } | SetupStep::PhoneUnreachable { .. } => {
+            vec![Input::RetryHandsFree, Input::CloseSetupWindow]
+        }
         SetupStep::Choose { .. }
         | SetupStep::Pairing { .. }
         | SetupStep::Confirmed { .. }

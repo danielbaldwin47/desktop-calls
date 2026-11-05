@@ -325,6 +325,29 @@ fn a_phone_connected_without_hands_free_is_asked_for_it_alone() {
 }
 
 #[test]
+fn a_phone_that_did_not_answer_for_hands_free_says_to_bring_it_close_and_connects_it_again() {
+    let (state, _) = paired();
+    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let (state, _) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
+
+    let (state, _) = run(state, [Input::HandsFreeUnreachable]);
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::PhoneUnreachable { phone: pixel() })
+    );
+
+    // Try again connects the Phone afresh: it may be back.
+    let (state, effects) = run(state, [Input::RetryHandsFree]);
+    assert!(effects.contains(&Effect::ConnectPhone {
+        address: PHONE.to_owned()
+    }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Connecting { phone: pixel() })
+    );
+}
+
+#[test]
 fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_again() {
     let (state, _) = paired();
     let (state, effects) = run(state, [Input::ConnectPhoneDone]);

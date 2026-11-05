@@ -233,7 +233,9 @@ fn wait_for_phone_listed(harness: &Harness) -> AppState {
     harness.wait_for_app("the Phone is listed, with focus", STARTUP, |state| {
         state.surface("setup-window").is_some_and(|window| {
             window.get("step").is_some_and(|step| step == "choose")
-                && window.contains_key("phones")
+                && window
+                    .get("phones")
+                    .is_some_and(|phones| !phones.is_empty())
                 && window.get("focused").is_some_and(|focused| focused == "true")
         })
     })

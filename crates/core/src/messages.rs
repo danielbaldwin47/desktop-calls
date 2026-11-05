@@ -28,6 +28,28 @@ pub enum Failure {
     NoSuchCall,
     /// The Call asked about is no longer ringing.
     CallNotRinging,
+    /// What the user asked to Call isn't a number the Phone can dial.
+    Undialable,
+    /// A Call can't be placed: no Phone is set up.
+    PhoneNotSetUp,
+    /// A Call can't be placed: the Phone is paired but not connected yet.
+    PhoneConnecting,
+    /// A Call can't be placed: the Phone is out of range or has Bluetooth off.
+    PhoneOutOfRange,
+    /// A Call can't be placed while another Call is live.
+    CallInProgress,
+    /// The Phone refused the number it was asked to dial.
+    NumberRefused,
+    /// The Phone refused to dial because it is busy with a Call or a command.
+    PhoneBusy,
+    /// The Phone doesn't let the Desktop place Calls.
+    DialNotSupported,
+    /// The Phone has no mobile network to place the Call on.
+    NoSignal,
+    /// The mobile network didn't respond when the Phone dialled.
+    NetworkError,
+    /// The Phone didn't place the Call, for a reason it didn't give.
+    DialFailed,
     /// There is no connected Call to act on.
     NoLiveCall,
     /// Mute works only while the Audio Location is the Desktop.
@@ -58,6 +80,17 @@ impl Failure {
             Self::AudioNotMoved => "audio-not-moved",
             Self::NoSuchCall => "no-such-call",
             Self::CallNotRinging => "call-not-ringing",
+            Self::Undialable => "undialable",
+            Self::PhoneNotSetUp => "phone-not-set-up",
+            Self::PhoneConnecting => "phone-connecting",
+            Self::PhoneOutOfRange => "phone-out-of-range",
+            Self::CallInProgress => "call-in-progress",
+            Self::NumberRefused => "number-refused",
+            Self::PhoneBusy => "phone-busy",
+            Self::DialNotSupported => "dial-not-supported",
+            Self::NoSignal => "no-signal",
+            Self::NetworkError => "network-error",
+            Self::DialFailed => "dial-failed",
             Self::NoLiveCall => "no-live-call",
             Self::MuteUnavailable => "mute-unavailable",
             Self::MuteFailed => "mute-failed",
@@ -115,6 +148,41 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::NoSuchCall => ("That Call has already ended.", None),
         Failure::CallNotRinging => ("That Call isn't ringing any more.", None),
+        Failure::Undialable => (
+            "That isn't a number your phone can dial; use digits, spaces and + * # only.",
+            None,
+        ),
+        Failure::PhoneNotSetUp => ("Phone not connected: no phone is set up yet.", None),
+        Failure::PhoneConnecting => ("Phone not connected yet; try again in a moment.", None),
+        Failure::PhoneOutOfRange => (
+            "Phone not connected: it's out of range or has Bluetooth off.",
+            None,
+        ),
+        Failure::CallInProgress => ("Hang up the current Call first.", None),
+        Failure::NumberRefused => (
+            "Your phone can't dial that number; check it and try again.",
+            None,
+        ),
+        Failure::PhoneBusy => (
+            "Your phone is busy with another Call; try again in a moment.",
+            None,
+        ),
+        Failure::DialNotSupported => (
+            "Your phone doesn't let this computer place Calls; call from your phone instead.",
+            None,
+        ),
+        Failure::NoSignal => (
+            "Your phone has no mobile signal, or is in airplane mode.",
+            None,
+        ),
+        Failure::NetworkError => (
+            "The mobile network didn't answer your phone; try again in a moment.",
+            None,
+        ),
+        Failure::DialFailed => (
+            "Your phone couldn't place the Call; check it has signal and isn't in airplane mode.",
+            None,
+        ),
         Failure::NoLiveCall => ("There's no connected Call right now.", None),
         Failure::MuteUnavailable => (
             "Mute works only while the Call's audio is on this computer; mute on your phone instead.",
@@ -211,6 +279,12 @@ pub enum Label {
     HangUp,
     /// The Call Window's status while the Call connects.
     Connecting,
+    /// The Call Window's status while a Call placed here starts.
+    Calling,
+    /// The Call Window's status while the other end rings.
+    Ringing,
+    /// The Call Window's status when a Call couldn't be placed.
+    CallNotPlaced,
     /// The Call Window's status once the Call is over.
     CallEnded,
     /// Audio Location: the Desktop.
@@ -241,6 +315,9 @@ pub fn label(label: Label) -> &'static str {
         Label::Decline => "Decline",
         Label::HangUp => "Hang up",
         Label::Connecting => "Connecting…",
+        Label::Calling => "Calling…",
+        Label::Ringing => "Ringing…",
+        Label::CallNotPlaced => "Call not placed",
         Label::CallEnded => "Call ended",
         Label::AudioOnDesktop => "Audio on this computer",
         Label::AudioOnPhone => "Audio on phone",

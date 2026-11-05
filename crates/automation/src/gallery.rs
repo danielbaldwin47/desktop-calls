@@ -226,7 +226,64 @@ const STATES: &[State] = &[
             !shows(screenshot, look.red()) && app_region(screenshot).is_some()
         },
     },
+    State {
+        name: "call-window-calling",
+        title: "The Call Window, placing a Call, before the other end rings",
+        reach: |harness| {
+            connect(harness);
+            dial(harness);
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-window-ringing",
+        title: "The Call Window, placing a Call, ringing at the other end",
+        reach: |harness| {
+            connect(harness);
+            dial(harness);
+            let _path = harness.simulated_phone().alert();
+            wait_for_status(harness, "Ringing…");
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-window-not-placed",
+        title: "The Call Window, after the Phone couldn't place the Call",
+        reach: |harness| {
+            connect(harness);
+            harness.simulated_phone().refuse_next_dial("cme:30");
+            if let Err(refusal) = harness.dial(NUMBER) {
+                panic!("the app refused to dial: {refusal}");
+            }
+            wait_for_status(harness, "Call not placed");
+        },
+        // Hang up is dimmed: there is no Call to hang up.
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red()) && app_region(screenshot).is_some()
+        },
+    },
 ];
+
+/// Asks the app to Call [`NUMBER`] and waits for "Calling…".
+fn dial(harness: &Harness) {
+    if let Err(refusal) = harness.dial(NUMBER) {
+        panic!("the app refused to dial: {refusal}");
+    }
+    wait_for_status(harness, "Calling…");
+}
+
+fn wait_for_status(harness: &Harness, status: &str) {
+    harness.wait_for_app(
+        &format!("the Call Window says {status}"),
+        DEADLINE,
+        |state| {
+            state
+                .surface("call-window")
+                .and_then(|window| window.get("status"))
+                .is_some_and(|shown| shown == status)
+        },
+    );
+}
 
 fn connect(harness: &Harness) {
     harness.simulated_phone().connect();

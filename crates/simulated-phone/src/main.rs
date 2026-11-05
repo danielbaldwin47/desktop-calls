@@ -16,8 +16,9 @@
 //! it is on the bus (see `scenario.rs`); `just demo` uses this.
 //!
 //! So far it can be a paired Phone whose hands-free link comes and goes, that
-//! rings, whose Calls can be answered, hung up and have their audio brought
-//! to the Desktop, and that opens a PBAP session. Tests can pick the codec and
+//! rings, that dials for the Desktop, whose Calls can be answered, hung up
+//! and have their audio brought to the Desktop, and that opens a PBAP
+//! session. Tests can pick the codec and
 //! switch on quirks other Phones show.
 
 mod bluez;
@@ -103,6 +104,7 @@ struct World {
     next_audio_gateway_index: u32,
     audio_gateway: Option<OwnedObjectPath>,
     behaviour: telephony::Behaviour,
+    dialling: telephony::Dialling,
     recorded: Vec<(Bus, MethodCall)>,
 }
 
@@ -146,6 +148,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         next_audio_gateway_index: arguments.first_audio_gateway_index,
         audio_gateway: None,
         behaviour: telephony::Behaviour::default(),
+        dialling: telephony::Dialling::default(),
         recorded: Vec::new(),
     }));
 
@@ -238,6 +241,7 @@ async fn serve(
                         &mut world.telephony,
                         world.audio_gateway.as_ref(),
                         &world.behaviour,
+                        &mut world.dialling,
                         &call,
                         &message,
                     );
@@ -425,6 +429,66 @@ impl Control {
         Ok(call)
     }
 
+    /// The other end of the Call the Desktop dialled starts ringing: PipeWire
+    /// registers the Call, `alerting`, and the Phone brings the audio to the
+    /// Desktop if `RejectSCO` allows. Returns the Call's object path. Fails
+    /// if the Phone has no accepted `Dial` waiting.
+    async fn alert(&self) -> zbus::fdo::Result<OwnedObjectPath> {
+        let (call, signals) = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let Some(gateway) = world.audio_gateway.clone() else {
+                return Err(zbus::fdo::Error::Failed(
+                    "hands-free is not connected".to_owned(),
+                ));
+            };
+            telephony::alert(
+                &mut world.telephony,
+                &gateway,
+                &world.behaviour,
+                &mut world.dialling,
+            )?
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed("the Desktop hasn't dialled anything".to_owned())
+            })?
+        };
+        for signal in signals {
+            signal.emit(&self.session).await?;
+        }
+        Ok(call)
+    }
+
+    /// The person the Desktop called answers: the dialled Call goes
+    /// `active`. Fails if no Call is `dialing` or `alerting`.
+    async fn callee_answers(&self) -> zbus::fdo::Result<()> {
+        let signals = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            world
+                .audio_gateway
+                .clone()
+                .and_then(|gateway| telephony::callee_answers(&mut world.telephony, &gateway))
+                .ok_or_else(|| zbus::fdo::Error::Failed("no dialled Call is ringing".to_owned()))?
+        };
+        for signal in signals {
+            signal.emit(&self.session).await?;
+        }
+        Ok(())
+    }
+
+    /// Makes the next `Dial` fail with a Telephony error: `"invalid-format"`,
+    /// `"invalid-state"`, `"not-supported"`, `"in-progress"`, `"failed"`, or
+    /// `"cme:N"` for the Phone's `+CME ERROR: N`.
+    fn refuse_next_dial(&self, error: &str) -> zbus::fdo::Result<()> {
+        let refusal = telephony::dial_refusal(error).ok_or_else(|| {
+            zbus::fdo::Error::InvalidArgs(format!(
+                "unknown Dial error {error:?}; the errors are invalid-format, invalid-state, not-supported, in-progress, failed and cme:N"
+            ))
+        })?;
+        lock(&self.world).dialling.refusal = Some(refusal);
+        Ok(())
+    }
+
     /// Makes the Phone's audio link negotiate the codec with this hands-free
     /// id from now on: 1 CVSD, 2 mSBC, 3 LC3-SWB (the Pixel's).
     fn set_codec(&self, codec: u8) -> zbus::fdo::Result<()> {
@@ -458,11 +522,11 @@ impl Control {
 
     /// Switches on a quirk other Phones, or other moments, show:
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
-    /// `"slow-property-writes"`.
+    /// `"get-calls-empty-while-dialling"` or `"slow-property-writes"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments and slow-property-writes"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling and slow-property-writes"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

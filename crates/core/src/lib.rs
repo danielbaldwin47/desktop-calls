@@ -11,7 +11,7 @@ mod call;
 mod connection;
 mod contacts;
 mod machine;
-mod matching;
+pub mod matching;
 pub mod messages;
 mod number;
 
@@ -24,7 +24,7 @@ pub use contacts::{
     ContactsState, NumberLabel, SyncFailure, Unavailable,
 };
 pub use machine::{
-    BannerView, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand, Problem, State,
-    Surfaces, Timer, keypad_tones, step,
+    BannerView, CallWindowPhase, CallWindowView, Effect, Input, Mute, PhoneCommand, PhoneRefusal,
+    Problem, State, Surfaces, Timer, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};

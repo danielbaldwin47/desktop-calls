@@ -74,6 +74,11 @@ const SIMULATED_PHONE_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls.S
 /// How long a process may take to start and claim its bus name.
 const STARTUP_DEADLINE: Duration = Duration::from_secs(10);
 
+/// The app's desktop file, which `just install` installs.
+const DESKTOP_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../data/io.github.danielbaldwin47.DesktopCalls.desktop"
+);
 /// How many frames [`Harness::screenshot_when`] records ahead of the check
 /// that judges them, at 25 MB each. Frames come only when the screen
 /// changes, so a few is plenty; past this, the recording waits and the next
@@ -126,6 +131,11 @@ trait SimulatedPhone1 {
 
     fn reregister_call(&self, call: &zbus::ObjectPath<'_>, after_ms: u32) -> zbus::Result<()>;
 
+    fn alert(&self) -> zbus::Result<zbus::OwnedObjectPath>;
+
+    fn callee_answers(&self) -> zbus::Result<()>;
+
+    fn refuse_next_dial(&self, error: &str) -> zbus::Result<()>;
     fn set_pbap_folder(&self, folder: &str, vcards: &str) -> zbus::Result<()>;
 
     fn remove_pbap_folder(&self, folder: &str) -> zbus::Result<()>;
@@ -169,6 +179,10 @@ pub struct PhoneIdentity {
     pub name: String,
     pub address: String,
 }
+
+/// The `Surfaces` property: each shown surface (`"banner"`,
+/// `"call-window"`) with its key content, as the surface shows it.
+pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
 
 /// The app's state, as its control interface publishes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -309,6 +323,8 @@ pub struct Harness {
     screenshot_directory: PathBuf,
     /// Every `Error` signal the app has sent, in order.
     app_errors: Arc<Mutex<Vec<AppError>>>,
+    /// Every value the app's `Surfaces` property has signalled, in order.
+    surfaces_seen: Arc<Mutex<Vec<ShownSurfaces>>>,
     // Stopped in reverse order of starting: the app, the Simulated Phone,
     // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,
@@ -512,6 +528,7 @@ impl Builder {
             .expect("serve the desktop stand-ins on the private session bus");
         // Subscribe before the app starts, so no Error signal is missed.
         let app_errors = collect_app_errors(&session);
+        let surfaces_seen = collect_surfaces(&session);
 
         let mut harness = Harness {
             directory,
@@ -528,6 +545,7 @@ impl Builder {
             hyprland,
             screenshot_directory,
             app_errors,
+            surfaces_seen,
             processes,
         };
 
@@ -1221,6 +1239,76 @@ impl Harness {
             .clone()
     }
 
+    /// Every value of the app's `Surfaces` property signalled since the
+    /// scenario started, in order: everything the surfaces showed, however
+    /// briefly.
+    #[must_use]
+    pub fn surfaces_seen(&self) -> Vec<ShownSurfaces> {
+        self.surfaces_seen
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Asks the app to Call `number`, a number or a `tel:` link, as any
+    /// client of the control interface could. Returns the error's message
+    /// if the app refuses.
+    ///
+    /// # Errors
+    ///
+    /// The message of the app's refusal.
+    pub fn dial(&self, number: &str) -> Result<(), String> {
+        zbus::block_on(self.session.call_method(
+            Some(APP_BUS_NAME),
+            APP_PATH,
+            Some(APP_INTERFACE),
+            "Dial",
+            &(number,),
+        ))
+        .map(drop)
+        .map_err(|error| match error {
+            zbus::Error::MethodError(_, Some(message), _) => message,
+            other => other.to_string(),
+        })
+    }
+
+    /// Opens `link` as a Desktop app would, with `gio open`, after
+    /// installing the app's desktop file as the user's handler for its
+    /// scheme and putting the app on `PATH`, as installing it does. Returns
+    /// once `gio` has launched the handler.
+    ///
+    /// # Panics
+    ///
+    /// If the desktop file can't be installed, or `gio` fails.
+    pub fn open_link(&self, link: &str) {
+        let applications = self.directory.join("home/.local/share/applications");
+        fs::create_dir_all(&applications).expect("create the applications directory");
+        let desktop_file = Path::new(DESKTOP_FILE);
+        let name = desktop_file
+            .file_name()
+            .expect("the desktop file has a name");
+        fs::copy(desktop_file, applications.join(name)).expect("install the desktop file");
+        let name = name.to_string_lossy();
+        fs::write(
+            self.directory.join("config/mimeapps.list"),
+            format!("[Default Applications]\nx-scheme-handler/tel={name}\n"),
+        )
+        .expect("make the app the handler for tel: links");
+        let path = std::env::var("PATH").unwrap_or_default();
+        let output = self
+            .external_command("gio")
+            .arg("open")
+            .arg(link)
+            .env("PATH", format!("{}:{path}", self.bin_directory.display()))
+            .output()
+            .expect("run gio");
+        assert!(
+            output.status.success(),
+            "gio open {link} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// Calls a method on the Phone's side of one of the private buses, as any
     /// D-Bus client could, and returns the reply.
     ///
@@ -1597,6 +1685,42 @@ impl SimulatedPhone<'_> {
         .unwrap_or_else(|error| panic!("reregister the Call at {call}: {error}"));
     }
 
+    /// Makes the Call the Desktop dialled ring at the other end, as the
+    /// Pixel reports it: the Call appears, `alerting`. Returns its path.
+    ///
+    /// # Panics
+    ///
+    /// If nothing was dialled.
+    #[must_use]
+    pub fn alert(&self) -> String {
+        zbus::block_on(async { self.proxy().await?.alert().await })
+            .expect("make the dialled Call ring at the other end")
+            .to_string()
+    }
+
+    /// The person called answers the Call the Desktop dialled: it goes
+    /// `active`.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such Call.
+    pub fn callee_answers(&self) {
+        zbus::block_on(async { self.proxy().await?.callee_answers().await })
+            .expect("answer the dialled Call at the other end");
+    }
+
+    /// Makes the Phone refuse the next `Dial` with a Telephony error:
+    /// `"invalid-format"`, `"invalid-state"`, `"not-supported"`,
+    /// `"in-progress"`, `"failed"`, or `"cme:N"` for the Phone's `+CME ERROR: N`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't know the error.
+    pub fn refuse_next_dial(&self, error: &str) {
+        zbus::block_on(async { self.proxy().await?.refuse_next_dial(error).await })
+            .unwrap_or_else(|failure| panic!("refuse the next Dial with {error:?}: {failure}"));
+    }
+
     /// Gives the Phone the PBAP folder `folder` (`"pb"` for Contacts;
     /// `"cch"`, `"ich"`, `"och"` or `"mch"` for Call History) with exactly
     /// this vCard text, which it serves whatever format is asked for. See
@@ -1907,6 +2031,47 @@ fn collect_app_errors(session: &Connection) -> Arc<Mutex<Vec<AppError>>> {
         });
     });
     errors
+}
+
+/// Collects every value of the app's `Surfaces` property that its
+/// `PropertiesChanged` signals carry, from now on.
+fn collect_surfaces(session: &Connection) -> Arc<Mutex<Vec<ShownSurfaces>>> {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let stream = zbus::block_on(async {
+        let rule = MatchRule::builder()
+            .msg_type(Type::Signal)
+            .path(APP_PATH)
+            .interface("org.freedesktop.DBus.Properties")
+            .member("PropertiesChanged")
+            .build()?;
+        MessageStream::for_match_rule(rule, session, None).await
+    })
+    .expect("subscribe to the app's PropertiesChanged");
+    let collected = seen.clone();
+    thread::spawn(move || {
+        zbus::block_on(async move {
+            let mut stream = stream;
+            while let Some(Ok(message)) = stream.next().await {
+                let Ok((_, mut changed, _)) = message.body().deserialize::<(
+                    String,
+                    std::collections::HashMap<String, zbus::OwnedVariant>,
+                    Vec<String>,
+                )>() else {
+                    continue;
+                };
+                let Some(surfaces) = changed.remove("Surfaces") else {
+                    continue;
+                };
+                if let Ok(surfaces) = ShownSurfaces::try_from(surfaces) {
+                    collected
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(surfaces);
+                }
+            }
+        });
+    });
+    seen
 }
 
 /// Runs `future`, giving up after `deadline`.

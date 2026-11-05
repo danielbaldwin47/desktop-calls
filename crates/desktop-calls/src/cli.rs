@@ -201,6 +201,43 @@ async fn get_all(session: &Connection) -> zbus::Result<HashMap<String, OwnedVari
         .map_err(Into::into)
 }
 
+/// `desktop-calls dial <number|tel: link>`: asks the service to Call it.
+/// Silent once the Phone has been asked to dial; otherwise says why not.
+pub fn dial(number: &str) -> ExitCode {
+    let context = MainContext::default();
+    let outcome = context.block_on(request_dial(GlibRuntime::new(context.clone()), number));
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(Refusal::Refused(sentence)) => {
+            eprintln!("{sentence}");
+            ExitCode::FAILURE
+        }
+        Err(Refusal::Failure(failure)) => report(failure),
+    }
+}
+
+async fn request_dial(runtime: GlibRuntime, number: &str) -> Result<(), Refusal> {
+    let session = connect(runtime).await.map_err(Refusal::Failure)?;
+    let reply = session
+        .call_method(
+            Some(control::BUS_NAME),
+            control::PATH,
+            Some(INTERFACE),
+            "Dial",
+            &(number,),
+        )
+        .await;
+    match reply {
+        Ok(_) => Ok(()),
+        Err(zbus::Error::MethodError(name, Some(sentence), _))
+            if name.starts_with(control::ERROR_PREFIX) =>
+        {
+            Err(Refusal::Refused(sentence))
+        }
+        Err(error) => Err(Refusal::Failure(failure_of(&error))),
+    }
+}
+
 /// Tells the user about `failure` on standard error.
 fn report(failure: Failure) -> ExitCode {
     let message = messages::failure(failure);

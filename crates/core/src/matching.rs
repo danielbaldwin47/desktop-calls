@@ -1,4 +1,5 @@
-//! Matching: which Contact a number belongs to, however each is written.
+//! Matching: which Contact a number belongs to, however each is written,
+//! and whether what the user typed is a number the Phone can dial.
 //!
 //! Numbers are compared as libphonenumber reads them, so `07700 900123` in
 //! Contacts matches a Call from `+447700900123`. A number written without
@@ -15,6 +16,9 @@ use crate::contacts::{Contact, NumberLabel};
 /// Fewer digits than this, and a number matched on its national digits
 /// alone, across countries, would match too much.
 const MIN_NATIONAL_DIGITS: usize = 7;
+
+/// The longest dial string the Phone accepts.
+const MAX_DIAL_LENGTH: usize = 80;
 
 /// Contacts, indexed by number.
 #[derive(Default)]
@@ -157,4 +161,65 @@ fn infer_region(contacts: &[Contact]) -> Option<Id> {
         .find(|metadata| metadata.is_main_country_for_code())
         .or_else(|| regions.first())?;
     main.id().parse().ok()
+}
+
+/// The number to dial for `text`, a number as typed or pasted, or a `tel:`
+/// link, or `None` if the Phone can't dial it.
+///
+/// Spaces and the visual separators `-`, `.`, `(` and `)` are dropped, and
+/// a `tel:` link loses its scheme and parameters. What is left must be made
+/// only of the characters the Phone accepts in a dial string (`0`-`9`, `+`,
+/// `*`, `#`, `,` and `A`-`D`), between 1 and 80 of them.
+#[must_use]
+pub fn dialable(text: &str) -> Option<String> {
+    let text = text.trim();
+    let number = match strip_tel_scheme(text) {
+        Some(link) => {
+            let link = link.trim_start_matches('/');
+            percent_decoded(link.split(';').next().unwrap_or_default())?
+        }
+        None => text.to_owned(),
+    };
+    let number: String = number
+        .chars()
+        .filter(|character| !is_visual_separator(*character))
+        .collect();
+    let accepted = number.chars().all(|character| {
+        character.is_ascii_digit() || matches!(character, '+' | '*' | '#' | ',' | 'A'..='D')
+    });
+    (accepted && (1..=MAX_DIAL_LENGTH).contains(&number.len())).then_some(number)
+}
+
+/// What follows `tel:`, in any case, if `text` is a `tel:` link.
+fn strip_tel_scheme(text: &str) -> Option<&str> {
+    let scheme = text.get(..4)?;
+    scheme
+        .eq_ignore_ascii_case("tel:")
+        .then(|| text.get(4..))
+        .flatten()
+}
+
+fn is_visual_separator(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '-' | '.' | '(' | ')')
+}
+
+/// `text` with each `%XX` escape decoded, or `None` if one is malformed or
+/// decodes to something other than ASCII.
+fn percent_decoded(text: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(text.len());
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character == '%' {
+            let high = characters.next()?.to_digit(16)?;
+            let low = characters.next()?.to_digit(16)?;
+            let byte = u8::try_from(high * 16 + low).ok()?;
+            if !byte.is_ascii() {
+                return None;
+            }
+            decoded.push(char::from(byte));
+        } else {
+            decoded.push(character);
+        }
+    }
+    Some(decoded)
 }

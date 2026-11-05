@@ -224,7 +224,7 @@ fn a_new_call_replaces_the_ended_call_window_and_the_old_timer_does_not_close_it
     );
 
     let window = state.surfaces().call_window.expect("the Call Window shows");
-    assert_eq!(window.call, next);
+    assert_eq!(window.call, Some(next));
 }
 
 #[test]

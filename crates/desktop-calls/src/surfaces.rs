@@ -558,6 +558,8 @@ struct CallWindow {
     mute_label: gtk::Label,
     keypad_shown: gtk::ToggleButton,
     hang_up: gtk::Button,
+    /// Why a Call placed here failed or was refused.
+    notice: gtk::Label,
     /// The strip that says the microphone is muted.
     microphone_muted: gtk::Label,
     /// Why Mute is disabled, while it is.
@@ -621,7 +623,7 @@ impl CallWindow {
         controls.set_homogeneous(true);
         controls.append(&mute);
         controls.append(&keypad_shown);
-        let hang_up = surface.button(Label::HangUp, "hang-up", intents, Input::HangUp);
+        let hang_up = hang_up_button(&surface, intents);
         shortcuts.insert(
             "hang-up-shortcut".to_owned(),
             show_shortcut(
@@ -631,6 +633,7 @@ impl CallWindow {
             ),
         );
 
+        let notice = notice_label();
         let (microphone_muted, mute_unavailable) = mute_notices();
         let (tones, keypad) = keypad();
 
@@ -643,6 +646,7 @@ impl CallWindow {
         // never moves under the pointer.
         content.append(&controls);
         content.append(&hang_up);
+        content.append(&notice);
         content.append(&microphone_muted);
         content.append(&mute_unavailable);
         content.append(&tones);
@@ -669,6 +673,7 @@ impl CallWindow {
             mute_label,
             keypad_shown,
             hang_up,
+            notice,
             microphone_muted,
             mute_unavailable,
             tones,
@@ -803,6 +808,41 @@ impl CallWindow {
     }
 }
 
+/// The Call Window's status for a phase without a live Call, whose status
+/// is its timer instead.
+fn status_label(phase: &CallWindowPhase) -> Label {
+    match phase {
+        CallWindowPhase::Connecting | CallWindowPhase::Live { .. } => Label::Connecting,
+        CallWindowPhase::Calling => Label::Calling,
+        CallWindowPhase::Ringing => Label::Ringing,
+        CallWindowPhase::NotPlaced => Label::CallNotPlaced,
+        CallWindowPhase::Ended => Label::CallEnded,
+    }
+}
+
+/// Hang up. With no Call yet, hanging up a Call placed here cancels the
+/// dial.
+fn hang_up_button(surface: &Surface, intents: &UnboundedSender<Input>) -> gtk::Button {
+    let hang_up = gtk::Button::new();
+    hang_up.add_css_class("hang-up");
+    let (call, intents) = (surface.call.clone(), intents.clone());
+    hang_up.connect_clicked(move |_| {
+        let intent = call.get().map_or(Input::CancelDial, Input::HangUp);
+        let _ = intents.unbounded_send(intent);
+    });
+    hang_up
+}
+
+/// Why a Call placed here failed or was refused, hidden.
+fn notice_label() -> gtk::Label {
+    let notice = gtk::Label::new(None);
+    notice.set_xalign(0.0);
+    notice.set_wrap(true);
+    notice.set_max_width_chars(36);
+    notice.set_visible(false);
+    notice
+}
+
 /// The tone entry, and the keypad's buttons, hidden.
 fn keypad() -> (gtk::Entry, gtk::Grid) {
     let tones = gtk::Entry::new();
@@ -866,7 +906,7 @@ impl CallWindow {
             self.surface.hide();
             return;
         };
-        self.surface.call.set(Some(view.call));
+        self.surface.call.set(view.call);
         let live = matches!(view.phase, CallWindowPhase::Live { .. });
         if live {
             self.start_ticker();
@@ -891,12 +931,6 @@ impl CallWindow {
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);
         let (status, audio_location, wideband, mute) = match view.phase {
-            CallWindowPhase::Connecting => (
-                messages::label(Label::Connecting).to_owned(),
-                None,
-                false,
-                None,
-            ),
             CallWindowPhase::Live {
                 active_since,
                 audio_location,
@@ -911,8 +945,8 @@ impl CallWindow {
                 wideband,
                 Some(mute),
             ),
-            CallWindowPhase::Ended => (
-                messages::label(Label::CallEnded).to_owned(),
+            phase => (
+                messages::label(status_label(&phase)).to_owned(),
                 None,
                 false,
                 None,
@@ -924,33 +958,22 @@ impl CallWindow {
         self.audio_location
             .set_text(audio_location.unwrap_or_default());
         self.hd.set_visible(wideband);
-        self.hang_up
-            .set_sensitive(view.phase != CallWindowPhase::Ended);
-        let live = mute.is_some();
-        let mute_text = messages::label(if mute == Some(Mute::On) {
-            Label::Unmute
-        } else {
-            Label::Mute
-        });
-        self.mute_label.set_text(mute_text);
-        self.mute
-            .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
-        if mute == Some(Mute::On) {
-            self.mute.add_css_class("muted");
-        } else {
-            self.mute.remove_css_class("muted");
-        }
-        self.microphone_muted.set_visible(mute == Some(Mute::On));
-        self.mute_unavailable
-            .set_visible(mute == Some(Mute::Unavailable));
-        self.keypad_shown.set_sensitive(live);
-        self.tones.set_sensitive(live);
-        self.keypad.set_sensitive(live);
+        self.hang_up.set_sensitive(!matches!(
+            view.phase,
+            CallWindowPhase::Ended | CallWindowPhase::NotPlaced
+        ));
+        let notice = view.notice.map(|failure| messages::failure(failure).text);
+        self.notice.set_text(notice.unwrap_or_default());
+        self.notice.set_visible(notice.is_some());
+        let mute_text = self.show_controls(mute);
 
-        let mut content = BTreeMap::from([
-            ("call".to_owned(), view.call.to_string()),
-            ("status".to_owned(), status),
-        ]);
+        let mut content = BTreeMap::from([("status".to_owned(), status)]);
+        if let Some(call) = view.call {
+            content.insert("call".to_owned(), call.to_string());
+        }
+        if let Some(notice) = notice {
+            content.insert("notice".to_owned(), notice.to_owned());
+        }
         who.report(&mut content);
         content.extend(self.shortcuts.clone());
         if let Some(audio_location) = audio_location {
@@ -985,6 +1008,32 @@ impl CallWindow {
             content.insert("tones".to_owned(), tones.to_string());
         }
         self.surface.show(content);
+    }
+
+    /// Brings Mute, its notices and the keypad up to date with `mute`, which
+    /// is `None` with no live Call, and returns Mute's label.
+    fn show_controls(&self, mute: Option<Mute>) -> &'static str {
+        let live = mute.is_some();
+        let mute_text = messages::label(if mute == Some(Mute::On) {
+            Label::Unmute
+        } else {
+            Label::Mute
+        });
+        self.mute_label.set_text(mute_text);
+        self.mute
+            .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
+        if mute == Some(Mute::On) {
+            self.mute.add_css_class("muted");
+        } else {
+            self.mute.remove_css_class("muted");
+        }
+        self.microphone_muted.set_visible(mute == Some(Mute::On));
+        self.mute_unavailable
+            .set_visible(mute == Some(Mute::Unavailable));
+        self.keypad_shown.set_sensitive(live);
+        self.tones.set_sensitive(live);
+        self.keypad.set_sensitive(live);
+        mute_text
     }
 
     fn start_ticker(self: &Rc<Self>) {

@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::{
-    CallId, CallState, Caller, Codec, Input, PhoneCommand, Timestamp, Transport,
+    CallId, CallState, Caller, Codec, Input, PhoneCommand, PhoneRefusal, Timestamp, Transport,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
@@ -565,6 +565,8 @@ impl PhoneLink {
                 }
                 PhoneCommand::MoveAudioToDesktop
                 | PhoneCommand::KeepAudioOnPhone
+                | PhoneCommand::AllowAudioOnDesktop
+                | PhoneCommand::Dial(_)
                 | PhoneCommand::SetMicrophoneVolume(_)
                 | PhoneCommand::SendTones(_) => self.connected.clone(),
             };
@@ -574,11 +576,12 @@ impl PhoneLink {
                 // next connect asks again.
                 None if command == PhoneCommand::KeepAudioOnPhone => {}
                 None => {
+                    let name = command_name(&command);
                     tracing::warn!(
                         event_kind = %EventKind::PhoneCommandFailed,
                         error_kind = "no-target",
-                        command = ?command,
-                        "Couldn't send {command:?}: the Phone has no such Call or isn't connected"
+                        command = %name,
+                        "Couldn't send {name}: the Phone has no such Call or isn't connected"
                     );
                     inputs.push(Input::PhoneCommandFailed(command));
                     break;
@@ -608,17 +611,27 @@ async fn execute(
                     }
                 }
                 PhoneCommand::KeepAudioOnPhone => set_reject_sco(session, &path, true).await,
+                PhoneCommand::AllowAudioOnDesktop => set_reject_sco(session, &path, false).await,
+                PhoneCommand::Dial(number) => {
+                    tracing::debug!(
+                        event_kind = %EventKind::PhoneCommandSent,
+                        phone_number = %number,
+                        "Asking the Phone to dial"
+                    );
+                    call(session, &path, AUDIO_GATEWAY, "Dial", &(number.as_str(),)).await
+                }
                 PhoneCommand::SetMicrophoneVolume(volume) => {
                     set_microphone_volume(session, &path, *volume).await
                 }
                 PhoneCommand::SendTones(tones) => send_tones(session, &path, tones).await,
             };
+            let name = command_name(&command);
             match result {
                 Ok(()) => {
                     tracing::debug!(
                         event_kind = %EventKind::PhoneCommandSent,
-                        command = ?command,
-                        "The Phone did {command:?}"
+                        command = %name,
+                        "The Phone did {name}"
                     );
                     let _ = inputs.unbounded_send(Input::PhoneCommandDone(command));
                 }
@@ -626,15 +639,50 @@ async fn execute(
                     tracing::warn!(
                         event_kind = %EventKind::PhoneCommandFailed,
                         error_kind = error_kind(&error),
-                        command = ?command,
+                        command = %name,
                         detail = %error,
-                        "The Phone refused {command:?}"
+                        "The Phone refused {name}"
                     );
-                    let _ = inputs.unbounded_send(Input::PhoneCommandFailed(command));
+                    let input = match command {
+                        PhoneCommand::Dial(_) => Input::DialFailed(dial_refusal(&error)),
+                        command => Input::PhoneCommandFailed(command),
+                    };
+                    let _ = inputs.unbounded_send(input);
                     break;
                 }
             }
         }
+    }
+}
+
+/// A Phone command as the log names it: a dialled number goes only in a
+/// `phone_number` field, never in a command's name.
+fn command_name(command: &PhoneCommand) -> String {
+    match command {
+        PhoneCommand::Dial(_) => "Dial".to_owned(),
+        command => format!("{command:?}"),
+    }
+}
+
+/// Why the Phone refused to dial. PipeWire passes a `+CME ERROR` on only as
+/// its description (`docs/research/2026-11-04-place-a-call.md`).
+fn dial_refusal(error: &zbus::Error) -> PhoneRefusal {
+    match error_name(error) {
+        Some("org.pipewire.Telephony.Error.InvalidFormat") => PhoneRefusal::InvalidFormat,
+        Some("org.pipewire.Telephony.Error.InvalidState") => PhoneRefusal::InvalidState,
+        Some("org.pipewire.Telephony.Error.InProgress") => PhoneRefusal::InProgress,
+        Some("org.pipewire.Telephony.Error.NotSupported") => PhoneRefusal::NotSupported,
+        Some("org.pipewire.Telephony.Error.CME") => match error_text(error).as_str() {
+            "dial string too long" | "invalid characters in dial string" => {
+                PhoneRefusal::InvalidFormat
+            }
+            "no network service" | "network not allowed - Emergency calls only" => {
+                PhoneRefusal::NoNetwork
+            }
+            "network Timeout" => PhoneRefusal::NetworkTimeout,
+            _ => PhoneRefusal::Failed,
+        },
+        _ => PhoneRefusal::Failed,
     }
 }
 
@@ -765,6 +813,7 @@ fn is_already_ending(error: &zbus::Error) -> bool {
 fn error_kind(error: &zbus::Error) -> &'static str {
     match error_name(error) {
         Some("org.pipewire.Telephony.Error.InvalidState") => "invalid-state",
+        Some("org.pipewire.Telephony.Error.InvalidFormat") => "invalid-format",
         Some("org.pipewire.Telephony.Error.InProgress") => "in-progress",
         Some("org.pipewire.Telephony.Error.NotSupported") => "not-supported",
         Some("org.pipewire.Telephony.Error.CME") => "cme",

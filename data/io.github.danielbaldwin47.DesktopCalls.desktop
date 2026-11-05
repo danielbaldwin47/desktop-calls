@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop Calls
+Comment=Take and place your phone's calls on this computer
+Exec=desktop-calls %u
+Icon=call-start-symbolic
+Terminal=false
+Categories=Network;Telephony;
+MimeType=x-scheme-handler/tel;
+# Hidden from the launcher until the Dialer lands (#11); it handles tel: links.
+NoDisplay=true
+StartupNotify=false

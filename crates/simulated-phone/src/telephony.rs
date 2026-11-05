@@ -29,6 +29,15 @@
 //! - Setting `RejectSCO` emits no signal. `Activate` does nothing while it is
 //!   true; otherwise the transport reports its codec, then `pending`, then
 //!   `active`, as the Pixel does.
+//! - `Dial`, on `AudioGateway1` or `org.ofono.VoiceCallManager`, checks the
+//!   number as PipeWire does (`0`-`9`, `A`-`D`, `#`, `*`, `+` and `,`, 1 to
+//!   80 of them, else `InvalidFormat` "Invalid phone number or tones"), and
+//!   replies once the Phone answers `ATD`, with no Call yet. The Pixel then
+//!   reports the Call straight in `alerting`, and while `RejectSCO` is false
+//!   brings the audio up itself, with no `Activate`
+//!   (`docs/research/2026-11-04-place-a-call.md`). A Phone error is
+//!   `org.pipewire.Telephony.Error.CME` with PipeWire's description of the
+//!   code as its message.
 //! - `SpeakerVolume` and `MicrophoneVolume` are bytes, and setting one
 //!   reports the new value with `PropertiesChanged`. PipeWire reads the
 //!   value without checking its type (a wrong one crashed `WirePlumber`), so
@@ -89,6 +98,8 @@ pub enum Quirk {
     /// `Hangup` replies `InvalidArgs` "Too few arguments" while the Call is
     /// torn down anyway.
     HangupTooFewArguments,
+    /// `GetCalls` leaves out a Call that is `dialing` or `alerting`.
+    GetCallsEmptyWhileDialling,
     /// `Properties.Set` on an AudioGateway is carried out and recorded at
     /// once, but answered only [`SLOW_REPLY`] later, as a busy `WirePlumber`
     /// may. Tests use it to see what the app shows before the reply.
@@ -104,6 +115,7 @@ impl Quirk {
         match name {
             "call1-hangup-missing" => Some(Self::Call1HangupMissing),
             "hangup-too-few-arguments" => Some(Self::HangupTooFewArguments),
+            "get-calls-empty-while-dialling" => Some(Self::GetCallsEmptyWhileDialling),
             "slow-property-writes" => Some(Self::SlowPropertyWrites),
             _ => None,
         }
@@ -127,6 +139,71 @@ impl Default for Behaviour {
             microphone_volume: 15,
             quirks: BTreeSet::new(),
         }
+    }
+}
+
+/// What the Phone does with the Desktop's `Dial`.
+#[derive(Default)]
+pub struct Dialling {
+    /// The Telephony error, name and message, the next `Dial` fails with.
+    pub refusal: Option<(&'static str, String)>,
+    /// The number of the last `Dial` the Phone accepted, until its Call
+    /// appears.
+    pub number: Option<String>,
+}
+
+/// The Telephony error PipeWire replies to `Dial` with for `name`:
+/// `"invalid-format"`, `"invalid-state"`, `"not-supported"`, `"in-progress"`,
+/// `"failed"`, or `"cme:N"` for the Phone's `+CME ERROR: N`.
+pub fn dial_refusal(name: &str) -> Option<(&'static str, String)> {
+    let refusal = match name {
+        "invalid-format" => (INVALID_FORMAT, INVALID_FORMAT_MESSAGE),
+        "invalid-state" => (INVALID_STATE, INVALID_STATE_MESSAGE),
+        "not-supported" => (
+            "org.pipewire.Telephony.Error.NotSupported",
+            "Method is not supported on this Audio Gateway",
+        ),
+        "in-progress" => (
+            "org.pipewire.Telephony.Error.InProgress",
+            "Command already in progress",
+        ),
+        "failed" => ("org.pipewire.Telephony.Error.Failed", "Method call failed"),
+        _ => {
+            let code: u8 = name.strip_prefix("cme:")?.parse().ok()?;
+            ("org.pipewire.Telephony.Error.CME", cme_description(code))
+        }
+    };
+    Some((refusal.0, refusal.1.to_owned()))
+}
+
+/// PipeWire 1.6.9's description of `+CME ERROR: code`, which is all a
+/// client sees of it.
+fn cme_description(code: u8) -> &'static str {
+    match code {
+        0 => "AG failure",
+        1 => "no connection to phone",
+        3 => "operation not allowed",
+        4 => "operation not supported",
+        5 => "PH-SIM PIN required",
+        10 => "SIM not inserted",
+        11 => "SIM PIN required",
+        12 => "SIM PUK required",
+        13 => "SIM failure",
+        14 => "SIM busy",
+        16 => "incorrect password",
+        17 => "SIM PIN2 required",
+        18 => "SIM PUK2 required",
+        20 => "memory full",
+        21 => "invalid index",
+        23 => "memory failure",
+        24 => "text string too long",
+        25 => "invalid characters in text string",
+        26 => "dial string too long",
+        27 => "invalid characters in dial string",
+        30 => "no network service",
+        31 => "network Timeout",
+        32 => "network not allowed - Emergency calls only",
+        _ => "Unknown CME error",
     }
 }
 
@@ -353,6 +430,57 @@ pub fn ring(
     Ok((path, signals))
 }
 
+/// Registers the Call the Desktop dialled on the AudioGateway at
+/// `audio_gateway`, `alerting`, as the Pixel reports it once the other end
+/// rings, and returns its path and the signals that announce it. While
+/// `RejectSCO` is false the Phone brings the audio to the Desktop at once;
+/// otherwise its refused attempt only flips the codec. `None` if nothing was
+/// dialled.
+pub fn alert(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+    dialling: &mut Dialling,
+) -> zbus::Result<Option<(OwnedObjectPath, Vec<Signal>)>> {
+    let Some(number) = dialling.number.take() else {
+        return Ok(None);
+    };
+    let mut call = Properties::new();
+    call.insert(
+        "LineIdentification".into(),
+        OwnedVariant::from(Str::from(number)),
+    );
+    call.insert("IncomingLine".into(), OwnedVariant::from(Str::from("")));
+    call.insert("Name".into(), OwnedVariant::from(Str::from("")));
+    call.insert("Multiparty".into(), OwnedVariant::from(false));
+    call.insert("State".into(), OwnedVariant::from(Str::from("alerting")));
+    let path = register_call(tree, audio_gateway, call.clone())?;
+    let mut signals = announce_call(audio_gateway, &path, call);
+    if transport_state(tree, audio_gateway).as_deref() == Some("idle") {
+        let codec = vec![("Codec", OwnedVariant::from(behaviour.codec))];
+        if rejects_sco(tree, audio_gateway) {
+            signals.extend(set_transport(tree, audio_gateway, codec));
+        } else {
+            signals.extend(bring_audio_up(tree, audio_gateway, codec));
+        }
+    }
+    Ok(Some((path, signals)))
+}
+
+/// The person called answers: the dialled Call goes `active`. Returns the
+/// signals, or `None` if no Call is `dialing` or `alerting`.
+pub fn callee_answers(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+) -> Option<Vec<Signal>> {
+    let (path, _) = calls(tree, audio_gateway.as_str())
+        .into_iter()
+        .find(|(_, properties)| {
+            matches!(call_state(properties).as_str(), "dialing" | "alerting")
+        })?;
+    Some(set_call_state(tree, &path, "active"))
+}
+
 /// Sets the AudioGateway's `MicrophoneVolume`, as the Phone's `+VGM` or a
 /// `Properties.Set` does, and returns the signal that reports it.
 pub fn set_microphone_volume(
@@ -427,6 +555,7 @@ pub fn answer(
     tree: &mut ObjectTree,
     audio_gateway: Option<&OwnedObjectPath>,
     behaviour: &Behaviour,
+    dialling: &mut Dialling,
     call: &MethodCall,
     message: &Message,
 ) -> (Reply, Vec<Signal>) {
@@ -461,12 +590,21 @@ pub fn answer(
             Reply::body(
                 calls(tree, &call.path)
                     .into_iter()
+                    .filter(|(_, properties)| {
+                        !(behaviour
+                            .quirks
+                            .contains(&Quirk::GetCallsEmptyWhileDialling)
+                            && matches!(call_state(properties).as_str(), "dialing" | "alerting"))
+                    })
                     .map(|(path, properties)| (path, properties.into_iter().collect()))
                     .collect::<HashMap<OwnedObjectPath, HashMap<String, OwnedVariant>>>(),
             ),
             Vec::new(),
         ),
         (PROPERTIES, "Set", Some(_), _) => set_property(tree, call, message),
+        (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "Dial", Some(_), _) => {
+            (dial(dialling, message), Vec::new())
+        }
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SendTones", Some(gateway), _) => {
             (send_tones(tree, gateway, message), Vec::new())
         }
@@ -552,31 +690,41 @@ fn send_tones(tree: &ObjectTree, audio_gateway: &OwnedObjectPath, message: &Mess
     Reply::body(())
 }
 
-/// `Activate`: brings the Call audio to the Desktop, unless SCO is rejected
-/// or no Call is live.
-fn activate(
+/// `Dial`: checks the number as PipeWire does, then fails as a test asked,
+/// or accepts it.
+fn dial(dialling: &mut Dialling, message: &Message) -> Reply {
+    let Ok((number,)) = message.body().deserialize::<(String,)>() else {
+        return Reply::Error(
+            "org.freedesktop.DBus.Error.InvalidArgs",
+            "Invalid arguments".to_owned(),
+        );
+    };
+    let accepted = number.chars().all(|character| {
+        character.is_ascii_digit() || matches!(character, 'A'..='D' | '#' | '*' | '+' | ',')
+    });
+    if !accepted || !(1..=80).contains(&number.len()) {
+        return Reply::Error(INVALID_FORMAT, INVALID_FORMAT_MESSAGE.to_owned());
+    }
+    if let Some((name, message)) = dialling.refusal.take() {
+        return Reply::Error(name, message);
+    }
+    dialling.number = Some(number);
+    Reply::body(())
+}
+
+fn rejects_sco(tree: &ObjectTree, audio_gateway: &OwnedObjectPath) -> bool {
+    tree.get(audio_gateway, AUDIO_GATEWAY_TRANSPORT, "RejectSCO")
+        .and_then(|value| bool::try_from(value).ok())
+        .unwrap_or(true)
+}
+
+/// The transport reports `first` (its codec), then `pending`, then `active`.
+fn bring_audio_up(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
-    behaviour: &Behaviour,
+    first: Vec<(&str, OwnedVariant)>,
 ) -> Vec<Signal> {
-    let rejected = tree
-        .get(audio_gateway, AUDIO_GATEWAY_TRANSPORT, "RejectSCO")
-        .and_then(|value| bool::try_from(value).ok())
-        .unwrap_or(true);
-    let live = calls(tree, audio_gateway.as_str())
-        .iter()
-        .any(|(_, properties)| call_state(properties) != "disconnected");
-    if rejected || !live || transport_state(tree, audio_gateway).as_deref() != Some("idle") {
-        return Vec::new();
-    }
-    let mut signals = set_transport(
-        tree,
-        audio_gateway,
-        vec![
-            ("Codec", OwnedVariant::from(behaviour.codec)),
-            ("RejectSCO", OwnedVariant::from(false)),
-        ],
-    );
+    let mut signals = set_transport(tree, audio_gateway, first);
     signals.extend(set_transport(
         tree,
         audio_gateway,
@@ -588,6 +736,30 @@ fn activate(
         vec![("State", OwnedVariant::from(Str::from("active")))],
     ));
     signals
+}
+
+/// `Activate`: brings the Call audio to the Desktop, unless SCO is rejected
+/// or no Call is live.
+fn activate(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+) -> Vec<Signal> {
+    let rejected = rejects_sco(tree, audio_gateway);
+    let live = calls(tree, audio_gateway.as_str())
+        .iter()
+        .any(|(_, properties)| call_state(properties) != "disconnected");
+    if rejected || !live || transport_state(tree, audio_gateway).as_deref() != Some("idle") {
+        return Vec::new();
+    }
+    bring_audio_up(
+        tree,
+        audio_gateway,
+        vec![
+            ("Codec", OwnedVariant::from(behaviour.codec)),
+            ("RejectSCO", OwnedVariant::from(false)),
+        ],
+    )
 }
 
 fn answer_call(
@@ -706,26 +878,16 @@ fn open_audio_link(
     audio_gateway: &OwnedObjectPath,
     behaviour: &Behaviour,
 ) -> Vec<Signal> {
-    let rejected = tree
-        .get(audio_gateway, AUDIO_GATEWAY_TRANSPORT, "RejectSCO")
-        .and_then(|value| bool::try_from(value).ok())
-        .unwrap_or(true);
-    if rejected || transport_state(tree, audio_gateway).as_deref() != Some("idle") {
+    if rejects_sco(tree, audio_gateway)
+        || transport_state(tree, audio_gateway).as_deref() != Some("idle")
+    {
         return Vec::new();
     }
-    let mut signals = set_transport(
+    bring_audio_up(
         tree,
         audio_gateway,
         vec![("Codec", OwnedVariant::from(behaviour.codec))],
-    );
-    for state in ["pending", "active"] {
-        signals.extend(set_transport(
-            tree,
-            audio_gateway,
-            vec![("State", OwnedVariant::from(Str::from(state)))],
-        ));
-    }
-    signals
+    )
 }
 
 fn invalid_state() -> Reply {

@@ -6,6 +6,7 @@ Usage (through just):
   just test-call 'busctl --user ...'      # run the hook once the Call is active
   just test-call --hold 10                # hold 10 s instead of 2
   just test-call --max-seconds 120 HOOK   # let the hook run up to 120 s (default 60)
+  just test-call --desktop-audio          # accept the Call's audio on the Desktop
 
 The Test Number is read from $XDG_CONFIG_HOME/desktop-calls/test-number and
 never printed: all output, the hook's included, is redacted.
@@ -19,6 +20,11 @@ input from /dev/null and these variables set:
 The Call is hung up whatever happens: when the hook exits or is killed, on
 a D-Bus error, on Ctrl-C, SIGTERM or SIGHUP, and, through a separate guard
 process, even if this process is killed outright.
+
+With --desktop-audio it sets RejectSCO=false before dialling, as the app
+does for a Call placed on the Desktop, logs every change of the
+transport's State and Codec until the Call is active, and sets RejectSCO
+back to true after hanging up (the guard does too).
 
 Refuses to start if any Call already exists, and only ever hangs up the
 Call to the Test Number.
@@ -96,7 +102,7 @@ def guard_main() -> int:
         signal.signal(s, signal.SIG_IGN)
     number = rp.read_test_number()
     rp.install_redaction(number)
-    dialled, call_path, hook_group = False, None, None
+    dialled, call_path, hook_group, desktop_audio = False, None, None, False
     for line in sys.stdin:
         word, _, rest = line.strip().partition(" ")
         if word == "done":
@@ -107,6 +113,8 @@ def guard_main() -> int:
             call_path = rest
         elif word == "hook":
             hook_group = int(rest)
+        elif word == "desktop-audio":
+            desktop_audio = True
     if hook_group is not None:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(hook_group, signal.SIGKILL)
@@ -117,6 +125,8 @@ def guard_main() -> int:
     tel.dialled = True
     tel.test_call_path = call_path
     tel.hang_up_test_call()
+    if desktop_audio:
+        reject_desktop_audio(tel)
     return EXIT_OK if rp.report_remaining(tel.remaining_calls()) else EXIT_CALL_REMAINS
 
 
@@ -175,21 +185,71 @@ def describe_status(status: int) -> str:
     return f"exited with status {status}"
 
 
+# ------------------------------------------------------------------ audio
+
+
+def set_reject_sco(tel: rp.Telephony, gateway: str, value: bool) -> None:
+    rp.set_property(
+        tel.session, rp.TELEPHONY, gateway, rp.TRANSPORT_IF, "RejectSCO", dbus.Boolean(value)
+    )
+    log("AUDIO", f"Set RejectSCO={str(value).lower()}")
+
+
+def reject_desktop_audio(tel: rp.Telephony) -> None:
+    """Set RejectSCO back to true, so the next Call's audio stays on the Phone."""
+    try:
+        gateway = tel.audio_gateway()
+        if gateway is None:
+            log("AUDIO", "no AudioGateway to set RejectSCO=true on")
+            return
+        set_reject_sco(tel, gateway, True)
+    except dbus.DBusException as e:
+        log("AUDIO", f"could not set RejectSCO=true: {e.get_dbus_name()}")
+
+
+class TransportLog:
+    """Logs each change of the transport's State and Codec, read with Get."""
+
+    def __init__(self, tel: rp.Telephony, gateway: str) -> None:
+        self.tel, self.gateway, self.last = tel, gateway, None
+
+    def poll(self) -> None:
+        values = tuple(
+            rp.call(self.tel.session, rp.TELEPHONY, self.gateway, rp.PROPERTIES_IF, "Get",
+                    rp.TRANSPORT_IF, name, signature="ss")
+            for name in ("State", "Codec", "RejectSCO")
+        )
+        if values != self.last:
+            self.last = values
+            log("AUDIO", f"transport State={values[0]} Codec={values[1]} RejectSCO={values[2]}")
+
+
 # ------------------------------------------------------------------ main
 
 
-def place_test_call(tel: rp.Telephony, gateway: str, guard: Guard) -> str:
+def place_test_call(
+    tel: rp.Telephony, gateway: str, guard: Guard, transport: TransportLog | None
+) -> str:
     """Dial the Test Number and wait until the Call is active. Returns its path."""
+
+    def appeared() -> bool:
+        if transport is not None:
+            transport.poll()
+        return tel.find_test_call() is not None
+
     log("DIAL", "AudioGateway1.Dial(<TEST_NUMBER>)")
     guard.tell("dialled")
     tel.dial_test_number(gateway)
-    if not tel.wait_for(lambda: tel.find_test_call() is not None, 15, "the Call appeared"):
+    log("DIAL", "Dial returned")
+    if not tel.wait_for(appeared, 15, "the Call appeared"):
         raise TestCallFailed("no Call appeared within 15 s of dialling")
     assert tel.test_call_path is not None
     guard.tell(f"call {tel.test_call_path}")
     state = {"last": ""}
 
     def active() -> bool:
+        if transport is not None:
+            transport.poll()
         found = tel.find_test_call()
         current = found[1].get("State", "") if found else "gone"
         if current != state["last"]:
@@ -232,8 +292,15 @@ def run(args: argparse.Namespace) -> int:
     guard = Guard()
     hook: Hook | None = None
     outcome = EXIT_FAILED
+    transport = TransportLog(tel, gateway) if args.desktop_audio else None
     try:
-        call_path = place_test_call(tel, gateway, guard)
+        if transport is not None:
+            guard.tell("desktop-audio")
+            transport.poll()
+            set_reject_sco(tel, gateway, False)
+        call_path = place_test_call(tel, gateway, guard, transport)
+        if transport is not None:
+            transport.poll()
         if args.hook:
             hook = Hook(args.hook, {
                 "DESKTOP_CALLS_AUDIO_GATEWAY": gateway,
@@ -248,7 +315,11 @@ def run(args: argparse.Namespace) -> int:
                 log("HOOK", describe_status(status))
                 outcome = EXIT_OK if status == 0 else EXIT_FAILED
         else:
-            time.sleep(args.hold)
+            held_until = time.monotonic() + args.hold
+            while time.monotonic() < held_until:
+                if transport is not None:
+                    transport.poll()
+                time.sleep(0.1)
             outcome = EXIT_OK
     except rp.Interrupted as e:
         log("STOP", f"{e}: hanging up")
@@ -262,6 +333,8 @@ def run(args: argparse.Namespace) -> int:
             if hook is not None:
                 hook.stop()
             tel.hang_up_test_call()
+            if transport is not None:
+                reject_desktop_audio(tel)
             no_call_remains = rp.report_remaining(tel.remaining_calls())
             guard.done()
     if not no_call_remains:
@@ -281,6 +354,8 @@ def main() -> int:
                         help="seconds to stay in the Call when there is no hook (default 2)")
     parser.add_argument("--max-seconds", type=float, default=60.0,
                         help="stop the hook after this many seconds (default 60)")
+    parser.add_argument("--desktop-audio", action="store_true",
+                        help="set RejectSCO=false before dialling and log the transport")
     parser.add_argument("--phone-address", help="the Phone's Bluetooth address, if several")
     args = parser.parse_args()
     try:

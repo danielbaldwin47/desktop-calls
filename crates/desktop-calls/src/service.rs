@@ -14,10 +14,11 @@ use desktop_calls_core::{Effect, Input, State, messages, step};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::select;
+use futures_util::stream;
 use glib::MainContext;
 use zbus::Connection;
 
-use crate::control::{Publisher, ShownSurfaces};
+use crate::control::{DialRequest, Publisher, ShownSurfaces};
 use crate::glib_runtime::GlibRuntime;
 use crate::logging::{self, EventKind};
 use crate::phone_link::Command;
@@ -108,7 +109,8 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .await
         .map_err(|error| raw_failure(Failure::SystemBusUnreachable, &error))?;
     let (input_sender, inputs) = unbounded();
-    let publisher = Publisher::serve(&session, input_sender.clone())
+    let (dial_sender, dials) = unbounded();
+    let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
         .await
         .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
 
@@ -127,6 +129,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     context.spawn_local(publish_surfaces(reports, publisher.clone()));
     context.spawn_local(decide(
         inputs,
+        dials,
         Shell {
             inputs: input_sender,
             commands: command_sender,
@@ -272,11 +275,28 @@ impl Shell {
 }
 
 /// Feeds every input to the Call state machine, carries out its effects,
-/// renders the surfaces and publishes the new state.
-async fn decide(mut inputs: UnboundedReceiver<Input>, mut shell: Shell) {
+/// renders the surfaces and publishes the new state. A Dial request's
+/// verdict is the failure its step reports, if any.
+async fn decide(
+    inputs: UnboundedReceiver<Input>,
+    dials: UnboundedReceiver<DialRequest>,
+    mut shell: Shell,
+) {
+    let mut inputs = stream::select(
+        inputs.map(|input| (input, None)),
+        dials.map(|(number, verdict)| (Input::Dial(number), Some(verdict))),
+    );
     let mut state = State::default();
-    while let Some(input) = inputs.next().await {
+    while let Some((input, verdict)) = inputs.next().await {
         let (next, effects) = step(state.clone(), input);
+        if let Some(verdict) = verdict {
+            let refusal = effects.iter().find_map(|effect| match effect {
+                Effect::ReportError(failure) => Some(*failure),
+                _ => None,
+            });
+            // The caller may have given up waiting; nothing is lost.
+            let _ = verdict.send(refusal);
+        }
         shell.carry_out(effects).await;
         if next.connection_state() != state.connection_state() {
             tracing::info!(

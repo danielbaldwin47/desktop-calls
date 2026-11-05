@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use desktop_calls_core::messages::{self, Failure};
 use desktop_calls_core::{CallId, Caller, ContactsState, Input, State};
 use futures_channel::mpsc::UnboundedSender;
+use futures_channel::oneshot;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, DBusError, interface};
 
@@ -23,6 +24,11 @@ pub const ERROR_PREFIX: &str = "io.github.danielbaldwin47.DesktopCalls1.Error.";
 /// `"call-window"`), as the surfaces report it.
 pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
 
+/// A request to Call a number or `tel:` link, as the user gave it, with
+/// where the verdict goes: the failure that refused it, or `None` once the
+/// Phone has been asked to dial.
+pub type DialRequest = (String, oneshot::Sender<Option<Failure>>);
+
 /// A request the Desktop refuses, as the D-Bus error a method returns: the
 /// failure kind as the error name, and the Messages sentence.
 #[derive(Debug, DBusError)]
@@ -31,6 +37,8 @@ pub enum Refused {
     NoLiveCall(String),
     MuteUnavailable(String),
     InvalidTones(String),
+    /// A Call the user asked to place wasn't; the sentence says why.
+    CallNotPlaced(String),
     Failed(String),
 }
 
@@ -41,6 +49,17 @@ impl From<Failure> for Refused {
             Failure::NoLiveCall => Self::NoLiveCall(text),
             Failure::MuteUnavailable => Self::MuteUnavailable(text),
             Failure::InvalidTones => Self::InvalidTones(text),
+            Failure::Undialable
+            | Failure::PhoneNotSetUp
+            | Failure::PhoneConnecting
+            | Failure::PhoneOutOfRange
+            | Failure::CallInProgress
+            | Failure::NumberRefused
+            | Failure::PhoneBusy
+            | Failure::DialNotSupported
+            | Failure::NoSignal
+            | Failure::NetworkError
+            | Failure::DialFailed => Self::CallNotPlaced(text),
             _ => Self::Failed(text),
         }
     }
@@ -51,6 +70,7 @@ pub struct ControlInterface {
     state: State,
     surfaces: ShownSurfaces,
     intents: UnboundedSender<Input>,
+    dials: UnboundedSender<DialRequest>,
 }
 
 #[interface(interface = "io.github.danielbaldwin47.DesktopCalls1")]
@@ -204,6 +224,21 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::HangUp(CallId(call)));
     }
 
+    /// Calls `number`, a number as typed or a `tel:` link, with the audio on
+    /// the Desktop. Replies once the Phone has been asked to dial, or with
+    /// `Error.CallNotPlaced` and the sentence to show if the Call can't be
+    /// placed now. Failures the Phone reports later go to the Call Window and
+    /// the `Error` signal.
+    async fn dial(&self, number: String) -> Result<(), Refused> {
+        let (verdict, refusal) = oneshot::channel();
+        // The decide loop only stops with the service.
+        let _ = self.dials.unbounded_send((number, verdict));
+        match refusal.await {
+            Ok(Some(failure)) => Err(failure.into()),
+            Ok(None) | Err(oneshot::Canceled) => Ok(()),
+        }
+    }
+
     /// Mutes (`true`) or unmutes the Desktop's microphone. Mute works only
     /// while the Call's audio is on the Desktop; otherwise this fails with
     /// the reason.
@@ -286,16 +321,18 @@ pub struct Publisher {
 
 impl Publisher {
     /// Serves the control interface on `session`, sending its intents to
-    /// `intents`, and claims its bus name.
+    /// `intents` and its Dial requests to `dials`, and claims its bus name.
     pub async fn serve(
         session: &Connection,
         intents: UnboundedSender<Input>,
+        dials: UnboundedSender<DialRequest>,
     ) -> zbus::Result<Self> {
         let server = session.object_server();
         let control = ControlInterface {
             state: State::default(),
             surfaces: ShownSurfaces::new(),
             intents,
+            dials,
         };
         server.at(PATH, control).await?;
         let interface = server.interface::<_, ControlInterface>(PATH).await?;

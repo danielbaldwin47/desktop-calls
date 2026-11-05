@@ -6,11 +6,17 @@ use crate::call::{
 };
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
-use crate::matching::ContactMatch;
+use crate::matching::{self, ContactMatch};
 use crate::messages::{Failure, ProblemKind};
 
 /// How long the Call Window shows "Call ended" before it closes.
 const CALL_ENDED_MS: u32 = 2_000;
+/// How long a refusal or failure of a Call placed here stays on the Call
+/// Window: long enough to read a sentence.
+const NOTICE_MS: u32 = 6_000;
+/// How long the Phone may take to report a Call it was asked to dial. The
+/// Pixel's took under a second.
+const DIAL_TIMEOUT_MS: u32 = 15_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -58,6 +64,12 @@ pub enum Input {
     Decline(CallId),
     /// The user asked to hang up this Call.
     HangUp(CallId),
+    /// The user asked to Call this number or `tel:` link, as typed.
+    Dial(String),
+    /// The user hung up the Call they placed before the Phone reported it.
+    CancelDial,
+    /// The Phone refused to dial.
+    DialFailed(PhoneRefusal),
     /// The user asked to mute (`true`) or unmute the Desktop's microphone.
     SetMuted(bool),
     /// The user typed or pasted these keypad tones.
@@ -100,6 +112,10 @@ pub enum PhoneCommand {
     HangUp(CallId),
     /// Bring the live Call's audio to the Desktop.
     MoveAudioToDesktop,
+    /// Let the Phone bring the next Call's audio to the Desktop.
+    AllowAudioOnDesktop,
+    /// Place a Call to this number, already checked as dialable.
+    Dial(String),
     /// Keep the next Call's audio on the Phone unless the Desktop asks for it.
     KeepAudioOnPhone,
     /// Set the hands-free microphone gain: 0 mutes.
@@ -109,11 +125,36 @@ pub enum PhoneCommand {
     SendTones(String),
 }
 
+/// Why the Phone refused to dial, as its Telephony service reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhoneRefusal {
+    /// The Phone can't dial the number.
+    InvalidFormat,
+    /// The Phone's Calls are in a state that doesn't allow dialling.
+    InvalidState,
+    /// The Phone is busy with another command.
+    InProgress,
+    /// The Phone doesn't support dialling from the Desktop.
+    NotSupported,
+    /// No mobile network: no service, or emergency calls only.
+    NoNetwork,
+    /// The mobile network timed out.
+    NetworkTimeout,
+    /// Any other failure, or none given.
+    Failed,
+}
+
 /// A timer the state machine can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Timer {
     /// Close the Call Window that shows this ended Call.
     CloseCallWindow(CallId),
+    /// Take down what the Call Window shows of the dial attempt with this
+    /// number: its refusal or failure, or "Call ended" once the user hung
+    /// up.
+    DismissDial(u32),
+    /// Give up on the Phone reporting the Call of this dial attempt.
+    DialTimedOut(u32),
 }
 
 /// Something the shell adapters must do.
@@ -165,11 +206,15 @@ pub struct BannerView {
 /// The Call Window's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallWindowView {
-    pub call: CallId,
+    /// The Call shown, or `None` for a Call placed here that the Phone
+    /// hasn't reported yet, or couldn't place.
+    pub call: Option<CallId>,
     pub caller: Caller,
     /// The Contact the other party is, if Contacts say.
     pub contact: Option<ContactMatch>,
     pub phase: CallWindowPhase,
+    /// A failure to explain beside the Call.
+    pub notice: Option<Failure>,
     /// The Call Window has keyboard focus.
     pub focused: bool,
 }
@@ -177,8 +222,14 @@ pub struct CallWindowView {
 /// Where the Call in the Call Window is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallWindowPhase {
-    /// Answered or placed, and not yet connected.
+    /// Answered here, and not yet connected.
     Connecting,
+    /// Placed here, and the other end isn't ringing yet.
+    Calling,
+    /// Placed here, and ringing at the other end.
+    Ringing,
+    /// Placing it failed; the notice says why, and the window closes shortly.
+    NotPlaced,
     /// Connected: the timer runs from `active_since`.
     Live {
         active_since: Timestamp,
@@ -240,6 +291,33 @@ struct EndedCall {
     caller: Caller,
 }
 
+/// A Call the user placed here that the Phone hasn't reported yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Dialling {
+    number: String,
+    attempt: u32,
+    /// The user hung up already; the Call is hung up as soon as it appears.
+    cancelled: bool,
+}
+
+/// A dial attempt the user hung up before the Phone reported its Call: the
+/// Call Window shows "Call ended" for it for a while.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HungUpDial {
+    attempt: u32,
+    caller: Caller,
+}
+
+/// A failure of a dial attempt, shown on the Call Window for a while.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Notice {
+    failure: Failure,
+    attempt: u32,
+    /// Who the user tried to Call, when no other Call is in the window: the
+    /// window then shows this attempt as not placed.
+    not_placed: Option<Caller>,
+}
+
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -255,6 +333,14 @@ pub struct State {
     /// The codec the Desktop's audio negotiated during the current Calls.
     codec: Option<Codec>,
     ended: Option<EndedCall>,
+    dialling: Option<Dialling>,
+    notice: Option<Notice>,
+    hung_up_dial: Option<HungUpDial>,
+    /// The Call of a dial the user hung up first: never shown, and hung up
+    /// as soon as it appeared.
+    unwanted: Option<CallId>,
+    /// How many times the user has asked to dial.
+    dial_attempts: u32,
     /// The Phone's latest report of its hands-free microphone gain.
     microphone_volume: Option<u8>,
     muting: Muting,
@@ -387,31 +473,79 @@ impl State {
                 focused: self.focus == Focus::Banner,
                 contact: self.contact(&call.caller),
             });
+        // A refusal made beside a Call annotates it; a dial that failed on
+        // its own has a Call Window of its own.
+        let notice = self
+            .notice
+            .as_ref()
+            .filter(|notice| notice.not_placed.is_none())
+            .map(|notice| notice.failure);
         let call_window = self
             .calls
             .iter()
-            .find(|call| call.has_call_window())
+            .find(|call| call.has_call_window() && self.unwanted != Some(call.id))
             .map(|call| CallWindowView {
-                call: call.id,
+                call: Some(call.id),
                 caller: call.caller.clone(),
                 contact: self.contact(&call.caller),
-                phase: match call.active_since {
-                    Some(active_since) if call.state.is_connected() => CallWindowPhase::Live {
+                phase: match (call.active_since, call.state) {
+                    (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
                         active_since,
                         audio_location: self.audio_location().unwrap_or(AudioLocation::Phone),
                         wideband: self.codec.is_some_and(Codec::is_wideband),
                         mute: self.mute(),
                     },
+                    (_, CallState::Dialing) => CallWindowPhase::Calling,
+                    (_, CallState::Alerting) => CallWindowPhase::Ringing,
                     _ => CallWindowPhase::Connecting,
                 },
+                notice,
                 focused: self.focus == Focus::CallWindow,
             })
             .or_else(|| {
+                let dialling = self
+                    .dialling
+                    .as_ref()
+                    .filter(|dialling| !dialling.cancelled)?;
+                let caller = Caller::Number(dialling.number.clone());
+                Some(CallWindowView {
+                    call: None,
+                    contact: self.contact(&caller),
+                    caller,
+                    phase: CallWindowPhase::Calling,
+                    notice,
+                    focused: self.focus == Focus::CallWindow,
+                })
+            })
+            .or_else(|| {
+                self.hung_up_dial.as_ref().map(|hung_up| CallWindowView {
+                    call: None,
+                    caller: hung_up.caller.clone(),
+                    contact: self.contact(&hung_up.caller),
+                    phase: CallWindowPhase::Ended,
+                    notice: None,
+                    focused: self.focus == Focus::CallWindow,
+                })
+            })
+            .or_else(|| {
+                let notice = self.notice.as_ref()?;
+                let caller = notice.not_placed.clone()?;
+                Some(CallWindowView {
+                    call: None,
+                    contact: self.contact(&caller),
+                    caller,
+                    phase: CallWindowPhase::NotPlaced,
+                    notice: Some(notice.failure),
+                    focused: self.focus == Focus::CallWindow,
+                })
+            })
+            .or_else(|| {
                 self.ended.as_ref().map(|ended| CallWindowView {
-                    call: ended.id,
+                    call: Some(ended.id),
                     caller: ended.caller.clone(),
                     contact: self.contact(&ended.caller),
                     phase: CallWindowPhase::Ended,
+                    notice: None,
                     focused: self.focus == Focus::CallWindow,
                 })
             });
@@ -585,6 +719,24 @@ fn phone_disconnected(state: &mut State) {
     }
 }
 
+/// The Phone reported `call`, unless it already had.
+fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
+    if state.calls.iter().any(|known| known.id == call.id) {
+        return;
+    }
+    if state
+        .ended
+        .as_ref()
+        .is_some_and(|ended| ended.id == call.id)
+    {
+        state.ended = None;
+    }
+    if call.direction == Direction::Outgoing {
+        adopt_dialled(state, &mut call, effects);
+    }
+    state.calls.push(call);
+}
+
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
     match input {
@@ -604,6 +756,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         }
         Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
             phone_disconnected(&mut state);
+            dial_failed(&mut state, Failure::PhoneOutOfRange, &mut effects);
         }
         Input::CallAdded {
             call,
@@ -611,19 +764,15 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             caller,
             at,
         } => {
-            if state.calls.iter().all(|known| known.id != call) {
-                if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
-                    state.ended = None;
-                }
-                state.calls.push(Call {
-                    id: call,
-                    direction: Direction::from_first_state(call_state),
-                    state: call_state,
-                    caller,
-                    active_since: call_state.is_connected().then_some(at),
-                    request: Request::None,
-                });
-            }
+            let call = Call {
+                id: call,
+                direction: Direction::from_first_state(call_state),
+                state: call_state,
+                caller,
+                active_since: call_state.is_connected().then_some(at),
+                request: Request::None,
+            };
+            call_added(&mut state, call, &mut effects);
         }
         Input::CallChanged {
             call,
@@ -669,21 +818,199 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::Answer(call) => answer(&mut state, call, &mut effects),
         Input::Decline(call) => decline(&mut state, call, &mut effects),
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
+        Input::Dial(text) => dial(&mut state, &text, &mut effects),
+        Input::CancelDial => cancel_dial(&mut state, &mut effects),
+        Input::DialFailed(refusal) => {
+            dial_failed(&mut state, refusal_failure(refusal), &mut effects);
+        }
+        Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
         Input::Activate => activate(&mut state, &mut effects),
         Input::ReleaseFocus => state.focus = Focus::None,
         Input::PhoneCommandDone(command) => command_done(&mut state, &command),
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
-        Input::TimerFired(Timer::CloseCallWindow(call)) => {
-            if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
-                state.ended = None;
-            }
-        }
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+/// Places a Call to `text`, a number or a `tel:` link, unless it can't be
+/// dialled or placed now. A Call placed here has its audio on the Desktop,
+/// so the Phone may bring the audio here before it dials.
+fn dial(state: &mut State, text: &str, effects: &mut Vec<Effect>) {
+    state.dial_attempts += 1;
+    let attempt = state.dial_attempts;
+    let Some(number) = matching::dialable(text) else {
+        let caller = Caller::Number(text.trim().to_owned());
+        refuse(state, Failure::Undialable, attempt, caller, effects);
+        return;
+    };
+    let refusal = match state.connection {
+        ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
+        ConnectionState::Connecting => Some(Failure::PhoneConnecting),
+        ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+        ConnectionState::Connected if !state.calls.is_empty() || state.dialling.is_some() => {
+            Some(Failure::CallInProgress)
+        }
+        ConnectionState::Connected => None,
+    };
+    if let Some(failure) = refusal {
+        refuse(state, failure, attempt, Caller::Number(number), effects);
+        return;
+    }
+    state.ended = None;
+    state.notice = None;
+    state.hung_up_dial = None;
+    state.dialling = Some(Dialling {
+        number: number.clone(),
+        attempt,
+        cancelled: false,
+    });
+    effects.push(Effect::Phone(PhoneCommand::AllowAudioOnDesktop));
+    effects.push(Effect::Phone(PhoneCommand::Dial(number)));
+    effects.push(Effect::StartTimer {
+        timer: Timer::DialTimedOut(attempt),
+        after_ms: DIAL_TIMEOUT_MS,
+    });
+}
+
+/// The first outgoing Call after a dial is the one dialled: it takes the
+/// dialled number if the Phone withholds it, and is hung up at once if the
+/// user hung up first.
+fn adopt_dialled(state: &mut State, call: &mut Call, effects: &mut Vec<Effect>) {
+    let Some(dialling) = state.dialling.take() else {
+        return;
+    };
+    if call.caller == Caller::Withheld {
+        call.caller = Caller::Number(dialling.number);
+    }
+    if dialling.cancelled {
+        call.request = Request::HangUp;
+        state.unwanted = Some(call.id);
+        effects.push(Effect::Phone(PhoneCommand::HangUp(call.id)));
+    }
+}
+
+fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
+    match timer {
+        Timer::DismissDial(attempt) => {
+            if state
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.attempt == attempt)
+            {
+                state.notice = None;
+            }
+            if state
+                .hung_up_dial
+                .as_ref()
+                .is_some_and(|hung_up| hung_up.attempt == attempt)
+            {
+                state.hung_up_dial = None;
+            }
+        }
+        Timer::DialTimedOut(attempt) => {
+            if state
+                .dialling
+                .as_ref()
+                .is_some_and(|dialling| dialling.attempt == attempt)
+            {
+                dial_failed(state, Failure::DialFailed, effects);
+            }
+        }
+        Timer::CloseCallWindow(call) => {
+            if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
+                state.ended = None;
+            }
+        }
+    }
+}
+
+/// The user hung up the Call they placed before the Phone reported it: the
+/// Call Window says "Call ended", and the Call is hung up when it appears.
+fn cancel_dial(state: &mut State, effects: &mut Vec<Effect>) {
+    let Some(dialling) = state
+        .dialling
+        .as_mut()
+        .filter(|dialling| !dialling.cancelled)
+    else {
+        return;
+    };
+    dialling.cancelled = true;
+    let attempt = dialling.attempt;
+    state.hung_up_dial = Some(HungUpDial {
+        attempt,
+        caller: Caller::Number(dialling.number.clone()),
+    });
+    effects.push(Effect::StartTimer {
+        timer: Timer::DismissDial(attempt),
+        after_ms: CALL_ENDED_MS,
+    });
+}
+
+/// Refuses dial attempt `attempt` to `caller`. With no other Call in the
+/// Call Window, the window shows the attempt as not placed; otherwise the
+/// refusal is a note beside that Call.
+fn refuse(
+    state: &mut State,
+    failure: Failure,
+    attempt: u32,
+    caller: Caller,
+    effects: &mut Vec<Effect>,
+) {
+    let alone = state.calls.is_empty() && state.dialling.is_none();
+    if alone {
+        state.ended = None;
+        state.hung_up_dial = None;
+    }
+    notify(state, failure, attempt, alone.then_some(caller), effects);
+}
+
+/// The pending dial is over without a Call: say why, unless the user hung
+/// up already, and keep the next Call's audio on the Phone.
+fn dial_failed(state: &mut State, failure: Failure, effects: &mut Vec<Effect>) {
+    let Some(dialling) = state.dialling.take() else {
+        return;
+    };
+    if !dialling.cancelled {
+        let caller = Caller::Number(dialling.number);
+        notify(state, failure, dialling.attempt, Some(caller), effects);
+    }
+    if !state.has_desktop_audio() {
+        effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
+fn notify(
+    state: &mut State,
+    failure: Failure,
+    attempt: u32,
+    not_placed: Option<Caller>,
+    effects: &mut Vec<Effect>,
+) {
+    state.notice = Some(Notice {
+        failure,
+        attempt,
+        not_placed,
+    });
+    effects.push(Effect::ReportError(failure));
+    effects.push(Effect::StartTimer {
+        timer: Timer::DismissDial(attempt),
+        after_ms: NOTICE_MS,
+    });
+}
+
+fn refusal_failure(refusal: PhoneRefusal) -> Failure {
+    match refusal {
+        PhoneRefusal::InvalidFormat => Failure::NumberRefused,
+        PhoneRefusal::InvalidState | PhoneRefusal::InProgress => Failure::PhoneBusy,
+        PhoneRefusal::NotSupported => Failure::DialNotSupported,
+        PhoneRefusal::NoNetwork => Failure::NoSignal,
+        PhoneRefusal::NetworkTimeout => Failure::NetworkError,
+        PhoneRefusal::Failed => Failure::DialFailed,
+    }
 }
 
 /// The keypad tones in `typed`: digits, `*` and `#`, leaving out the
@@ -775,10 +1102,12 @@ fn activate(state: &mut State, effects: &mut Vec<Effect>) {
     let surfaces = state.surfaces();
     if surfaces.banner.is_some() {
         state.focus = Focus::Banner;
-    } else if surfaces
-        .call_window
-        .is_some_and(|window| window.phase != CallWindowPhase::Ended)
-    {
+    } else if surfaces.call_window.is_some_and(|window| {
+        !matches!(
+            window.phase,
+            CallWindowPhase::Ended | CallWindowPhase::NotPlaced
+        )
+    }) {
         state.focus = Focus::CallWindow;
     } else {
         // The Dialer opens here once it exists (ticket #11).
@@ -831,7 +1160,9 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         return;
     };
     let ended = state.calls.remove(index);
-    if ended.has_call_window() {
+    if state.unwanted == Some(call) {
+        state.unwanted = None;
+    } else if ended.has_call_window() {
         state.ended = Some(EndedCall {
             id: ended.id,
             caller: ended.caller,
@@ -870,6 +1201,10 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
         }
         PhoneCommand::MoveAudioToDesktop => {
             effects.push(Effect::ReportError(Failure::AudioNotMoved));
+        }
+        // Without these the Phone never dialled.
+        PhoneCommand::AllowAudioOnDesktop | PhoneCommand::Dial(_) => {
+            dial_failed(state, Failure::DialFailed, effects);
         }
         // The shell has logged it; the next Call end or connect tries again.
         // The Phone is there all the same, so it shows as connected.

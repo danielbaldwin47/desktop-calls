@@ -2,7 +2,7 @@
 
 use super::{SharedReport, Surface, Who, detail_label, has_command_modifier};
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{BannerView, CallId, Input};
+use desktop_calls_core::{BannerView, CallId, Input, RingingCaller};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -84,13 +84,12 @@ impl Banner {
             self.surface.hide();
             return;
         };
-        let who = if view.awaiting_number {
-            Who {
+        let who = match &view.caller {
+            RingingCaller::Identifying => Who {
                 caller: messages::label(Label::IdentifyingCaller).to_owned(),
                 detail: None,
-            }
-        } else {
-            Who::of(&view.caller, view.contact.as_ref())
+            },
+            RingingCaller::Known { caller, contact } => Who::of(caller, contact.as_ref()),
         };
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);

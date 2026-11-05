@@ -31,7 +31,8 @@ pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorVie
 pub use machine::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, ConnectFailure, DialProgress,
     DialerView, Effect, Input, Mute, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
-    SetupNotice, SetupStep, SetupWindowView, State, Surfaces, Timer, keypad_tones, step,
+    RingingCaller, SetupNotice, SetupStep, SetupWindowView, State, Surfaces, Timer, keypad_tones,
+    step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

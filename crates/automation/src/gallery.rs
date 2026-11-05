@@ -280,9 +280,7 @@ const STATES: &[State] = &[
             });
         },
         // Hang up is dimmed once the Call has ended.
-        shown: |screenshot, look| {
-            !shows(screenshot, look.red()) && app_region(screenshot).is_some()
-        },
+        shown: dimmed,
     },
     State {
         name: "call-waiting-banner",
@@ -329,7 +327,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-connection-lost",
-        title: "The Call Window, after the audio went to the phone and hands-free didn't come back",
+        title: "The Call Window, after the audio went to the phone and hands-free didn't come back: Hang up says to hang up on the phone, and nothing is red",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -355,7 +353,7 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+        shown: |screenshot, look| dimmed(screenshot, look) && !shows(screenshot, look.green()),
     },
     State {
         name: "call-window-calling",
@@ -396,9 +394,7 @@ const STATES: &[State] = &[
             wait_for_status(harness, "Call not placed");
         },
         // Hang up is dimmed: there is no Call to hang up.
-        shown: |screenshot, look| {
-            !shows(screenshot, look.red()) && app_region(screenshot).is_some()
-        },
+        shown: dimmed,
     },
     State {
         name: "dialer-call-history",
@@ -784,6 +780,11 @@ fn held(harness: &Harness) {
 
 fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
+}
+
+/// Whether a surface is on screen with no red: Hang up is dimmed.
+fn dimmed(screenshot: &Screenshot, look: Look) -> bool {
+    app_region(screenshot).is_some() && !shows(screenshot, look.red())
 }
 
 /// Whether `colour`, give or take antialiasing, is on screen.

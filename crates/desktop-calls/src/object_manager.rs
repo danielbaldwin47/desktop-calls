@@ -245,6 +245,12 @@ impl Lister<'_> {
     async fn list(&self, manager: &ObjectManagerProxy<'_>) -> Result<(), WatchError> {
         match manager.get_managed_objects().await {
             Ok(objects) => {
+                // D-Bus replies carry a dictionary, which comes out in no
+                // order a run can rely on. Sorted by path, the Phone
+                // followed with two paired and none chosen is the same each
+                // run.
+                let mut objects: Vec<_> = objects.into_iter().collect();
+                objects.sort_by(|(first, _), (second, _)| first.as_str().cmp(second.as_str()));
                 for (path, interfaces) in objects {
                     let interfaces = interfaces
                         .into_iter()

@@ -36,6 +36,7 @@ pub(super) struct CallWindow {
     mute_label: gtk::Label,
     keypad_shown: gtk::ToggleButton,
     hang_up: gtk::Button,
+    hang_up_label: gtk::Label,
     /// The other Call, on hold, with Swap.
     held: HeldRow,
     /// Why a Call placed here failed or was refused.
@@ -47,8 +48,9 @@ pub(super) struct CallWindow {
     /// Where keypad tones are typed or pasted, and which shows those sent.
     tones: gtk::Entry,
     keypad: gtk::Grid,
-    /// Each shortcut as the window shows it, by the action's report key.
-    shortcuts: BTreeMap<String, String>,
+    /// Each shortcut as the window shows it, by the action's report key,
+    /// with the hint that shows it on its button.
+    shortcuts: BTreeMap<String, (String, Option<gtk::Widget>)>,
     /// Set while the window writes the tones it sent into `tones`, so the
     /// write isn't taken for typing.
     writing_tones: Cell<bool>,
@@ -77,36 +79,27 @@ impl CallWindow {
         status.set_xalign(0.0);
         let mut shortcuts = BTreeMap::new();
         let audio = AudioRow::new();
-        shortcuts.insert("handoff-shortcut".to_owned(), audio.shortcut.clone());
+        shortcuts.insert(
+            "handoff-shortcut".to_owned(),
+            (audio.shortcut.clone(), hint(&audio.handoff_label)),
+        );
         let mute = gtk::Button::new();
         mute.add_css_class("mute");
         let mute_label = gtk::Label::new(Some(messages::label(Label::Mute)));
-        shortcuts.insert(
-            "mute-shortcut".to_owned(),
-            show_shortcut(&mute, &mute_label, MUTE_SHORTCUT),
-        );
+        let shown = show_shortcut(&mute, &mute_label, MUTE_SHORTCUT);
+        shortcuts.insert("mute-shortcut".to_owned(), (shown, hint(&mute_label)));
         let keypad_shown = gtk::ToggleButton::new();
-        shortcuts.insert(
-            "keypad-shortcut".to_owned(),
-            show_shortcut(
-                &keypad_shown,
-                &gtk::Label::new(Some(messages::label(Label::Keypad))),
-                KEYPAD_SHORTCUT,
-            ),
-        );
+        let keypad_label = gtk::Label::new(Some(messages::label(Label::Keypad)));
+        let shown = show_shortcut(&keypad_shown, &keypad_label, KEYPAD_SHORTCUT);
+        shortcuts.insert("keypad-shortcut".to_owned(), (shown, hint(&keypad_label)));
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         controls.set_homogeneous(true);
         controls.append(&mute);
         controls.append(&keypad_shown);
         let hang_up = hang_up_button(&surface, intents);
-        shortcuts.insert(
-            "hang-up-shortcut".to_owned(),
-            show_shortcut(
-                &hang_up,
-                &gtk::Label::new(Some(messages::label(Label::HangUp))),
-                HANG_UP_SHORTCUT,
-            ),
-        );
+        let hang_up_label = gtk::Label::new(Some(messages::label(Label::HangUp)));
+        let shown = show_shortcut(&hang_up, &hang_up_label, HANG_UP_SHORTCUT);
+        shortcuts.insert("hang-up-shortcut".to_owned(), (shown, hint(&hang_up_label)));
 
         let held = HeldRow::new(intents);
         let notice = notice_label();
@@ -151,6 +144,7 @@ impl CallWindow {
             mute_label,
             keypad_shown,
             hang_up,
+            hang_up_label,
             held,
             notice,
             microphone_muted,
@@ -228,8 +222,11 @@ impl CallWindow {
         ];
         for (accelerator, control) in actions {
             // Disabled controls ignore it, and the key is still taken.
+            // `activate` would press a greyed-out button anyway.
             let action = gtk::CallbackAction::new(move |_, _| {
-                control.activate();
+                if control.is_sensitive() {
+                    control.activate();
+                }
                 glib::Propagation::Stop
             });
             shortcuts.add_shortcut(gtk::Shortcut::new(
@@ -443,6 +440,32 @@ fn mute_notices() -> (gtk::Label, gtk::Label) {
     (microphone_muted, mute_unavailable)
 }
 
+/// Adds what Mute and its notices show for `mute`, with Mute saying
+/// `mute_text`, to `content`.
+fn report_mute(mute: Mute, mute_text: &str, content: &mut BTreeMap<String, String>) {
+    content.insert("mute".to_owned(), mute_text.to_owned());
+    match mute {
+        Mute::On => {
+            content.insert(
+                "muted".to_owned(),
+                messages::label(Label::MicrophoneMuted).to_owned(),
+            );
+        }
+        Mute::Unavailable => {
+            content.insert(
+                "mute-unavailable".to_owned(),
+                messages::failure(Failure::MuteUnavailable).text.to_owned(),
+            );
+        }
+        Mute::Off => {}
+    }
+}
+
+/// The shortcut hint [`show_shortcut`] put beside `text`, right after it.
+fn hint(text: &gtk::Label) -> Option<gtk::Widget> {
+    text.next_sibling()
+}
+
 /// Puts `text` and `accelerator`'s label on `button`, and returns the label
 /// as shown.
 fn show_shortcut(button: &impl IsA<gtk::Button>, text: &gtk::Label, accelerator: &str) -> String {
@@ -536,14 +559,19 @@ impl CallWindow {
         // answer or decline the Waiting Call instead; the held row says so.
         self.hang_up.set_sensitive(
             !view.waiting_first
+                && !view.connection_lost
                 && !matches!(
                     view.phase,
                     CallWindowPhase::Ended | CallWindowPhase::NotPlaced
                 ),
         );
+        let hang_up_on_phone = self.show_hang_up(view.connection_lost);
         let notice = view.notice.map(|failure| messages::failure(failure).text);
         self.notice.set_text(notice.unwrap_or_default());
         self.notice.set_visible(notice.is_some());
+        // With contact lost, nothing in the window works; the notice says
+        // why, without Mute's hint beside it.
+        let mute = mute.filter(|_| !view.connection_lost);
         let mute_text = self.show_controls(mute);
 
         let mut content = BTreeMap::from([("status".to_owned(), status)]);
@@ -554,7 +582,17 @@ impl CallWindow {
             content.insert("notice".to_owned(), notice.to_owned());
         }
         who.report(&mut content);
-        content.extend(self.shortcuts.clone());
+        if let Some(hang_up_on_phone) = hang_up_on_phone {
+            content.insert("hang-up".to_owned(), hang_up_on_phone.to_owned());
+            content.insert("mute".to_owned(), messages::label(Label::Mute).to_owned());
+        }
+        // Each shortcut whose hint is on screen.
+        content.extend(
+            self.shortcuts
+                .iter()
+                .filter(|(_, (_, hint))| hint.as_ref().is_none_or(WidgetExt::is_visible))
+                .map(|(key, (shown, _))| (key.clone(), shown.clone())),
+        );
         if view.waiting_first {
             // Greyed out, Hang up has no shortcut to report.
             content.remove("hang-up-shortcut");
@@ -567,22 +605,7 @@ impl CallWindow {
             content.insert("hd".to_owned(), messages::label(Label::Hd).to_owned());
         }
         if let Some(mute) = mute {
-            content.insert("mute".to_owned(), mute_text.to_owned());
-            match mute {
-                Mute::On => {
-                    content.insert(
-                        "muted".to_owned(),
-                        messages::label(Label::MicrophoneMuted).to_owned(),
-                    );
-                }
-                Mute::Unavailable => {
-                    content.insert(
-                        "mute-unavailable".to_owned(),
-                        messages::failure(Failure::MuteUnavailable).text.to_owned(),
-                    );
-                }
-                Mute::Off => {}
-            }
+            report_mute(mute, mute_text, &mut content);
         }
         if self.keypad_shown.is_active() {
             content.insert("keypad".to_owned(), "shown".to_owned());
@@ -631,6 +654,32 @@ impl CallWindow {
             .handoff
             .set_sensitive(audio.is_some_and(|audio| audio.moving.is_none()));
         label
+    }
+
+    /// Brings Hang up's look up to date: while the Desktop has lost contact
+    /// with the Call, a plain button saying to hang up on the Phone, and no
+    /// control shows a shortcut, as none works. Returns that label then.
+    fn show_hang_up(&self, connection_lost: bool) -> Option<&'static str> {
+        let label = messages::label(if connection_lost {
+            Label::HangUpOnPhone
+        } else {
+            Label::HangUp
+        });
+        self.hang_up_label.set_text(label);
+        for hint in self
+            .shortcuts
+            .values()
+            .filter_map(|(_, hint)| hint.as_ref())
+        {
+            hint.set_visible(!connection_lost);
+        }
+        // Not red: it isn't a Hang up that works.
+        if connection_lost {
+            self.hang_up.remove_css_class("hang-up");
+        } else {
+            self.hang_up.add_css_class("hang-up");
+        }
+        connection_lost.then_some(label)
     }
 
     /// Brings Mute, its notices and the keypad up to date with `mute`, which

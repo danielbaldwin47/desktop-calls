@@ -62,6 +62,8 @@ enum Step {
     /// Hands-free was asked for, alone.
     AskedForHandsFree(Phone),
     PhoneCallsOff(Phone),
+    /// The Phone didn't answer: out of range, or its Bluetooth is off.
+    PhoneUnreachable(Phone),
     Done(Phone),
 }
 
@@ -105,6 +107,8 @@ pub enum SetupStep {
     Connecting { phone: Phone },
     /// The Phone refused hands-free: "Phone calls" is off for the Desktop.
     PhoneCallsOff { phone: Phone },
+    /// The Phone didn't answer: out of range, or its Bluetooth is off.
+    PhoneUnreachable { phone: Phone },
     /// Connected for Calls.
     Done { phone: Phone },
 }
@@ -121,6 +125,7 @@ impl SetupStep {
             Self::Confirmed { .. } => "confirmed",
             Self::Connecting { .. } => "connecting",
             Self::PhoneCallsOff { .. } => "phone-calls-off",
+            Self::PhoneUnreachable { .. } => "phone-unreachable",
             Self::Done { .. } => "done",
         }
     }
@@ -142,7 +147,8 @@ impl Step {
             Self::Confirmed(phone)
             | Self::Connecting(phone)
             | Self::AskedForHandsFree(phone)
-            | Self::PhoneCallsOff(phone) => Some(phone),
+            | Self::PhoneCallsOff(phone)
+            | Self::PhoneUnreachable(phone) => Some(phone),
             _ => None,
         }
     }
@@ -154,7 +160,11 @@ impl State {
         let setup = self.setup.as_ref()?;
         let step = match &setup.step {
             Step::Choose => SetupStep::Choose {
-                phones: self.nearby_phones.clone(),
+                phones: self
+                    .already_paired_to_choose()
+                    .chain(self.nearby_phones.iter())
+                    .cloned()
+                    .collect(),
             },
             Step::Pairing(phone) => SetupStep::Pairing {
                 phone: phone.clone(),
@@ -172,6 +182,9 @@ impl State {
             Step::PhoneCallsOff(phone) => SetupStep::PhoneCallsOff {
                 phone: phone.clone(),
             },
+            Step::PhoneUnreachable(phone) => SetupStep::PhoneUnreachable {
+                phone: phone.clone(),
+            },
             Step::Done(phone) => SetupStep::Done {
                 phone: phone.clone(),
             },
@@ -182,6 +195,13 @@ impl State {
             notice: setup.notice,
             opened: setup.opened,
         })
+    }
+
+    /// The Phones paired already that the Setup Window offers: while no
+    /// Phone is followed, such as when the chosen Phone was unpaired, any of
+    /// them can be chosen without pairing it again.
+    fn already_paired_to_choose(&self) -> impl Iterator<Item = &Phone> {
+        self.paired_phones.iter().filter(|_| self.phone.is_none())
     }
 
     /// Whether the Setup Window is pairing the Phone with `address`.
@@ -236,13 +256,33 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
                 setup.step = Step::PhoneCallsOff(phone.clone());
             }
         }
-        Input::RetryHandsFree => {
+        Input::HandsFreeUnreachable => {
             if let Some(setup) = state.setup.as_mut()
-                && let Step::PhoneCallsOff(phone) = &setup.step
+                && let Step::AskedForHandsFree(phone) = &setup.step
             {
-                let phone = phone.clone();
-                ask_for_hands_free(setup, phone, effects);
+                setup.step = Step::PhoneUnreachable(phone.clone());
             }
+        }
+        Input::RetryHandsFree => retry(state, effects),
+        _ => {}
+    }
+}
+
+/// Try again, from "Phone calls" off or from a Phone that didn't answer:
+/// the first asks for hands-free alone; the second connects the Phone
+/// afresh, as it may be back.
+fn retry(state: &mut State, effects: &mut Vec<Effect>) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    match &setup.step {
+        Step::PhoneCallsOff(phone) => {
+            let phone = phone.clone();
+            ask_for_hands_free(setup, phone, effects);
+        }
+        Step::PhoneUnreachable(phone) => {
+            let phone = phone.clone();
+            paired(state, phone, effects);
         }
         _ => {}
     }
@@ -277,6 +317,25 @@ fn not_nearby(state: &mut State, address: &str) {
 }
 
 fn choose(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
+    if !state
+        .setup
+        .as_ref()
+        .is_some_and(|setup| setup.step == Step::Choose)
+    {
+        return;
+    }
+    // A Phone paired already is followed at once, with nothing to pair.
+    let paired_already = state
+        .already_paired_to_choose()
+        .find(|phone| phone.address.eq_ignore_ascii_case(address))
+        .cloned();
+    if let Some(phone) = paired_already {
+        if let Some(setup) = state.setup.as_mut() {
+            setup.notice = None;
+        }
+        paired(state, phone, effects);
+        return;
+    }
     let Some(phone) = state
         .nearby_phones
         .iter()
@@ -288,9 +347,6 @@ fn choose(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
     let Some(setup) = state.setup.as_mut() else {
         return;
     };
-    if setup.step != Step::Choose {
-        return;
-    }
     setup.notice = None;
     setup.step = Step::Pairing(phone.clone());
     effects.push(Effect::PairPhone {
@@ -307,7 +363,7 @@ fn pairing_code(state: &mut State, phone: Phone, code: u32, effects: &mut Vec<Ef
         return;
     };
     let welcome = match &setup.step {
-        Step::Choose | Step::PhoneCallsOff(_) | Step::Done(_) => true,
+        Step::Choose | Step::PhoneCallsOff(_) | Step::PhoneUnreachable(_) | Step::Done(_) => true,
         Step::Pairing(chosen) => chosen.address.eq_ignore_ascii_case(&phone.address),
         _ => false,
     };
@@ -362,6 +418,18 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
         .phone
         .as_ref()
         .is_some_and(|followed| followed.address.eq_ignore_ascii_case(&phone.address));
+    // The user chose it, so a restart follows it, not the Phone BlueZ lists
+    // first.
+    if !state
+        .chosen_phone
+        .as_ref()
+        .is_some_and(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+    {
+        state.chosen_phone = Some(phone.address.clone());
+        effects.push(Effect::KeepChosenPhone {
+            address: phone.address.clone(),
+        });
+    }
     if !already_followed {
         if state.phone.is_some() {
             switch_away(state, effects);

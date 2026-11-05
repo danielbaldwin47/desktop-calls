@@ -17,6 +17,11 @@ const NOTICE_MS: u32 = 6_000;
 /// How long the Phone may take to report a Call it was asked to dial. The
 /// Pixel's took under a second.
 const DIAL_TIMEOUT_MS: u32 = 15_000;
+/// How long the Phone may take to bring the audio here after `Activate()`
+/// before the Desktop asks once more, and then before it gives up. The
+/// Pixel took under 0.25 s 5 times in 7, 2.9 s once, and ignored it once
+/// (ADR-0005).
+const HANDOFF_TIMEOUT_MS: u32 = 3_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also
@@ -68,6 +73,8 @@ pub enum Input {
     Dial(String),
     /// The user hung up the Call they placed before the Phone reported it.
     CancelDial,
+    /// The user asked to move the Calls' audio here or to the Phone.
+    MoveAudio(AudioLocation),
     /// The Phone refused to dial.
     DialFailed(PhoneRefusal),
     /// The user asked to mute (`true`) or unmute the Desktop's microphone.
@@ -155,6 +162,8 @@ pub enum Timer {
     DismissDial(u32),
     /// Give up on the Phone reporting the Call of this dial attempt.
     DialTimedOut(u32),
+    /// The audio hasn't come here since this attempt to bring it here.
+    HandoffTimedOut(u32),
 }
 
 /// Something the shell adapters must do.
@@ -213,10 +222,22 @@ pub struct CallWindowView {
     /// The Contact the other party is, if Contacts say.
     pub contact: Option<ContactMatch>,
     pub phase: CallWindowPhase,
+    /// Where the Call's audio is, while there is a Call to move it for.
+    pub audio: Option<CallAudio>,
     /// A failure to explain beside the Call.
     pub notice: Option<Failure>,
     /// The Call Window has keyboard focus.
     pub focused: bool,
+}
+
+/// What the Call Window says about the Call's audio, and so what its
+/// Handoff button offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallAudio {
+    /// Where the audio is now.
+    pub location: AudioLocation,
+    /// The Desktop has asked for the audio, and it hasn't come yet.
+    pub moving_here: bool,
 }
 
 /// Where the Call in the Call Window is.
@@ -233,7 +254,6 @@ pub enum CallWindowPhase {
     /// Connected: the timer runs from `active_since`.
     Live {
         active_since: Timestamp,
-        audio_location: AudioLocation,
         wideband: bool,
         mute: Mute,
     },
@@ -318,6 +338,15 @@ struct Notice {
     not_placed: Option<Caller>,
 }
 
+/// The Desktop asked the Phone to bring the audio here, and it hasn't yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MovingAudio {
+    /// The attempt whose [`Timer::HandoffTimedOut`] counts.
+    attempt: u32,
+    /// The Phone has already been asked a second time.
+    retried: bool,
+}
+
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -344,6 +373,12 @@ pub struct State {
     /// The Phone's latest report of its hands-free microphone gain.
     microphone_volume: Option<u8>,
     muting: Muting,
+    moving_audio: Option<MovingAudio>,
+    /// How many times the Phone has been asked to bring the audio here.
+    handoff_attempts: u32,
+    /// Why the audio isn't where the user asked: shown beside the Call until
+    /// the audio moves, the user asks again, or the Call ends.
+    audio_notice: Option<Failure>,
     focus: Focus,
     contacts_sync: ContactsState,
     contacts: Contacts,
@@ -479,7 +514,8 @@ impl State {
             .notice
             .as_ref()
             .filter(|notice| notice.not_placed.is_none())
-            .map(|notice| notice.failure);
+            .map(|notice| notice.failure)
+            .or(self.audio_notice);
         let call_window = self
             .calls
             .iter()
@@ -491,7 +527,6 @@ impl State {
                 phase: match (call.active_since, call.state) {
                     (Some(active_since), state) if state.is_connected() => CallWindowPhase::Live {
                         active_since,
-                        audio_location: self.audio_location().unwrap_or(AudioLocation::Phone),
                         wideband: self.codec.is_some_and(Codec::is_wideband),
                         mute: self.mute(),
                     },
@@ -499,6 +534,10 @@ impl State {
                     (_, CallState::Alerting) => CallWindowPhase::Ringing,
                     _ => CallWindowPhase::Connecting,
                 },
+                audio: call.state.is_live().then(|| CallAudio {
+                    location: self.audio_location().unwrap_or(AudioLocation::Phone),
+                    moving_here: self.moving_audio.is_some(),
+                }),
                 notice,
                 focused: self.focus == Focus::CallWindow,
             })
@@ -512,6 +551,7 @@ impl State {
                     call: None,
                     contact: self.contact(&caller),
                     caller,
+                    audio: None,
                     phase: CallWindowPhase::Calling,
                     notice,
                     focused: self.focus == Focus::CallWindow,
@@ -522,6 +562,7 @@ impl State {
                     call: None,
                     caller: hung_up.caller.clone(),
                     contact: self.contact(&hung_up.caller),
+                    audio: None,
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
@@ -534,6 +575,7 @@ impl State {
                     call: None,
                     contact: self.contact(&caller),
                     caller,
+                    audio: None,
                     phase: CallWindowPhase::NotPlaced,
                     notice: Some(notice.failure),
                     focused: self.focus == Focus::CallWindow,
@@ -544,6 +586,7 @@ impl State {
                     call: Some(ended.id),
                     caller: ended.caller.clone(),
                     contact: self.contact(&ended.caller),
+                    audio: None,
                     phase: CallWindowPhase::Ended,
                     notice: None,
                     focused: self.focus == Focus::CallWindow,
@@ -592,6 +635,19 @@ impl State {
                 Some(AudioLocation::Phone) => Some(Failure::MuteUnavailable),
                 Some(AudioLocation::Desktop) => None,
             },
+            Input::MoveAudio(location) => {
+                if !self.calls.iter().any(|call| call.state.is_live()) {
+                    Some(Failure::NoLiveCall)
+                } else if *location == AudioLocation::Phone
+                    && self.audio_location() == Some(AudioLocation::Desktop)
+                {
+                    // Until the Desktop can close the audio link itself
+                    // (ADR-0005), the user does it on the Phone.
+                    Some(Failure::HandoffToPhoneUnavailable)
+                } else {
+                    None
+                }
+            }
             Input::SendTones(tones) => {
                 if !self
                     .calls
@@ -800,10 +856,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::ContactsPermissionNeeded { .. }
         | Input::ContactsSyncFailed(_)) => contacts_sync(&mut state, input, &mut effects),
         Input::TransportChanged(transport) => {
-            state.transport = transport;
-            if transport.is_up() && state.reported_codec.is_some() {
-                state.codec = state.reported_codec;
-            }
+            transport_changed(&mut state, transport, &mut effects);
         }
         Input::CodecChanged(codec) => {
             state.reported_codec = codec;
@@ -820,6 +873,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
         Input::Dial(text) => dial(&mut state, &text, &mut effects),
         Input::CancelDial => cancel_dial(&mut state, &mut effects),
+        Input::MoveAudio(location) => move_audio(&mut state, location, &mut effects),
         Input::DialFailed(refusal) => {
             dial_failed(&mut state, refusal_failure(refusal), &mut effects);
         }
@@ -918,6 +972,14 @@ fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
                 .is_some_and(|dialling| dialling.attempt == attempt)
             {
                 dial_failed(state, Failure::DialFailed, effects);
+            }
+        }
+        Timer::HandoffTimedOut(attempt) => {
+            if state
+                .moving_audio
+                .is_some_and(|moving| moving.attempt == attempt)
+            {
+                audio_not_here(state, effects);
             }
         }
         Timer::CloseCallWindow(call) => {
@@ -1115,12 +1177,81 @@ fn activate(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
+/// The Call audio link changed. Once the audio the Desktop asked for is
+/// here, `RejectSCO` is set again (ADR-0005); it doesn't close the open link.
+/// The audio moving either way answers any notice about where it is.
+fn transport_changed(state: &mut State, transport: Transport, effects: &mut Vec<Effect>) {
+    let was_here = state.transport == Transport::Active;
+    state.transport = transport;
+    if transport.is_up() && state.reported_codec.is_some() {
+        state.codec = state.reported_codec;
+    }
+    let is_here = transport == Transport::Active;
+    if was_here != is_here {
+        state.audio_notice = None;
+    }
+    if is_here && state.moving_audio.take().is_some() {
+        effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
+/// The user asked to move the audio to `location`.
+fn move_audio(state: &mut State, location: AudioLocation, effects: &mut Vec<Effect>) {
+    let input = Input::MoveAudio(location);
+    if let Some(failure) = state.refusal(&input) {
+        effects.push(Effect::ReportError(failure));
+        if state.calls.iter().any(|call| call.state.is_live()) {
+            state.audio_notice = Some(failure);
+        }
+        return;
+    }
+    if location == AudioLocation::Desktop
+        && state.audio_location() == Some(AudioLocation::Phone)
+        && state.moving_audio.is_none()
+    {
+        state.audio_notice = None;
+        bring_audio_here(state, false, effects);
+    }
+}
+
+/// Asks the Phone to bring the audio here, and starts the wait for it.
+fn bring_audio_here(state: &mut State, retried: bool, effects: &mut Vec<Effect>) {
+    effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
+    start_waiting_for_audio(state, retried, effects);
+}
+
+fn start_waiting_for_audio(state: &mut State, retried: bool, effects: &mut Vec<Effect>) {
+    state.handoff_attempts += 1;
+    let attempt = state.handoff_attempts;
+    state.moving_audio = Some(MovingAudio { attempt, retried });
+    effects.push(Effect::StartTimer {
+        timer: Timer::HandoffTimedOut(attempt),
+        after_ms: HANDOFF_TIMEOUT_MS,
+    });
+}
+
+/// An attempt to bring the audio here failed or ran out of time. The Phone
+/// ignored `Activate()` once in 7 tries on the Pixel, so it is asked once
+/// more; after that the user is told how to do it on the Phone. `RejectSCO`
+/// stays false, so doing it on the Phone works.
+fn audio_not_here(state: &mut State, effects: &mut Vec<Effect>) {
+    match state.moving_audio {
+        Some(MovingAudio { retried: false, .. }) => bring_audio_here(state, true, effects),
+        Some(MovingAudio { retried: true, .. }) => {
+            state.moving_audio = None;
+            state.audio_notice = Some(Failure::AudioNotMoved);
+            effects.push(Effect::ReportError(Failure::AudioNotMoved));
+        }
+        None => {}
+    }
+}
+
 fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
     match state.call_mut(call) {
         Some(known) if known.rings_here() => {
             known.request = Request::Answer;
             effects.push(Effect::Phone(PhoneCommand::Answer(call)));
-            effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
+            bring_audio_here(state, false, effects);
         }
         Some(known) if known.request == Request::Answer => {}
         Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
@@ -1174,6 +1305,8 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
     }
     if state.calls.is_empty() {
         state.codec = None;
+        state.moving_audio = None;
+        state.audio_notice = None;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
     }
 }
@@ -1186,6 +1319,8 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
             {
                 known.request = Request::None;
             }
+            // The batch stopped here: the audio was never asked for.
+            state.moving_audio = None;
             effects.push(Effect::ReportError(Failure::AnswerFailed));
             if !state.has_desktop_audio() {
                 effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
@@ -1199,9 +1334,7 @@ fn command_failed(state: &mut State, command: &PhoneCommand, effects: &mut Vec<E
             }
             effects.push(Effect::ReportError(Failure::HangUpFailed));
         }
-        PhoneCommand::MoveAudioToDesktop => {
-            effects.push(Effect::ReportError(Failure::AudioNotMoved));
-        }
+        PhoneCommand::MoveAudioToDesktop => audio_not_here(state, effects),
         // Without these the Phone never dialled.
         PhoneCommand::AllowAudioOnDesktop | PhoneCommand::Dial(_) => {
             dial_failed(state, Failure::DialFailed, effects);

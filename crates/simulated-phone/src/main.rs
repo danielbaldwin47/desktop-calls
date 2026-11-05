@@ -240,7 +240,7 @@ async fn serve(
                     let (reply, signals) = telephony::answer(
                         &mut world.telephony,
                         world.audio_gateway.as_ref(),
-                        &world.behaviour,
+                        &mut world.behaviour,
                         &mut world.dialling,
                         &call,
                         &message,
@@ -458,6 +458,27 @@ impl Control {
         Ok(call)
     }
 
+    /// The person holding the Phone places a Call to `number` on it: PipeWire
+    /// registers the Call, `dialing`, and the audio stays on the Phone, since
+    /// the Desktop set nothing. `CalleeAnswers` connects it. Returns the
+    /// Call's object path.
+    async fn dial_on_phone(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
+        let (call, signals) = {
+            let mut world = lock(&self.world);
+            let world = &mut *world;
+            let Some(gateway) = world.audio_gateway.clone() else {
+                return Err(zbus::fdo::Error::Failed(
+                    "hands-free is not connected".to_owned(),
+                ));
+            };
+            telephony::dial_on_phone(&mut world.telephony, &gateway, &world.behaviour, &number)?
+        };
+        for signal in signals {
+            signal.emit(&self.session).await?;
+        }
+        Ok(call)
+    }
+
     /// The person the Desktop called answers: the dialled Call goes
     /// `active`. Fails if no Call is `dialing` or `alerting`.
     async fn callee_answers(&self) -> zbus::fdo::Result<()> {
@@ -522,11 +543,13 @@ impl Control {
 
     /// Switches on a quirk other Phones, or other moments, show:
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
-    /// `"get-calls-empty-while-dialling"` or `"slow-property-writes"`.
+    /// `"get-calls-empty-while-dialling"`, `"slow-property-writes"`,
+    /// `"activate-ignored"`, `"activate-ignored-once"` or
+    /// `"earbuds-keep-audio"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling and slow-property-writes"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once and earbuds-keep-audio"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);
@@ -618,10 +641,20 @@ impl Control {
             let mut world = lock(&self.world);
             let world = &mut *world;
             let gateway = connected_audio_gateway(world)?;
-            telephony::answer_on_phone(&mut world.telephony, &gateway, &world.behaviour, &call)
+            telephony::answer_on_phone(&mut world.telephony, &gateway, &mut world.behaviour, &call)
                 .map_err(zbus::fdo::Error::InvalidArgs)?
         };
         self.emit(signals).await
+    }
+
+    /// Connects earbuds to the Phone beside the Desktop (`true`), or
+    /// disconnects them. Connected earbuds become the Phone's active
+    /// hands-free device: a Call answered on them, or placed on the Phone,
+    /// has its audio there, and the Phone ignores `Activate` until the
+    /// Desktop answers or dials, which makes the Desktop the active device
+    /// unless the `earbuds-keep-audio` quirk is on.
+    fn set_earbuds(&self, connected: bool) {
+        lock(&self.world).behaviour.earbuds.set_connected(connected);
     }
 
     /// Declines the ringing Call at `call` on the Phone, as the person

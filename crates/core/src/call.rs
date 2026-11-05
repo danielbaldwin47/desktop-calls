@@ -49,7 +49,7 @@ impl CallState {
         }
     }
 
-    fn is_live(self) -> bool {
+    pub(crate) fn is_live(self) -> bool {
         matches!(
             self,
             Self::Active | Self::Held | Self::Dialing | Self::Alerting
@@ -182,6 +182,16 @@ impl AudioLocation {
         match self {
             Self::Phone => "phone",
             Self::Desktop => "desktop",
+        }
+    }
+
+    /// The Audio Location the control interface names `name`, if any.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "phone" => Some(Self::Phone),
+            "desktop" => Some(Self::Desktop),
+            _ => None,
         }
     }
 }

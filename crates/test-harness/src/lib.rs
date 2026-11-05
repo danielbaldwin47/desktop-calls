@@ -135,6 +135,10 @@ trait SimulatedPhone1 {
 
     fn callee_answers(&self) -> zbus::Result<()>;
 
+    fn dial_on_phone(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
+
+    fn set_earbuds(&self, connected: bool) -> zbus::Result<()>;
+
     fn refuse_next_dial(&self, error: &str) -> zbus::Result<()>;
     fn set_pbap_folder(&self, folder: &str, vcards: &str) -> zbus::Result<()>;
 
@@ -1095,6 +1099,17 @@ impl Harness {
         self.try_app_method("SetMuted", &(muted,))
     }
 
+    /// Asks the app to move the Calls' audio to `location`, `"desktop"` or
+    /// `"phone"`, and returns the error the control interface answers with,
+    /// if any.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn move_audio(&self, location: &str) -> Result<(), AppError> {
+        self.try_app_method("MoveAudio", &(location,))
+    }
+
     /// Asks the app to send keypad tones during the Call.
     ///
     /// # Errors
@@ -1707,6 +1722,32 @@ impl SimulatedPhone<'_> {
     pub fn callee_answers(&self) {
         zbus::block_on(async { self.proxy().await?.callee_answers().await })
             .expect("answer the dialled Call at the other end");
+    }
+
+    /// Places a Call to `number` on the Phone itself, as the person holding
+    /// it does: the Call appears `dialing`, and the audio stays on the Phone.
+    /// Returns the Call's object path.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses, as it does while hands-free is down.
+    #[must_use]
+    pub fn dial_on_phone(&self, number: &str) -> String {
+        zbus::block_on(async { self.proxy().await?.dial_on_phone(number).await })
+            .expect("place a Call on the Simulated Phone")
+            .to_string()
+    }
+
+    /// Connects earbuds to the Phone beside the Desktop (`true`), or
+    /// disconnects them. Connected earbuds take the audio of Calls answered
+    /// on them, and the Phone ignores `Activate` until the Desktop answers.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone can't be reached.
+    pub fn set_earbuds(&self, connected: bool) {
+        zbus::block_on(async { self.proxy().await?.set_earbuds(connected).await })
+            .expect("connect or disconnect the Simulated Phone's earbuds");
     }
 
     /// Makes the Phone refuse the next `Dial` with a Telephony error:

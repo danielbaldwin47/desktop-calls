@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use desktop_calls_core::messages::{self, Failure};
-use desktop_calls_core::{CallId, Caller, ContactsState, Input, State};
+use desktop_calls_core::{AudioLocation, CallId, Caller, ContactsState, Input, State};
 use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
@@ -39,6 +39,11 @@ pub enum Refused {
     InvalidTones(String),
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
+    /// The Desktop can't move the audio to the Phone itself yet; the
+    /// sentence says how to do it on the Phone.
+    HandoffToPhoneUnavailable(String),
+    /// `MoveAudio` was given something other than `"desktop"` or `"phone"`.
+    UnknownAudioLocation(String),
     Failed(String),
 }
 
@@ -60,6 +65,7 @@ impl From<Failure> for Refused {
             | Failure::NoSignal
             | Failure::NetworkError
             | Failure::DialFailed => Self::CallNotPlaced(text),
+            Failure::HandoffToPhoneUnavailable => Self::HandoffToPhoneUnavailable(text),
             _ => Self::Failed(text),
         }
     }
@@ -244,6 +250,19 @@ impl ControlInterface {
     /// the reason.
     fn set_muted(&self, muted: bool) -> Result<(), Refused> {
         self.pass_on(Input::SetMuted(muted))
+    }
+
+    /// Moves the Call's audio to `location`, `"desktop"` or `"phone"`: a
+    /// Handoff. It returns once the Phone is asked; `AudioLocation` changes
+    /// when the audio arrives, and `Error` says so if it doesn't. Fails with
+    /// the reason while there is no live Call, and with the instruction for
+    /// the Phone's own audio button for `"phone"`, until the Desktop can
+    /// close the audio link itself.
+    fn move_audio(&self, location: &str) -> Result<(), Refused> {
+        let location = AudioLocation::from_name(location).ok_or_else(|| {
+            Refused::UnknownAudioLocation(messages::unknown_audio_location().to_owned())
+        })?;
+        self.pass_on(Input::MoveAudio(location))
     }
 
     /// Plays keypad tones to the other party: digits, `*` and `#`, in order.

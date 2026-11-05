@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::process::ExitCode;
 
 use desktop_calls_core::messages::{self, Failure, NextAction};
-use desktop_calls_core::{ConnectionState, Phone};
+use desktop_calls_core::{AudioLocation, ConnectionState, Phone};
 use glib::MainContext;
 use zbus::fdo::PropertiesProxy;
 use zbus::names::InterfaceName;
@@ -122,6 +122,56 @@ async fn toggle_mute(runtime: GlibRuntime) -> Result<bool, Refusal> {
         .await;
     match reply {
         Ok(_) => Ok(!muted),
+        Err(zbus::Error::MethodError(name, Some(text), _))
+            if name.starts_with(control::ERROR_PREFIX) =>
+        {
+            Err(Refusal::Refused(text))
+        }
+        Err(error) => Err(Refusal::Failure(failure_of(&error))),
+    }
+}
+
+/// `desktop-calls audio here` or `audio phone`: a Handoff of the Call's
+/// audio to `location`.
+pub fn audio(location: AudioLocation) -> ExitCode {
+    let context = MainContext::default();
+    match context.block_on(move_audio(GlibRuntime::new(context.clone()), location)) {
+        Ok(already_there) => {
+            println!("{}", messages::audio_requested(location, already_there));
+            ExitCode::SUCCESS
+        }
+        Err(Refusal::Failure(failure)) => report(failure),
+        Err(Refusal::Refused(text)) => {
+            eprintln!("{text}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Asks for the audio at `location`, and returns whether it was there
+/// already.
+async fn move_audio(runtime: GlibRuntime, location: AudioLocation) -> Result<bool, Refusal> {
+    let session = connect(runtime).await.map_err(Refusal::Failure)?;
+    let properties = get_all(&session)
+        .await
+        .map_err(|error| Refusal::Failure(failure_of(&error)))?;
+    let already_there = properties
+        .get("AudioLocation")
+        .cloned()
+        .and_then(|value| String::try_from(value).ok())
+        .ok_or(Refusal::Failure(Failure::UnexpectedReply))?
+        == location.as_str();
+    let reply = session
+        .call_method(
+            Some(control::BUS_NAME),
+            control::PATH,
+            Some(INTERFACE),
+            "MoveAudio",
+            &(location.as_str(),),
+        )
+        .await;
+    match reply {
+        Ok(_) => Ok(already_there),
         Err(zbus::Error::MethodError(name, Some(text), _))
             if name.starts_with(control::ERROR_PREFIX) =>
         {

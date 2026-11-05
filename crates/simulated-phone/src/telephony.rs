@@ -104,6 +104,16 @@ pub enum Quirk {
     /// once, but answered only [`SLOW_REPLY`] later, as a busy `WirePlumber`
     /// may. Tests use it to see what the app shows before the reply.
     SlowPropertyWrites,
+    /// `Activate` replies, and the audio stays where it is, every time: a
+    /// Phone that keeps the audio, as one with earbuds in may.
+    ActivateIgnored,
+    /// `Activate` replies, and the audio stays where it is, the next time
+    /// only, as the Pixel did once in 7 tries (ADR-0005).
+    ActivateIgnoredOnce,
+    /// Answering on the Desktop leaves the earbuds the active device, so the
+    /// audio stays on them, as an Android call-establish audio policy of
+    /// `POLICY_NOT_ALLOWED` would.
+    EarbudsKeepAudio,
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
@@ -117,6 +127,9 @@ impl Quirk {
             "hangup-too-few-arguments" => Some(Self::HangupTooFewArguments),
             "get-calls-empty-while-dialling" => Some(Self::GetCallsEmptyWhileDialling),
             "slow-property-writes" => Some(Self::SlowPropertyWrites),
+            "activate-ignored" => Some(Self::ActivateIgnored),
+            "activate-ignored-once" => Some(Self::ActivateIgnoredOnce),
+            "earbuds-keep-audio" => Some(Self::EarbudsKeepAudio),
             _ => None,
         }
     }
@@ -129,6 +142,37 @@ pub struct Behaviour {
     /// The hands-free microphone gain a new AudioGateway reports.
     pub microphone_volume: u8,
     pub quirks: BTreeSet<Quirk>,
+    pub earbuds: Earbuds,
+}
+
+/// Earbuds connected to the Phone beside the Desktop: a second hands-free
+/// unit. Android sends Call audio only to its one active hands-free device.
+/// AOSP's `HeadsetService.isScoAcceptable` refuses audio for any other
+/// device, and `HeadsetSystemInterface.answerCall` makes the device that
+/// answers the active one. Newly connected earbuds becoming active is
+/// inferred, not read in the source.
+#[derive(Default)]
+pub struct Earbuds {
+    pub connected: bool,
+    /// The earbuds are the active device, so the Phone keeps the Call's
+    /// audio on them and refuses it to the Desktop.
+    pub active: bool,
+}
+
+impl Earbuds {
+    /// The earbuds connect, and become the active device, or disconnect.
+    pub fn set_connected(&mut self, connected: bool) {
+        self.connected = connected;
+        self.active = connected;
+    }
+
+    /// The Desktop answers or dials: it becomes the active device, unless
+    /// the Phone keeps the earbuds active.
+    fn desktop_takes_over(&mut self, quirks: &BTreeSet<Quirk>) {
+        if !quirks.contains(&Quirk::EarbudsKeepAudio) {
+            self.active = false;
+        }
+    }
 }
 
 impl Default for Behaviour {
@@ -138,6 +182,7 @@ impl Default for Behaviour {
             codec: 3,
             microphone_volume: 15,
             quirks: BTreeSet::new(),
+            earbuds: Earbuds::default(),
         }
     }
 }
@@ -445,6 +490,32 @@ pub fn alert(
     let Some(number) = dialling.number.take() else {
         return Ok(None);
     };
+    outgoing_call(tree, audio_gateway, behaviour, number, "alerting").map(Some)
+}
+
+/// Registers a Call to `number` placed on the Phone itself, `dialing`, as
+/// the person holding it does, and returns its path and the signals that
+/// announce it. The Desktop set nothing, so `RejectSCO` is still true and
+/// the Phone's attempt to bring the audio to the Desktop only flips the
+/// codec: the audio stays on the Phone.
+pub fn dial_on_phone(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+    number: &str,
+) -> zbus::Result<(OwnedObjectPath, Vec<Signal>)> {
+    outgoing_call(tree, audio_gateway, behaviour, number.to_owned(), "dialing")
+}
+
+/// Registers an outgoing Call to `number` in `state`, and brings the audio
+/// to the Desktop if `RejectSCO` allows, as the Pixel does.
+fn outgoing_call(
+    tree: &mut ObjectTree,
+    audio_gateway: &OwnedObjectPath,
+    behaviour: &Behaviour,
+    number: String,
+    state: &str,
+) -> zbus::Result<(OwnedObjectPath, Vec<Signal>)> {
     let mut call = Properties::new();
     call.insert(
         "LineIdentification".into(),
@@ -453,18 +524,21 @@ pub fn alert(
     call.insert("IncomingLine".into(), OwnedVariant::from(Str::from("")));
     call.insert("Name".into(), OwnedVariant::from(Str::from("")));
     call.insert("Multiparty".into(), OwnedVariant::from(false));
-    call.insert("State".into(), OwnedVariant::from(Str::from("alerting")));
+    call.insert(
+        "State".into(),
+        OwnedVariant::from(Str::from(state.to_owned())),
+    );
     let path = register_call(tree, audio_gateway, call.clone())?;
     let mut signals = announce_call(audio_gateway, &path, call);
     if transport_state(tree, audio_gateway).as_deref() == Some("idle") {
         let codec = vec![("Codec", OwnedVariant::from(behaviour.codec))];
-        if rejects_sco(tree, audio_gateway) {
+        if rejects_sco(tree, audio_gateway) || behaviour.earbuds.active {
             signals.extend(set_transport(tree, audio_gateway, codec));
         } else {
             signals.extend(bring_audio_up(tree, audio_gateway, codec));
         }
     }
-    Ok(Some((path, signals)))
+    Ok((path, signals))
 }
 
 /// The person called answers: the dialled Call goes `active`. Returns the
@@ -550,11 +624,12 @@ pub fn unannounce_call(audio_gateway: &OwnedObjectPath, call: &OwnedObjectPath) 
 }
 
 /// Answers a method call on the Telephony service, changing the tree as the
-/// real service would. The signals go out after the reply.
+/// real service would. The signals go out after the reply. A quirk that
+/// shows only once is used up here.
 pub fn answer(
     tree: &mut ObjectTree,
     audio_gateway: Option<&OwnedObjectPath>,
-    behaviour: &Behaviour,
+    behaviour: &mut Behaviour,
     dialling: &mut Dialling,
     call: &MethodCall,
     message: &Message,
@@ -603,7 +678,11 @@ pub fn answer(
         ),
         (PROPERTIES, "Set", Some(_), _) => set_property(tree, call, message),
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "Dial", Some(_), _) => {
-            (dial(dialling, message), Vec::new())
+            let reply = dial(dialling, message);
+            if matches!(reply, Reply::Body(_)) {
+                behaviour.earbuds.desktop_takes_over(&behaviour.quirks);
+            }
+            (reply, Vec::new())
         }
         (AUDIO_GATEWAY | VOICE_CALL_MANAGER, "SendTones", Some(gateway), _) => {
             (send_tones(tree, gateway, message), Vec::new())
@@ -611,7 +690,9 @@ pub fn answer(
         (AUDIO_GATEWAY_TRANSPORT, "Activate", Some(gateway), _) => {
             (Reply::body(()), activate(tree, gateway, behaviour))
         }
-        (CALL | VOICE_CALL, "Answer", _, Some(gateway)) => answer_call(tree, gateway, call),
+        (CALL | VOICE_CALL, "Answer", _, Some(gateway)) => {
+            answer_call(tree, gateway, behaviour, call)
+        }
         (CALL, "Hangup", _, Some(_)) if behaviour.quirks.contains(&Quirk::Call1HangupMissing) => (
             Reply::Error(
                 "org.freedesktop.DBus.Error.UnknownMethod",
@@ -738,13 +819,21 @@ fn bring_audio_up(
     signals
 }
 
-/// `Activate`: brings the Call audio to the Desktop, unless SCO is rejected
-/// or no Call is live.
+/// `Activate`: brings the Call audio to the Desktop, unless SCO is rejected,
+/// no Call is live, the earbuds are the active device, or the Phone ignores
+/// it as the Pixel once did. PipeWire replies before the Phone acts, so a
+/// refusal looks the same as nothing happening.
 fn activate(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
-    behaviour: &Behaviour,
+    behaviour: &mut Behaviour,
 ) -> Vec<Signal> {
+    if behaviour.earbuds.active
+        || behaviour.quirks.contains(&Quirk::ActivateIgnored)
+        || behaviour.quirks.remove(&Quirk::ActivateIgnoredOnce)
+    {
+        return Vec::new();
+    }
     let rejected = rejects_sco(tree, audio_gateway);
     let live = calls(tree, audio_gateway.as_str())
         .iter()
@@ -765,6 +854,7 @@ fn activate(
 fn answer_call(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
+    behaviour: &mut Behaviour,
     call: &MethodCall,
 ) -> (Reply, Vec<Signal>) {
     let Some((path, properties)) = find_call(tree, audio_gateway, &call.path) else {
@@ -773,6 +863,7 @@ fn answer_call(
     if call_state(&properties) != "incoming" {
         return (invalid_state(), Vec::new());
     }
+    behaviour.earbuds.desktop_takes_over(&behaviour.quirks);
     (Reply::body(()), set_call_state(tree, &path, "active"))
 }
 
@@ -810,7 +901,7 @@ fn hang_up(
 pub fn answer_on_phone(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
-    behaviour: &Behaviour,
+    behaviour: &mut Behaviour,
     call: &str,
 ) -> Result<Vec<Signal>, String> {
     let (path, properties) = find_call(tree, audio_gateway, call)
@@ -820,7 +911,13 @@ pub fn answer_on_phone(
         return Err(format!("the Call at {call} is {state}, not ringing"));
     }
     let mut signals = set_call_state(tree, &path, "active");
-    signals.extend(open_audio_link(tree, audio_gateway, behaviour));
+    if behaviour.earbuds.connected {
+        // Answered on the earbuds: they are the active device, and the
+        // audio goes to them.
+        behaviour.earbuds.active = true;
+    } else {
+        signals.extend(open_audio_link(tree, audio_gateway, behaviour));
+    }
     Ok(signals)
 }
 

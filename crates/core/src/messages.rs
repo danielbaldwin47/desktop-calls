@@ -4,7 +4,7 @@
 //! out. The surfaces' labels and the Call timer's text come from here too. No
 //! other code writes text for the user.
 
-use crate::call::Caller;
+use crate::call::{AudioLocation, Caller};
 use crate::contacts::NumberLabel;
 use crate::matching::ContactMatch;
 use crate::{ConnectionState, Phone};
@@ -22,8 +22,11 @@ pub enum Failure {
     AnswerFailed,
     /// The Phone did not hang up the Call.
     HangUpFailed,
-    /// The Call was answered, but its audio did not come to the Desktop.
+    /// The Desktop asked for the Call's audio, and the Phone kept it.
     AudioNotMoved,
+    /// The Desktop can't move the audio to the Phone itself yet, so the user
+    /// does it on the Phone.
+    HandoffToPhoneUnavailable,
     /// The Call asked about is over, or never existed.
     NoSuchCall,
     /// The Call asked about is no longer ringing.
@@ -78,6 +81,7 @@ impl Failure {
             Self::AnswerFailed => "answer-failed",
             Self::HangUpFailed => "hang-up-failed",
             Self::AudioNotMoved => "audio-not-moved",
+            Self::HandoffToPhoneUnavailable => "handoff-to-phone-unavailable",
             Self::NoSuchCall => "no-such-call",
             Self::CallNotRinging => "call-not-ringing",
             Self::Undialable => "undialable",
@@ -143,7 +147,11 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::AudioNotMoved => (
-            "The Call is answered, but its audio stayed on your phone; tap the audio button on your phone's call screen to switch.",
+            "Your phone kept the audio; to hear the Call here, tap the audio button on your phone's call screen.",
+            None,
+        ),
+        Failure::HandoffToPhoneUnavailable => (
+            "Tap the audio button on your phone's call screen to move the audio to your phone.",
             None,
         ),
         Failure::NoSuchCall => ("That Call has already ended.", None),
@@ -241,6 +249,24 @@ pub fn problem(problem: ProblemKind) -> Message {
     }
 }
 
+/// What `desktop-calls audio here` or `audio phone` did: the Phone was
+/// asked to move the audio to `location`, or it was there already.
+#[must_use]
+pub fn audio_requested(location: AudioLocation, already_there: bool) -> &'static str {
+    match (location, already_there) {
+        (AudioLocation::Desktop, false) => "Moving the audio to this computer.",
+        (AudioLocation::Desktop, true) => "The audio is already on this computer.",
+        (AudioLocation::Phone, false) => "Moving the audio to your phone.",
+        (AudioLocation::Phone, true) => "The audio is already on your phone.",
+    }
+}
+
+/// Why the control interface's `MoveAudio` refused its argument.
+#[must_use]
+pub fn unknown_audio_location() -> &'static str {
+    "The audio can move to \"desktop\" or \"phone\"."
+}
+
 /// What `desktop-calls mute` did.
 #[must_use]
 pub fn mute_toggled(muted: bool) -> &'static str {
@@ -291,6 +317,12 @@ pub enum Label {
     AudioOnDesktop,
     /// Audio Location: the Phone.
     AudioOnPhone,
+    /// The Handoff button while the audio is on the Phone.
+    MoveAudioHere,
+    /// The Handoff button while the audio is on the Desktop.
+    MoveAudioToPhone,
+    /// The Handoff button while the Phone brings the audio here.
+    MovingAudioHere,
     /// Wideband speech.
     Hd,
     /// The Call Window's button that mutes the microphone.
@@ -321,6 +353,9 @@ pub fn label(label: Label) -> &'static str {
         Label::CallEnded => "Call ended",
         Label::AudioOnDesktop => "Audio on this computer",
         Label::AudioOnPhone => "Audio on phone",
+        Label::MoveAudioHere => "Move audio here",
+        Label::MoveAudioToPhone => "Move audio to phone",
+        Label::MovingAudioHere => "Moving audio here…",
         Label::Hd => "HD",
         Label::Mute => "Mute",
         Label::Unmute => "Unmute",

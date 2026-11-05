@@ -122,6 +122,10 @@ fn answering_on_the_desktop_answers_then_brings_the_audio_here_in_one_step() {
             Effect::StopRinging,
             Effect::Phone(PhoneCommand::Answer(CALL)),
             Effect::Phone(PhoneCommand::MoveAudioToDesktop),
+            Effect::StartTimer {
+                timer: Timer::HandoffTimedOut(1),
+                after_ms: 3_000,
+            },
         ]
     );
     assert!(!state.ringing());
@@ -140,10 +144,13 @@ fn once_active_with_the_transport_up_the_audio_is_on_the_desktop_with_a_timer() 
         window.phase,
         CallWindowPhase::Live {
             active_since: Timestamp(2_000),
-            audio_location: AudioLocation::Desktop,
             wideband: true,
             mute: Mute::Off,
         }
+    );
+    assert_eq!(
+        window.audio.map(|audio| audio.location),
+        Some(AudioLocation::Desktop)
     );
 }
 
@@ -305,10 +312,13 @@ fn answered_on_the_phone_the_desktop_leaves_the_audio_there() {
         window.phase,
         CallWindowPhase::Live {
             active_since: Timestamp(2_000),
-            audio_location: AudioLocation::Phone,
             wideband: false,
             mute: Mute::Unavailable,
         }
+    );
+    assert_eq!(
+        window.audio.map(|audio| audio.location),
+        Some(AudioLocation::Phone)
     );
 }
 

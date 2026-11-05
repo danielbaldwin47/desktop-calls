@@ -17,6 +17,7 @@ mod theme;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use desktop_calls_core::AudioLocation;
 
 /// Take and place your Phone's Calls on this Desktop.
 #[derive(Parser)]
@@ -49,9 +50,33 @@ enum Command {
     },
     /// Mute the microphone during a Call, or unmute it if it is muted.
     Mute,
+    /// Move the Call's audio to this computer or to your phone.
+    Audio {
+        /// Where the audio goes.
+        #[arg(value_enum)]
+        to: AudioTarget,
+    },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
     Service,
+}
+
+/// Where `desktop-calls audio` moves the audio.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum AudioTarget {
+    /// This computer.
+    Here,
+    /// Your phone.
+    Phone,
+}
+
+impl From<AudioTarget> for AudioLocation {
+    fn from(target: AudioTarget) -> Self {
+        match target {
+            AudioTarget::Here => Self::Desktop,
+            AudioTarget::Phone => Self::Phone,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -60,6 +85,7 @@ fn main() -> ExitCode {
         Some(Command::Dial { number }) => cli::dial(&number),
         Some(Command::Status { json }) => cli::status(json),
         Some(Command::Mute) => cli::mute(),
+        Some(Command::Audio { to }) => cli::audio(to.into()),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.

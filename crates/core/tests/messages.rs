@@ -67,6 +67,7 @@ fn call_failures_have_a_kind_and_never_raw_dbus_text() {
         Failure::AnswerFailed,
         Failure::HangUpFailed,
         Failure::AudioNotMoved,
+        Failure::HandoffToPhoneUnavailable,
         Failure::NoSuchCall,
         Failure::CallNotRinging,
     ] {

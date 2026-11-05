@@ -33,8 +33,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    AudioLocation, BannerView, CallId, CallWindowPhase, CallWindowView, Caller, ContactMatch,
-    Input, Mute, Timestamp, keypad_tones,
+    AudioLocation, BannerView, CallAudio, CallId, CallWindowPhase, CallWindowView, Caller,
+    ContactMatch, Input, Mute, Timestamp, keypad_tones,
 };
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib::{self, SourceId};
@@ -58,6 +58,7 @@ const WIDTH: i32 = 340;
 const MUTE_SHORTCUT: &str = "m";
 const KEYPAD_SHORTCUT: &str = "k";
 const HANG_UP_SHORTCUT: &str = "<Control>h";
+const HANDOFF_SHORTCUT: &str = "a";
 
 /// The keypad's buttons, row by row, as on a phone.
 const KEYPAD: [[&str; 3]; 4] = [
@@ -552,7 +553,8 @@ struct CallWindow {
     caller: gtk::Label,
     detail: gtk::Label,
     status: gtk::Label,
-    audio_location: gtk::Label,
+    /// Where the audio is, and the Handoff button.
+    audio: AudioRow,
     hd: gtk::Label,
     mute: gtk::Button,
     mute_label: gtk::Label,
@@ -598,11 +600,9 @@ impl CallWindow {
         let status = gtk::Label::new(None);
         status.add_css_class("numeric");
         status.set_xalign(0.0);
-        let audio_location = gtk::Label::new(None);
-        audio_location.add_css_class("dim-label");
-        audio_location.set_xalign(0.0);
-
         let mut shortcuts = BTreeMap::new();
+        let audio = AudioRow::new();
+        shortcuts.insert("handoff-shortcut".to_owned(), audio.shortcut.clone());
         let mute = gtk::Button::new();
         mute.add_css_class("mute");
         let mute_label = gtk::Label::new(Some(messages::label(Label::Mute)));
@@ -641,7 +641,7 @@ impl CallWindow {
         content.append(&heading);
         content.append(&detail);
         content.append(&status);
-        content.append(&audio_location);
+        content.append(&audio.row);
         // Everything that comes and goes sits below Hang up, so Hang up
         // never moves under the pointer.
         content.append(&controls);
@@ -655,6 +655,7 @@ impl CallWindow {
         for button in [
             mute.upcast_ref::<gtk::Button>(),
             keypad_shown.upcast_ref(),
+            &audio.handoff,
             &hang_up,
         ] {
             // Clicking leaves the keyboard with the tone entry.
@@ -667,7 +668,7 @@ impl CallWindow {
             caller,
             detail,
             status,
-            audio_location,
+            audio,
             hd,
             mute,
             mute_label,
@@ -693,6 +694,12 @@ impl CallWindow {
         self.mute.connect_clicked(move |_| {
             if let Some(window) = weak.upgrade() {
                 window.toggle_mute();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.audio.handoff.connect_clicked(move |_| {
+            if let Some(window) = weak.upgrade() {
+                window.hand_off();
             }
         });
         let weak = Rc::downgrade(self);
@@ -732,9 +739,10 @@ impl CallWindow {
         // Before any control sees the key, so M and K never reach the tone
         // entry.
         shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let actions: [(&str, gtk::Widget); 3] = [
+        let actions: [(&str, gtk::Widget); 4] = [
             (MUTE_SHORTCUT, self.mute.clone().upcast()),
             (KEYPAD_SHORTCUT, self.keypad_shown.clone().upcast()),
+            (HANDOFF_SHORTCUT, self.audio.handoff.clone().upcast()),
             (HANG_UP_SHORTCUT, self.hang_up.clone().upcast()),
         ];
         for (accelerator, control) in actions {
@@ -780,6 +788,19 @@ impl CallWindow {
         let _ = self.intents.unbounded_send(Input::SetMuted(!muted));
     }
 
+    /// Asks for the audio where it isn't.
+    fn hand_off(&self) {
+        let audio = self.view.borrow().as_ref().and_then(|view| view.audio);
+        if let Some(audio) = audio {
+            let _ = self
+                .intents
+                .unbounded_send(Input::MoveAudio(match audio.location {
+                    AudioLocation::Phone => AudioLocation::Desktop,
+                    AudioLocation::Desktop => AudioLocation::Phone,
+                }));
+        }
+    }
+
     /// Types `tone` at the end of the tone entry, as if from the keyboard.
     fn press_tone(&self, tone: &str) {
         if !self.tones.is_sensitive() {
@@ -818,6 +839,60 @@ fn status_label(phase: &CallWindowPhase) -> Label {
         CallWindowPhase::NotPlaced => Label::CallNotPlaced,
         CallWindowPhase::Ended => Label::CallEnded,
     }
+}
+
+/// The Call Window's row that says where the audio is, with the Handoff
+/// button beside it.
+struct AudioRow {
+    row: gtk::Box,
+    audio_location: gtk::Label,
+    /// Moves the audio to where its label says.
+    handoff: gtk::Button,
+    handoff_label: gtk::Label,
+    /// The Handoff button's shortcut, as shown.
+    shortcut: String,
+}
+
+impl AudioRow {
+    fn new() -> Self {
+        let audio_location = gtk::Label::new(None);
+        audio_location.add_css_class("dim-label");
+        audio_location.set_xalign(0.0);
+        audio_location.set_hexpand(true);
+        // As wide as its widest text, and the Handoff button as wide as its
+        // widest label, so the window never changes width under the pointer
+        // as the audio moves.
+        audio_location.set_width_chars(widest(&[Label::AudioOnPhone, Label::AudioOnDesktop]));
+        let handoff = gtk::Button::new();
+        handoff.add_css_class("handoff");
+        let handoff_label = gtk::Label::new(Some(messages::label(Label::MoveAudioHere)));
+        handoff_label.set_width_chars(widest(&[
+            Label::MoveAudioHere,
+            Label::MoveAudioToPhone,
+            Label::MovingAudioHere,
+        ]));
+        let shortcut = show_shortcut(&handoff, &handoff_label, HANDOFF_SHORTCUT);
+        handoff.set_hexpand(false);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        row.append(&audio_location);
+        row.append(&handoff);
+        Self {
+            row,
+            audio_location,
+            handoff,
+            handoff_label,
+            shortcut,
+        }
+    }
+}
+
+/// How many characters the longest of `labels` has.
+fn widest(labels: &[Label]) -> i32 {
+    labels
+        .iter()
+        .map(|label| messages::label(*label).chars().count())
+        .max()
+        .map_or(0, |widest| i32::try_from(widest).unwrap_or(i32::MAX))
 }
 
 /// Hang up. With no Call yet, hanging up a Call placed here cancels the
@@ -930,33 +1005,35 @@ impl CallWindow {
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);
-        let (status, audio_location, wideband, mute) = match view.phase {
+        let (status, wideband, mute) = match view.phase {
             CallWindowPhase::Live {
                 active_since,
-                audio_location,
                 wideband,
                 mute,
             } => (
                 messages::elapsed(seconds_since(active_since)),
-                Some(messages::label(match audio_location {
-                    AudioLocation::Desktop => Label::AudioOnDesktop,
-                    AudioLocation::Phone => Label::AudioOnPhone,
-                })),
                 wideband,
                 Some(mute),
             ),
             phase => (
                 messages::label(status_label(&phase)).to_owned(),
-                None,
                 false,
                 None,
             ),
         };
         self.status.set_text(&status);
+        let audio_location = view.audio.map(|audio| {
+            messages::label(match audio.location {
+                AudioLocation::Desktop => Label::AudioOnDesktop,
+                AudioLocation::Phone => Label::AudioOnPhone,
+            })
+        });
         // The row stays, empty, while there is nothing to say, so Hang up
         // never moves under the pointer when the Call connects.
-        self.audio_location
+        self.audio
+            .audio_location
             .set_text(audio_location.unwrap_or_default());
+        let handoff = self.show_handoff(view.audio);
         self.hd.set_visible(wideband);
         self.hang_up.set_sensitive(!matches!(
             view.phase,
@@ -978,6 +1055,7 @@ impl CallWindow {
         content.extend(self.shortcuts.clone());
         if let Some(audio_location) = audio_location {
             content.insert("audio-location".to_owned(), audio_location.to_owned());
+            content.insert("handoff".to_owned(), handoff.to_owned());
         }
         if wideband {
             content.insert("hd".to_owned(), messages::label(Label::Hd).to_owned());
@@ -1008,6 +1086,31 @@ impl CallWindow {
             content.insert("tones".to_owned(), tones.to_string());
         }
         self.surface.show(content);
+    }
+
+    /// Brings the Handoff button up to date with the Call's audio, `None`
+    /// with no live Call, and returns its label. It names where the audio
+    /// will go, and is disabled while the audio is on its way.
+    fn show_handoff(&self, audio: Option<CallAudio>) -> &'static str {
+        let label = messages::label(match audio {
+            Some(CallAudio {
+                moving_here: true, ..
+            }) => Label::MovingAudioHere,
+            Some(CallAudio {
+                location: AudioLocation::Desktop,
+                ..
+            }) => Label::MoveAudioToPhone,
+            Some(CallAudio {
+                location: AudioLocation::Phone,
+                ..
+            })
+            | None => Label::MoveAudioHere,
+        });
+        self.audio.handoff_label.set_text(label);
+        self.audio
+            .handoff
+            .set_sensitive(audio.is_some_and(|audio| !audio.moving_here));
+        label
     }
 
     /// Brings Mute, its notices and the keypad up to date with `mute`, which

@@ -2,7 +2,16 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
-## 2026-11-05 ~08:00 UTC, batch 1 landed; batch 2 in flight (supersedes the entries below)
+## 2026-11-05 late, batch 2 landed; #79 (file split) running alone (supersedes the entries below)
+
+- Merged, each with green CI through `just merge`: #55 (PR #57, faster CI), #13 (PR #72 `7076845`, which contained #69), #11 (PR #71 `02fc5ca`, which contained #68), #43 (PRs #73 and #74, then #77 `5f24008`, which contained #75), #20 (PR #81 `01bece2`), #53 (PR #87 `8775ed9`), #12 (PR #82), #70 and #80 (PR #76 `8989cbc`), #18 (PR #84 `7566141`).
+- Lesson: #12, #18 and #20 all edited `machine.rs` and `surfaces.rs`. Each merge made the next PR conflict, which cost 5 extra agent rounds and CI runs. The practice page already said never two tickets on the same file. #79 splits the oversized files so that rule is easier to keep. See [chief-of-staff-practice](chief-of-staff-practice.md).
+- Lesson: timing scenarios measured wall-clock time across processes and failed on loaded runners (audio-here at 1.501 s and 1.536 s, the Dialer keystroke at 50 ms). #80 moved the Handoff tests to app-logged times; #83 does the rest.
+- Brief changes: no stacked part PRs (`bf69f4a`); run only the touched tests locally, and use one `just ci-wait` (`d8ff67f`, retro on #43).
+- Queued after #79: #83 (app-measured timings), #47 (first Banner at startup), #65 (CLI Dial refusal), #14 (audio back to the Phone; may need the real Phone), #85 and #86 (#12 follow-ups). Pick a batch with disjoint files.
+- Waiting on the user: `just pbap-probe`; whether to audit and make the repo public; deleting the GHCR package; `just install` plus Checklist step 7.3 (pin the Indicator).
+
+## 2026-11-05 ~08:00 UTC, batch 1 landed; batch 2 in flight (superseded above)
 
 - Merged since 04:30, each with green CI: #44 (CI once per PR push), #8 (PR #46), #15 (PR #50), #39 (PR #48), #9 (PR #52), #61 (three flakes, plus Connected/Muted only once the Phone confirms), #24 (PR #58), #56 (`just merge`), #42 (PR #60, gallery records on change), #10 (PR #49, `1231d8e`).
 - Merge with `just merge <n>` (verified 2026-11-05 on #56, #60 and #49). See [chief-of-staff-practice](chief-of-staff-practice.md).

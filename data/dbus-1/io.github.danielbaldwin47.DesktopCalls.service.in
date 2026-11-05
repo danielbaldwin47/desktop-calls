@@ -1,0 +1,8 @@
+# The D-Bus service file `just install` installs, with @BINDIR@ filled in, so
+# the CLI and the keybinding start Desktop Calls if it isn't running. A bus
+# that starts services through systemd (dbus-broker always does) starts the
+# unit; any other runs Exec itself.
+[D-BUS Service]
+Name=io.github.danielbaldwin47.DesktopCalls
+Exec=@BINDIR@/desktop-calls service
+SystemdService=desktop-calls.service

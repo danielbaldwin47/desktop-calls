@@ -141,7 +141,7 @@ struct EndedCall {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
     phone: Option<Phone>,
-    connection_state: ConnectionState,
+    connection: ConnectionState,
     calls: Vec<Call>,
     transport: Transport,
     /// The Phone's latest codec report, whatever the transport is doing.
@@ -160,7 +160,7 @@ impl State {
 
     #[must_use]
     pub fn connection_state(&self) -> &ConnectionState {
-        &self.connection_state
+        &self.connection
     }
 
     /// The Phone's Calls, oldest first.
@@ -219,7 +219,7 @@ impl State {
                     Some(active_since) if call.state.is_connected() => CallWindowPhase::Live {
                         active_since,
                         audio_location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                        wideband: self.codec.is_some_and(|codec| codec.is_wideband()),
+                        wideband: self.codec.is_some_and(Codec::is_wideband),
                     },
                     _ => CallWindowPhase::Connecting,
                 },
@@ -274,13 +274,13 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 address: phone.address.clone(),
             });
             state.phone = Some(phone);
-            state.connection_state = ConnectionState::Connecting;
+            state.connection = ConnectionState::Connecting;
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => {
             return (State::default(), vec![Effect::DetachPhone]);
         }
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
-            state.connection_state = ConnectionState::Connected;
+            state.connection = ConnectionState::Connected;
             // A crash or a dropped link mid-Call must never leave the next
             // Call's audio jumping to the Desktop.
             if !state.has_desktop_audio() {
@@ -288,10 +288,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             }
         }
         Input::PhoneDisconnected { address }
-            if state.is_our_phone(&address)
-                && state.connection_state == ConnectionState::Connected =>
+            if state.is_our_phone(&address) && state.connection == ConnectionState::Connected =>
         {
-            state.connection_state = ConnectionState::Disconnected;
+            state.connection = ConnectionState::Disconnected;
             state.transport = Transport::Idle;
         }
         Input::CallAdded {
@@ -339,37 +338,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 state.codec = codec;
             }
         }
-        Input::Answer(call) => match state.call_mut(call) {
-            Some(known) if known.rings_here() => {
-                known.request = Request::Answer;
-                effects.push(Effect::Phone(PhoneCommand::Answer(call)));
-                effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
-            }
-            Some(known) if known.request == Request::Answer => {}
-            Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
-            None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
-        },
-        Input::Decline(call) => match state.call_mut(call) {
-            Some(known) if known.rings_here() => {
-                known.request = Request::Decline;
-                effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
-            }
-            Some(known) if known.request == Request::Decline => {}
-            Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
-            None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
-        },
-        Input::HangUp(call) => match state.call_mut(call) {
-            Some(known) if matches!(known.request, Request::HangUp | Request::Decline) => {}
-            Some(known) => {
-                known.request = if known.rings_here() {
-                    Request::Decline
-                } else {
-                    Request::HangUp
-                };
-                effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
-            }
-            None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
-        },
+        Input::Answer(call) => answer(&mut state, call, &mut effects),
+        Input::Decline(call) => decline(&mut state, call, &mut effects),
+        Input::HangUp(call) => hang_up(&mut state, call, &mut effects),
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
         Input::TimerFired(Timer::CloseCallWindow(call)) => {
             if state.ended.as_ref().is_some_and(|ended| ended.id == call) {
@@ -382,6 +353,46 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PhoneDisconnected { .. } => {}
     }
     (state, effects)
+}
+
+fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if known.rings_here() => {
+            known.request = Request::Answer;
+            effects.push(Effect::Phone(PhoneCommand::Answer(call)));
+            effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
+        }
+        Some(known) if known.request == Request::Answer => {}
+        Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+fn decline(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if known.rings_here() => {
+            known.request = Request::Decline;
+            effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
+        }
+        Some(known) if known.request == Request::Decline => {}
+        Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    match state.call_mut(call) {
+        Some(known) if matches!(known.request, Request::HangUp | Request::Decline) => {}
+        Some(known) => {
+            known.request = if known.rings_here() {
+                Request::Decline
+            } else {
+                Request::HangUp
+            };
+            effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
+        }
+        None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
 }
 
 fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {

@@ -7,7 +7,9 @@ mod glib_runtime;
 mod logging;
 mod object_manager;
 mod phone_link;
+mod ringer;
 mod service;
+mod surfaces;
 
 use std::process::ExitCode;
 

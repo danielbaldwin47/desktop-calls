@@ -180,6 +180,16 @@ impl ObjectTree {
         self.objects.remove(path.as_str())
     }
 
+    /// One property's value, if the object has it.
+    pub fn get(
+        &self,
+        path: &OwnedObjectPath,
+        interface: &str,
+        name: &str,
+    ) -> Option<&OwnedVariant> {
+        self.objects.get(path.as_str())?.get(interface)?.get(name)
+    }
+
     /// Sets one property and returns whether it changed.
     pub fn set(
         &mut self,

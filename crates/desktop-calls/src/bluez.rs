@@ -11,7 +11,7 @@ use futures_util::StreamExt as _;
 use zbus::{Connection, OwnedVariant};
 
 use crate::logging::EventKind;
-use crate::object_manager::{self, ObjectEvent, WatchError};
+use crate::object_manager::{self, ObjectEvent, WatchError, Watched};
 
 const SERVICE: &str = "org.bluez";
 const ROOT: &str = "/";
@@ -24,7 +24,12 @@ const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34f
 pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(), WatchError> {
     let (object_sender, mut objects) = unbounded();
     let watching = async {
-        object_manager::watch(&system, SERVICE, ROOT, &object_sender).await?;
+        let watched = Watched {
+            service: SERVICE,
+            root: ROOT,
+            nested_manager: None,
+        };
+        object_manager::watch(&system, watched, &object_sender).await?;
         drop(object_sender);
         Ok::<_, WatchError>(())
     };
@@ -61,7 +66,7 @@ pub async fn run(system: Connection, inputs: UnboundedSender<Input>) -> Result<(
                 }
                 // Pairings outlive a bluetoothd restart; the objects are
                 // listed again when it is back.
-                ObjectEvent::ServiceGone => continue,
+                ObjectEvent::ServiceGone | ObjectEvent::Changed { .. } => continue,
             };
             inputs
                 .unbounded_send(input)

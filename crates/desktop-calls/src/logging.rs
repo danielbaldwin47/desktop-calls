@@ -60,6 +60,20 @@ pub enum EventKind {
     MalformedSignal,
     WatchFailed,
     PublishFailed,
+    CallAdded,
+    CallChanged,
+    CallEnded,
+    CallVanished,
+    CallReturned,
+    TransportChanged,
+    PhoneCommandSent,
+    PhoneCommandFailed,
+    PhoneCommandFallback,
+    RingingStarted,
+    RingingStopped,
+    RingingFailed,
+    ErrorReported,
+    SurfacesUnavailable,
 }
 
 impl EventKind {
@@ -78,6 +92,20 @@ impl EventKind {
             Self::MalformedSignal => "malformed-signal",
             Self::WatchFailed => "watch-failed",
             Self::PublishFailed => "publish-failed",
+            Self::CallAdded => "call-added",
+            Self::CallChanged => "call-changed",
+            Self::CallEnded => "call-ended",
+            Self::CallVanished => "call-vanished",
+            Self::CallReturned => "call-returned",
+            Self::TransportChanged => "transport-changed",
+            Self::PhoneCommandSent => "phone-command-sent",
+            Self::PhoneCommandFailed => "phone-command-failed",
+            Self::PhoneCommandFallback => "phone-command-fallback",
+            Self::RingingStarted => "ringing-started",
+            Self::RingingStopped => "ringing-stopped",
+            Self::RingingFailed => "ringing-failed",
+            Self::ErrorReported => "error-reported",
+            Self::SurfacesUnavailable => "surfaces-unavailable",
         }
     }
 }

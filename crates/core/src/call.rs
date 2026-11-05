@@ -50,7 +50,10 @@ impl CallState {
     }
 
     fn is_live(self) -> bool {
-        matches!(self, Self::Active | Self::Held | Self::Dialing | Self::Alerting)
+        matches!(
+            self,
+            Self::Active | Self::Held | Self::Dialing | Self::Alerting
+        )
     }
 
     pub(crate) fn is_connected(self) -> bool {

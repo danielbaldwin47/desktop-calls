@@ -1,11 +1,13 @@
 //! The long-running process that the systemd user unit starts.
 //!
-//! One thread runs one GLib main context. zbus runs on it through
-//! [`GlibRuntime`]; the BlueZ client and the Phone link turn D-Bus traffic
-//! into inputs; the Call state machine decides; this module carries out its
-//! effects and publishes the state on the control interface.
+//! One thread runs one GLib main context. zbus and GTK run on it, zbus
+//! through [`GlibRuntime`]; the BlueZ client, the Phone link, the control
+//! interface and the surfaces turn what happens into inputs; the Call state
+//! machine decides; this module carries out its effects, renders the
+//! surfaces and publishes the state on the control interface.
 
 use std::process::ExitCode;
+use std::time::Duration;
 
 use desktop_calls_core::{Effect, Input, State, step};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -14,10 +16,12 @@ use futures_util::future::select;
 use glib::MainContext;
 use zbus::Connection;
 
-use crate::control::Publisher;
+use crate::control::{Publisher, ShownSurfaces};
 use crate::glib_runtime::GlibRuntime;
 use crate::logging::{self, EventKind};
 use crate::phone_link::Command;
+use crate::ringer::Ringer;
+use crate::surfaces::Surfaces;
 use crate::{bluez, phone_link};
 
 /// Why the service could not run.
@@ -48,8 +52,22 @@ pub fn run() -> ExitCode {
         log_destination = %destination,
         "Desktop Calls started"
     );
+    // GTK needs a display. Without one (a headless session, a test with no
+    // screen) Desktop Calls still runs and follows Calls, with no surfaces.
+    let has_display = match adw::init() {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                event_kind = %EventKind::SurfacesUnavailable,
+                error_kind = "no-display",
+                detail = %error,
+                "No display to show the Banner and Call Window on"
+            );
+            false
+        }
+    };
     let context = MainContext::default();
-    let outcome = context.block_on(serve(GlibRuntime::new(context.clone())));
+    let outcome = context.block_on(serve(GlibRuntime::new(context.clone()), has_display));
     match outcome {
         Ok(()) => {
             tracing::info!(event_kind = %EventKind::ServiceStopped, "Desktop Calls stopped");
@@ -66,23 +84,35 @@ pub fn run() -> ExitCode {
     }
 }
 
-async fn serve(runtime: GlibRuntime) -> Result<(), Failure> {
+async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let session = connect(zbus::connection::Builder::session(), &runtime)
         .await
         .map_err(|error| raw_failure(Failure::SessionBusUnreachable, &error))?;
     let system = connect(zbus::connection::Builder::system(), &runtime)
         .await
         .map_err(|error| raw_failure(Failure::SystemBusUnreachable, &error))?;
-    let publisher = Publisher::serve(&session)
+    let (input_sender, inputs) = unbounded();
+    let publisher = Publisher::serve(&session, input_sender.clone())
         .await
         .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
 
-    let (input_sender, inputs) = unbounded();
     let (command_sender, commands) = unbounded();
+    let (report_sender, reports) = unbounded();
+    let surfaces = has_display.then(|| Surfaces::new(&input_sender, report_sender));
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system, input_sender.clone()));
-    context.spawn_local(follow_phone(session, commands, input_sender));
-    context.spawn_local(decide(inputs, command_sender, publisher));
+    context.spawn_local(follow_phone(session, commands, input_sender.clone()));
+    context.spawn_local(publish_surfaces(reports, publisher.clone()));
+    context.spawn_local(decide(
+        inputs,
+        Shell {
+            inputs: input_sender,
+            commands: command_sender,
+            publisher,
+            surfaces,
+            ringer: Ringer::default(),
+        },
+    ));
 
     select(
         glib_unix::signal_future(SIGTERM),
@@ -137,25 +167,75 @@ async fn follow_phone(
     }
 }
 
-/// Feeds every input to the Call state machine, carries out its effects and
-/// publishes the new state.
-async fn decide(
-    mut inputs: UnboundedReceiver<Input>,
+/// Publishes what the surfaces show, as they report it.
+async fn publish_surfaces(mut reports: UnboundedReceiver<ShownSurfaces>, publisher: Publisher) {
+    while let Some(shown) = reports.next().await {
+        if let Err(error) = publisher.publish_surfaces(shown).await {
+            publish_failed(&error);
+        }
+    }
+}
+
+/// What carries out the Call state machine's effects.
+struct Shell {
+    /// Where timers report back.
+    inputs: UnboundedSender<Input>,
     commands: UnboundedSender<Command>,
     publisher: Publisher,
-) {
+    surfaces: Option<Surfaces>,
+    ringer: Ringer,
+}
+
+impl Shell {
+    async fn carry_out(&mut self, effects: Vec<Effect>) {
+        let mut phone_commands = Vec::new();
+        for effect in effects {
+            match effect {
+                Effect::AttachPhone { address } => self.command(Command::Attach { address }),
+                Effect::DetachPhone => self.command(Command::Detach),
+                Effect::Phone(command) => phone_commands.push(command),
+                Effect::StartRinging => self.ringer.start(),
+                Effect::StopRinging => self.ringer.stop(),
+                Effect::StartTimer { timer, after_ms } => {
+                    let inputs = self.inputs.clone();
+                    MainContext::default().spawn_local(async move {
+                        glib::timeout_future(Duration::from_millis(u64::from(after_ms))).await;
+                        let _ = inputs.unbounded_send(Input::TimerFired(timer));
+                    });
+                }
+                Effect::ReportError(failure) => {
+                    tracing::info!(
+                        event_kind = %EventKind::ErrorReported,
+                        error_kind = failure.as_str(),
+                        "Told the user: {}",
+                        desktop_calls_core::messages::failure(failure).text
+                    );
+                    if let Err(error) = self.publisher.report_error(failure).await {
+                        publish_failed(&error);
+                    }
+                }
+            }
+        }
+        // One step's Phone commands run in order, as one batch.
+        if !phone_commands.is_empty() {
+            self.command(Command::Run(phone_commands));
+        }
+    }
+
+    fn command(&self, command: Command) {
+        // The Phone link only stops when the bus connection closes, and then
+        // the service has nothing left to do anyway.
+        let _ = self.commands.unbounded_send(command);
+    }
+}
+
+/// Feeds every input to the Call state machine, carries out its effects,
+/// renders the surfaces and publishes the new state.
+async fn decide(mut inputs: UnboundedReceiver<Input>, mut shell: Shell) {
     let mut state = State::default();
     while let Some(input) = inputs.next().await {
         let (next, effects) = step(state.clone(), input);
-        for effect in effects {
-            let command = match effect {
-                Effect::AttachPhone { address } => Command::Attach { address },
-                Effect::DetachPhone => Command::Detach,
-            };
-            // The Phone link only stops when the bus connection closes, and
-            // then the service has nothing left to do anyway.
-            let _ = commands.unbounded_send(command);
-        }
+        shell.carry_out(effects).await;
         if next.connection_state() != state.connection_state() {
             tracing::info!(
                 event_kind = %EventKind::ConnectionStateChanged,
@@ -165,14 +245,21 @@ async fn decide(
                 next.connection_state()
             );
         }
-        if let Err(error) = publisher.publish(&next).await {
-            tracing::warn!(
-                event_kind = %EventKind::PublishFailed,
-                error_kind = "publish-failed",
-                detail = %error,
-                "Couldn't publish the new state on the control interface"
-            );
+        if let Some(surfaces) = &shell.surfaces {
+            surfaces.render(&next.surfaces());
+        }
+        if let Err(error) = shell.publisher.publish(&next).await {
+            publish_failed(&error);
         }
         state = next;
     }
+}
+
+fn publish_failed(error: &zbus::Error) {
+    tracing::warn!(
+        event_kind = %EventKind::PublishFailed,
+        error_kind = "publish-failed",
+        detail = %error,
+        "Couldn't publish the new state on the control interface"
+    );
 }

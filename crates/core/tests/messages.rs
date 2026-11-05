@@ -72,7 +72,11 @@ fn call_failures_have_a_kind_and_never_raw_dbus_text() {
     ] {
         let message = messages::failure(failure);
         assert!(message.text.ends_with('.'), "{failure:?}: {}", message.text);
-        assert!(!message.text.contains("org."), "{failure:?}: {}", message.text);
+        assert!(
+            !message.text.contains("org."),
+            "{failure:?}: {}",
+            message.text
+        );
         assert!(!failure.as_str().is_empty());
     }
     assert_eq!(Failure::AnswerFailed.as_str(), "answer-failed");

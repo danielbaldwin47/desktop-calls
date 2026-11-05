@@ -9,11 +9,16 @@
 //! - the settings portal, `org.freedesktop.portal.Settings`, which tells GTK
 //!   whether the Desktop is light or dark;
 //! - Omarchy's notification state file, whose `dnd` field is Do Not Disturb;
+//! - Omarchy's current theme, `~/.local/state/omarchy/current/theme/`,
+//!   switched the way `omarchy-theme-set` switches it;
 //! - Omarchy's bar: `test-client --bar`, a layer-shell surface across the
 //!   top of the output that reserves [`BAR_HEIGHT`], drawn in [`BAR_COLOUR`];
 //! - Hyprland's request socket, answering `j/layers` with an
 //!   `omarchy-notifications` layer as wide as the scenario asks, the way
-//!   `hyprctl layers -j` reports Omarchy's notification-toast column.
+//!   `hyprctl layers -j` reports Omarchy's notification-toast column, and
+//!   `j/getoption decoration:rounding` with the scenario's corner rounding;
+//!   and its event socket, which announces `configreloaded` when the
+//!   rounding changes.
 //!
 //! The D-Bus stand-ins share one connection to the scenario's session bus,
 //! served from the harness's process.
@@ -21,7 +26,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{Read as _, Write as _};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -43,13 +48,42 @@ pub const BAR_COLOUR: [u8; 3] = [0x30, 0x30, 0x60];
 /// The instance signature the Hyprland stand-in serves under.
 pub(crate) const HYPRLAND_SIGNATURE: &str = "desktop-calls-test";
 
-/// Serves Hyprland's request socket under `runtime`, for the rest of the
-/// test process, reporting an `omarchy-notifications` layer `toast_width`
-/// wide at the top-right of the headless output.
-pub(crate) fn serve_hyprland(runtime: &Path, toast_width: u32) -> std::io::Result<()> {
+/// How wide Omarchy 4.5's notification-toast column is, as Hyprland reports
+/// it on the user's Desktop.
+pub(crate) const OMARCHY_TOAST_COLUMN_WIDTH: u32 = 394;
+
+/// The running Hyprland stand-in.
+pub(crate) struct Hyprland {
+    rounding: Arc<Mutex<u32>>,
+    /// Clients of the event socket.
+    listeners: Arc<Mutex<Vec<UnixStream>>>,
+}
+
+impl Hyprland {
+    /// Changes `decoration:rounding` and announces the reload on the event
+    /// socket, as Hyprland does when its configuration is reloaded.
+    pub fn set_rounding(&self, rounding: u32) {
+        *self.rounding.lock().unwrap_or_else(PoisonError::into_inner) = rounding;
+        self.listeners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain_mut(|listener| listener.write_all(b"configreloaded>>\n").is_ok());
+    }
+}
+
+/// Serves Hyprland's request and event sockets under `runtime`, for the rest
+/// of the test process. The request socket reports an
+/// `omarchy-notifications` layer `toast_width` wide at the top-right of the
+/// headless output, and `decoration:rounding` as `rounding`.
+pub(crate) fn serve_hyprland(
+    runtime: &Path,
+    toast_width: u32,
+    rounding: u32,
+) -> std::io::Result<Hyprland> {
     let directory = runtime.join("hypr").join(HYPRLAND_SIGNATURE);
     fs::create_dir_all(&directory)?;
     let listener = UnixListener::bind(directory.join(".socket.sock"))?;
+    let events = UnixListener::bind(directory.join(".socket2.sock"))?;
     let (width, height) = crate::SCREEN_SIZE;
     // `hyprctl layers -j` reports layout coordinates: at scale 1.6 the
     // 3840x2160 output is 2400x1350.
@@ -61,6 +95,11 @@ pub(crate) fn serve_hyprland(runtime: &Path, toast_width: u32) -> std::io::Resul
          \"alpha\": 1.0}}]}}}}}}",
         x = width.saturating_sub(toast_width),
     );
+    let hyprland = Hyprland {
+        rounding: Arc::new(Mutex::new(rounding)),
+        listeners: Arc::default(),
+    };
+    let rounding = hyprland.rounding.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
@@ -68,15 +107,106 @@ pub(crate) fn serve_hyprland(runtime: &Path, toast_width: u32) -> std::io::Resul
             let Ok(length) = stream.read(&mut request) else {
                 continue;
             };
-            let reply = if &request[..length] == b"j/layers" {
-                layers.as_str()
-            } else {
-                "unknown request"
+            let reply = match &request[..length] {
+                b"j/layers" => layers.clone(),
+                // As Hyprland 0.56 answers `hyprctl getoption -j`.
+                b"j/getoption decoration:rounding" => format!(
+                    "{{\"option\": \"decoration:rounding\", \"int\": {}, \"set\": true }}",
+                    rounding.lock().unwrap_or_else(PoisonError::into_inner)
+                ),
+                _ => "unknown request".to_owned(),
             };
             let _ = stream.write_all(reply.as_bytes());
         }
     });
-    Ok(())
+    let listeners = hyprland.listeners.clone();
+    std::thread::spawn(move || {
+        for stream in events.incoming().flatten() {
+            listeners
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(stream);
+        }
+    });
+    Ok(hyprland)
+}
+
+/// One of the harness's two Omarchy themes, for the theme stand-in. Their
+/// `colors.toml` files are in `crates/test-harness/fixtures/omarchy-themes/`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OmarchyTheme {
+    Light,
+    Dark,
+}
+
+impl OmarchyTheme {
+    /// Its name, for file names: `"omarchy-light"` or `"omarchy-dark"`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "omarchy-light",
+            Self::Dark => "omarchy-dark",
+        }
+    }
+
+    /// Whether the theme is light or dark, which Omarchy also tells the
+    /// settings portal.
+    #[must_use]
+    pub fn mode(self) -> Theme {
+        match self {
+            Self::Light => Theme::Light,
+            Self::Dark => Theme::Dark,
+        }
+    }
+
+    /// The theme's `colors.toml`.
+    #[must_use]
+    pub fn colors_toml(self) -> &'static str {
+        match self {
+            Self::Light => include_str!("../fixtures/omarchy-themes/light/colors.toml"),
+            Self::Dark => include_str!("../fixtures/omarchy-themes/dark/colors.toml"),
+        }
+    }
+
+    /// The colour `colors.toml` gives `key`, such as `"background"`.
+    ///
+    /// # Panics
+    ///
+    /// If the theme has no such colour.
+    #[must_use]
+    pub fn colour(self, key: &str) -> [u8; 3] {
+        self.colors_toml()
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .find(|(name, _)| name.trim() == key)
+            .and_then(|(_, value)| {
+                let hex = value.trim().trim_matches('"').strip_prefix('#')?;
+                let channel = |at: usize| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok();
+                Some([channel(0)?, channel(2)?, channel(4)?])
+            })
+            .unwrap_or_else(|| panic!("{} has no colour {key:?}", self.as_str()))
+    }
+}
+
+/// Makes `theme` Omarchy's current theme under `home`, as `omarchy-theme-set`
+/// does: it builds the new theme in `current/next-theme`, deletes
+/// `current/theme`, moves the new one into its place, then writes
+/// `theme.generation` and `theme.name`.
+pub(crate) fn switch_omarchy_theme(home: &Path, theme: OmarchyTheme) -> std::io::Result<()> {
+    let current = home.join(".local/state/omarchy/current");
+    let next = current.join("next-theme");
+    fs::create_dir_all(&next)?;
+    fs::write(next.join("colors.toml"), theme.colors_toml())?;
+    match fs::remove_dir_all(current.join("theme")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    fs::rename(&next, current.join("theme"))?;
+    let generation = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_micros());
+    fs::write(current.join("theme.generation"), format!("{generation}\n"))?;
+    fs::write(current.join("theme.name"), format!("{}\n", theme.as_str()))
 }
 
 const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";

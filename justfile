@@ -19,8 +19,9 @@ test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
-# Render every surface in every state, light and dark, into the screenshot
-# gallery at target/screenshots/gallery. Needs sway and grim.
+# Render every surface in every state, light and dark, stock and under an
+# Omarchy theme, into the screenshot gallery at target/screenshots/gallery.
+# Needs sway and grim.
 screenshot:
     cargo build --workspace --bins --locked
     target/debug/automation screenshot

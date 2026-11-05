@@ -44,6 +44,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
 use crate::control::ShownSurfaces;
 use crate::hyprland::{self, Unknown};
 use crate::logging::EventKind;
+use crate::theme::Theme;
 
 /// How wide Omarchy's notification-toast column is taken to be when
 /// Hyprland can't say. Omarchy 4.5's is 394.
@@ -66,9 +67,9 @@ const KEYPAD: [[&str; 3]; 4] = [
     ["*", "0", "#"],
 ];
 
-/// Answer is green and Decline and Hang up are red, as on a phone, in light
-/// and dark alike. Muted is orange, unlike either, on the Mute button and on
-/// a strip across the Call Window.
+/// The surfaces' layout, and the orange that marks the microphone muted,
+/// unlike any green or red. The rest of their colours and their corners come
+/// from [`Theme`].
 const CSS: &str = "
 .desktop-calls-surface { padding: 16px; }
 .desktop-calls-surface .microphone-muted {
@@ -82,15 +83,13 @@ const CSS: &str = "
     font-size: 0.8em; font-weight: bold; padding: 0 6px;
     border: 1px solid currentColor; border-radius: 4px;
 }
-.desktop-calls-surface button.answer { background: #26a269; color: #ffffff; }
-.desktop-calls-surface button.decline,
-.desktop-calls-surface button.hang-up { background: #c01c28; color: #ffffff; }
 ";
 
 /// The surfaces, once GTK is up.
 pub struct Surfaces {
     banner: Banner,
     call_window: Rc<CallWindow>,
+    _theme: Option<Theme>,
 }
 
 /// What the surfaces show, and where it is reported.
@@ -119,7 +118,7 @@ impl Surfaces {
     /// Builds the surfaces, hidden. Clicks go to `intents`, and what is shown
     /// to `reports`.
     pub fn new(intents: &UnboundedSender<Input>, reports: UnboundedSender<ShownSurfaces>) -> Self {
-        if let Some(display) = gtk::gdk::Display::default() {
+        let theme = gtk::gdk::Display::default().map(|display| {
             let provider = gtk::CssProvider::new();
             provider.load_from_string(CSS);
             gtk::style_context_add_provider_for_display(
@@ -127,7 +126,8 @@ impl Surfaces {
                 &provider,
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
-        }
+            Theme::follow(&display)
+        });
         let report = Rc::new(RefCell::new(Report {
             shown: ShownSurfaces::new(),
             reports,
@@ -135,6 +135,7 @@ impl Surfaces {
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
             call_window: CallWindow::new(intents, report),
+            _theme: theme,
         };
         surfaces.place_beside_toasts();
         surfaces
@@ -179,7 +180,7 @@ impl Surfaces {
 
 fn toast_column_unknown(unknown: &Unknown) {
     match unknown {
-        Unknown::NotHyprland | Unknown::NoToastLayer => tracing::debug!(
+        Unknown::NotHyprland | Unknown::NoToastLayer | Unknown::NoRounding => tracing::debug!(
             event_kind = %EventKind::ToastColumnUnknown,
             error_kind = unknown.as_str(),
             "No toast column to keep clear of; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"

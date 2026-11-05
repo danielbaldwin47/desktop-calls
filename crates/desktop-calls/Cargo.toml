@@ -25,6 +25,7 @@ futures-channel.workspace = true
 gtk.workspace = true
 adw.workspace = true
 gtk4-layer-shell.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

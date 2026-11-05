@@ -46,7 +46,7 @@ mod stand_ins;
 pub use client::TestClient;
 pub use input::Key;
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
-pub use stand_ins::{BAR_COLOUR, BAR_HEIGHT, Notification, Theme, TrayItem};
+pub use stand_ins::{BAR_COLOUR, BAR_HEIGHT, Notification, OmarchyTheme, Theme, TrayItem};
 
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;
@@ -212,6 +212,8 @@ pub struct Harness {
     screen: Option<Screen>,
     /// The stand-in for Omarchy's bar, if the scenario has one.
     bar: Option<TestClient>,
+    /// The Hyprland stand-in, if the scenario runs under one.
+    hyprland: Option<stand_ins::Hyprland>,
     screenshot_directory: PathBuf,
     /// Every `Error` signal the app has sent, in order.
     app_errors: Arc<Mutex<Vec<AppError>>>,
@@ -230,8 +232,46 @@ pub struct Builder {
     scenario: Option<PathBuf>,
     screenshot_directory: Option<PathBuf>,
     omarchy_bar: bool,
-    toast_column: Option<u32>,
     phone_connected: bool,
+    omarchy_theme: Option<OmarchyTheme>,
+    hyprland: Option<HyprlandSettings>,
+}
+
+/// What the Hyprland stand-in reports.
+#[derive(Clone, Copy)]
+struct HyprlandSettings {
+    toast_column: u32,
+    rounding: u32,
+}
+
+impl Default for HyprlandSettings {
+    /// As on the user's Desktop: Omarchy 4.5's toast column, and Omarchy's
+    /// default square corners.
+    fn default() -> Self {
+        Self {
+            toast_column: stand_ins::OMARCHY_TOAST_COLUMN_WIDTH,
+            rounding: 0,
+        }
+    }
+}
+
+impl HyprlandSettings {
+    /// Serves the Hyprland stand-in in the scenario's `directory`, and names
+    /// it in `environment` as Hyprland names itself.
+    fn serve(
+        self,
+        directory: &Path,
+        environment: &mut Vec<(&'static str, String)>,
+    ) -> stand_ins::Hyprland {
+        let hyprland =
+            stand_ins::serve_hyprland(&directory.join("runtime"), self.toast_column, self.rounding)
+                .expect("serve the Hyprland stand-in");
+        environment.push((
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            stand_ins::HYPRLAND_SIGNATURE.to_owned(),
+        ));
+        hyprland
+    }
 }
 
 impl Builder {
@@ -275,7 +315,22 @@ impl Builder {
     /// reports Omarchy's notification-toast column `width` wide. Without
     /// it there is no Hyprland, as under sway.
     pub fn hyprland_toast_column(mut self, width: u32) -> Self {
-        self.toast_column = Some(width);
+        self.hyprland.get_or_insert_default().toast_column = width;
+        self
+    }
+
+    /// Runs the app under a Hyprland stand-in whose `decoration:rounding` is
+    /// `rounding`. [`Harness::set_hyprland_rounding`] changes it later.
+    pub fn hyprland_rounding(mut self, rounding: u32) -> Self {
+        self.hyprland.get_or_insert_default().rounding = rounding;
+        self
+    }
+
+    /// Makes `theme` Omarchy's current theme before the app starts. Without
+    /// it there is no Omarchy theme, as on a Desktop without Omarchy.
+    /// [`Harness::switch_omarchy_theme`] switches it later.
+    pub fn omarchy_theme(mut self, theme: OmarchyTheme) -> Self {
+        self.omarchy_theme = Some(theme);
         self
     }
 
@@ -314,13 +369,12 @@ impl Builder {
         let system_bus = start_bus(&directory, "system", &mut processes);
         let session_bus = start_bus(&directory, "session", &mut processes);
         let mut environment = environment(&directory, &system_bus, &session_bus);
-        if let Some(width) = self.toast_column {
-            stand_ins::serve_hyprland(&directory.join("runtime"), width)
-                .expect("serve the Hyprland stand-in");
-            environment.push((
-                "HYPRLAND_INSTANCE_SIGNATURE",
-                stand_ins::HYPRLAND_SIGNATURE.to_owned(),
-            ));
+        let hyprland = self
+            .hyprland
+            .map(|settings| settings.serve(&directory, &mut environment));
+        if let Some(theme) = self.omarchy_theme {
+            stand_ins::switch_omarchy_theme(&directory.join("home"), theme)
+                .expect("make the Omarchy theme current");
         }
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &mut processes);
@@ -367,6 +421,7 @@ impl Builder {
             stand_ins,
             screen,
             bar: None,
+            hyprland,
             screenshot_directory,
             app_errors,
             processes,
@@ -447,6 +502,24 @@ impl Harness {
         )
     }
 
+    /// Captures only `region` of the screen, as `<name>.png` in the
+    /// screenshot directory. A small region takes a fraction of a full
+    /// capture's time, for checks that are timed. The capture's own
+    /// coordinates start at the region's top-left corner.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the capture fails.
+    #[must_use]
+    pub fn screenshot_of(&self, name: &str, region: Region) -> Screenshot {
+        self.screen();
+        Screen::screenshot_of(
+            &self.environment,
+            &self.screenshot_directory.join(format!("{name}.png")),
+            region,
+        )
+    }
+
     /// Captures the screen as `<name>.png` until the capture satisfies
     /// `shown`, and returns it. What the app reports can run a frame ahead
     /// of what is on screen; this waits for the screen.
@@ -517,6 +590,31 @@ impl Harness {
     pub fn set_do_not_disturb(&self, on: bool) {
         stand_ins::write_do_not_disturb(&self.directory.join("home"), on)
             .expect("write Omarchy's notification state file");
+    }
+
+    /// Switches Omarchy's current theme to `theme`, as `omarchy-theme-set`
+    /// does: the theme directory is deleted and a new one moved into its
+    /// place. Returns once the switch is on disk.
+    ///
+    /// # Panics
+    ///
+    /// If the theme can't be written.
+    pub fn switch_omarchy_theme(&self, theme: OmarchyTheme) {
+        stand_ins::switch_omarchy_theme(&self.directory.join("home"), theme)
+            .expect("switch Omarchy's theme");
+    }
+
+    /// Changes Hyprland's `decoration:rounding` and announces the reload, as
+    /// Hyprland does when its configuration is reloaded.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no Hyprland stand-in.
+    pub fn set_hyprland_rounding(&self, rounding: u32) {
+        self.hyprland
+            .as_ref()
+            .expect("this needs Hyprland: start with Harness::builder().hyprland_rounding(…)")
+            .set_rounding(rounding);
     }
 
     /// Types on the screen's synthetic keyboard, into whatever has focus.

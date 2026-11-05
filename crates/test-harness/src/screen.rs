@@ -224,12 +224,30 @@ impl Screen {
     /// Captures every output into `path` with `grim`. `environment` names
     /// this screen in `WAYLAND_DISPLAY`.
     pub fn screenshot(environment: &[(&'static str, String)], path: &Path) -> Screenshot {
+        Self::grim(environment, &[], path)
+    }
+
+    /// Captures only `region`, in layout coordinates, into `path`.
+    pub fn screenshot_of(
+        environment: &[(&'static str, String)],
+        path: &Path,
+        region: Region,
+    ) -> Screenshot {
+        // grim takes whole layout pixels; round outwards.
+        let (left, top) = (region.left.floor(), region.top.floor());
+        let (width, height) = (region.right.ceil() - left, region.bottom.ceil() - top);
+        let geometry = format!("{left},{top} {width}x{height}");
+        Self::grim(environment, &["-g", &geometry], path)
+    }
+
+    fn grim(environment: &[(&'static str, String)], arguments: &[&str], path: &Path) -> Screenshot {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create the screenshot directory");
         }
         let captured = Command::new("grim")
             .env_clear()
             .envs(environment.iter().cloned())
+            .args(arguments)
             .arg(path)
             .output();
         let captured = match captured {

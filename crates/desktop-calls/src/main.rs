@@ -11,6 +11,7 @@ mod phone_link;
 mod ringer;
 mod service;
 mod surfaces;
+mod theme;
 
 use std::process::ExitCode;
 

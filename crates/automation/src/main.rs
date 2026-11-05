@@ -23,7 +23,8 @@ struct Arguments {
 enum Command {
     /// Report every polish-scorecard item with its status and evidence.
     Scorecard,
-    /// Render every surface in every state, light and dark, into a gallery.
+    /// Render every surface in every state, light and dark, stock and under
+    /// an Omarchy theme, into a gallery.
     Screenshot {
         /// Where to write the gallery. Default: `target/screenshots/gallery`.
         #[arg(long)]

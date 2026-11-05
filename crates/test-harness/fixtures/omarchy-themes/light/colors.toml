@@ -1,0 +1,34 @@
+# A light Omarchy theme for the screen scenarios, laid out as Omarchy's own
+# `colors.toml`. Its accent, background, green and red differ from the dark
+# fixture's, from stock Adwaita's and from the bar stand-in's.
+mode = "light"
+
+accent = "#7c3aed"
+selection = "#e2d9c8"
+muted = "#b8ab96"
+
+background = "#f4efe6"
+dark_background = "#ebe4d8"
+darker_background = "#e0d8ca"
+lighter_background = "#faf7f1"
+
+foreground = "#3b3228"
+dark_foreground = "#8a7d6c"
+light_foreground = "#5a4e40"
+bright_foreground = "#2a231b"
+
+red = "#b8323c"
+yellow = "#b07d12"
+orange = "#c0561e"
+green = "#2f8f46"
+cyan = "#1b8a8f"
+blue = "#2b6cc4"
+magenta = "#a43f9e"
+brown = "#6c3d1c"
+
+bright_red = "#c94a53"
+bright_yellow = "#c4911f"
+bright_green = "#3ea657"
+bright_cyan = "#25a0a6"
+bright_blue = "#3f80d8"
+bright_magenta = "#b852b2"

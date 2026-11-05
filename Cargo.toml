@@ -34,6 +34,8 @@ futures-channel = "0.3"
 gtk = { version = "0.11", package = "gtk4", features = ["v4_12"] }
 adw = { version = "0.9", package = "libadwaita" }
 gtk4-layer-shell = "0.8"
+# Reads the Omarchy theme's colors.toml.
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 # Formats phone numbers for reading, by libphonenumber's rules.
 phonenumber = "0.3"
 tempfile = "3"
@@ -70,4 +72,34 @@ allow_attributes_without_reason = "deny"
 opt-level = 3
 
 [profile.dev.package.regex-syntax]
+opt-level = 3
+
+# The screen harness's PNG decoding and pixel scans, optimised even in debug
+# builds. Unoptimised, checking one 3840x2160 screenshot took about 0.6 s of
+# one CPU here and several seconds on a loaded one, so a screen scenario
+# could miss a 5 s deadline after only a couple of captures; optimised it
+# takes about 16 ms. `region_where` is generic, so it compiles into the crate
+# that calls it: the harness's own tests, and the gallery in automation.
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.adler2]
+opt-level = 3
+
+[profile.dev.package.simd-adler32]
+opt-level = 3
+
+[profile.dev.package.test-harness]
+opt-level = 3
+
+[profile.dev.package.automation]
 opt-level = 3

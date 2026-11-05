@@ -75,6 +75,10 @@ pub enum EventKind {
     ErrorReported,
     SurfacesUnavailable,
     ToastColumnUnknown,
+    ThemeChanged,
+    ThemeUnreadable,
+    ThemeUnwatched,
+    RoundingUnknown,
 }
 
 impl EventKind {
@@ -108,6 +112,10 @@ impl EventKind {
             Self::ErrorReported => "error-reported",
             Self::SurfacesUnavailable => "surfaces-unavailable",
             Self::ToastColumnUnknown => "toast-column-unknown",
+            Self::ThemeChanged => "theme-changed",
+            Self::ThemeUnreadable => "theme-unreadable",
+            Self::ThemeUnwatched => "theme-unwatched",
+            Self::RoundingUnknown => "rounding-unknown",
         }
     }
 }

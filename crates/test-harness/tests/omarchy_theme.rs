@@ -1,0 +1,242 @@
+//! Scenarios: the surfaces follow the live Omarchy theme (its palette, light
+//! or dark) and Hyprland's corner rounding, with no restart, and are stock
+//! Adwaita on a Desktop without Omarchy. Checked on screenshots.
+//!
+//! The timed checks capture only a few pixels of the screen at a time, so a
+//! slow CI runner spends its time on the app, not on the harness.
+
+use std::time::{Duration, Instant};
+
+use test_harness::{BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot};
+
+/// How long the app may take to notice a change on the Phone.
+const DEADLINE: Duration = Duration::from_secs(5);
+/// How long an open surface may take to follow a theme switch.
+const THEME_DEADLINE: Duration = Duration::from_secs(1);
+
+const NUMBER: &str = "+447700900123";
+
+/// Stock Adwaita's light window background (libadwaita 1.10).
+const ADWAITA_LIGHT_WINDOW: [u8; 3] = [0xfa, 0xfa, 0xfb];
+/// The stock Answer button's green.
+const STOCK_GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+
+/// The Banner's corner radius once Hyprland rounds windows.
+const ROUNDING: u32 = 12;
+
+fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
+    colour
+        .iter()
+        .zip(target)
+        .all(|(channel, wanted)| channel.abs_diff(wanted) <= 6)
+}
+
+/// Whether every pixel of `screenshot` is `colour`.
+fn shows_only(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
+    screenshot
+        .region_where(|pixel| !close_to(pixel, colour))
+        .is_none()
+}
+
+/// Whether `colour`, give or take antialiasing, is anywhere on screen.
+fn shows(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
+    screenshot
+        .region_where(|pixel| {
+            pixel
+                .iter()
+                .zip(colour)
+                .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
+        })
+        .is_some()
+}
+
+/// Where the app's surfaces are: everything that is neither the black
+/// background nor the bar stand-in.
+fn app_region(screenshot: &Screenshot) -> Option<Region> {
+    screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
+}
+
+/// Starts `builder` on a screen, connects the Phone and rings it, and waits
+/// until the screen shows the Banner with its Answer button in `green`.
+/// Returns where the Banner is.
+fn ringing(builder: Builder, green: [u8; 3]) -> (Harness, Region) {
+    let harness = builder.headless_screen().omarchy_bar().start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    let _call = harness.simulated_phone().ring(NUMBER);
+    harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+        state.surface("banner").is_some()
+    });
+    let screenshot =
+        harness.screenshot_when("banner", DEADLINE, |screenshot| shows(screenshot, green));
+    let banner = app_region(&screenshot)
+        .unwrap_or_else(|| panic!("the Banner isn't on screen: {}", screenshot.path.display()));
+    (harness, banner)
+}
+
+/// A few pixels of a surface's background: in its left padding, halfway
+/// down, clear of its corners and its content.
+fn background_patch(surface: Region) -> Region {
+    let middle = f64::midpoint(surface.top, surface.bottom);
+    Region {
+        left: surface.left + 3.0,
+        top: middle - 3.0,
+        right: surface.left + 9.0,
+        bottom: middle + 3.0,
+    }
+}
+
+/// One layout pixel just inside the surface's top-left corner: background
+/// where the corner is square, black where it is rounded. At scale 1.6 the
+/// surface's edges fall between screen pixels, so its outermost pixels are
+/// blends; this is one layout pixel clear of them.
+fn corner(surface: Region) -> Region {
+    let (left, top) = (surface.left.ceil() + 1.0, surface.top.ceil() + 1.0);
+    Region {
+        left,
+        top,
+        right: left + 1.0,
+        bottom: top + 1.0,
+    }
+}
+
+/// Captures `patch` until it shows only `colour`, and returns how long that
+/// took from `since`.
+///
+/// # Panics
+///
+/// If it hasn't within [`DEADLINE`].
+fn time_until(harness: &Harness, name: &str, patch: Region, colour: [u8; 3]) -> Duration {
+    let since = Instant::now();
+    loop {
+        let screenshot = harness.screenshot_of(name, patch);
+        if shows_only(&screenshot, colour) {
+            return since.elapsed();
+        }
+        assert!(
+            since.elapsed() < DEADLINE,
+            "{name}: the screen never showed {colour:02x?} within {DEADLINE:?}; see {}",
+            screenshot.path.display()
+        );
+    }
+}
+
+#[test]
+fn an_open_banner_follows_a_switch_between_light_and_dark_omarchy_themes_within_a_second() {
+    let dark = OmarchyTheme::Dark;
+    let light = OmarchyTheme::Light;
+    let (harness, banner) = ringing(
+        Harness::builder().theme(dark.mode()).omarchy_theme(dark),
+        dark.colour("green"),
+    );
+    let patch = background_patch(banner);
+    assert!(
+        shows_only(
+            &harness.screenshot_of("dark-background", patch),
+            dark.colour("background")
+        ),
+        "the Banner's background isn't the dark theme's"
+    );
+
+    harness.switch_omarchy_theme(light);
+    let to_light = time_until(&harness, "to-light", patch, light.colour("background"));
+
+    let screenshot = harness.screenshot("light");
+    assert!(
+        shows(&screenshot, light.colour("green")),
+        "Answer isn't the light theme's green"
+    );
+    assert!(
+        shows(&screenshot, light.colour("red")),
+        "Decline isn't the light theme's red"
+    );
+    harness.switch_omarchy_theme(dark);
+    let to_dark = time_until(&harness, "to-dark", patch, dark.colour("background"));
+
+    assert!(to_light <= THEME_DEADLINE, "to light took {to_light:?}");
+    assert!(to_dark <= THEME_DEADLINE, "to dark took {to_dark:?}");
+    // The same Banner, still ringing: the app followed without a restart.
+    let state = harness.app_state();
+    assert!(
+        state.ringing && state.surface("banner").is_some(),
+        "{state:?}"
+    );
+}
+
+#[test]
+fn the_call_window_takes_its_colours_from_the_omarchy_theme() {
+    let light = OmarchyTheme::Light;
+    let (harness, _) = ringing(
+        Harness::builder().omarchy_theme(light),
+        light.colour("green"),
+    );
+    let call = harness.app_state().calls[0].id;
+
+    harness.answer(call);
+
+    let screenshot = harness.screenshot_when("call-window", DEADLINE, |screenshot| {
+        shows(screenshot, light.colour("red")) && !shows(screenshot, light.colour("green"))
+    });
+    let window = app_region(&screenshot).expect("the Call Window is on screen");
+    let patch = harness.screenshot_of("call-window-background", background_patch(window));
+    assert!(
+        shows_only(&patch, light.colour("background")),
+        "the Call Window's background isn't the theme's; see {}",
+        patch.path.display()
+    );
+}
+
+#[test]
+fn without_omarchy_the_banner_is_stock_adwaita_and_the_app_logs_no_error() {
+    let (harness, banner) = ringing(Harness::builder(), STOCK_GREEN);
+
+    let patch = harness.screenshot_of("background", background_patch(banner));
+
+    assert!(
+        shows_only(&patch, ADWAITA_LIGHT_WINDOW),
+        "the Banner's background isn't stock Adwaita's; see {}",
+        patch.path.display()
+    );
+    let log = std::fs::read_to_string(
+        harness
+            .directory()
+            .join("state/desktop-calls/desktop-calls.log"),
+    )
+    .expect("read the app's log");
+    let errors: Vec<_> = log
+        .lines()
+        .filter(|line| line.contains("\"level\":\"ERROR\""))
+        .collect();
+    assert!(errors.is_empty(), "the app logged errors: {errors:#?}");
+    let theme_warnings: Vec<_> = log
+        .lines()
+        .filter(|line| {
+            line.contains("\"level\":\"WARN\"") && line.contains("\"event_kind\":\"theme-")
+        })
+        .collect();
+    assert!(
+        theme_warnings.is_empty(),
+        "the app warned about the theme: {theme_warnings:#?}"
+    );
+}
+
+#[test]
+fn an_open_banner_rounds_its_corners_when_hyprland_reloads_with_rounding() {
+    let (harness, banner) = ringing(Harness::builder().hyprland_rounding(0), STOCK_GREEN);
+    assert!(
+        shows_only(
+            &harness.screenshot_of("square", corner(banner)),
+            ADWAITA_LIGHT_WINDOW
+        ),
+        "the Banner's corners aren't square while Hyprland's rounding is 0"
+    );
+
+    harness.set_hyprland_rounding(ROUNDING);
+
+    time_until(&harness, "rounded", corner(banner), [0, 0, 0]);
+    // The rest of the Banner stays put.
+    let screenshot = harness.screenshot("rounded-banner");
+    assert_eq!(app_region(&screenshot), Some(banner));
+}

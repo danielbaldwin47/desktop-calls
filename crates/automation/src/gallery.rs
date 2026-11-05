@@ -1,5 +1,6 @@
 //! The screenshot gallery: every surface in every state, in a light and a
-//! dark Desktop, with an `index.html` for a screenshot-review agent.
+//! dark Desktop without Omarchy (stock Adwaita) and under a light and a dark
+//! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
 //! Each surface ticket adds its states to [`STATES`].
 
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use test_harness::{BAR_COLOUR, Harness, Region, Screenshot, Theme};
+use test_harness::{BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot, Theme};
 
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -22,25 +23,75 @@ struct State {
     title: &'static str,
     /// Brings the scenario into the state.
     reach: fn(&Harness),
-    /// Whether a capture shows the state yet.
-    shown: fn(&Screenshot) -> bool,
+    /// Whether a capture under `look` shows the state yet.
+    shown: fn(&Screenshot, Look) -> bool,
 }
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
 
-/// The Answer button's green, the Decline and Hang up buttons' red, and the
-/// orange that marks the microphone muted.
+/// The stock Answer button's green, the stock Decline and Hang up buttons'
+/// red, and the orange that marks the microphone muted under every look.
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
+
+/// How the Desktop looks in one column of the gallery.
+#[derive(Clone, Copy)]
+enum Look {
+    /// No Omarchy, light or dark as the settings portal says.
+    Stock(Theme),
+    Omarchy(OmarchyTheme),
+}
+
+const LOOKS: [Look; 4] = [
+    Look::Stock(Theme::Light),
+    Look::Stock(Theme::Dark),
+    Look::Omarchy(OmarchyTheme::Light),
+    Look::Omarchy(OmarchyTheme::Dark),
+];
+
+impl Look {
+    /// Its name, for file names and captions.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Stock(theme) => theme.as_str(),
+            Self::Omarchy(theme) => theme.as_str(),
+        }
+    }
+
+    /// The Answer button's colour.
+    fn green(self) -> [u8; 3] {
+        match self {
+            Self::Stock(_) => GREEN,
+            Self::Omarchy(theme) => theme.colour("green"),
+        }
+    }
+
+    /// The Decline and Hang up buttons' colour.
+    fn red(self) -> [u8; 3] {
+        match self {
+            Self::Stock(_) => RED,
+            Self::Omarchy(theme) => theme.colour("red"),
+        }
+    }
+
+    /// Sets the Desktop up to look this way. Omarchy also tells the settings
+    /// portal whether its theme is light or dark.
+    fn builder(self) -> Builder {
+        match self {
+            Self::Stock(theme) => Harness::builder().theme(theme),
+            Self::Omarchy(theme) => Harness::builder().theme(theme.mode()).omarchy_theme(theme),
+        }
+    }
+}
 
 const STATES: &[State] = &[
     State {
         name: "bare-output",
         title: "The bare output, with the Phone connected and no surface shown",
         reach: connect,
-        shown: |_| true,
+        shown: |_, _| true,
     },
     State {
         name: "incoming-call-banner",
@@ -49,7 +100,7 @@ const STATES: &[State] = &[
             connect(harness);
             ring(harness);
         },
-        shown: |screenshot| shows(screenshot, GREEN) && shows(screenshot, RED),
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
         name: "call-window-live",
@@ -65,7 +116,7 @@ const STATES: &[State] = &[
                 })
             });
         },
-        shown: |screenshot| shows(screenshot, RED) && !shows(screenshot, GREEN),
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
     State {
         name: "call-window-muted",
@@ -82,9 +133,13 @@ const STATES: &[State] = &[
             harness
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));
-            // Click the Call Window, to give it the keyboard, then show the
-            // keypad and type tones.
-            let screenshot = harness.screenshot("call-window-before-keypad");
+            // Once the muted strip is drawn and the Call Window has grown to
+            // hold it, click the window, to give it the keyboard, then show
+            // the keypad and type tones. A click before the redraw can miss.
+            let screenshot =
+                harness.screenshot_when("call-window-before-keypad", DEADLINE, |screenshot| {
+                    shows(screenshot, ORANGE)
+                });
             let window = app_region(&screenshot);
             let _ = fs::remove_file(&screenshot.path);
             if let Some(window) = window {
@@ -101,8 +156,8 @@ const STATES: &[State] = &[
         },
         // Once the keypad is drawn the window is over 300 px tall; without
         // it, about 220.
-        shown: |screenshot| {
-            shows(screenshot, RED)
+        shown: |screenshot, look| {
+            shows(screenshot, look.red())
                 && shows(screenshot, ORANGE)
                 && app_region(screenshot).is_some_and(|window| window.bottom - window.top > 300.0)
         },
@@ -127,8 +182,10 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot| {
-            shows(screenshot, RED) && !shows(screenshot, GREEN) && !shows(screenshot, ORANGE)
+        shown: |screenshot, look| {
+            shows(screenshot, look.red())
+                && !shows(screenshot, look.green())
+                && !shows(screenshot, ORANGE)
         },
     },
     State {
@@ -152,7 +209,9 @@ const STATES: &[State] = &[
             });
         },
         // Hang up is dimmed once the Call has ended.
-        shown: |screenshot| !shows(screenshot, RED) && app_region(screenshot).is_some(),
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red()) && app_region(screenshot).is_some()
+        },
     },
 ];
 
@@ -190,8 +249,6 @@ fn shows(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
         .is_some()
 }
 
-const THEMES: [Theme; 2] = [Theme::Light, Theme::Dark];
-
 /// `automation screenshot`: renders the gallery into `output`, or
 /// `target/screenshots/gallery`.
 pub fn run(output: Option<PathBuf>) -> ExitCode {
@@ -214,17 +271,19 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
 
     let mut shots = Vec::new();
     for state in STATES {
-        for theme in THEMES {
-            let harness = Harness::builder()
+        for look in LOOKS {
+            let harness = look
+                .builder()
                 .headless_screen()
                 .omarchy_bar()
-                .theme(theme)
                 .screenshot_directory(output.clone())
                 .start();
             (state.reach)(&harness);
-            let file = format!("{}-{}", state.name, theme.as_str());
-            let screenshot = harness.screenshot_when(&file, DEADLINE, state.shown);
-            shots.push((state, theme, screenshot.path));
+            let file = format!("{}-{}", state.name, look.as_str());
+            let screenshot = harness.screenshot_when(&file, DEADLINE, |screenshot| {
+                (state.shown)(screenshot, look)
+            });
+            shots.push((state, look, screenshot.path));
         }
     }
 
@@ -234,7 +293,7 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!(
-        "Gallery: {} screenshots of {} states, light and dark.",
+        "Gallery: {} screenshots of {} states, light and dark, stock and under Omarchy.",
         shots.len(),
         STATES.len()
     );
@@ -242,27 +301,28 @@ pub fn run(output: Option<PathBuf>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The gallery page: one row per state, light beside dark.
-fn index_html(shots: &[(&State, Theme, PathBuf)]) -> String {
+/// The gallery page: one row per state, stock light and dark, then Omarchy
+/// light and dark.
+fn index_html(shots: &[(&State, Look, PathBuf)]) -> String {
     let mut figures = String::new();
-    for (state, theme, path) in shots {
+    for (state, look, path) in shots {
         let file = path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
         let _ = writeln!(
             figures,
-            "<figure><a href=\"{file}\"><img src=\"{file}\" alt=\"{title}, {theme}\"></a>\
-             <figcaption>{title} ({theme})</figcaption></figure>",
+            "<figure><a href=\"{file}\"><img src=\"{file}\" alt=\"{title}, {look}\"></a>\
+             <figcaption>{title} ({look})</figcaption></figure>",
             title = state.title,
-            theme = theme.as_str(),
+            look = look.as_str(),
         );
     }
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <title>Desktop Calls screenshot gallery</title>\n\
          <style>body{{font-family:sans-serif;margin:16px}}\
-         main{{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}}\
+         main{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}}\
          img{{width:100%;border:1px solid #888}}</style>\n</head>\n<body>\n\
          <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n</body>\n</html>\n"
     )

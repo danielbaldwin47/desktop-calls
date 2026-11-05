@@ -1,10 +1,10 @@
 //! `automation screenshot`: the gallery of every surface in every state,
-//! light and dark.
+//! light and dark, stock and under an Omarchy theme.
 
 use std::process::Command;
 
 #[test]
-fn the_gallery_shows_every_state_in_light_and_dark() {
+fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     let output = tempfile::tempdir().expect("create a gallery directory");
 
     let rendered = Command::new(env!("CARGO_BIN_EXE_automation"))
@@ -21,11 +21,13 @@ fn the_gallery_shows_every_state_in_light_and_dark() {
         "bare-output",
         "incoming-call-banner",
         "call-window-live",
+        "call-window-muted",
+        "call-window-mute-unavailable",
         "call-window-ended",
     ];
-    let files = states
-        .iter()
-        .flat_map(|state| [format!("{state}-light.png"), format!("{state}-dark.png")]);
+    let files = states.iter().flat_map(|state| {
+        ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))
+    });
     for file in files {
         let file = file.as_str();
         assert!(index.contains(file), "the index shows {file}: {index}");

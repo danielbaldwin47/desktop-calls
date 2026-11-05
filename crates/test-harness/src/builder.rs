@@ -328,6 +328,7 @@ impl Builder {
             session_bus,
             system,
             stand_ins,
+            service_manager: None,
             screen,
             bar: None,
             hyprland,

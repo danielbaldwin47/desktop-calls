@@ -120,15 +120,17 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         .await
         .map_err(|error| raw_failure(Failure::SystemBusUnreachable, &error))?;
     let (input_sender, inputs) = unbounded();
+    let (dial_sender, dials) = unbounded();
+    // First, so a copy started beside another stops before it reads or
+    // touches anything.
+    let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
+        .await
+        .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
     // Before anything the Phone reports, so its Calls are known for what
     // they were before a crash.
     if let Some(earlier) = earlier_run::load() {
         let _ = input_sender.unbounded_send(Input::EarlierRun(earlier));
     }
-    let (dial_sender, dials) = unbounded();
-    let publisher = Publisher::serve(&session, input_sender.clone(), dial_sender)
-        .await
-        .map_err(|error| raw_failure(Failure::AlreadyRunning, &error))?;
 
     let (command_sender, commands) = unbounded();
     let (contacts_sender, contacts_commands) = unbounded();

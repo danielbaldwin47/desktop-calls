@@ -52,6 +52,7 @@ mod redraw;
 mod screen;
 mod screencopy;
 mod screenshots;
+mod service_manager;
 mod simulated_phone;
 mod stand_ins;
 mod timeline;
@@ -148,6 +149,8 @@ pub struct Harness {
     session_bus: String,
     system: Connection,
     stand_ins: StandIns,
+    /// The systemd user manager stand-in, where the app is installed.
+    service_manager: Option<service_manager::ServiceManager>,
     screen: Option<Screen>,
     /// The stand-in for Omarchy's bar, if the scenario has one.
     bar: Option<TestClient>,
@@ -241,6 +244,17 @@ impl Harness {
     ///
     /// If the app doesn't start again.
     pub fn restart_app(&mut self) {
+        self.kill_app_by_hand();
+        self.start_app();
+    }
+
+    /// Stops the app the harness started, as a crash or a signal would
+    /// (SIGKILL), and waits until it has left the bus.
+    ///
+    /// # Panics
+    ///
+    /// If it stays on the bus.
+    pub fn kill_app_by_hand(&mut self) {
         if let Some(index) = self
             .processes
             .iter()
@@ -250,6 +264,11 @@ impl Harness {
             let _ = app.kill();
             let _ = app.wait();
         }
+        self.wait_until_app_off_bus();
+    }
+
+    /// Waits until nothing owns the app's control interface.
+    fn wait_until_app_off_bus(&self) {
         let left = zbus::block_on(within(STARTUP_DEADLINE, async {
             let bus = DBusProxy::new(&self.session).await?;
             let mut owner_changes = bus.receive_name_owner_changed().await?;
@@ -264,6 +283,18 @@ impl Harness {
             "the stopped app stayed on the bus: {left:?}{}",
             self.timeline.render()
         );
+    }
+
+    /// Starts the app's long-running process directly, as a developer's
+    /// `cargo run -- service` does, not as the installed service, and
+    /// waits until it is on the bus. In a scenario that installs the app,
+    /// nothing else starts it.
+    ///
+    /// # Panics
+    ///
+    /// If another copy stays on the bus, or this one doesn't claim it.
+    pub fn start_app_by_hand(&mut self) {
+        self.wait_until_app_off_bus();
         self.start_app();
     }
 
@@ -303,8 +334,9 @@ impl Harness {
     }
 
     /// Installs the app into the scenario's home with `tools/install.py`,
-    /// which `just install` runs.
-    fn install(&self) {
+    /// which `just install` runs, and serves the systemd user manager
+    /// stand-in that runs the installed service.
+    fn install(&mut self) {
         let output = self
             // The system Python: a version manager's `python3` shim (mise's)
             // reads its configuration from the real home, which a scenario
@@ -318,6 +350,16 @@ impl Harness {
             output.status.success(),
             "tools/install.py failed: {}",
             String::from_utf8_lossy(&output.stderr)
+        );
+        self.service_manager = Some(
+            service_manager::ServiceManager::start(
+                &self.session_bus,
+                &self.directory.join("home"),
+                &self.directory,
+                self.environment.clone(),
+                self.group.id(),
+            )
+            .expect("serve the systemd user manager stand-in on the private session bus"),
         );
     }
 
@@ -336,6 +378,56 @@ impl Harness {
                 .map_err(zbus::Error::from)
         })
         .expect("ask the session bus whether the app is on it")
+    }
+
+    /// The process ID of whatever owns the app's control interface now, if
+    /// anything does.
+    ///
+    /// # Panics
+    ///
+    /// If the bus doesn't answer.
+    #[must_use]
+    pub fn app_process_id(&self) -> Option<u32> {
+        zbus::block_on(async {
+            let bus = DBusProxy::new(&self.session).await?;
+            let name = BusName::try_from(APP_BUS_NAME)?;
+            if !bus.name_has_owner(name.clone()).await? {
+                return Ok(None);
+            }
+            bus.get_connection_unix_process_id(name)
+                .await
+                .map(Some)
+                .map_err(zbus::Error::from)
+        })
+        .expect("ask the session bus who owns the app's control interface")
+    }
+
+    /// Runs another copy of the app's long-running process beside the one
+    /// running, as a developer's `cargo run -- service` would, and returns
+    /// its exit status once it stops, or `None` if it is still running
+    /// after `deadline` (it is then killed).
+    ///
+    /// # Panics
+    ///
+    /// If it can't be started.
+    #[must_use]
+    pub fn run_second_app(&self, deadline: Duration) -> Option<std::process::ExitStatus> {
+        let mut second = self
+            .app_command()
+            .stdout(self.log_file("desktop-calls-second.stdout"))
+            .stderr(self.log_file("desktop-calls-second.stderr"))
+            .spawn()
+            .expect("start a second desktop-calls");
+        let started = std::time::Instant::now();
+        while started.elapsed() < deadline {
+            if let Ok(Some(status)) = second.try_wait() {
+                return Some(status);
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = second.kill();
+        let _ = second.wait();
+        None
     }
 
     /// Stops the app if the session bus started it: such an app is the
@@ -427,6 +519,7 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
+        drop(self.service_manager.take());
         self.stop_activated_app();
         while let Some((_, mut child)) = self.processes.pop() {
             let _ = child.kill();

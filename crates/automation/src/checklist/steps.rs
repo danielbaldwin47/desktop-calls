@@ -312,7 +312,7 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "7.4",
                 needs: &[KEYBINDING],
-                title: "The Dialer draws its first frame within 150 ms of the keybinding",
+                title: "The Dialer draws its first frame within 150 ms of being asked",
                 script: Some(dialer_first_frame),
                 lands_with: &[],
             },

@@ -38,13 +38,15 @@ const KEYMAP: &str = "xkb_keymap {\n\
 /// `wl_keyboard.keymap_format.xkb_v1`.
 const KEYMAP_FORMAT_XKB_V1: u32 = 1;
 
-/// The Shift and Control modifiers' bits in the keymap above.
+/// The Shift, Control and Super (Mod4) modifiers' bits in the keymap above.
 const SHIFT_MASK: u32 = 1;
 const CONTROL_MASK: u32 = 4;
+const SUPER_MASK: u32 = 64;
 
 /// Key codes from `linux/input-event-codes.h`.
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_LEFTCTRL: u32 = 29;
+const KEY_LEFTMETA: u32 = 125;
 const BTN_LEFT: u32 = 0x110;
 
 /// Sub-pixel precision for absolute pointer motion.
@@ -187,14 +189,23 @@ impl SyntheticInput {
     /// Presses and releases `character`'s key while holding Control, and
     /// Shift too where the character needs it: `'H'` is Ctrl+Shift+H.
     pub fn press_with_control(&mut self, character: char) -> Result<(), String> {
+        self.press_with(KEY_LEFTCTRL, CONTROL_MASK, character)
+    }
+
+    /// Presses and releases `character`'s key while holding Super, the key
+    /// Omarchy's window bindings use.
+    pub fn press_with_super(&mut self, character: char) -> Result<(), String> {
+        self.press_with(KEY_LEFTMETA, SUPER_MASK, character)
+    }
+
+    /// Presses and releases `character`'s key while holding the modifier
+    /// key `modifier`, whose bit is `mask`, and Shift too where the
+    /// character needs it.
+    fn press_with(&mut self, modifier: u32, mask: u32, character: char) -> Result<(), String> {
         let (code, shifted) = character_key(character)
             .ok_or_else(|| format!("the harness can't type {character:?}"))?;
-        let mask = if shifted {
-            CONTROL_MASK | SHIFT_MASK
-        } else {
-            CONTROL_MASK
-        };
-        self.key(KEY_LEFTCTRL, true);
+        let mask = if shifted { mask | SHIFT_MASK } else { mask };
+        self.key(modifier, true);
         if shifted {
             self.key(KEY_LEFTSHIFT, true);
         }
@@ -204,7 +215,7 @@ impl SyntheticInput {
         if shifted {
             self.key(KEY_LEFTSHIFT, false);
         }
-        self.key(KEY_LEFTCTRL, false);
+        self.key(modifier, false);
         self.keyboard.modifiers(0, 0, 0, 0);
         self.sync()
     }

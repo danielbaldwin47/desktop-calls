@@ -3,7 +3,10 @@
 //! features that can pass them land.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::process::ExitCode;
+
+use crate::checklist::results::{self, Mode, Outcome, ResultFile};
 
 /// An item's standing. The spec also names MANUAL (waits on the user and
 /// the real Phone) and NEEDS-REVIEW (waits on a screenshot-review agent);
@@ -41,18 +44,75 @@ struct Score {
     evidence: String,
 }
 
-/// Scores one item. Nothing can be measured yet: no feature an item
-/// measures exists.
-fn score(_item: usize) -> Score {
+impl Score {
+    fn none() -> Self {
+        Self {
+            status: Status::Fail,
+            evidence: "no evidence yet".to_owned(),
+        }
+    }
+}
+
+/// Scores one item. Items 3 and 5 read the latest Real-Phone Checklist run
+/// against the real Phone, if there is one; nothing else is measured yet.
+fn score(item: usize, checklist: Option<&ResultFile>) -> Score {
+    match (item, checklist) {
+        (3, Some(checklist)) => wideband(checklist),
+        (5, Some(checklist)) => checklist_result(checklist),
+        _ => Score::none(),
+    }
+}
+
+/// Item 3: the codec the runner recorded on the latest real Call.
+fn wideband(checklist: &ResultFile) -> Score {
+    let recorded = checklist.steps.iter().rev().find_map(|step| {
+        let codec = step.measurements.get("codec")?.as_str()?;
+        let wideband = step.measurements.get("wideband")?.as_bool()?;
+        Some((step.id.as_str(), codec, wideband))
+    });
+    match recorded {
+        Some((step, codec, wideband)) => Score {
+            status: if wideband { Status::Pass } else { Status::Fail },
+            evidence: format!(
+                "{codec} ({}) on {}, Real-Phone Checklist {}, step {step}",
+                if wideband { "wideband" } else { "narrowband" },
+                checklist.phone,
+                checklist.started
+            ),
+        },
+        None => Score::none(),
+    }
+}
+
+/// Item 5: the Real-Phone Checklist part. The scenario count joins it with
+/// ticket #27, so the item can't pass yet.
+fn checklist_result(checklist: &ResultFile) -> Score {
+    let count = |outcome: Outcome| {
+        checklist
+            .steps
+            .iter()
+            .filter(|step| step.outcome == outcome)
+            .count()
+    };
     Score {
         status: Status::Fail,
-        evidence: "no evidence yet".to_owned(),
+        evidence: format!(
+            "Real-Phone Checklist {}: {} pass, {} fail, {} skipped; scenarios not yet counted",
+            checklist.started,
+            count(Outcome::Pass),
+            count(Outcome::Fail),
+            count(Outcome::Skipped)
+        ),
     }
 }
 
 /// `automation scorecard`: prints the table.
-pub fn run() -> ExitCode {
-    let scores: Vec<Score> = (1..=ITEMS.len()).map(score).collect();
+pub fn run(results: Option<PathBuf>) -> ExitCode {
+    let directory = results.unwrap_or_else(|| PathBuf::from(results::DEFAULT_DIRECTORY));
+    let checklist = ResultFile::latest(&directory, Mode::Real);
+    let scores: Vec<Score> = (1..=ITEMS.len())
+        .map(|item| score(item, checklist.as_ref()))
+        .collect();
     let passing = scores
         .iter()
         .filter(|score| score.status == Status::Pass)

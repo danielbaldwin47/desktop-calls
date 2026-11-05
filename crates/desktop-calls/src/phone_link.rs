@@ -692,7 +692,9 @@ async fn send_tones(session: &Connection, path: &str, tones: &str) -> zbus::Resu
 async fn hang_up(session: &Connection, path: &str) -> zbus::Result<()> {
     let result = match call(session, path, CALL, "Hangup", &()).await {
         Err(error) if is_missing_method(&error) => {
-            tracing::debug!(
+            // At info, so the journal records which hang-up path the Phone
+            // needs; the Real-Phone Checklist reports it.
+            tracing::info!(
                 event_kind = %EventKind::PhoneCommandFallback,
                 detail = %error,
                 "Call1.Hangup doesn't exist here; hanging up through org.ofono.VoiceCall"

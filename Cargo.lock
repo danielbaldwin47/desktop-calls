@@ -98,9 +98,12 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures-util",
+ "serde_json",
  "signal-hook",
  "tempfile",
  "test-harness",
+ "zbus",
 ]
 
 [[package]]

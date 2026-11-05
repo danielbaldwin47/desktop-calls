@@ -5,8 +5,12 @@ use std::process::Command;
 
 #[test]
 fn the_scorecard_lists_all_eight_items_with_status_and_evidence() {
+    // No Real-Phone Checklist has run.
+    let results = tempfile::tempdir().expect("an empty results directory");
     let printed = Command::new(env!("CARGO_BIN_EXE_automation"))
         .arg("scorecard")
+        .arg("--results")
+        .arg(results.path())
         .output()
         .expect("run automation scorecard");
     assert!(printed.status.success(), "scorecard failed: {printed:?}");

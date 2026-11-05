@@ -1,7 +1,7 @@
-//! Automation for Desktop Calls: the scorecard runner, the screenshot
-//! gallery and the demo. The Real-Phone Checklist runner lands with ticket
-//! #24.
+//! Automation for Desktop Calls: the scorecard runner, the Real-Phone
+//! Checklist runner, the screenshot gallery and the demo.
 
+mod checklist;
 mod demo;
 mod gallery;
 mod scorecard;
@@ -22,7 +22,32 @@ struct Arguments {
 #[derive(Subcommand)]
 enum Command {
     /// Report every polish-scorecard item with its status and evidence.
-    Scorecard,
+    Scorecard {
+        /// Where the Real-Phone Checklist's result files are. Default:
+        /// `docs/real-phone-checklist`.
+        #[arg(long)]
+        results: Option<PathBuf>,
+    },
+    /// Walk through the Real-Phone Checklist one step at a time, observing
+    /// what a machine can and asking only what it can't.
+    RealPhoneChecklist {
+        /// The group to run, 1 to 7. Default: every group.
+        group: Option<u8>,
+        /// Run against the Simulated Phone instead of the real Phone, and
+        /// print the action that plays each instruction after `demo>`.
+        #[arg(long)]
+        demo: bool,
+        /// With --demo, keep the compositor off-screen.
+        #[arg(long, requires = "demo")]
+        headless: bool,
+        /// Where to keep the dated result files. Default:
+        /// `docs/real-phone-checklist`, or under `target/` with --demo.
+        #[arg(long)]
+        results: Option<PathBuf>,
+        /// Start a new result file even if the last run is unfinished.
+        #[arg(long)]
+        fresh: bool,
+    },
     /// Render every surface in every state, light and dark, stock and under
     /// an Omarchy theme, into a gallery.
     Screenshot {
@@ -39,7 +64,20 @@ enum Command {
 
 fn main() -> ExitCode {
     match Arguments::parse().command {
-        Command::Scorecard => scorecard::run(),
+        Command::Scorecard { results } => scorecard::run(results),
+        Command::RealPhoneChecklist {
+            group,
+            demo,
+            headless,
+            results,
+            fresh,
+        } => checklist::run(&checklist::Options {
+            group,
+            demo,
+            headless,
+            results,
+            fresh,
+        }),
         Command::Screenshot { output } => gallery::run(output),
         Command::Demo { scenario } => demo::run(&scenario),
     }

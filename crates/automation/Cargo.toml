@@ -14,9 +14,15 @@ clap.workspace = true
 test-harness = { path = "../test-harness" }
 # `just demo` outlives Ctrl-C long enough to clean up its scenario.
 signal-hook = "0.4"
+# The Real-Phone Checklist runner watches the app's control interface,
+# and writes and reads its dated result files.
+zbus = { workspace = true, features = ["default-rt"] }
+futures-util.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

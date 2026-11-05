@@ -54,7 +54,7 @@ pub fn run(scenario: &Path) -> ExitCode {
 
 /// The Desktop compositor's socket, from `WAYLAND_DISPLAY`, which may be a
 /// name in `XDG_RUNTIME_DIR` or a path.
-fn desktop_socket() -> Option<PathBuf> {
+pub fn desktop_socket() -> Option<PathBuf> {
     let display = std::env::var_os("WAYLAND_DISPLAY")?;
     let display = Path::new(&display);
     if display.is_absolute() {

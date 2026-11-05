@@ -45,10 +45,15 @@ demo scenario="crates/simulated-phone/scenarios/demo.scenario":
 test-call *args:
     @python3 tools/real-phone/test_call.py "$@"
 
-# Walk through the Real-Phone Checklist one step at a time.
+# Walk through the Real-Phone Checklist one step at a time: all groups, or
+# one (`just real-phone-checklist 2`). Results go to docs/real-phone-checklist/;
+# a rerun resumes at the first step that didn't pass. `--demo` runs it
+# against the Simulated Phone instead. `just real-phone-checklist --help`.
+[positional-arguments]
 [no-exit-message]
-real-phone-checklist:
-    @echo "just real-phone-checklist: not available yet (lands with ticket #24)." >&2; exit 1
+real-phone-checklist *args:
+    @cargo build --quiet --workspace --bins --locked
+    @target/debug/automation real-phone-checklist "$@"
 
 # Install for this user: binary, systemd user unit, D-Bus activation and desktop file.
 [no-exit-message]

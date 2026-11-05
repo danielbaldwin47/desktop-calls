@@ -44,7 +44,6 @@ import dbus
 import real_phone as rp
 
 APP = Path(__file__).resolve().parents[2] / "target" / "debug" / "desktop-calls"
-APP_NAME = "io.github.danielbaldwin47.DesktopCalls"
 APP_PATH = "/io/github/danielbaldwin47/DesktopCalls"
 APP_IF = "io.github.danielbaldwin47.DesktopCalls1"
 DEVICE_IF = "org.bluez.Device1"

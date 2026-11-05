@@ -92,7 +92,8 @@ def run(binary: Path) -> int:
         if service.running():
             service.stop()
         log("APP", f"starting a dev run: {binary} service (Ctrl-C to stop)")
-        app = subprocess.Popen([str(binary), "service"], start_new_session=True)
+        app = subprocess.Popen([str(binary), "service"], start_new_session=True,
+                               preexec_fn=rp.die_with_parent)
         guard.tell(f"hook {app.pid}")
         outcome = app.wait()
         log("APP", f"the dev run exited with status {outcome}")

@@ -171,6 +171,7 @@ class Hook:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            preexec_fn=rp.die_with_parent,
             env={**os.environ, **env},
             text=True,
             errors="replace",

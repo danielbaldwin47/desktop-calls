@@ -139,6 +139,32 @@ fn tool_output(harness: &Harness, name: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
+/// The process ID of `child`'s guard: the child process it started to
+/// clean up after it.
+fn guard_of(child: &Child) -> u32 {
+    let children = format!("/proc/{0}/task/{0}/children", child.id());
+    let children =
+        fs::read_to_string(&children).unwrap_or_else(|error| panic!("read {children}: {error}"));
+    children
+        .split_whitespace()
+        .filter_map(|pid| pid.parse::<u32>().ok())
+        .find(|pid| {
+            fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+                cmdline
+                    .split(|byte| *byte == 0)
+                    .any(|word| word == b"--guard")
+            })
+        })
+        .unwrap_or_else(|| panic!("process {} has no guard", child.id()))
+}
+
+/// The installed unit file, which the stand-in reads at every start.
+fn unit_file(harness: &Harness) -> PathBuf {
+    harness
+        .directory()
+        .join("home/.local/share/systemd/user/desktop-calls.service")
+}
+
 /// Every `ActiveState` of a service that was stopped once and started
 /// once again, after starting as the scenario began.
 const STOPPED_AND_STARTED_ONCE: [&str; 6] = [
@@ -447,4 +473,61 @@ fn a_run_that_ends_while_another_has_its_dev_run_up_leaves_the_service_to_it() {
         "the service was stopped once, and started once again"
     );
     never_two_apps(&harness);
+}
+
+#[test]
+fn a_dev_run_dies_with_just_run_and_its_guard() {
+    let harness = service_running();
+    let service = harness.service_process_id();
+    let mut run = start_run(&harness);
+    dev_run_on_bus(&harness, service);
+
+    let guard = guard_of(&run);
+    let killed = harness
+        .external_command("kill")
+        .args(["-KILL", &guard.to_string()])
+        .status()
+        .expect("kill the guard");
+    assert!(killed.success());
+    run.kill().expect("kill run.py");
+    let _ = run.wait();
+
+    wait_until("the dev run has left the bus", || {
+        harness.app_process_id().is_none()
+    });
+}
+
+#[test]
+fn a_run_whose_service_start_fails_doesnt_stop_the_next_run_starting_it() {
+    let harness = service_running();
+    let unit = unit_file(&harness);
+    let installed = fs::read_to_string(&unit).expect("read the unit file");
+    let broken: String = installed
+        .lines()
+        .map(|line| {
+            if line.starts_with("ExecStart=") {
+                "ExecStart=/usr/bin/false\n".to_owned()
+            } else if line.starts_with("Restart=") {
+                "Restart=no\n".to_owned()
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    fs::write(&unit, broken).expect("break the unit file");
+
+    let mut first = start_run(&harness);
+    dev_run_on_bus(&harness, harness.service_process_id());
+    send(&harness, &first, "-INT");
+    let status = wait_for_exit(&harness, &mut first, "the first run.py");
+    assert_eq!(status.code(), Some(3), "the first run couldn't start the service");
+
+    fs::write(&unit, &installed).expect("mend the unit file");
+    let mut second = start_run(&harness);
+    dev_run_on_bus(&harness, None);
+    send(&harness, &second, "-INT");
+    let status = wait_for_exit(&harness, &mut second, "the second run.py");
+    assert_eq!(status.code(), Some(130), "the second run.py: {status}");
+    assert_eq!(harness.service_state(), "active", "the second run started it");
+    assert_eq!(harness.app_process_id(), harness.service_process_id());
 }

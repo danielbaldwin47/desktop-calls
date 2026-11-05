@@ -526,6 +526,19 @@ class ServiceError(Exception):
     """The installed service could not be stopped or started."""
 
 
+def die_with_parent() -> None:
+    """For `preexec_fn`: the child gets SIGTERM when the process that started
+    it dies, even by SIGKILL, so a dev run never outlives its tool."""
+    import ctypes
+
+    pr_set_pdeathsig = 1
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(pr_set_pdeathsig, signal.SIGTERM, 0, 0, 0) != 0:
+        os._exit(126)
+    if os.getppid() == 1:  # the parent died before the prctl
+        os._exit(126)
+
+
 def app_owner(session: dbus.Bus) -> str | None:
     """The unique bus name of the copy of the app on the bus, or None. Asks
     the bus, never the app, and a call to a unique name never activates
@@ -612,16 +625,20 @@ class InstalledService:
             if not wait_for(lambda: not self.app_on_bus(), 10,
                             "no other copy of the app on the bus", quiet=True):
                 log("SERVICE", f"another copy of the app is still on the bus, so "
-                               f"{INSTALLED_UNIT} isn't started beside it. The run that "
-                               "started that copy starts the service when it ends.")
+                               f"{INSTALLED_UNIT} isn't started beside it. If a `just run` "
+                               "or `just test-call` started it, that run starts the service "
+                               "when it ends. If none is running, stop that copy, then run "
+                               f"`systemctl --user start {INSTALLED_UNIT}`.")
                 return True
             log("SERVICE", f"starting {INSTALLED_UNIT}")
             call(self.session, SYSTEMD, SYSTEMD_PATH, SYSTEMD_MANAGER_IF, "StartUnit",
                  INSTALLED_UNIT, "replace", signature="ss")
-            started = wait_for(
-                lambda: self.active_state() == "active" and self.app_on_bus(),
+            wait_for(
+                lambda: (self.active_state() == "active" and self.app_on_bus())
+                or self.active_state() == "failed",
                 timeout, f"{INSTALLED_UNIT} running",
             )
+            started = self.active_state() == "active" and self.app_on_bus()
         except dbus.DBusException as e:
             if e.get_dbus_name() in self._ABSENT:
                 return True

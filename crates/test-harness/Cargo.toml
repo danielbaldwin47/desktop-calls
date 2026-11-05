@@ -20,6 +20,7 @@ wayland-protocols-wlr.workspace = true
 zbus = { workspace = true, features = ["default-rt"] }
 
 [dev-dependencies]
+roxmltree.workspace = true
 serde_json.workspace = true
 
 [lints]

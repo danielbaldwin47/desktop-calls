@@ -82,6 +82,8 @@ trait SimulatedPhone1 {
 
     fn disconnect(&self) -> zbus::Result<()>;
 
+    fn ring(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
+
     #[zbus(property)]
     fn audio_gateway(&self) -> zbus::Result<zbus::OwnedObjectPath>;
 
@@ -117,6 +119,15 @@ pub struct AppState {
     pub phone: Option<PhoneIdentity>,
 }
 
+/// One of a scenario's two private buses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Bus {
+    /// Where BlueZ lives.
+    System,
+    /// Where PipeWire's Telephony service and obexd live.
+    Session,
+}
+
 /// One scenario's private world. Dropping it stops every process, and
 /// removes the scenario's directory unless the scenario is failing.
 pub struct Harness {
@@ -127,6 +138,7 @@ pub struct Harness {
     audio_gateway_index: u32,
     session: Connection,
     session_bus: String,
+    system: Connection,
     stand_ins: StandIns,
     screen: Option<Screen>,
     screenshot_directory: PathBuf,
@@ -226,6 +238,9 @@ impl Builder {
         let session =
             zbus::block_on(zbus::connection::Builder::address(session_bus.as_str()).build())
                 .expect("connect the harness to the private session bus");
+        let system =
+            zbus::block_on(zbus::connection::Builder::address(system_bus.as_str()).build())
+                .expect("connect the harness to the private system bus");
 
         let stand_ins = StandIns::start(&session_bus, self.theme)
             .expect("serve the desktop stand-ins on the private session bus");
@@ -238,6 +253,7 @@ impl Builder {
             audio_gateway_index,
             session,
             session_bus,
+            system,
             stand_ins,
             screen,
             screenshot_directory,
@@ -484,6 +500,32 @@ impl Harness {
                 zbus::block_on(read_app_state(&self.session))
             ),
         }
+    }
+
+    /// Calls a method on the Phone's side of one of the private buses, as any
+    /// D-Bus client could, and returns the reply.
+    ///
+    /// # Panics
+    ///
+    /// If the call fails or the reply is an error; the panic names the call.
+    pub fn call_phone_method<B>(
+        &self,
+        bus: Bus,
+        service: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body: &B,
+    ) -> zbus::Message
+    where
+        B: zbus::export::serde::Serialize + zbus::DynamicType,
+    {
+        let connection = match bus {
+            Bus::System => &self.system,
+            Bus::Session => &self.session,
+        };
+        zbus::block_on(connection.call_method(Some(service), path, Some(interface), member, body))
+            .unwrap_or_else(|error| panic!("{interface}.{member} on {service} {path}: {error}"))
     }
 
     /// Runs the `desktop-calls` CLI with `arguments` in this scenario's
@@ -756,6 +798,19 @@ impl SimulatedPhone<'_> {
     pub fn disconnect(&self) {
         zbus::block_on(async { self.proxy().await?.disconnect().await })
             .expect("tell the Simulated Phone to disconnect");
+    }
+
+    /// Rings the Phone from `number`, as a caller does, and returns the new
+    /// Call's object path.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses, as it does while hands-free is down.
+    #[must_use]
+    pub fn ring(&self, number: &str) -> String {
+        zbus::block_on(async { self.proxy().await?.ring(number).await })
+            .expect("ring the Simulated Phone")
+            .to_string()
     }
 
     /// The object path of the current AudioGateway, or `"/"` while there is

@@ -388,9 +388,9 @@ async fn answer(
     Ok(())
 }
 
-/// Does what obexd does `after` a method call, on a thread of its own so
-/// the service keeps answering meanwhile: replies to `message` if a reply is
-/// still owed, and sends the signals.
+/// Does what obexd does `after` a method call, and after that, on a thread
+/// of its own so the service keeps answering meanwhile: replies to
+/// `message` if a reply is still owed, and sends the signals.
 fn run_obex_later(
     world: SharedWorld,
     connection: Connection,
@@ -399,9 +399,20 @@ fn run_obex_later(
     later: obex::Later,
 ) {
     std::thread::spawn(move || {
-        std::thread::sleep(after);
-        let (reply, signals) = obex::run_later(&mut lock(&world).obex, later);
-        zbus::block_on(answer(&connection, &message, reply, signals))
+        let mut next = Some((after, later));
+        while let Some((after, later)) = next.take() {
+            std::thread::sleep(after);
+            let done = {
+                let mut world = lock(&world);
+                let world = &mut *world;
+                obex::run_later(&mut world.obex, &world.phone_address, later)
+            };
+            next = done.later;
+            if next.is_none() {
+                zbus::block_on(answer(&connection, &message, done.reply, done.signals))?;
+            }
+        }
+        Ok::<_, zbus::Error>(())
     });
 }
 
@@ -841,11 +852,12 @@ impl Control {
 
     /// How the person holding the Phone answers its prompt to share
     /// Contacts, for each new PBAP session: `"grant"`, `"deny"` or
-    /// `"ignore"`.
+    /// `"ignore"`; or `"ask"`, and the test answers with
+    /// `AnswerContactsPrompt`.
     fn set_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
         let prompt = obex::Prompt::from_name(answer).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown answer {answer:?}; the answers are grant, deny and ignore"
+                "unknown answer {answer:?}; the answers are grant, deny, ignore and ask"
             ))
         })?;
         lock(&self.world).obex.prompt = prompt;
@@ -855,6 +867,27 @@ impl Control {
     /// Makes every PBAP pull take `delay_ms` before it completes.
     fn set_pull_delay(&self, delay_ms: u32) {
         lock(&self.world).obex.pull_delay = std::time::Duration::from_millis(u64::from(delay_ms));
+    }
+
+    /// Makes every PBAP pull take longer for each vCard it gives:
+    /// `phonebook_ms` from `pb`, `call_history_ms` from a Call History folder.
+    fn set_pull_delay_per_vcard(&self, phonebook_ms: u32, call_history_ms: u32) {
+        lock(&self.world).obex.pull_delay_per_vcard =
+            obex::per_vcard(phonebook_ms, call_history_ms);
+    }
+
+    /// Answers the prompt to share Contacts that the Phone shows, as the
+    /// person holding it does: `"grant"` or `"deny"`. Fails if none shows.
+    fn answer_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
+        lock(&self.world).obex.answer_prompt(answer)
+    }
+
+    /// Each prompt to share Contacts the Phone showed, oldest first: when
+    /// it appeared and when it goes away unanswered, in milliseconds since
+    /// the Unix epoch, and `"waiting"`, `"granted"`, `"denied"` or
+    /// `"timed-out"`.
+    fn contacts_prompts(&self) -> Vec<(u64, u64, String)> {
+        lock(&self.world).obex.prompts()
     }
 
     /// Makes the Phone take `delay_ms` after each `Activate` before it acts

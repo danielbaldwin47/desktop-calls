@@ -10,6 +10,7 @@ mod earlier_run;
 mod glib_runtime;
 mod hyprland;
 mod indicator;
+mod keybinding;
 mod logging;
 mod logind;
 mod notifications;

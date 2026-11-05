@@ -12,10 +12,14 @@
 //!   or, where the Phone lacks `cch`, `ich`, `och` and `mch` merged without
 //!   duplicates. A folder the Phone can't give doesn't stop the others.
 //! - **Pages.** The Pixel gives at most 50 Call History entries a pull, so
-//!   each folder is read with `Offset` until `GetSize` is reached. A sync
-//!   reports Contacts and the newest page first, then the rest; after a
+//!   each folder is read with `Offset` until `GetSize` is reached. After a
 //!   Call, only the newest page is pulled again, in front of the older
 //!   Calls held.
+//! - **Order.** The Call History comes first, newest page first, as it is
+//!   quick: the Pixel gave 200 Calls in under 2 s, but took 9.7 s over 319
+//!   Contacts (2026-11-05). The sync reports its progress as it goes, so the
+//!   Setup Window shows the Call History done, then how many Contacts are
+//!   being read, instead of looking stuck.
 //! - **vCards** (`vcard.rs`), asked for as 3.0, read as 3.0 or 2.1, and
 //!   Call History times without a time zone read as the Desktop's local time.
 //! - **The cache** (`cache.rs`), read when the Phone is attached, written
@@ -36,7 +40,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Caller, Contact, ContactNumber, Contacts,
-    Directory, Input, SyncFailure, Timestamp, Unavailable,
+    Directory, Input, SyncFailure, SyncProgress, Timestamp, Unavailable,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures_channel::oneshot;
@@ -191,6 +195,7 @@ impl ContactsSync {
             Ok(session) => session,
             Err(stop) => return self.stopped(stop),
         };
+        self.report(Input::ContactsSyncProgress(SyncProgress::Shared));
         let pulled = self.sync_in(&session, address, held).await;
         self.close_session(&session).await;
         if let Err(stop) = pulled {
@@ -198,28 +203,45 @@ impl ContactsSync {
         }
     }
 
-    /// Pulls Contacts and the newest page of the Call History, and reports
-    /// them; then reads the rest of the Call History, page by page, and
-    /// reports it too. So the Banner can name callers, and Missed Calls and
-    /// the Dialer show recent Calls, without waiting for years of Calls.
+    /// Pulls the Call History, newest page first, reporting each part as
+    /// it lands, so the Banner can name recent callers and the Dialer show
+    /// recent Calls at once; then Contacts, which take longest, and reports
+    /// them with the whole Call History.
     async fn sync_in(
         &self,
         session: &OwnedObjectPath,
         address: &str,
         held: &mut Cached,
     ) -> Result<(), Stop> {
+        let mut history = self.pull_call_history(session, 1).await?;
+        if let Some(folders) = &mut history {
+            held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
+            self.report_call_history(address, held).await;
+            if folders.iter().any(|folder| !folder.complete) {
+                for folder in folders.iter_mut().filter(|folder| !folder.complete) {
+                    self.pull(session, folder, MOST_PAGES).await?;
+                }
+                held.call_history =
+                    call_history_from(folders, std::mem::take(&mut held.call_history));
+                self.report_call_history(address, held).await;
+            }
+        }
+
         let mut contacts = Folder::new("pb", None);
-        let has_contacts = self.pull(session, &mut contacts, MOST_PAGES).await?;
-        let history = self.pull_call_history(session, 1).await?;
+        let mut has_contacts = self.select(session, &mut contacts).await?;
+        if has_contacts {
+            self.report(Input::ContactsSyncProgress(SyncProgress::ReadingContacts {
+                count: contacts.size.map(u32::from),
+                at: Timestamp(now()),
+            }));
+            has_contacts = self.pull(session, &mut contacts, MOST_PAGES).await?;
+        }
         if !has_contacts && history.is_none() {
             return Err(Stop::Unavailable(Unavailable::Failed));
         }
         // A folder that couldn't be pulled keeps what was held.
         if has_contacts {
             held.contacts = contacts_from(contacts.cards);
-        }
-        if let Some(folders) = &history {
-            held.call_history = call_history_from(folders, std::mem::take(&mut held.call_history));
         }
         let (contacts, call_history) = self.index_and_save(address, held).await;
         tracing::info!(
@@ -234,30 +256,23 @@ impl ContactsSync {
             contacts,
             call_history,
         });
+        self.report(Input::ContactsSyncProgress(SyncProgress::Finished));
+        Ok(())
+    }
 
-        let Some(mut folders) = history else {
-            return Ok(());
-        };
-        if folders.iter().all(|folder| folder.complete) {
-            return Ok(());
-        }
-        for folder in folders.iter_mut().filter(|folder| !folder.complete) {
-            self.pull(session, folder, MOST_PAGES).await?;
-        }
-        held.call_history = call_history_from(&folders, std::mem::take(&mut held.call_history));
-        let (contacts, call_history) = self.index_and_save(address, held).await;
+    /// Indexes and saves the Call History read so far, and reports it as
+    /// the sync's progress.
+    async fn report_call_history(&self, address: &str, held: &mut Cached) {
+        let (_, call_history) = self.index_and_save(address, held).await;
         tracing::info!(
             event_kind = %EventKind::ContactsSynced,
             call_history = held.call_history.len(),
-            "Read the rest of the Call History: {} entries",
+            "Read {} Call History entries",
             held.call_history.len()
         );
-        // Part of the sync, not a refresh: a refresh confirms Missed Calls.
-        self.report(Input::ContactsSynced {
-            contacts,
+        self.report(Input::ContactsSyncProgress(SyncProgress::CallHistory(
             call_history,
-        });
-        Ok(())
+        )));
     }
 
     /// Pulls the newest page of the Call History in a session of its own,
@@ -407,15 +422,10 @@ impl ContactsSync {
         folder: &mut Folder,
         pages: usize,
     ) -> Result<bool, Stop> {
-        if let Err(error) = obex::select_folder(&self.session, session, folder.name).await {
-            return pull_failed(folder.name, &error).map(|()| false);
+        if !std::mem::take(&mut folder.selected) && !self.select(session, folder).await? {
+            return Ok(false);
         }
-        if folder.size.is_none() {
-            folder.size = obex::size(&self.session, session)
-                .await
-                .inspect_err(|error| sync_failed("GetSize", error))
-                .ok();
-        }
+        folder.selected = false;
         for _ in 0..pages {
             if folder.complete {
                 break;
@@ -454,6 +464,22 @@ impl ContactsSync {
                 folder.complete = true;
             }
         }
+        Ok(true)
+    }
+
+    /// Selects `folder`, and asks how many vCards it holds, once. False if
+    /// the Phone can't give the folder at all.
+    async fn select(&self, session: &OwnedObjectPath, folder: &mut Folder) -> Result<bool, Stop> {
+        if let Err(error) = obex::select_folder(&self.session, session, folder.name).await {
+            return pull_failed(folder.name, &error).map(|()| false);
+        }
+        if folder.size.is_none() {
+            folder.size = obex::size(&self.session, session)
+                .await
+                .inspect_err(|error| sync_failed("GetSize", error))
+                .ok();
+        }
+        folder.selected = true;
         Ok(true)
     }
 
@@ -552,6 +578,8 @@ struct Folder {
     size: Option<u16>,
     /// Whether every page has been read, or no more can be.
     complete: bool,
+    /// Selected just now, so the next pull needn't select it again.
+    selected: bool,
 }
 
 impl Folder {
@@ -562,6 +590,7 @@ impl Folder {
             cards: Vec::new(),
             size: None,
             complete: false,
+            selected: false,
         }
     }
 }

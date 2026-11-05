@@ -43,7 +43,10 @@ use missed_calls::missed_call_input;
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
 use presence::{Presence, forget_phone, presence_input};
 use setup::Setup;
-pub use setup::{SetupNotice, SetupStep, SetupWindowView};
+pub use setup::{
+    ContactsOutcome, KeybindingCheck, KeybindingStage, ReadingContacts, SetupNotice, SetupStep,
+    SetupWindowView,
+};
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute,
     RingingCaller, Surfaces, WaitingOptions,
@@ -662,7 +665,8 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     } else {
         release_mute(&mut state, &mut effects);
     }
-    setup::follow_connection(&mut state);
+    setup::follow_connection(&mut state, &mut effects);
+    setup::follow_contacts(&mut state, &mut effects);
     (state, effects)
 }
 
@@ -714,6 +718,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }
         | Input::ContactsPermissionNeeded { .. }
+        | Input::ContactsSyncProgress(_)
         | Input::ContactsSyncFailed(_)) => contacts_sync(&mut state, input, &mut effects),
         input @ (Input::CallHistoryRefreshed(_)
         | Input::CallHistoryRefreshFailed
@@ -769,7 +774,15 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PairingFailed(_)
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
-        | Input::RetryHandsFree) => setup::setup_input(&mut state, input, &mut effects),
+        | Input::RetryHandsFree
+        | Input::RetryContacts
+        | Input::SkipContacts
+        | Input::KeybindingChecked(_)
+        | Input::AddKeybinding
+        | Input::ConfirmKeybinding
+        | Input::CancelKeybinding
+        | Input::KeybindingAdded
+        | Input::KeybindingNotAdded) => setup::setup_input(&mut state, input, &mut effects),
         Input::DesktopChecked(check) => desktop::checked(&mut state, check, &mut effects),
         Input::Fix(problem) => desktop::fix(&mut state, problem, &mut effects),
         Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),

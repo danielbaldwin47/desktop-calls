@@ -634,16 +634,18 @@ fn call_history_past_the_phones_50_entry_pulls_is_read_page_by_page() {
     // Slow enough to see the newest page reported before the rest.
     phone.set_pull_delay(Duration::from_secs(2));
 
-    let state = synced(&harness);
+    harness.simulated_phone().connect();
 
+    // The newest 50 Calls come first, while the sync goes on.
+    harness.wait_for_app("the newest 50 Calls are read", SYNC_DEADLINE, |state| {
+        state.contacts.state == "syncing" && state.contacts.call_history == 50
+    });
+    let state = harness.wait_for_app("ContactsState is ready", SYNC_DEADLINE, is_ready);
     assert_eq!(
         (state.contacts.contacts, state.contacts.call_history),
-        (10, 50),
-        "Contacts and the newest 50 Calls come first"
+        (10, 120),
+        "Contacts come with the whole Call History"
     );
-    harness.wait_for_app("the whole Call History is read", SYNC_DEADLINE, |state| {
-        state.contacts.call_history == 120
-    });
     let pulls = wait_for_call_history_pulls(&harness, 3);
     assert_eq!(pulls.len(), 3, "three pages: {pulls:?}");
     assert!(!pulls[0].contains("Offset"), "{}", pulls[0]);

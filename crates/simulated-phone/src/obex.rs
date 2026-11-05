@@ -16,6 +16,11 @@
 //!   Denied, it fails with `org.bluez.obex.Error.Forbidden`. Ignored, it
 //!   fails after obexd's 10 s OBEX timeout with `org.bluez.obex.Error.Failed`
 //!   `Timed out waiting for response`, as the real one did on 2026-11-04.
+//! - Asked, the Phone shows its prompt for 30 s, as Android does, and waits
+//!   for the test to answer it as the person holding the Phone: each
+//!   `CreateSession` waits, up to obexd's 10 s, on the prompt showing, and
+//!   one after the prompt timed out shows a new prompt. Once answered, the
+//!   Phone remembers the answer and doesn't ask again.
 //! - `Session1.Target` is the PBAP server's UUID, not `pbap`, and
 //!   `PhonebookAccess1.Folder` appears only after `Select`. Selecting a
 //!   folder the Phone lacks fails with `Failed` `Not Found`; selecting a
@@ -32,6 +37,9 @@
 //! - `PullAll` honours the `Offset` and `MaxCount` filters, and, like the
 //!   Pixel, gives at most 50 vCards from a Call History folder however
 //!   many it holds: a client reads the rest page by page.
+//! - A pull takes as long as a test asks: a fixed delay, plus a delay for
+//!   each vCard, as the Pixel gave 319 Contacts in 9.7 s, about 30 ms each,
+//!   and Call History far quicker (2026-11-05).
 //! - `RemoveSession` closes a session and its transfers.
 //!
 //! Each folder holds whatever vCard text a test gives it, served as is
@@ -42,7 +50,7 @@ use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use zbus::{Message, OwnedObjectPath, OwnedVariant, Str};
 
@@ -84,6 +92,12 @@ const HISTORY_PULL_CAP: usize = 50;
 /// How long obexd waits for the Phone to answer an OBEX request.
 const OBEX_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long Android shows its prompt to share Contacts.
+const PROMPT_TIMEOUT_MS: u64 = 30_000;
+
+/// How often a `CreateSession` waiting on the prompt looks for an answer.
+const PROMPT_POLL: Duration = Duration::from_millis(20);
+
 /// `Introspect` on `/org/bluez/obex`, captured from the real obexd.
 const CLIENT_INTROSPECTION: &str = include_str!("../introspection/obex-client.xml");
 
@@ -100,6 +114,8 @@ pub enum Prompt {
     Grant,
     Deny,
     Ignore,
+    /// The Phone shows its prompt, and the test answers it.
+    Ask,
 }
 
 impl Prompt {
@@ -108,7 +124,31 @@ impl Prompt {
             "grant" => Some(Self::Grant),
             "deny" => Some(Self::Deny),
             "ignore" => Some(Self::Ignore),
+            "ask" => Some(Self::Ask),
             _ => None,
+        }
+    }
+}
+
+/// One showing of the Phone's prompt to share Contacts.
+#[derive(Clone, Copy, Debug)]
+pub struct ShownPrompt {
+    /// When it appeared, in milliseconds since the Unix epoch.
+    pub shown_at: u64,
+    /// When it goes away unanswered, likewise.
+    pub deadline: u64,
+    /// `Some(true)` granted, `Some(false)` denied.
+    answer: Option<bool>,
+}
+
+impl ShownPrompt {
+    /// `"waiting"`, `"granted"`, `"denied"` or `"timed-out"`.
+    pub fn outcome(&self) -> &'static str {
+        match self.answer {
+            Some(true) => "granted",
+            Some(false) => "denied",
+            None if now() >= self.deadline => "timed-out",
+            None => "waiting",
         }
     }
 }
@@ -121,7 +161,14 @@ pub struct Obex {
     /// Each folder the Phone has, by name, with its vCard text.
     folders: BTreeMap<String, String>,
     pub prompt: Prompt,
+    /// Each prompt shown while asking, oldest first.
+    prompts: Vec<ShownPrompt>,
+    /// What the person answered, once they did, while asking.
+    remembered: Option<bool>,
     pub pull_delay: Duration,
+    /// How much longer a pull takes for each vCard: from `pb`, and from a
+    /// Call History folder.
+    pub pull_delay_per_vcard: (Duration, Duration),
     /// Sessions from `CreateSession` until they fail or are removed.
     sessions_open: u32,
     pub most_sessions_at_once: u32,
@@ -131,6 +178,8 @@ pub struct Obex {
 pub enum Later {
     /// The Phone never answered `CreateSession`.
     SessionTimedOut,
+    /// `CreateSession` waits on the prompt showing, since `since`.
+    Asking { since: Instant },
     /// A pull finishes.
     Transfer {
         transfer: OwnedObjectPath,
@@ -190,7 +239,10 @@ pub fn new() -> zbus::Result<Obex> {
             .map(|name| (name.to_owned(), String::new()))
             .collect(),
         prompt: Prompt::default(),
+        prompts: Vec::new(),
+        remembered: None,
         pull_delay: Duration::ZERO,
+        pull_delay_per_vcard: (Duration::ZERO, Duration::ZERO),
         sessions_open: 0,
         most_sessions_at_once: 0,
     })
@@ -205,6 +257,57 @@ impl Obex {
     /// Takes `folder` away from the Phone.
     pub fn remove_pbap_folder(&mut self, folder: &str) {
         self.folders.remove(folder);
+    }
+
+    /// Answers the prompt showing, as the person holding the Phone:
+    /// `"grant"` or `"deny"`.
+    pub fn answer_prompt(&mut self, answer: &str) -> zbus::fdo::Result<()> {
+        let grant = match answer {
+            "grant" => true,
+            "deny" => false,
+            _ => {
+                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                    "unknown answer {answer:?}; the answers are grant and deny"
+                )));
+            }
+        };
+        let Some(prompt) = self
+            .prompts
+            .last_mut()
+            .filter(|prompt| prompt.outcome() == "waiting")
+        else {
+            return Err(zbus::fdo::Error::Failed("no prompt is showing".to_owned()));
+        };
+        prompt.answer = Some(grant);
+        self.remembered = Some(grant);
+        Ok(())
+    }
+
+    /// Each prompt shown, oldest first: when it appeared, when it goes away
+    /// unanswered, and its outcome.
+    pub fn prompts(&self) -> Vec<(u64, u64, String)> {
+        let outcome = |prompt: &ShownPrompt| prompt.outcome().to_owned();
+        let prompts = self.prompts.iter();
+        prompts
+            .map(|prompt| (prompt.shown_at, prompt.deadline, outcome(prompt)))
+            .collect()
+    }
+
+    /// The prompt showing, shown anew if none is.
+    fn prompt_showing(&mut self) {
+        if self
+            .prompts
+            .last()
+            .is_some_and(|prompt| prompt.outcome() == "waiting")
+        {
+            return;
+        }
+        let shown_at = now();
+        self.prompts.push(ShownPrompt {
+            shown_at,
+            deadline: shown_at + PROMPT_TIMEOUT_MS,
+            answer: None,
+        });
     }
 
     fn session_opened(&mut self) {
@@ -246,25 +349,41 @@ pub fn answer(
     }
 }
 
-/// Does what obexd does `later`, and returns the reply still owed, if any,
-/// and the signals to send.
-pub fn run_later(obex: &mut Obex, later: Later) -> (Reply, Vec<Signal>) {
+/// Does what obexd does `later`: the reply still owed, if any, the signals
+/// to send, and what it does later still.
+pub fn run_later(obex: &mut Obex, phone_address: &str, later: Later) -> Answer {
     match later {
         Later::SessionTimedOut => {
             obex.session_closed();
-            (
-                Reply::Error(ERROR_FAILED, "Timed out waiting for response".to_owned()),
-                Vec::new(),
-            )
+            Reply::Error(ERROR_FAILED, "Timed out waiting for response".to_owned()).into()
         }
+        Later::Asking { since } => match obex.remembered {
+            Some(true) => {
+                obex.session_closed();
+                open_session(obex, phone_address)
+            }
+            Some(false) => {
+                obex.session_closed();
+                Reply::Error(ERROR_FORBIDDEN, "Forbidden".to_owned()).into()
+            }
+            None if since.elapsed() >= OBEX_TIMEOUT => {
+                run_later(obex, phone_address, Later::SessionTimedOut)
+            }
+            None => Answer {
+                reply: Reply::Unhandled,
+                signals: Vec::new(),
+                later: Some((PROMPT_POLL, Later::Asking { since })),
+            },
+        },
         Later::Transfer {
             transfer,
             filename,
             vcards,
-        } => (
-            Reply::Unhandled,
-            finish_transfer(obex, &transfer, &filename, &vcards),
-        ),
+        } => Answer {
+            reply: Reply::Unhandled,
+            signals: finish_transfer(obex, &transfer, &filename, &vcards),
+            later: None,
+        },
     }
 }
 
@@ -297,7 +416,25 @@ fn create_session(obex: &mut Obex, phone_address: &str, message: &Message) -> An
                 later: Some((OBEX_TIMEOUT, Later::SessionTimedOut)),
             };
         }
+        Prompt::Ask => {
+            if obex.remembered.is_none() {
+                obex.prompt_showing();
+            }
+            obex.session_opened();
+            return run_later(
+                obex,
+                phone_address,
+                Later::Asking {
+                    since: Instant::now(),
+                },
+            );
+        }
     }
+    open_session(obex, phone_address)
+}
+
+/// Opens a PBAP session to the Phone.
+fn open_session(obex: &mut Obex, phone_address: &str) -> Answer {
     let Ok(path) =
         OwnedObjectPath::try_from(format!("{SESSION_PREFIX}{}", obex.next_session_index))
     else {
@@ -402,6 +539,17 @@ fn select(obex: &mut Obex, call: &MethodCall, message: &Message) -> Reply {
     }
 }
 
+/// How long pulling `count` vCards from `folder` takes: the phonebook
+/// reads at its own pace, slower than Call History.
+fn pull_delay(obex: &Obex, folder: &str, count: usize) -> Duration {
+    let per_vcard = if folder == "pb" {
+        obex.pull_delay_per_vcard.0
+    } else {
+        obex.pull_delay_per_vcard.1
+    };
+    obex.pull_delay + per_vcard * u32::try_from(count).unwrap_or(u32::MAX)
+}
+
 /// `PullAll(targetfile, filters)`: queues a transfer of the selected
 /// folder into `targetfile`.
 fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
@@ -429,11 +577,13 @@ fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
     if HISTORY_FOLDERS.contains(&folder.as_str()) {
         most = most.min(HISTORY_PULL_CAP);
     }
-    let vcards: String = vcards_in(&held)
+    let pulled: Vec<&str> = vcards_in(&held)
         .into_iter()
         .skip(filter("Offset").unwrap_or(0))
         .take(most)
         .collect();
+    let delay = pull_delay(obex, &folder, pulled.len());
+    let vcards: String = pulled.concat();
     let folder = format!("/telecom/{folder}");
     let filename = if targetfile.is_empty() {
         std::env::temp_dir().join(format!("obex-client{}", obex.next_transfer_index))
@@ -496,7 +646,7 @@ fn pull_all(obex: &mut Obex, call: &MethodCall, message: &Message) -> Answer {
             },
         ],
         later: Some((
-            obex.pull_delay,
+            delay,
             Later::Transfer {
                 transfer,
                 filename,
@@ -625,6 +775,22 @@ fn finish_transfer(
         interfaces: vec![TRANSFER],
     });
     signals
+}
+
+/// The delays for each vCard pulled: `phonebook_ms` from `pb`,
+/// `call_history_ms` from a Call History folder.
+pub fn per_vcard(phonebook_ms: u32, call_history_ms: u32) -> (Duration, Duration) {
+    let millis = |ms| Duration::from_millis(u64::from(ms));
+    (millis(phonebook_ms), millis(call_history_ms))
+}
+
+/// Milliseconds since the Unix epoch.
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn root() -> OwnedObjectPath {

@@ -16,13 +16,25 @@
 //!    (its media, say) is asked for hands-free alone.
 //! 6. Phone calls off: the Phone refused hands-free; the window says where
 //!    to switch "Phone calls" on.
-//! 7. Done: the Phone is connected for Calls.
+//! 7. Contacts warning: connected for Calls. The Phone is about to ask
+//!    whether to share Contacts and Call History, so the window says so
+//!    first, and the sync waits until the person has had time to read it.
+//! 8. Contacts: the sync is under way. While the Phone asks, the window
+//!    counts down to the prompt's deadline; if nobody answers in time, Try
+//!    again asks once more. Once shared, it shows the Call History done as
+//!    soon as it is read, then the Contacts being read.
+//! 9. Done: what was synced, or that Calls still work with numbers; an
+//!    invitation to place a first Call, and the Desktop Calls keybinding,
+//!    which it offers to add to the Hyprland config, writing nothing until
+//!    the user confirms the exact line.
 
 use super::dialling::phone_unpaired;
 use super::input::{Effect, Input, PairingFailure, Timer};
 use super::presence::connect_phone_now;
 use super::{State, forget_phone_keeping_desktop, phone::phone_paired};
+use crate::call::Timestamp;
 use crate::connection::{ConnectionState, Phone};
+use crate::contacts::{ContactsState, SyncProgress, Unavailable};
 
 /// How long a Phone that just paired may take to connect before the
 /// Desktop asks it for hands-free alone. A Phone sharing Calls had its
@@ -37,6 +49,13 @@ const HANDS_FREE_ASKED_MS: u32 = 10_000;
 /// How long the pairing may take to finish once confirmed: the person
 /// holding the Phone still has to tap Pair on it.
 const CONFIRMED_MS: u32 = 30_000;
+/// How long the window warns that the Phone is about to ask whether to
+/// share Contacts before the sync starts and the Phone asks: long enough
+/// to read one sentence and look at the Phone.
+const WARNING_MS: u32 = 3_000;
+/// About how long the Phone takes to give each Contact: the Pixel gave 319
+/// in 9.7 s (2026-11-05).
+const CONTACT_READ_MS: u64 = 30;
 
 /// The open Setup Window.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -49,6 +68,24 @@ pub(super) struct Setup {
     /// Which wait is current, so only its timer counts.
     wait: u32,
     opened: u32,
+    /// The Phone connected, and its first sync waits for the warning.
+    sync_held: bool,
+    /// How far the sync the window follows has got.
+    progress: Progress,
+    keybinding: KeybindingStage,
+    /// The confirmed keybinding is being written.
+    adding: bool,
+}
+
+/// How far the sync the Setup Window follows has got.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Progress {
+    /// The window started the sync and it hasn't finished, so the window
+    /// waits for it rather than going on at the first Ready.
+    awaiting_finish: bool,
+    shared: bool,
+    call_history: bool,
+    reading: Option<ReadingContacts>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -64,7 +101,66 @@ enum Step {
     PhoneCallsOff(Phone),
     /// The Phone didn't answer: out of range, or its Bluetooth is off.
     PhoneUnreachable(Phone),
+    ContactsWarning(Phone),
+    Contacts(Phone),
     Done(Phone),
+}
+
+/// The Contacts the sync is reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadingContacts {
+    /// How many, if the Phone said.
+    pub count: Option<u32>,
+    /// About when they will all be read, if the Phone said how many.
+    pub done_by: Option<Timestamp>,
+}
+
+/// What became of Contacts, on the finish page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactsOutcome {
+    /// Synced: this many Contacts and Calls of the Call History.
+    Synced { contacts: usize, calls: usize },
+    /// The Phone refused to share them.
+    Denied,
+    /// Not shared, for another reason: nobody answered the Phone, or the
+    /// sync failed.
+    NotShared,
+}
+
+/// What the Desktop's Hyprland config can take for the Desktop Calls
+/// keybinding, which runs `desktop-calls`: the Dialer, or the ringing or
+/// live Call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeybindingCheck {
+    /// `line`, added to the end of `file`, binds `keys`.
+    Available {
+        keys: String,
+        file: String,
+        line: String,
+    },
+    /// `file` already binds `keys` to Desktop Calls.
+    Added { keys: String, file: String },
+    /// `keys` already does something else in `file`; the user can bind
+    /// another key to `command`.
+    Taken {
+        keys: String,
+        file: String,
+        command: String,
+    },
+    /// No Hyprland config Desktop Calls knows how to add to; the user can
+    /// bind a key to `command`.
+    NoConfig { command: String },
+}
+
+/// Where the finish page is with the keybinding.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum KeybindingStage {
+    /// Finding what the Hyprland config can take.
+    #[default]
+    Checking,
+    Checked(KeybindingCheck),
+    /// Showing the exact line, for the user to confirm or decline.
+    Confirming(KeybindingCheck),
 }
 
 /// What the Setup Window shows.
@@ -90,6 +186,8 @@ pub enum SetupNotice {
     PairingUnreachable,
     /// Pairing didn't finish, for a reason BlueZ didn't give.
     PairingFailed,
+    /// The keybinding couldn't be written to the Hyprland config.
+    KeybindingNotAdded,
 }
 
 /// The Setup Window's step.
@@ -109,8 +207,28 @@ pub enum SetupStep {
     PhoneCallsOff { phone: Phone },
     /// The Phone didn't answer: out of range, or its Bluetooth is off.
     PhoneUnreachable { phone: Phone },
-    /// Connected for Calls.
-    Done { phone: Phone },
+    /// Connected for Calls; the Phone is about to ask whether to share
+    /// Contacts.
+    ContactsWarning { phone: Phone },
+    /// The Phone is asking whether to share Contacts, until `deadline`.
+    ContactsPrompt { phone: Phone, deadline: Timestamp },
+    /// Nobody answered the Phone before its prompt timed out.
+    ContactsPromptTimedOut { phone: Phone },
+    /// Shared: the sync is reading. `call_history` once the newest Calls
+    /// are read, `contacts` while Contacts are read, and `contacts_read`
+    /// once they are, while older Calls still are.
+    ContactsSyncing {
+        phone: Phone,
+        call_history: bool,
+        contacts: Option<ReadingContacts>,
+        contacts_read: bool,
+    },
+    /// Finished: what became of Contacts, and the keybinding.
+    Done {
+        phone: Phone,
+        contacts: ContactsOutcome,
+        keybinding: KeybindingStage,
+    },
 }
 
 impl Setup {
@@ -133,6 +251,10 @@ impl SetupStep {
             Self::Connecting { .. } => "connecting",
             Self::PhoneCallsOff { .. } => "phone-calls-off",
             Self::PhoneUnreachable { .. } => "phone-unreachable",
+            Self::ContactsWarning { .. } => "contacts-warning",
+            Self::ContactsPrompt { .. } => "contacts-prompt",
+            Self::ContactsPromptTimedOut { .. } => "contacts-prompt-timed-out",
+            Self::ContactsSyncing { .. } => "contacts-syncing",
             Self::Done { .. } => "done",
         }
     }
@@ -192,8 +314,14 @@ impl State {
             Step::PhoneUnreachable(phone) => SetupStep::PhoneUnreachable {
                 phone: phone.clone(),
             },
+            Step::ContactsWarning(phone) => SetupStep::ContactsWarning {
+                phone: phone.clone(),
+            },
+            Step::Contacts(phone) => self.contacts_step(setup, phone.clone()),
             Step::Done(phone) => SetupStep::Done {
                 phone: phone.clone(),
+                contacts: self.contacts_outcome(),
+                keybinding: setup.keybinding.clone(),
             },
         };
         Some(SetupWindowView {
@@ -209,6 +337,40 @@ impl State {
     /// them can be chosen without pairing it again.
     fn already_paired_to_choose(&self) -> impl Iterator<Item = &Phone> {
         self.paired_phones.iter().filter(|_| self.phone.is_none())
+    }
+
+    /// What the window shows while Contacts are being synced.
+    fn contacts_step(&self, setup: &Setup, phone: Phone) -> SetupStep {
+        match self.contacts_sync {
+            ContactsState::PermissionNeeded { deadline } => {
+                SetupStep::ContactsPrompt { phone, deadline }
+            }
+            ContactsState::Unavailable(Unavailable::PromptTimedOut) => {
+                SetupStep::ContactsPromptTimedOut { phone }
+            }
+            sync if setup.progress.shared || sync == ContactsState::Ready => {
+                SetupStep::ContactsSyncing {
+                    phone,
+                    call_history: setup.progress.call_history,
+                    contacts: setup.progress.reading,
+                    contacts_read: sync == ContactsState::Ready,
+                }
+            }
+            // Until the Phone is known to ask, or to share, the warning
+            // stays.
+            _ => SetupStep::ContactsWarning { phone },
+        }
+    }
+
+    fn contacts_outcome(&self) -> ContactsOutcome {
+        match self.contacts_sync {
+            ContactsState::Ready => ContactsOutcome::Synced {
+                contacts: self.contacts.directory().len(),
+                calls: self.call_history.entries().len(),
+            },
+            ContactsState::Denied => ContactsOutcome::Denied,
+            _ => ContactsOutcome::NotShared,
+        }
     }
 
     /// Whether the Setup Window is pairing the Phone with `address`.
@@ -271,7 +433,22 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
             }
         }
         Input::RetryHandsFree => retry(state, effects),
-        _ => {}
+        Input::RetryContacts => {
+            if state.contacts_sync == ContactsState::Unavailable(Unavailable::PromptTimedOut)
+                && state.phone_is_here()
+            {
+                start_sync(state, effects);
+            }
+        }
+        Input::SkipContacts => {
+            if let Some(setup) = state.setup.as_mut()
+                && let Step::Contacts(phone) = &setup.step
+            {
+                let phone = phone.clone();
+                finish(setup, phone, effects);
+            }
+        }
+        input => keybinding_input(state, input, effects),
     }
 }
 
@@ -326,6 +503,11 @@ fn close(state: &mut State, effects: &mut Vec<Effect>) {
         effects.push(Effect::AnswerPairingCode { confirm: false });
     }
     effects.push(Effect::StopSetup);
+    // The first sync waited for the warning, which won't be seen now.
+    if setup.sync_held && state.phone_is_here() {
+        state.contacts_sync = ContactsState::Syncing;
+        effects.push(Effect::SyncContacts);
+    }
 }
 
 fn not_nearby(state: &mut State, address: &str) {
@@ -502,6 +684,11 @@ pub(super) fn setup_timer(state: &mut State, wait: u32, effects: &mut Vec<Effect
         paired(state, followed, effects);
         return;
     }
+    if let Step::ContactsWarning(phone) = &setup.step {
+        let phone = phone.clone();
+        begin_contacts(state, phone, effects);
+        return;
+    }
     match &setup.step {
         Step::Connecting(phone) => {
             let phone = phone.clone();
@@ -532,9 +719,10 @@ fn wait(setup: &mut Setup, after_ms: u32, effects: &mut Vec<Effect>) {
     });
 }
 
-/// After every step: the Phone being set up is done once it is connected
-/// for Calls.
-pub(super) fn follow_connection(state: &mut State) {
+/// After every step: the Phone being set up is connected for Calls once
+/// hands-free is up, and the window warns that it is about to ask whether
+/// to share Contacts.
+pub(super) fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
     let connected = state.connection == ConnectionState::Connected;
     let followed = state.phone.clone();
     let Some(setup) = state.setup.as_mut() else {
@@ -546,7 +734,156 @@ pub(super) fn follow_connection(state: &mut State) {
             .connecting()
             .is_some_and(|phone| phone.address.eq_ignore_ascii_case(&followed.address))
     {
-        setup.wait += 1;
-        setup.step = Step::Done(followed);
+        setup.step = Step::ContactsWarning(followed);
+        wait(setup, WARNING_MS, effects);
     }
+}
+
+/// After every step: the sync the window follows is over once the Phone
+/// refused, the sync failed, or it finished, and the window goes on to the
+/// finish page. An unanswered prompt waits for Try again or Skip.
+pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
+    let here = state.phone_is_here();
+    let sync = state.contacts_sync;
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    let Step::Contacts(phone) = &setup.step else {
+        return;
+    };
+    let over = match sync {
+        ContactsState::Denied => true,
+        ContactsState::Unavailable(reason) => reason != Unavailable::PromptTimedOut,
+        ContactsState::Ready => !setup.progress.awaiting_finish || !here,
+        ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => false,
+    };
+    if over {
+        let phone = phone.clone();
+        finish(setup, phone, effects);
+    }
+}
+
+/// The finish page's keybinding: offered, shown, confirmed and written.
+fn keybinding_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    if !matches!(setup.step, Step::Done(_)) {
+        return;
+    }
+    let adding = setup.adding;
+    let current = std::mem::take(&mut setup.keybinding);
+    setup.keybinding = match (input, current) {
+        (Input::KeybindingChecked(check), _) => KeybindingStage::Checked(check),
+        (
+            Input::AddKeybinding,
+            KeybindingStage::Checked(check @ KeybindingCheck::Available { .. }),
+        ) => KeybindingStage::Confirming(check),
+        (Input::CancelKeybinding, KeybindingStage::Confirming(check)) if !adding => {
+            KeybindingStage::Checked(check)
+        }
+        (Input::ConfirmKeybinding, KeybindingStage::Confirming(check)) => {
+            if let (KeybindingCheck::Available { file, line, .. }, false) = (&check, adding) {
+                setup.adding = true;
+                setup.notice = None;
+                effects.push(Effect::AddKeybinding {
+                    file: file.clone(),
+                    line: line.clone(),
+                });
+            }
+            KeybindingStage::Confirming(check)
+        }
+        (
+            Input::KeybindingAdded,
+            KeybindingStage::Confirming(KeybindingCheck::Available { keys, file, .. }),
+        ) if adding => {
+            setup.adding = false;
+            KeybindingStage::Checked(KeybindingCheck::Added { keys, file })
+        }
+        (Input::KeybindingNotAdded, KeybindingStage::Confirming(check)) if adding => {
+            setup.adding = false;
+            setup.notice = Some(SetupNotice::KeybindingNotAdded);
+            KeybindingStage::Checked(check)
+        }
+        (_, unchanged) => unchanged,
+    };
+}
+
+/// How far the sync under way has got, for the Setup Window to show.
+pub(super) fn sync_progress(state: &mut State, progress: &SyncProgress) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    if !matches!(setup.step, Step::Contacts(_)) {
+        return;
+    }
+    let seen = &mut setup.progress;
+    match progress {
+        SyncProgress::Shared => seen.shared = true,
+        SyncProgress::CallHistory(_) => seen.call_history = true,
+        SyncProgress::ReadingContacts { count, at } => {
+            seen.reading = Some(ReadingContacts {
+                count: *count,
+                done_by: count.map(|count| Timestamp(at.0 + u64::from(count) * CONTACT_READ_MS)),
+            });
+        }
+        SyncProgress::Finished => seen.awaiting_finish = false,
+    }
+}
+
+/// The Phone the Setup Window is connecting is connected for Calls: its
+/// first sync waits until the window has warned that the Phone is about to
+/// ask whether to share Contacts. Whether it waits.
+pub(super) fn hold_sync(state: &mut State) -> bool {
+    let followed = state.phone.clone();
+    let Some(setup) = state.setup.as_mut() else {
+        return false;
+    };
+    let held = followed.is_some_and(|followed| {
+        setup
+            .step
+            .connecting()
+            .is_some_and(|phone| phone.address.eq_ignore_ascii_case(&followed.address))
+    });
+    setup.sync_held |= held;
+    held
+}
+
+/// Starts a sync, which the Setup Window then follows if it is at Contacts.
+fn start_sync(state: &mut State, effects: &mut Vec<Effect>) {
+    state.contacts_sync = ContactsState::Syncing;
+    effects.push(Effect::SyncContacts);
+    if let Some(setup) = state.setup.as_mut()
+        && matches!(setup.step, Step::Contacts(_))
+    {
+        setup.progress = Progress {
+            awaiting_finish: true,
+            ..Progress::default()
+        };
+    }
+}
+
+/// The warning has been up long enough: the sync starts, and the Phone
+/// asks. A sync already under way is followed instead.
+fn begin_contacts(state: &mut State, phone: Phone, effects: &mut Vec<Effect>) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    let held = std::mem::take(&mut setup.sync_held);
+    setup.step = Step::Contacts(phone);
+    setup.progress = Progress::default();
+    let under_way = matches!(
+        state.contacts_sync,
+        ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
+    );
+    if !under_way && state.phone_is_here() && (held || state.may_sync_contacts()) {
+        start_sync(state, effects);
+    }
+}
+
+fn finish(setup: &mut Setup, phone: Phone, effects: &mut Vec<Effect>) {
+    setup.step = Step::Done(phone);
+    setup.keybinding = KeybindingStage::Checking;
+    setup.adding = false;
+    effects.push(Effect::CheckKeybinding);
 }

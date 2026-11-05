@@ -487,17 +487,96 @@ const STATES: &[State] = &[
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
     State {
+        name: "setup-window-contacts-prompt",
+        title: "The Setup Window, counting down while the Phone asks whether to share Contacts",
+        still: |state| setup_window_shows(state, "step", "contacts-prompt"),
+        prepare: fresh_install,
+        reach: |harness| {
+            harness.simulated_phone().set_contacts_prompt("ask");
+            pair_through_setup_window(harness);
+            setup_window_at(harness, "contacts-prompt");
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-contacts-syncing",
+        title: "The Setup Window, with recent Calls read and Contacts still being read",
+        still: |state| setup_window_shows(state, "step", "contacts-syncing"),
+        prepare: fresh_install,
+        reach: |harness| {
+            let phone = harness.simulated_phone();
+            phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
+            phone.set_pbap_folder("cch", &vcards::call_history(200));
+            // At the Pixel's pace: 312 Contacts take 9.4 s.
+            phone.set_pull_delay_per_vcard(Duration::from_millis(30), Duration::from_millis(5));
+            pair_through_setup_window(harness);
+            harness.wait_for_app("Contacts are being read", DEADLINE, |state| {
+                state
+                    .surface("setup-window")
+                    .and_then(|window| window.get("progress"))
+                    .is_some_and(|progress| progress.starts_with("✓ Recent Calls\n312 Contacts…"))
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
         name: "setup-window-done",
-        title: "The Setup Window, paired and connected for Calls",
+        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding",
         still: |_| true,
         prepare: fresh_install,
         reach: |harness| {
+            with_hyprland_config(harness);
+            with_phone_book(harness);
             pair_through_setup_window(harness);
             setup_window_at(harness, "done");
+            harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Add keybinding\nDone")
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-keybinding",
+        title: "The Setup Window, showing the exact keybinding line before writing it",
+        still: |_| true,
+        prepare: fresh_install,
+        reach: |harness| {
+            with_hyprland_config(harness);
+            with_phone_book(harness);
+            pair_through_setup_window(harness);
+            harness.wait_for_app("the keybinding is offered", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Add keybinding\nDone")
+            });
+            harness.keyboard().press(Key::Return);
+            harness.wait_for_app("the line is shown", DEADLINE, |state| {
+                setup_window_shows(state, "buttons", "Confirm\nCancel")
+            });
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];
+
+/// Omarchy's Hyprland config in the scenario's home, so the Setup Window
+/// offers to add the keybinding to it.
+fn with_hyprland_config(harness: &Harness) {
+    let directory = harness.directory().join("config/hypr");
+    fs::create_dir_all(&directory)
+        .and_then(|()| {
+            fs::write(
+                directory.join("bindings.lua"),
+                "-- Keep only your personal keybinding overrides here.\n",
+            )
+        })
+        .unwrap_or_else(|error| panic!("write the Hyprland config: {error}"));
+}
+
+/// Contacts and recent Calls on the Phone, so the finish page reports
+/// a sync the size of a real one.
+fn with_phone_book(harness: &Harness) {
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
+    phone.set_pbap_folder("cch", &vcards::call_history(200));
+}
 
 /// One state of the Indicator the gallery shows.
 struct IndicatorState {

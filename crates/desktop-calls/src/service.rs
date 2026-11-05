@@ -36,7 +36,7 @@ use crate::ringer::Ringer;
 use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
-use crate::{bluez, chosen_phone, contacts, earlier_run, logind, pairing, phone_link};
+use crate::{bluez, chosen_phone, contacts, earlier_run, keybinding, logind, pairing, phone_link};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -357,6 +357,19 @@ impl Shell {
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),
                 Effect::CheckDesktop => self.setup_checks.check_again(),
                 Effect::Fix(fix) => self.setup_checks.fix(fix),
+                Effect::CheckKeybinding => {
+                    let inputs = self.inputs.clone();
+                    std::thread::spawn(move || {
+                        let _ =
+                            inputs.unbounded_send(Input::KeybindingChecked(keybinding::check()));
+                    });
+                }
+                Effect::AddKeybinding { file, line } => {
+                    let inputs = self.inputs.clone();
+                    std::thread::spawn(move || {
+                        let _ = inputs.unbounded_send(keybinding::add(&file, &line));
+                    });
+                }
                 // The decide loop passes these on to whoever asked to dial.
                 Effect::DialProgress(_) => {}
                 Effect::EarlierCallsForgotten(calls) => earlier_run::forgotten(calls),

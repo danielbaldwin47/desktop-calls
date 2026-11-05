@@ -401,6 +401,14 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
     );
     assert_eq!(after.len(), 2, "{after:#?}");
     no_problems_shown(&harness);
+    wait_for_audio_put_right(&harness);
+}
+
+/// Waits until the app has counted setting up audio as done, which it does
+/// only once systemd's restart job for `WirePlumber` ended `done`: the
+/// Problem also goes once the drop-ins read as set up, so it proves nothing.
+fn wait_for_audio_put_right(harness: &Harness) {
+    harness.wait_for_app_log(r#""event_kind":"desktop-fixed""#, DEADLINE);
 }
 
 /// Presses Set up audio once the Problem shows, and waits until setting up

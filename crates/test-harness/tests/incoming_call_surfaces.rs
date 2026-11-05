@@ -198,7 +198,7 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
 /// 175 ms in 2 of 4 runs; one scenario at a time under `just test-ci-like`,
 /// the whole first frame took 63 to 64 ms in 5 of 5.
 #[test]
-#[ignore = "one scenario at a time: just test-ci-like -p test-harness --test incoming_call_surfaces -- --ignored the_first_banner"]
+#[ignore = "one scenario at a time: just test-file incoming_call_surfaces the_first_banner --ignored --ci-like"]
 fn the_first_banner_shows_without_holding_up_the_main_loop() {
     let harness = connected_on_screen();
     // As for a person's first Call, which comes long after login.

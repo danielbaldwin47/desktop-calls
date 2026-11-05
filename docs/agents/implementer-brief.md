@@ -30,7 +30,7 @@ The standing instructions for any agent implementing a ticket in this repo. The 
 
 ## Finishing
 
-1. Run `just check` and the test files your change touches (`cargo test -p <crate> --test <file>`), and make them pass. Don't run the whole `just test` locally: CI runs it, and on this shared Desktop a local full run costs 10 minutes or more and measures other agents' load. Run it locally only to reproduce a CI failure, under `just test-ci-like`.
+1. Run `just check` and the test files your change touches, and make them pass: `just test-file <file>` for a harness file in `crates/test-harness/tests/` (`just test-file <file> <part of a name>` for some of its scenarios), `cargo test -p <crate> --test <file>` for any other crate's. Don't run the whole `just test` locally: CI runs it, and on this shared Desktop a local full run costs 10 minutes or more and measures other agents' load. Run it locally only to reproduce a CI failure, under `just test-ci-like`.
 2. Merge the tip of `origin/main` into your branch, re-run checks, and push the branch.
 3. Open a PR to `main` with `Closes #<n>`. The body follows `mattpocock-skills:pr` and ends with the attribution line from your system prompt.
 4. Record durable findings (hardware behaviour, quirks, decisions) as a dated research note in `docs/research/` within your PR. The chief of staff ingests them into the wiki.

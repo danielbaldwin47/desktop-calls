@@ -7,6 +7,203 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+# Every scenario file in tests/ is a module of one test binary, listed by
+# build.rs (#118), rather than a binary of its own.
+autotests = false
+
+[[test]]
+name = "scenarios"
+path = "tests/scenarios.rs"
+
+# The names the files had as binaries of their own: `cargo test --test <name>`
+# fails with a pointer to `just test-file <name>`, rather than running nothing
+# (tests/moved/pointer.rs). Never run by a whole `cargo test`.
+# New files need no entry.
+[[test]]
+name = "answered_on_phone_surfaces"
+path = "tests/moved/answered_on_phone_surfaces.rs"
+harness = false
+test = false
+
+[[test]]
+name = "call_window_keyboard"
+path = "tests/moved/call_window_keyboard.rs"
+harness = false
+test = false
+
+[[test]]
+name = "conformance"
+path = "tests/moved/conformance.rs"
+harness = false
+test = false
+
+[[test]]
+name = "connection"
+path = "tests/moved/connection.rs"
+harness = false
+test = false
+
+[[test]]
+name = "contacts"
+path = "tests/moved/contacts.rs"
+harness = false
+test = false
+
+[[test]]
+name = "crash_restart"
+path = "tests/moved/crash_restart.rs"
+harness = false
+test = false
+
+[[test]]
+name = "dialer"
+path = "tests/moved/dialer.rs"
+harness = false
+test = false
+
+[[test]]
+name = "dialer_surface"
+path = "tests/moved/dialer_surface.rs"
+harness = false
+test = false
+
+[[test]]
+name = "do_not_disturb"
+path = "tests/moved/do_not_disturb.rs"
+harness = false
+test = false
+
+[[test]]
+name = "earbuds"
+path = "tests/moved/earbuds.rs"
+harness = false
+test = false
+
+[[test]]
+name = "handoff"
+path = "tests/moved/handoff.rs"
+harness = false
+test = false
+
+[[test]]
+name = "handoff_recovery"
+path = "tests/moved/handoff_recovery.rs"
+harness = false
+test = false
+
+[[test]]
+name = "harness"
+path = "tests/moved/harness.rs"
+harness = false
+test = false
+
+[[test]]
+name = "incoming_call"
+path = "tests/moved/incoming_call.rs"
+harness = false
+test = false
+
+[[test]]
+name = "incoming_call_surfaces"
+path = "tests/moved/incoming_call_surfaces.rs"
+harness = false
+test = false
+
+[[test]]
+name = "indicator"
+path = "tests/moved/indicator.rs"
+harness = false
+test = false
+
+[[test]]
+name = "install"
+path = "tests/moved/install.rs"
+harness = false
+test = false
+
+[[test]]
+name = "keybinding"
+path = "tests/moved/keybinding.rs"
+harness = false
+test = false
+
+[[test]]
+name = "late_line_identification"
+path = "tests/moved/late_line_identification.rs"
+harness = false
+test = false
+
+[[test]]
+name = "missed_calls"
+path = "tests/moved/missed_calls.rs"
+harness = false
+test = false
+
+[[test]]
+name = "mute_and_tones"
+path = "tests/moved/mute_and_tones.rs"
+harness = false
+test = false
+
+[[test]]
+name = "omarchy_theme"
+path = "tests/moved/omarchy_theme.rs"
+harness = false
+test = false
+
+[[test]]
+name = "out_of_range"
+path = "tests/moved/out_of_range.rs"
+harness = false
+test = false
+
+[[test]]
+name = "outgoing_call"
+path = "tests/moved/outgoing_call.rs"
+harness = false
+test = false
+
+[[test]]
+name = "outgoing_call_surfaces"
+path = "tests/moved/outgoing_call_surfaces.rs"
+harness = false
+test = false
+
+[[test]]
+name = "publish_order"
+path = "tests/moved/publish_order.rs"
+harness = false
+test = false
+
+[[test]]
+name = "scenario_files"
+path = "tests/moved/scenario_files.rs"
+harness = false
+test = false
+
+[[test]]
+name = "screen"
+path = "tests/moved/screen.rs"
+harness = false
+test = false
+
+[[test]]
+name = "setup_window"
+path = "tests/moved/setup_window.rs"
+harness = false
+test = false
+
+[[test]]
+name = "stand_ins"
+path = "tests/moved/stand_ins.rs"
+harness = false
+test = false
+
+[[test]]
+name = "telephony_restart"
+path = "tests/moved/telephony_restart.rs"
+harness = false
+test = false
 
 [dependencies]
 futures-channel.workspace = true

@@ -48,6 +48,7 @@ mod process_group;
 mod screen;
 mod screencopy;
 mod stand_ins;
+mod timeline;
 pub mod vcards;
 
 pub use client::TestClient;
@@ -68,6 +69,7 @@ use crate::process_group::ProcessGroup;
 use crate::screen::{Screen, ScreenKind};
 use crate::screencopy::Recorder;
 use crate::stand_ins::StandIns;
+use crate::timeline::{Timeline, unique_name};
 
 /// The app's control interface, as the contract in `CODING_STANDARDS.md` names it.
 const APP_BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls";
@@ -364,6 +366,8 @@ pub struct Harness {
     // Stopped in reverse order of starting: the app, the Simulated Phone,
     // the compositor, then the buses.
     processes: Vec<(&'static str, Child)>,
+    /// What happened, for the panic when a wait times out.
+    timeline: Arc<Timeline>,
     /// Holds every process above and their children. Dropped last, so it
     /// kills whatever they left running.
     group: ProcessGroup,
@@ -520,11 +524,17 @@ impl Builder {
             .expect("create the scenario directory")
             .keep();
         let bin_directory = bin_directory();
+        let timeline = Timeline::start(&directory);
         let group = ProcessGroup::start(&directory);
         let mut processes = Vec::new();
 
-        let system_bus = start_bus(&directory, "system", &group, &mut processes);
-        let session_bus = start_bus(&directory, "session", &group, &mut processes);
+        let [system_bus, session_bus] = ["system", "session"].map(|bus| {
+            let address = start_bus(&directory, bus, &group, &mut processes);
+            timeline
+                .monitor(&address, bus)
+                .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
+            address
+        });
         let mut environment = environment(&directory, &system_bus, &session_bus);
         if let Some(time_zone) = self.time_zone {
             environment.push(("TZ", time_zone));
@@ -563,6 +573,8 @@ impl Builder {
         let system =
             zbus::block_on(zbus::connection::Builder::address(system_bus.as_str()).build())
                 .expect("connect the harness to the private system bus");
+        timeline.label(&unique_name(&session), "harness");
+        timeline.label(&unique_name(&system), "harness");
 
         let stand_ins = StandIns::start(&session_bus, self.theme)
             .expect("serve the desktop stand-ins on the private session bus");
@@ -587,6 +599,7 @@ impl Builder {
             app_errors,
             surfaces_seen,
             processes,
+            timeline,
             group,
         };
 
@@ -600,24 +613,7 @@ impl Builder {
             harness.bar = Some(bar);
         }
 
-        let mut simulated_phone = harness.command("simulated-phone");
-        simulated_phone
-            .arg("--name")
-            .arg(&harness.phone.name)
-            .arg("--address")
-            .arg(&harness.phone.address)
-            .arg("--first-audio-gateway-index")
-            .arg(harness.audio_gateway_index.to_string());
-        if let Some(scenario) = &self.scenario {
-            simulated_phone.arg("--scenario").arg(scenario);
-        }
-        let simulated_phone = simulated_phone
-            .stdout(harness.log_file("simulated-phone.stdout"))
-            .stderr(harness.log_file("simulated-phone.stderr"))
-            .spawn()
-            .expect("start the Simulated Phone");
-        harness.processes.push(("simulated-phone", simulated_phone));
-        harness.wait_for_bus_name(SIMULATED_PHONE_BUS_NAME, "simulated-phone");
+        harness.start_simulated_phone(self.scenario.as_deref());
         if self.phone_connected {
             harness.simulated_phone().connect();
         }
@@ -766,10 +762,14 @@ impl Harness {
         match (found, last) {
             (Some(capture), _) => kept(&capture),
             (None, Some(capture)) => panic!(
-                "the screen never showed {name} within {deadline:?}; see {}",
-                kept(&capture).path.display()
+                "the screen never showed {name} within {deadline:?}; see {}{}",
+                kept(&capture).path.display(),
+                self.timeline.render()
             ),
-            (None, None) => panic!("no capture of {name} was made within {deadline:?}"),
+            (None, None) => panic!(
+                "no capture of {name} was made within {deadline:?}{}",
+                self.timeline.render()
+            ),
         }
     }
 
@@ -797,6 +797,7 @@ impl Harness {
     pub fn notifications(&self) -> Notifications<'_> {
         Notifications {
             stand_ins: &self.stand_ins,
+            timeline: &self.timeline,
         }
     }
 
@@ -805,6 +806,7 @@ impl Harness {
     pub fn tray(&self) -> Tray<'_> {
         Tray {
             stand_ins: &self.stand_ins,
+            timeline: &self.timeline,
         }
     }
 
@@ -887,8 +889,9 @@ impl Harness {
             }
             assert!(
                 started.elapsed() < Duration::from_secs(5),
-                "the clipboard never held {text:?}; wl-paste said {:?}",
-                String::from_utf8_lossy(&pasted.stderr)
+                "the clipboard never held {text:?}; wl-paste said {:?}{}",
+                String::from_utf8_lossy(&pasted.stderr),
+                self.timeline.render()
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -937,7 +940,7 @@ impl Harness {
             .stderr(self.log_file("test-client.stderr"))
             .spawn()
             .expect("start test-client");
-        TestClient::new(child)
+        TestClient::new(child, Arc::clone(&self.timeline))
     }
 
     /// Blocks until the screen closes: the compositor exits, or, for a
@@ -1029,8 +1032,9 @@ impl Harness {
             Some(Ok(state)) => state,
             Some(Err(error)) => panic!("waiting for \"{description}\": {error}"),
             None => panic!(
-                "\"{description}\" did not happen within {deadline:?}; the app's state is {:?}",
-                zbus::block_on(read_app_state(&self.session))
+                "\"{description}\" did not happen within {deadline:?}; the app's state is {:?}{}",
+                zbus::block_on(read_app_state(&self.session)),
+                self.timeline.render()
             ),
         }
     }
@@ -1071,7 +1075,10 @@ impl Harness {
         match checked {
             Ok(None) => self.app_state(),
             Ok(Some(state)) => {
-                panic!("\"{description}\" stopped holding; the app's state is {state:?}")
+                panic!(
+                    "\"{description}\" stopped holding; the app's state is {state:?}{}",
+                    self.timeline.render()
+                )
             }
             Err(error) => panic!("watching \"{description}\": {error}"),
         }
@@ -1096,8 +1103,9 @@ impl Harness {
             }
             assert!(
                 started.elapsed() < deadline,
-                "the app logged nothing containing {needle:?} within {deadline:?}; see {}",
-                log.display()
+                "the app logged nothing containing {needle:?} within {deadline:?}; see {}{}",
+                log.display(),
+                self.timeline.render()
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -1341,9 +1349,33 @@ impl Harness {
         }));
         assert!(
             matches!(left, Some(Ok(()))),
-            "the stopped app stayed on the bus: {left:?}"
+            "the stopped app stayed on the bus: {left:?}{}",
+            self.timeline.render()
         );
         self.start_app();
+    }
+
+    /// Starts the Simulated Phone, acting out `scenario` if there is one,
+    /// and waits until it is on the bus.
+    fn start_simulated_phone(&mut self, scenario: Option<&Path>) {
+        let mut simulated_phone = self.command("simulated-phone");
+        simulated_phone
+            .arg("--name")
+            .arg(&self.phone.name)
+            .arg("--address")
+            .arg(&self.phone.address)
+            .arg("--first-audio-gateway-index")
+            .arg(self.audio_gateway_index.to_string());
+        if let Some(scenario) = scenario {
+            simulated_phone.arg("--scenario").arg(scenario);
+        }
+        let simulated_phone = simulated_phone
+            .stdout(self.log_file("simulated-phone.stdout"))
+            .stderr(self.log_file("simulated-phone.stderr"))
+            .spawn()
+            .expect("start the Simulated Phone");
+        self.processes.push(("simulated-phone", simulated_phone));
+        self.wait_for_bus_name(SIMULATED_PHONE_BUS_NAME, "simulated-phone");
     }
 
     fn start_app(&mut self) {
@@ -1370,7 +1402,8 @@ impl Harness {
             }
             assert!(
                 started.elapsed() < deadline,
-                "the app sent no Error within {deadline:?}"
+                "the app sent no Error within {deadline:?}{}",
+                self.timeline.render()
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -1570,8 +1603,9 @@ impl Harness {
                 .find(|(running, _)| *running == process)
                 .and_then(|(_, child)| child.try_wait().ok().flatten());
             panic!(
-                "{process} did not claim {name} within {STARTUP_DEADLINE:?} ({appeared:?}, exit status {exit:?}); see {}",
-                self.directory.join(format!("{process}.stderr")).display()
+                "{process} did not claim {name} within {STARTUP_DEADLINE:?} ({appeared:?}, exit status {exit:?}); see {}{}",
+                self.directory.join(format!("{process}.stderr")).display(),
+                self.timeline.render()
             );
         }
     }
@@ -1594,6 +1628,7 @@ impl Drop for Harness {
 /// The notification server stand-in. See [`Harness::notifications`].
 pub struct Notifications<'harness> {
     stand_ins: &'harness StandIns,
+    timeline: &'harness Timeline,
 }
 
 impl Notifications<'_> {
@@ -1620,7 +1655,8 @@ impl Notifications<'_> {
             .wait_for_notification(deadline, condition)
             .unwrap_or_else(|received| {
                 panic!(
-                    "\"{description}\" did not happen within {deadline:?}; received {received:#?}"
+                    "\"{description}\" did not happen within {deadline:?}; received {received:#?}{}",
+                    self.timeline.render()
                 )
             })
     }
@@ -1641,6 +1677,7 @@ impl Notifications<'_> {
 /// The tray watcher stand-in. See [`Harness::tray`].
 pub struct Tray<'harness> {
     stand_ins: &'harness StandIns,
+    timeline: &'harness Timeline,
 }
 
 impl Tray<'_> {
@@ -1665,7 +1702,10 @@ impl Tray<'_> {
         self.stand_ins
             .wait_for_tray(deadline, condition)
             .unwrap_or_else(|error| {
-                panic!("\"{description}\" did not happen within {deadline:?}: {error}")
+                panic!(
+                    "\"{description}\" did not happen within {deadline:?}: {error}{}",
+                    self.timeline.render()
+                )
             })
     }
 }
@@ -2008,7 +2048,8 @@ impl SimulatedPhone<'_> {
             }
             assert!(
                 started.elapsed() < deadline,
-                "\"{description}\" did not happen within {deadline:?}; the Simulated Phone received {recorded:#?}"
+                "\"{description}\" did not happen within {deadline:?}; the Simulated Phone received {recorded:#?}{}",
+                self.harness.timeline.render()
             );
             thread::sleep(Duration::from_millis(20));
         }
@@ -2033,7 +2074,8 @@ impl SimulatedPhone<'_> {
             let recorded = self.recorded_method_calls();
             assert!(
                 condition(&recorded),
-                "\"{description}\" stopped holding; the Simulated Phone received {recorded:#?}"
+                "\"{description}\" stopped holding; the Simulated Phone received {recorded:#?}{}",
+                self.harness.timeline.render()
             );
             if started.elapsed() >= window {
                 return recorded;

@@ -123,6 +123,51 @@ fn a_scenario_to_kill() {
     thread::sleep(Duration::from_secs(60));
 }
 
+/// What a scenario that times out prints: the timeline of the Simulated
+/// Phone's events, the app's state changes and its log, in milliseconds
+/// since the scenario started. All of it is kept in `timeline.txt`.
+#[test]
+fn a_wait_that_times_out_prints_the_scenario_timeline() {
+    let (directory_sender, directory) = mpsc::channel();
+    let failed = thread::spawn(move || {
+        let harness = Harness::builder().phone_connected().start();
+        directory_sender
+            .send(harness.directory().to_owned())
+            .expect("the test is listening");
+        harness.wait_for_app("connected", Duration::from_secs(5), |state| {
+            state.connection_state == "connected"
+        });
+        let _call = harness.simulated_phone().ring("+15550100");
+        harness.wait_for_app("never", Duration::from_millis(500), |_| false);
+    })
+    .join()
+    .expect_err("the wait times out");
+    let message = failed
+        .downcast_ref::<String>()
+        .expect("the panic has a message");
+    let directory: PathBuf = directory.recv().expect("the scenario started");
+
+    for shown in [
+        "\"never\" did not happen within 500ms",
+        "The scenario's timeline, in ms since it started",
+        // The harness tells the Simulated Phone to ring.
+        "harness calls Simulated Phone SimulatedPhone1.Ring",
+        // The Simulated Phone announces the Call, as PipeWire would.
+        "Simulated Phone (Telephony) signals ObjectManager.InterfacesAdded",
+        // The app follows it, logs it and publishes its new state.
+        "app log  call-added",
+        "app signals Properties.PropertiesChanged on /io/github/danielbaldwin47/DesktopCalls",
+    ] {
+        assert!(
+            message.contains(shown),
+            "the panic shows {shown:?}: {message}"
+        );
+    }
+    let kept = fs::read_to_string(directory.join("timeline.txt")).expect("the timeline is kept");
+    assert!(kept.contains("call-added"), "the kept timeline: {kept}");
+    fs::remove_dir_all(&directory).expect("clean up the kept logs");
+}
+
 /// Every running process whose command line or environment names
 /// `directory`, as `pid: command line`.
 fn processes_of(directory: &Path) -> Vec<String> {

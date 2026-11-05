@@ -8,6 +8,8 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::timeline::Timeline;
+
 /// The lines a running `test-client` has printed so far.
 #[derive(Default)]
 struct Printed {
@@ -19,16 +21,21 @@ struct Printed {
 pub struct TestClient {
     child: Child,
     printed: Arc<Printed>,
+    timeline: Arc<Timeline>,
 }
 
 impl TestClient {
-    pub(crate) fn new(mut child: Child) -> Self {
+    pub(crate) fn new(mut child: Child, timeline: Arc<Timeline>) -> Self {
         let printed = Arc::new(Printed::default());
         if let Some(stdout) = child.stdout.take() {
             let printed = printed.clone();
             thread::spawn(move || read_lines(stdout, &printed));
         }
-        Self { child, printed }
+        Self {
+            child,
+            printed,
+            timeline,
+        }
     }
 
     /// Every line the client has printed so far, in order.
@@ -67,7 +74,8 @@ impl TestClient {
             let left = end.saturating_duration_since(Instant::now());
             assert!(
                 !left.is_zero(),
-                "\"{description}\" did not happen within {deadline:?}; the test client printed {lines:#?}"
+                "\"{description}\" did not happen within {deadline:?}; the test client printed {lines:#?}{}",
+                self.timeline.render()
             );
             lines = self
                 .printed

@@ -23,6 +23,7 @@ use crate::glib_runtime::GlibRuntime;
 use crate::logging::{self, EventKind};
 use crate::phone_link::Command;
 use crate::ringer::Ringer;
+use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{bluez, contacts, phone_link};
 
@@ -137,6 +138,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             publisher,
             surfaces,
             ringer: Ringer::default(),
+            stall_watch: StallWatch::default(),
         },
     ));
 
@@ -211,6 +213,7 @@ struct Shell {
     publisher: Publisher,
     surfaces: Option<Surfaces>,
     ringer: Ringer,
+    stall_watch: StallWatch,
 }
 
 impl Shell {
@@ -288,7 +291,15 @@ async fn decide(
     );
     let mut state = State::default();
     while let Some((input, verdict)) = inputs.next().await {
-        let (next, effects) = step(state.clone(), input);
+        let (next, effects, shown) = stall_watch::timed("deciding", || {
+            let (next, effects) = step(state.clone(), input);
+            let shown = next.surfaces();
+            (next, effects, shown)
+        });
+        // Before carrying anything out, so a stall in this very turn shows.
+        shell.stall_watch.watch(
+            !next.calls().is_empty() || shown.banner.is_some() || shown.call_window.is_some(),
+        );
         if let Some(verdict) = verdict {
             let refusal = effects.iter().find_map(|effect| match effect {
                 Effect::ReportError(failure) => Some(*failure),
@@ -308,7 +319,7 @@ async fn decide(
             );
         }
         if let Some(surfaces) = &shell.surfaces {
-            surfaces.render(&next.surfaces());
+            surfaces.render(&shown);
         }
         if let Err(error) = shell.publisher.publish(&next).await {
             publish_failed(&error);

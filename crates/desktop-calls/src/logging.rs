@@ -87,6 +87,7 @@ pub enum EventKind {
     ThemeUnreadable,
     ThemeUnwatched,
     RoundingUnknown,
+    MainLoopStalled,
 }
 
 impl EventKind {
@@ -132,6 +133,7 @@ impl EventKind {
             Self::ThemeUnreadable => "theme-unreadable",
             Self::ThemeUnwatched => "theme-unwatched",
             Self::RoundingUnknown => "rounding-unknown",
+            Self::MainLoopStalled => "main-loop-stalled",
         }
     }
 }

@@ -11,6 +11,7 @@ mod object_manager;
 mod phone_link;
 mod ringer;
 mod service;
+mod stall_watch;
 mod surfaces;
 mod theme;
 

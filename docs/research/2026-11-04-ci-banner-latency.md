@@ -3,6 +3,8 @@
 Date: 2026-11-04. Follows ticket #7 (PR #40). CI runs 41947055883, 41947111574, 41947797252 (red on `main`) and 41961510810 (this branch, before the second fix).
 Legend: **[V]** = verified (where is stated). **[I]** = inferred, not tested.
 
+> **Superseded recipe.** Don't copy the `taskset -c 0` loop in section 2: on a Desktop shared by several agents, every copy piles onto CPU 0. Use `just test-ci-like`, which [2026-11-05-diagnosable-ci.md](2026-11-05-diagnosable-ci.md) describes and calibrates.
+
 **Bottom line:** two causes, both now fixed.
 
 1. **A real bug, which CI's slower CPU made big enough to see.** Formatting the first caller's number loads libphonenumber's metadata on the GTK main thread, and that load compiles every region's patterns. It held up the Banner by 0.27 s on the Desktop and by 1.0 to 1.4 s on a CI runner (debug builds). The metadata now loads on a thread of its own at startup, and the regex compiler is optimised in debug builds too.

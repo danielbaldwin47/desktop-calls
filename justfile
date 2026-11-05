@@ -20,6 +20,15 @@ test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
+# Run the tests under CI's limits, to reproduce a CI-only failure before
+# pushing: a cgroup CPU quota, four scenarios at a time, no GPU, CI's
+# /dev/shm. Takes a machine-wide lock, so runs from several agents take turns.
+# Arguments as for `just test`. `just test-ci-like --help`.
+[positional-arguments]
+[no-exit-message]
+test-ci-like *args:
+    @python3 tools/test_ci_like.py "$@"
+
 # Render every surface in every state, light and dark, stock and under an
 # Omarchy theme, into the screenshot gallery at target/screenshots/gallery.
 # Needs sway and grim.

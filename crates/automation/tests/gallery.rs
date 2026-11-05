@@ -21,7 +21,12 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         .output()
         .expect("run automation screenshot");
 
-    assert!(rendered.status.success(), "screenshot failed: {rendered:?}");
+    assert!(
+        rendered.status.success(),
+        "automation screenshot failed ({}). Its standard error:\n{}",
+        rendered.status,
+        String::from_utf8_lossy(&rendered.stderr)
+    );
     let index =
         std::fs::read_to_string(output.join("index.html")).expect("the gallery has an index");
     let states = [

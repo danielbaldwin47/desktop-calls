@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::input::SyntheticInput;
 use crate::process_group::ProcessGroup;
@@ -262,7 +262,7 @@ impl Screen {
                     .env("WAYLAND_DISPLAY", parent_socket);
             }
         }
-        let child = match command.spawn() {
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => panic!(
                 "start sway ({error}); the screen harness needs the sway and grim packages: \
@@ -276,14 +276,22 @@ impl Screen {
             ),
             Err(error) => panic!("start sway ({error})"),
         };
-        processes.push(("compositor", child));
-
-        let wayland_display = read_ready(&ready).unwrap_or_else(|| {
+        let Some(wayland_display) = read_ready(&ready, &mut child) else {
+            let status = match child.try_wait() {
+                Ok(Some(status)) => format!("it exited ({status})"),
+                Ok(None) => format!("it is still running after {STARTUP_DEADLINE:?}"),
+                Err(error) => format!("its exit status is unknown ({error})"),
+            };
+            processes.push(("compositor", child));
+            let stderr = directory.join("compositor.stderr");
             panic!(
-                "sway did not start within {STARTUP_DEADLINE:?}; see {}",
-                directory.join("compositor.stderr").display()
-            )
-        });
+                "sway did not start: {status}; {}. {}\n(all of it: {})",
+                shm_free(),
+                said(&stderr),
+                stderr.display()
+            );
+        };
+        processes.push(("compositor", child));
         let runtime = environment
             .iter()
             .find(|(name, _)| *name == "XDG_RUNTIME_DIR")
@@ -350,9 +358,10 @@ impl Screen {
         };
         assert!(
             captured.status.success(),
-            "grim failed ({}): {}",
+            "grim failed ({}); {}. grim said: {:?}",
             captured.status,
-            String::from_utf8_lossy(&captured.stderr)
+            shm_free(),
+            String::from_utf8_lossy(&captured.stderr).trim()
         );
         let png = fs::read(path).expect("read the screenshot");
         let (width, height) =
@@ -375,16 +384,59 @@ fn config_text(kind: &ScreenKind, ready: &Path) -> String {
         ),
         ScreenKind::Nested { .. } => String::new(),
     };
+    // No Xwayland and no swaybg: the app needs neither, and their errors
+    // (CI has neither installed) hid sway's own.
     format!(
         "# Written by the Desktop Calls test harness.\n\
+         xwayland disable\n\
+         swaybg_command -\n\
          {output}\
          exec printf '%s\\n' \"$WAYLAND_DISPLAY\" > '{}'\n",
         ready.display()
     )
 }
 
-/// Waits for sway to write its `WAYLAND_DISPLAY` into the FIFO at `ready`.
-fn read_ready(ready: &Path) -> Option<String> {
+/// How much of `/dev/shm` is free, where grim and headless sway keep their
+/// frames: 33 MB each at [`SCREEN_SIZE`]. Docker's default of 64 MB once
+/// killed grim with SIGBUS and kept sway from starting (ticket #41).
+pub(crate) fn shm_free() -> String {
+    let df = Command::new("df")
+        .args(["--block-size=1M", "--output=avail,size", "/dev/shm"])
+        .output();
+    let sizes = df.as_ref().ok().and_then(|df| {
+        let text = String::from_utf8_lossy(&df.stdout);
+        let line = text.lines().nth(1)?.to_owned();
+        let mut fields = line.split_whitespace();
+        Some((fields.next()?.to_owned(), fields.next()?.to_owned()))
+    });
+    match (sizes, df) {
+        (Some((free, size)), _) => format!("/dev/shm has {free} MB free of {size} MB"),
+        (None, Ok(df)) => format!(
+            "/dev/shm's free space is unknown (df said {:?})",
+            String::from_utf8_lossy(&df.stderr).trim()
+        ),
+        (None, Err(error)) => format!("/dev/shm's free space is unknown (df: {error})"),
+    }
+}
+
+/// What sway wrote to `stderr`, its log, without the errors about Xwayland
+/// and swaybg, which it prints wherever they are missing.
+fn said(stderr: &Path) -> String {
+    let log = fs::read_to_string(stderr).unwrap_or_default();
+    let own: Vec<&str> = log
+        .lines()
+        .filter(|line| !line.contains("Xwayland") && !line.contains("swaybg"))
+        .collect();
+    if own.is_empty() {
+        "sway wrote nothing to its log".to_owned()
+    } else {
+        format!("sway said:\n  {}", own.join("\n  "))
+    }
+}
+
+/// Waits for sway to write its `WAYLAND_DISPLAY` into the FIFO at `ready`,
+/// for at most [`STARTUP_DEADLINE`], and not at all once `sway` has exited.
+fn read_ready(ready: &Path, sway: &mut Child) -> Option<String> {
     let (sender, receiver) = mpsc::channel();
     let fifo = ready.to_owned();
     thread::spawn(move || {
@@ -396,13 +448,17 @@ fn read_ready(ready: &Path) -> Option<String> {
         });
         let _ = sender.send(line);
     });
-    if let Ok(display) = receiver.recv_timeout(STARTUP_DEADLINE) {
-        display.filter(|display| !display.is_empty())
-    } else {
-        // The reader is still waiting for a writer; release it.
-        let _ = fs::OpenOptions::new().write(true).open(ready);
-        None
+    let give_up = Instant::now() + STARTUP_DEADLINE;
+    while Instant::now() < give_up {
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(display) => return display.filter(|display| !display.is_empty()),
+            Err(mpsc::RecvTimeoutError::Timeout) if !matches!(sway.try_wait(), Ok(Some(_))) => {}
+            Err(_) => break,
+        }
     }
+    // The reader is still waiting for a writer; release it.
+    let _ = fs::OpenOptions::new().write(true).open(ready);
+    None
 }
 
 /// The width and height in a PNG's header.

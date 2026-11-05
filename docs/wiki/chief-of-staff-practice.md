@@ -40,6 +40,14 @@ Dated rules for how the chief of staff writes tickets, plans batches and merges.
   - **Lighter reviews for tooling** (Fable retro, 2026-11-05, user's decision): a PR that touches only `tools/`, `crates/automation/`, docs or `.github/` gets one Sonnet review and one round, then merges. #134, a checklist-script PR, took 4 rounds.
   - Planned next: move this review to GitHub Actions as the first task of a software factory, after v1.
 
-- 2026-11-05: confirm checks with `gh pr checks <n> --watch` and that the PR head contains `origin/main`, then merge with `--match-head-commit <full sha>` (a short SHA is rejected). Use `just merge <n>` once #56 lands. Never merge with CI pending: see the #40 incident in [retros](retros.md).
+- 2026-11-05 (superseded for PRs merged after `700e1aa`, by #158): confirm checks with `gh pr checks <n> --watch` and that the PR head contains `origin/main`, then merge with `--match-head-commit <full sha>` (a short SHA is rejected). Use `just merge <n>` once #56 lands. Never merge with CI pending: see the #40 incident in [retros](retros.md).
 - 2026-11-05: a PR that contains another open PR (#72 contained #69, #71 contained #68) can be merged alone; close the contained PR as superseded. That saves a CI round. Stacked part PRs (#75 on #74) conflict once the lower part is squash-merged, so the implementer brief now forbids stacking.
 - 2026-11-05 (retro on #42): never tell an agent to wait for another PR to land before pushing. Let it push and reply. The merge step asks for a branch update if it's needed.
+
+## After the local-CI switch and the retro (2026-11-05, evening)
+
+- 2026-11-05 (#158, PR #159, `700e1aa`): a PR is green when `just ci-local` has posted "CI passed" on its head commit, and a PR that was rebased or amended needs a fresh run before `just merge`. Do not wait for a GitHub run on a PR: there is none. Known load-sensitive flakes in local runs are listed in #154's comments. See [testing](testing.md).
+- 2026-11-05 (#143, `955394b`): `just merge` refuses a PR that closes an issue named in a checklist step's `lands_with` until that step has a script (`tools/checklist_tickets.py`). It is caught only at merge time, after local CI. When a ticket closes an issue a checklist step waits on, put the step's script in the same PR, or tell the agent in the ticket. #160 (`1210b55`) was the follow-up that made step 1.2 say what went wrong.
+- 2026-11-05 (#143, `955394b`): rebasing onto a PR that merged first can break a test the rebased PR didn't touch (#153's Setup Window change against #143's keyboard test). Local CI catches it, so a rebased PR is never pushed on the strength of the earlier run.
+- 2026-11-05, Sonnet implementers (user's trial; see [retros](retros.md)): #145, #149 and #160 were Sonnet implementations, comparable to Opus. Three PRs is a small sample.
+- 2026-11-05, restated from the Fable retro (`c79d731`) for the record: research notes in `docs/research/` only when a PR touches the real Phone or an ADR (the [implementer brief](../agents/implementer-brief.md), Finishing step 4); tooling, docs and CI PRs get one Sonnet review and one round (Merging, above).

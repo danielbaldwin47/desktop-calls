@@ -18,15 +18,15 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated.
 
-- [testing](testing.md): the harness, CI timings against the Desktop, and the Real-Phone Checklist, dated (added 2026-11-05).
+- [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) with its known flakes, and the Real-Phone Checklist, dated (added 2026-11-05).
 
 ## Process
 
-- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first.
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-05 evening, 12 PRs merged, CI local, feature freeze).
 
-- [retros](retros.md): subagent-session retros and the improvements pursued.
+- [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions and the Sonnet implementer trial (2026-11-05).
 
-- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging (added 2026-11-05).
+- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze and the local-CI merge rules (added 2026-11-05).
 
 - [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).
 

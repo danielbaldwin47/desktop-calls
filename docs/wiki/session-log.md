@@ -2,6 +2,15 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
+## 2026-11-05 evening: 12 PRs merged, CI moved to this machine, freeze on (supersedes the entries below on CI and on what is in flight)
+
+- **Merged 2026-11-05, 15:52 to 20:22 UTC, in order:** #129 (`18e403c`, call waiting #16), #145 (`94dcb16`, #116), #142 (`234c2c3`, #123), #134 (`8735912`, #120), #156 (`7c8b607`, #155), #157 (`ba22b51`, #155), #149 (`f2ddbbf`, #121), #151 (`5eb631f`, #111), #159 (`700e1aa`, #158), #153 (`97278a3`, #23), #143 (`955394b`, #22), #160 (`1210b55`, step 1.2 follow-up to #143). Source: `git log` and `gh pr view` on 2026-11-05.
+- **CI moved to this machine** (#158, PR #159, `700e1aa`). From `700e1aa`, a PR's "CI passed" status comes from `just ci-local`, not from a GitHub run; GitHub runs full CI only on pushes to `main`. Details and the known flakes are on [testing](testing.md). This supersedes the entries below that say CI runs once per PR push, and that tell the chief of staff to run `gh pr checks <n> --watch` before merging a PR (for a PR merged after `700e1aa`, `just merge` reads the status).
+- **Feature freeze** (Fable retro, `c79d731`, decided with the user): no new feature tickets until Real-Phone Checklist groups 1, 2 and 6 have run on the Pixel. The review found no scorecard item verified on the Pixel. Minor review findings go to #154 (label `after-v1`). See [chief-of-staff-practice](chief-of-staff-practice.md).
+- **Sonnet implementers were tried** on #145, #149 and #160; results on [retros](retros.md).
+- **Lesson from #143** (`955394b`): `just merge` refused it because it closes an issue (#22) named in a checklist step's `lands_with` and that step had no script yet. That is only found at merge time, after local CI. See [chief-of-staff-practice](chief-of-staff-practice.md).
+- Waiting on the user: running Real-Phone Checklist groups 1, 2 and 6 on the Pixel (the freeze lifts after that), plus the items already listed on [testing](testing.md).
+
 ## 2026-11-05 the repo went public (new repository, scrubbed history)
 
 - `danielbaldwin47/desktop-calls` is now a new public repository. Its history was rewritten with placeholders: the Pixel's and the Desktop's Bluetooth addresses, the Phone's Bluetooth name, the hostname, the user name and home paths are gone, and every commit's author email is the GitHub noreply address. `refs/pull/*` were dropped.

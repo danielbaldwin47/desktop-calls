@@ -66,12 +66,21 @@ fn a_passing_scenario_leaves_nothing_behind() {
 /// Where [`a_scenario_to_kill`] writes its directory, once it has started.
 const REPORT: &str = "SCENARIO_TO_KILL_REPORT";
 
+/// [`a_scenario_to_kill`]'s full test name, which starts with this file's
+/// module path when the harness's test files are compiled as one binary.
+fn scenario_to_kill() -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::a_scenario_to_kill"),
+        None => "a_scenario_to_kill".to_owned(),
+    }
+}
+
 /// As a timeout or a stopped run does: SIGKILL a test process mid-scenario.
 #[test]
 fn nothing_a_scenario_started_outlives_its_killed_test_process() {
     let report = tempfile::NamedTempFile::new().expect("create the report file");
     let mut test_process = Command::new(std::env::current_exe().expect("find this test"))
-        .args(["a_scenario_to_kill", "--exact", "--ignored"])
+        .args([scenario_to_kill().as_str(), "--exact", "--ignored"])
         .env(REPORT, report.path())
         .stdout(Stdio::null())
         .spawn()

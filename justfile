@@ -20,6 +20,14 @@ test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
+# `just test-file contacts with_5000`; --ci-like runs them under CI's limits.
+# Use it rather than `cargo test --test <file>`. `just test-file --help`.
+# Run one harness test file, or only its scenarios whose names contain FILTER.
+[positional-arguments]
+[no-exit-message]
+test-file *args:
+    @python3 tools/test_file.py "$@"
+
 # Run the tests under CI's limits, to reproduce a CI-only failure before
 # pushing: a cgroup CPU quota, four scenarios at a time, no GPU, CI's
 # /dev/shm. Takes a machine-wide lock, so runs from several agents take turns.

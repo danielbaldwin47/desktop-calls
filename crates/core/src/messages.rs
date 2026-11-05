@@ -364,6 +364,8 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
         IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),
+        // The Call Window's words for it.
+        IndicatorStatus::ConnectionLost(phone) => format!("Connection to {} lost", phone.name),
         // No one to say the Call is from yet: the Banner's own words.
         IndicatorStatus::Ringing(RingingCaller::Identifying) => {
             label(Label::IdentifyingCaller).to_owned()
@@ -374,6 +376,11 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
         IndicatorStatus::InCall { caller, contact } => {
             format!("In a Call with {}", caller_name(caller, contact.as_ref()))
         }
+        // The Call Window's notice, naming the Call.
+        IndicatorStatus::CallOnPhone { caller, contact } => format!(
+            "Connection to phone lost: the Call with {} continues on your phone",
+            caller_name(caller, contact.as_ref())
+        ),
     }
 }
 
@@ -398,6 +405,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::ConnectPhone => "Connect your phone…".to_owned(),
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
+        IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),
         IndicatorEntry::MoveAudio {
             to: AudioLocation::Desktop,
@@ -483,6 +491,9 @@ pub enum Label {
     Answer,
     Decline,
     HangUp,
+    /// Hang up's label while the Desktop has lost contact with the Call,
+    /// which carries on on the Phone: where to hang up instead.
+    HangUpOnPhone,
     /// The Call Window's status while the Call connects.
     Connecting,
     /// The Call Window's status while a Call placed here starts.
@@ -575,6 +586,7 @@ pub fn label(label: Label) -> &'static str {
         Label::Answer => "Answer",
         Label::Decline => "Decline",
         Label::HangUp => "Hang up",
+        Label::HangUpOnPhone => "Hang up on your phone",
         Label::Connecting => "Connecting…",
         Label::Calling => "Calling…",
         Label::Ringing => "Ringing…",

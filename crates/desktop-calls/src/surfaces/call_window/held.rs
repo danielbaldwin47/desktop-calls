@@ -106,7 +106,7 @@ impl HeldRow {
     /// Swap, or while the only Call is on hold, with Resume.
     pub(super) fn update(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         let lone = view.held.is_none() && matches!(view.phase, CallWindowPhase::OnHold { .. });
-        let can_act = !view.waiting_first;
+        let can_act = !view.waiting_first && !view.connection_lost;
         self.held.set(view.held.as_ref().map(|held| held.call));
         self.row.set_visible(view.held.is_some() || lone);
         // Hidden controls ignore their shortcuts.
@@ -115,13 +115,17 @@ impl HeldRow {
         self.hang_up.set_sensitive(view.held.is_some() && can_act);
         self.hang_up.set_visible(view.held.is_some());
         self.buttons.set_visible(can_act);
-        self.waiting_first.set_visible(!can_act);
+        // With contact lost, the Call Window's notice says why.
+        self.waiting_first.set_visible(view.waiting_first);
         self.caller_line.set_visible(view.held.is_some());
         if let Some(held) = &view.held {
             let who = Who::of(&held.caller, held.contact.as_ref());
             self.caller.set_text(&who.caller);
             content.insert("held-call".to_owned(), held.call.to_string());
             content.insert("held-caller".to_owned(), who.caller);
+        }
+        if view.connection_lost {
+            return;
         }
         if !can_act {
             content.insert(

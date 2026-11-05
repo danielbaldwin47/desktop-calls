@@ -213,6 +213,9 @@ pub(super) fn caller_changed(state: &mut State, call: CallId, caller: Caller) {
 }
 
 pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    if lost_contact(state, effects) {
+        return;
+    }
     // Answering a Waiting Call keeps the connected one, on hold: the choice
     // that loses nothing. A Call still being placed can't be held, so it
     // ends; but a connected Call never ends unasked, so with one on hold
@@ -241,6 +244,9 @@ pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>)
 }
 
 pub(super) fn decline(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    if lost_contact(state, effects) {
+        return;
+    }
     match state.call_mut(call) {
         Some(known) if known.rings_here() => {
             known.request = Request::Decline;
@@ -252,12 +258,19 @@ pub(super) fn decline(state: &mut State, call: CallId, effects: &mut Vec<Effect>
     }
 }
 
+/// While the Call Window says the connection to the Phone is lost and the
+/// Calls are still out of reach, a ringing Call can't be answered or
+/// declined from here: says so, and returns whether it did.
+fn lost_contact(state: &State, effects: &mut Vec<Effect>) -> bool {
+    let lost = state.connection_lost.is_some() && state.calls_out_of_reach();
+    if lost {
+        effects.push(Effect::ReportError(Failure::ConnectionLost));
+    }
+    lost
+}
+
 pub(super) fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
-    if state
-        .connection_lost
-        .as_ref()
-        .is_some_and(|lost| lost.call.id == call)
-    {
+    if state.connection_lost.is_some() {
         // A hang-up kept until the Phone is back could end the Call the user
         // is now on, on the Phone.
         effects.push(Effect::ReportError(Failure::ConnectionLost));

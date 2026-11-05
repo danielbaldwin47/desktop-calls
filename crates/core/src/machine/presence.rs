@@ -79,6 +79,12 @@ impl State {
     pub(super) fn calls_out_of_reach(&self) -> bool {
         self.presence.reach != Reach::Present
     }
+
+    /// Whether the Phone is present, and hands-free didn't come back after
+    /// a Handoff to the Phone: not out of range, though not connected.
+    pub(crate) fn hands_free_lost(&self) -> bool {
+        self.presence.reach == Reach::HandsFreeLost
+    }
 }
 
 /// What BlueZ and logind report about reaching the Phone.
@@ -180,15 +186,15 @@ pub(super) fn hands_free_connect_failed(state: &mut State, effects: &mut Vec<Eff
 }
 
 /// The Calls can't be acted on from here any more. The live one in the
-/// Call Window carries on on the Phone: the window says so for a while.
+/// Call Window, and the one on hold behind it, carry on on the Phone: the
+/// window says so for a while.
 fn lose_calls(state: &mut State, effects: &mut Vec<Effect>) {
     // The audio stays with the Call on the Phone once the Phone is back.
     state.restore_audio = None;
-    let Some(call) = state
-        .calls
-        .iter()
-        .find(|call| call.state.is_live() && call.has_call_window())
-        .cloned()
+    let Some((call, held)) = state
+        .call_window_calls()
+        .filter(|(call, _)| call.state.is_live())
+        .map(|(call, held)| (call.clone(), held.cloned()))
     else {
         return;
     };
@@ -199,6 +205,7 @@ fn lose_calls(state: &mut State, effects: &mut Vec<Effect>) {
     state.losses += 1;
     state.connection_lost = Some(ConnectionLost {
         call,
+        held,
         loss: state.losses,
     });
     effects.push(Effect::StartTimer {

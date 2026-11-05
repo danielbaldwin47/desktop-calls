@@ -222,6 +222,8 @@ struct AudioToRestore {
 struct ConnectionLost {
     /// The Call as it was when the connection dropped.
     call: Call,
+    /// The Call on hold behind it, as it was.
+    held: Option<Call>,
     /// Which loss this is, so only its own timer counts.
     loss: u32,
 }
@@ -340,7 +342,7 @@ impl State {
     #[must_use]
     pub fn ringing(&self) -> bool {
         !self.do_not_disturb
-            && !self.presence.absent()
+            && !self.calls_out_of_reach()
             && self.calls.iter().any(Call::rings_here)
             && !self.calls.iter().any(|call| call.state.blocks_ringing())
     }

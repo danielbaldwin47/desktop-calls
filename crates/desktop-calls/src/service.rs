@@ -21,6 +21,7 @@ use zbus::Connection;
 use crate::control::{DialRequest, Publisher, ShownSurfaces};
 use crate::glib_runtime::GlibRuntime;
 use crate::logging::{self, EventKind};
+use crate::notifications::Notifier;
 use crate::phone_link::Command;
 use crate::ringer::Ringer;
 use crate::stall_watch::{self, StallWatch};
@@ -124,6 +125,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let (contacts_sender, contacts_commands) = unbounded();
     let (report_sender, reports) = unbounded();
     let surfaces = has_display.then(|| Surfaces::new(&input_sender, report_sender));
+    let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system, input_sender.clone()));
     context.spawn_local(contacts::run(
@@ -143,6 +145,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             publisher,
             surfaces,
             ringer: Ringer::default(),
+            notifier,
             stall_watch: StallWatch::default(),
         },
     ));
@@ -218,6 +221,7 @@ struct Shell {
     publisher: Publisher,
     surfaces: Option<Surfaces>,
     ringer: Ringer,
+    notifier: Notifier,
     stall_watch: StallWatch,
 }
 
@@ -241,6 +245,7 @@ impl Shell {
                     self.contacts_command(contacts::Command::RefreshCallHistory);
                 }
                 Effect::ForgetContacts => self.contacts_command(contacts::Command::Forget),
+                Effect::NotifyMissedCall(notice) => self.notifier.notify(notice),
                 Effect::Phone(command) => phone_commands.push(command),
                 Effect::StartRinging => self.ringer.start(),
                 Effect::StopRinging => self.ringer.stop(),

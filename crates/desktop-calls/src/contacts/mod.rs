@@ -109,8 +109,12 @@ pub async fn run(
                 }
             }
             Command::RefreshCallHistory => {
+                // Every refresh asked for ends in a report, so the Call state
+                // machine can tell which refresh confirms which Missed Call.
                 if let Some(address) = held.address.clone() {
                     sync.refresh_call_history(&address, &mut held.cached).await;
+                } else {
+                    sync.report(Input::CallHistoryRefreshFailed);
                 }
             }
             Command::Forget => {
@@ -241,40 +245,60 @@ impl ContactsSync {
             self.pull(session, folder, MOST_PAGES).await?;
         }
         held.call_history = call_history_from(&folders, std::mem::take(&mut held.call_history));
-        self.call_history_pulled(address, held).await;
+        let (contacts, call_history) = self.index_and_save(address, held).await;
+        tracing::info!(
+            event_kind = %EventKind::ContactsSynced,
+            call_history = held.call_history.len(),
+            "Read the rest of the Call History: {} entries",
+            held.call_history.len()
+        );
+        // Part of the sync, not a refresh: a refresh confirms Missed Calls.
+        self.report(Input::ContactsSynced {
+            contacts,
+            call_history,
+        });
         Ok(())
     }
 
     /// Pulls the newest page of the Call History in a session of its own,
-    /// and puts it in front of the older Calls held.
+    /// and puts it in front of the older Calls held. Reports the Call
+    /// History, or that the refresh failed.
     async fn refresh_call_history(&self, address: &str, held: &mut Cached) {
         let session = match self.open_session(address).await {
             Ok(session) => session,
-            Err(stop) => return self.stopped(stop),
+            Err(stop) => return self.refresh_stopped(Some(stop)),
         };
         let pulled = self.pull_call_history(&session, 1).await;
         self.close_session(&session).await;
         match pulled {
-            Err(stop) => self.stopped(stop),
-            Ok(None) => {}
+            Err(stop) => self.refresh_stopped(Some(stop)),
+            Ok(None) => self.refresh_stopped(None),
             Ok(Some(folders)) => {
                 held.call_history =
                     call_history_from(&folders, std::mem::take(&mut held.call_history));
-                self.call_history_pulled(address, held).await;
+                let (_, call_history) = self.index_and_save(address, held).await;
+                tracing::info!(
+                    event_kind = %EventKind::CallHistoryRefreshed,
+                    call_history = held.call_history.len(),
+                    "Refreshed the Call History: {} entries",
+                    held.call_history.len()
+                );
+                self.report(Input::CallHistoryRefreshed(call_history));
             }
         }
     }
 
-    /// Indexes and saves the Call History held, and reports it.
-    async fn call_history_pulled(&self, address: &str, held: &mut Cached) {
-        let (_, call_history) = self.index_and_save(address, held).await;
+    /// A refresh ended without a Call History: because the sync had to stop,
+    /// or because the Phone offers no Call History folder.
+    fn refresh_stopped(&self, stop: Option<Stop>) {
+        if let Some(stop) = stop {
+            self.stopped(stop);
+        }
         tracing::info!(
-            event_kind = %EventKind::CallHistoryRefreshed,
-            call_history = held.call_history.len(),
-            "Refreshed the Call History: {} entries",
-            held.call_history.len()
+            event_kind = %EventKind::CallHistoryRefreshFailed,
+            "Couldn't refresh the Call History"
         );
-        self.report(Input::CallHistoryRefreshed(call_history));
+        self.report(Input::CallHistoryRefreshFailed);
     }
 
     fn stopped(&self, stop: Stop) {

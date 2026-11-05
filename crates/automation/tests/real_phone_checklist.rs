@@ -21,9 +21,13 @@ use std::time::Duration;
 /// How long the runner may go without printing anything.
 const QUIET_DEADLINE: Duration = Duration::from_secs(60);
 
-/// The only group-2 question a machine can't answer today. The rest of
-/// group 2 is observed through the control interface.
+/// The group-2 questions a machine can't answer today: what the helper
+/// hears, and what the notification server draws. The rest of group 2 is
+/// observed through the control interface.
 const HEARD_CLEARLY: &str = "Does your helper hear you clearly, with no echo of their own voice?";
+const MISSED_CALL_SHOWN: &str =
+    "Does a notification say you missed a call from your helper, by name or number, with the time?";
+const WITHHELD_SHOWN: &str = "Does a notification say you missed a call from a withheld number, and that it can't be called back?";
 
 /// A running checklist, and what it has printed.
 struct Runner {
@@ -166,7 +170,7 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
 
     assert_eq!(
         questions,
-        [HEARD_CLEARLY],
+        [HEARD_CLEARLY, MISSED_CALL_SHOWN, WITHHELD_SHOWN],
         "{}",
         runner.transcript.join("\n")
     );
@@ -202,7 +206,7 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
         "{answered:#}"
     );
 
-    for id in ["2.2", "2.3", "2.4", "2.8"] {
+    for id in ["2.2", "2.3", "2.4", "2.5", "2.6", "2.8"] {
         let observed = step(&result, id);
         assert_eq!(observed["result"], "pass", "{observed:#}");
         assert!(
@@ -212,16 +216,36 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
             "{observed:#}"
         );
     }
-    for id in ["2.5", "2.6", "2.7"] {
-        let waiting = step(&result, id);
-        assert_eq!(waiting["result"], "skipped", "{waiting:#}");
-        assert!(
-            waiting["evidence"][0]
+    // 2.5: the Missed Call is notified, and its notification leads back to
+    // the caller: the Call placed after Enter goes to the number that rang.
+    let rang_out = step(&result, "2.5");
+    assert!(
+        rang_out["evidence"]
+            .as_array()
+            .is_some_and(|evidence| evidence.iter().any(|line| line
                 .as_str()
-                .is_some_and(|evidence| evidence.starts_with("Not yet runnable")),
-            "{waiting:#}"
-        );
-    }
+                .is_some_and(|line| line.contains("called back")))),
+        "{rang_out:#}"
+    );
+    // 2.4: the Call declined on the Pixel isn't in its missed Call History,
+    // so no Missed Call is notified.
+    let declined = step(&result, "2.4");
+    assert!(
+        declined["evidence"]
+            .as_array()
+            .is_some_and(|evidence| evidence.iter().any(|line| line
+                .as_str()
+                .is_some_and(|line| line.contains("No Missed Call")))),
+        "{declined:#}"
+    );
+    let waiting = step(&result, "2.7");
+    assert_eq!(waiting["result"], "skipped", "{waiting:#}");
+    assert!(
+        waiting["evidence"][0]
+            .as_str()
+            .is_some_and(|evidence| evidence.starts_with("Not yet runnable")),
+        "{waiting:#}"
+    );
     // Only group 2 ran.
     assert!(
         result["steps"]
@@ -285,7 +309,7 @@ fn the_scorecard_reads_the_latest_real_phone_result_and_never_a_demo() {
     );
     assert!(
         checklist.contains("Real-Phone Checklist")
-            && checklist.contains("5 pass, 0 fail, 3 skipped"),
+            && checklist.contains("7 pass, 0 fail, 1 skipped"),
         "{real}"
     );
 }
@@ -313,12 +337,12 @@ fn an_interrupted_run_resumes_at_the_failed_step_and_keeps_what_passed() {
     );
     assert_eq!(
         second.steps_started(),
-        ["2.1", "2.3", "2.4", "2.8"],
+        ["2.1", "2.3", "2.4", "2.5", "2.6", "2.8"],
         "the failed step and those not yet run, but not 2.2:\n{}",
         second.transcript.join("\n")
     );
     let after_second = result_file(results.path());
-    for id in ["2.1", "2.2", "2.3", "2.4", "2.8"] {
+    for id in ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.8"] {
         assert_eq!(
             step(&after_second, id)["result"],
             "pass",

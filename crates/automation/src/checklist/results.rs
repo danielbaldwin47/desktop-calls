@@ -251,6 +251,11 @@ fn utc_timestamp(time: SystemTime) -> String {
     )
 }
 
+/// `time` as a PBAP Call History entry gives it, such as `20261105T143207`.
+pub fn irmc_timestamp(time: SystemTime) -> String {
+    utc_timestamp(time).replace(['-', ':', 'Z'], "")
+}
+
 /// The proleptic Gregorian date of `days` since 1970-01-01, by Howard
 /// Hinnant's `civil_from_days`.
 fn civil_from_days(days: i64) -> (i64, i64, i64) {

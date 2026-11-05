@@ -1,7 +1,9 @@
 //! The Messages module: every sentence the user reads.
 
-use desktop_calls_core::messages::{self, Failure};
-use desktop_calls_core::{ConnectionState, Phone, Timestamp};
+use desktop_calls_core::messages::{self, Failure, Label};
+use desktop_calls_core::{
+    CallId, Caller, ConnectionState, ContactMatch, MissedCallNotice, NumberLabel, Phone, Timestamp,
+};
 
 fn pixel() -> Phone {
     Phone {
@@ -102,4 +104,101 @@ fn when_a_call_was_is_in_local_time() {
         messages::when(Timestamp(1_793_747_700_000), NOW, 3_600),
         "Yesterday 00:15"
     );
+}
+
+fn missed_call(caller: Caller, contact: Option<ContactMatch>, count: u32) -> MissedCallNotice {
+    MissedCallNotice {
+        notification: CallId(1),
+        call: CallId(count),
+        caller,
+        contact,
+        count,
+        // 08:30 UTC today.
+        at: Timestamp(1_793_867_400_000),
+    }
+}
+
+fn alice() -> ContactMatch {
+    ContactMatch {
+        name: "Alice".to_owned(),
+        label: NumberLabel::Mobile,
+    }
+}
+
+fn alices_number() -> Caller {
+    Caller::Number("+447700900123".to_owned())
+}
+
+#[test]
+fn a_missed_call_notification_names_the_caller_and_says_when() {
+    let text = messages::missed_call(&missed_call(alices_number(), Some(alice()), 1), NOW, 0);
+
+    assert_eq!(text.summary, "Missed call from Alice (mobile)");
+    assert_eq!(text.body, "08:30");
+}
+
+#[test]
+fn a_missed_call_from_someone_not_in_contacts_shows_the_number() {
+    let text = messages::missed_call(&missed_call(alices_number(), None, 1), NOW, 0);
+
+    assert_eq!(text.summary, "Missed call from +44 7700 900123");
+}
+
+#[test]
+fn a_withheld_missed_call_says_it_cant_be_called_back() {
+    let text = messages::missed_call(&missed_call(Caller::Withheld, None, 1), NOW, 0);
+
+    assert_eq!(text.summary, "Missed call from a withheld number");
+    assert_eq!(text.body, "08:30 · can't be called back");
+}
+
+#[test]
+fn repeat_missed_calls_are_counted_with_the_latest_time() {
+    let text = messages::missed_call(&missed_call(alices_number(), Some(alice()), 3), NOW, 0);
+    assert_eq!(text.summary, "3 missed calls from Alice");
+    assert_eq!(text.body, "Latest 08:30");
+
+    let text = messages::missed_call(&missed_call(Caller::Withheld, None, 2), NOW, 0);
+    assert_eq!(text.summary, "2 missed calls from withheld numbers");
+    assert_eq!(text.body, "Latest 08:30 · can't be called back");
+}
+
+#[test]
+fn missed_call_notifications_never_look_like_a_verification_code() {
+    // Omarchy 4.5 lets a notification through Do Not Disturb if it finds 4
+    // to 8 digits near a word such as code, pin, verify or confirm.
+    const CODE_WORDS: [&str; 12] = [
+        "code",
+        "otp",
+        "one-time",
+        "verification",
+        "verify",
+        "passcode",
+        "pin",
+        "2fa",
+        "two-factor",
+        "security key",
+        "confirm",
+        "confirmation",
+    ];
+    for notice in [
+        missed_call(alices_number(), Some(alice()), 1),
+        missed_call(alices_number(), None, 1),
+        missed_call(alices_number(), None, 3),
+        missed_call(Caller::Withheld, None, 1),
+        missed_call(Caller::Withheld, None, 2),
+    ] {
+        let text = messages::missed_call(&notice, NOW, 0);
+        let all = format!("{} {}", text.summary, text.body).to_lowercase();
+        for word in CODE_WORDS {
+            assert!(!all.contains(word), "{all:?} contains {word:?}");
+        }
+    }
+    for label in [Label::CallBack, Label::Dismiss, Label::ShowInDialer] {
+        let label = messages::label(label).to_lowercase();
+        assert!(
+            !CODE_WORDS.iter().any(|word| label.contains(word)),
+            "{label}"
+        );
+    }
 }

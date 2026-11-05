@@ -14,6 +14,7 @@ mod earlier_run;
 mod machine;
 pub mod matching;
 pub mod messages;
+mod missed;
 mod number;
 
 pub use call::{
@@ -30,3 +31,4 @@ pub use machine::{
     PhoneCommand, PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
+pub use missed::MissedCallNotice;

@@ -145,6 +145,8 @@ trait SimulatedPhone1 {
 
     fn ring(&self, number: &str) -> zbus::Result<zbus::OwnedObjectPath>;
 
+    fn ring_with_caller_id(&self, caller_id: &str) -> zbus::Result<zbus::OwnedObjectPath>;
+
     fn set_codec(&self, codec: u8) -> zbus::Result<()>;
 
     fn enable_quirk(&self, name: &str) -> zbus::Result<()>;
@@ -341,6 +343,22 @@ pub struct AppError {
     pub message: String,
 }
 
+/// One `MissedCall` signal from the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissedCall {
+    /// The latest Missed Call's id.
+    pub call: u32,
+    /// The caller's number, or `""` if withheld.
+    pub number: String,
+    /// The Contact's name, or `""`.
+    pub display_name: String,
+    /// How many Missed Calls from this caller the notification tells of.
+    pub count: u32,
+    /// When the latest one started ringing, in milliseconds since the Unix
+    /// epoch.
+    pub at_ms: u64,
+}
+
 /// One of a scenario's two private buses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bus {
@@ -373,6 +391,8 @@ pub struct Harness {
     screenshot_directory: PathBuf,
     /// Every `Error` signal the app has sent, in order.
     app_errors: Arc<Mutex<Vec<AppError>>>,
+    /// Every `MissedCall` signal the app has sent, in order.
+    missed_calls: Arc<Mutex<Vec<MissedCall>>>,
     /// Every value the app's `Surfaces` property has signalled, in order.
     surfaces_seen: Arc<Mutex<Vec<ShownSurfaces>>>,
     // Stopped in reverse order of starting: the app, the Simulated Phone,
@@ -606,6 +626,7 @@ impl Builder {
             .expect("serve the desktop stand-ins on the private session bus");
         // Subscribe before the app starts, so no Error signal is missed.
         let app_errors = collect_app_errors(&session);
+        let missed_calls = collect_missed_calls(&session);
         let surfaces_seen = collect_surfaces(&session);
 
         let mut harness = Harness {
@@ -624,6 +645,7 @@ impl Builder {
             test_clients: Mutex::default(),
             screenshot_directory,
             app_errors,
+            missed_calls,
             surfaces_seen,
             processes,
             timeline,
@@ -1581,6 +1603,15 @@ impl Harness {
             .clone()
     }
 
+    /// Every `MissedCall` signal the app has sent so far, in order.
+    #[must_use]
+    pub fn missed_calls(&self) -> Vec<MissedCall> {
+        self.missed_calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Every value of the app's `Surfaces` property signalled since the
     /// scenario started, in order: everything the surfaces showed, however
     /// briefly.
@@ -1813,6 +1844,18 @@ impl Notifications<'_> {
             panic!("click notification {id}: {error}");
         }
     }
+
+    /// Presses notification `id`'s button for action `key`, such as
+    /// `"call-back"`, and closes it, as Omarchy does.
+    ///
+    /// # Panics
+    ///
+    /// If the notification offered no such action.
+    pub fn invoke_action(&self, id: u32, key: &str) {
+        if let Err(error) = self.stand_ins.invoke_action(id, key) {
+            panic!("press {key:?} on notification {id}: {error}");
+        }
+    }
 }
 
 /// The tray watcher stand-in. See [`Harness::tray`].
@@ -1988,6 +2031,20 @@ impl SimulatedPhone<'_> {
     #[must_use]
     pub fn ring(&self, number: &str) -> String {
         zbus::block_on(async { self.proxy().await?.ring(number).await })
+            .expect("ring the Simulated Phone")
+            .to_string()
+    }
+
+    /// Rings the Phone with this caller ID as the Phone sends it to the
+    /// Desktop, such as `"",129` for a withheld number, read as PipeWire
+    /// reads it. Returns the new Call's object path.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses, as it does while hands-free is down.
+    #[must_use]
+    pub fn ring_with_caller_id(&self, caller_id: &str) -> String {
+        zbus::block_on(async { self.proxy().await?.ring_with_caller_id(caller_id).await })
             .expect("ring the Simulated Phone")
             .to_string()
     }
@@ -2395,32 +2452,63 @@ async fn read_app_state(session: &Connection) -> zbus::Result<AppState> {
 
 /// Collects every `Error` signal the app sends on `session`, from now on.
 fn collect_app_errors(session: &Connection) -> Arc<Mutex<Vec<AppError>>> {
-    let errors = Arc::new(Mutex::new(Vec::new()));
+    collect_signal(session, "Error", |message| {
+        let (kind, message) = message.body().deserialize::<(String, String)>().ok()?;
+        Some(AppError { kind, message })
+    })
+}
+
+/// Collects every `MissedCall` signal the app sends on `session`, from now
+/// on.
+fn collect_missed_calls(session: &Connection) -> Arc<Mutex<Vec<MissedCall>>> {
+    collect_signal(session, "MissedCall", |message| {
+        let (call, number, display_name, count, at_ms) = message
+            .body()
+            .deserialize::<(u32, String, String, u32, u64)>()
+            .ok()?;
+        Some(MissedCall {
+            call,
+            number,
+            display_name,
+            count,
+            at_ms,
+        })
+    })
+}
+
+/// Collects every signal `member` of the app's control interface on
+/// `session`, from now on, as `read` reads it.
+fn collect_signal<T: Send + 'static>(
+    session: &Connection,
+    member: &'static str,
+    read: fn(&zbus::Message) -> Option<T>,
+) -> Arc<Mutex<Vec<T>>> {
+    let signals = Arc::new(Mutex::new(Vec::new()));
     let stream = zbus::block_on(async {
         let rule = MatchRule::builder()
             .msg_type(Type::Signal)
             .path(APP_PATH)
             .interface(APP_INTERFACE)
-            .member("Error")
+            .member(member)
             .build()?;
         MessageStream::for_match_rule(rule, session, None).await
     })
-    .expect("subscribe to the app's Error signal");
-    let collected = errors.clone();
+    .unwrap_or_else(|error| panic!("subscribe to the app's {member} signal: {error}"));
+    let collected = signals.clone();
     thread::spawn(move || {
         zbus::block_on(async move {
             let mut stream = stream;
             while let Some(Ok(message)) = stream.next().await {
-                if let Ok((kind, message)) = message.body().deserialize::<(String, String)>() {
+                if let Some(signal) = read(&message) {
                     collected
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
-                        .push(AppError { kind, message });
+                        .push(signal);
                 }
             }
         });
     });
-    errors
+    signals
 }
 
 /// Collects every value of the app's `Surfaces` property that its

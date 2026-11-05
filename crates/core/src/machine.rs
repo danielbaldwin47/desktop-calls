@@ -5,10 +5,13 @@ use crate::call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Request, Timestamp, Transport,
 };
 use crate::connection::{ConnectionState, Phone};
-use crate::contacts::{CallHistory, Contacts, ContactsState, SyncFailure, Unavailable};
+use crate::contacts::{
+    CallHistory, CallHistoryKind, Contacts, ContactsState, SyncFailure, Unavailable,
+};
 use crate::earlier_run::{EarlierCall, EarlierRun};
 use crate::matching::{self, ContactMatch, DialerRow};
 use crate::messages::{Failure, ProblemKind};
+use crate::missed::{MissedCallNotice, MissedCalls, Notified, Unconfirmed};
 
 /// How many recent Calls the Desktop remembers the other party of, so
 /// `OpenDialer` can select one.
@@ -114,6 +117,13 @@ pub enum Input {
     DialerChoose(usize),
     /// Escape in the Dialer: close it.
     CloseDialer,
+    /// The user clicked the Missed Call notification with this id: open
+    /// the Dialer with its latest Call selected.
+    OpenMissedCall(CallId),
+    /// The user pressed the Missed Call notification's Call back.
+    CallBack(CallId),
+    /// The user dismissed the Missed Call notification with this id.
+    MissedCallDismissed(CallId),
     /// The Phone did this command.
     PhoneCommandDone(PhoneCommand),
     /// The Phone refused, or never answered, this command.
@@ -132,6 +142,10 @@ pub enum Input {
     },
     /// A refresh of the Call History finished.
     CallHistoryRefreshed(CallHistory),
+    /// A refresh of the Call History ended without one. Each
+    /// [`Effect::RefreshCallHistory`] ends in this or
+    /// [`Input::CallHistoryRefreshed`], in the order asked.
+    CallHistoryRefreshFailed,
     /// The Phone is asking whether to share Contacts, until `deadline`.
     ContactsPermissionNeeded { deadline: Timestamp },
     /// A sync, or a refresh, ended without Contacts.
@@ -220,6 +234,9 @@ pub enum Effect {
     SyncContacts,
     /// Pull the Phone's Call History again.
     RefreshCallHistory,
+    /// Show the Missed Call notification, replacing the one with the same
+    /// `notification` id if it is still shown.
+    NotifyMissedCall(MissedCallNotice),
     /// Delete the Contacts and Call History held for the attached Phone,
     /// on disk too.
     ForgetContacts,
@@ -465,6 +482,7 @@ pub struct State {
     dialer_openings: u32,
     /// The other party of each recent Call, oldest first.
     recent_calls: Vec<(CallId, Caller)>,
+    missed: MissedCalls,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -748,6 +766,12 @@ impl State {
         contact.is_some() && contact == self.contact(b)
     }
 
+    /// Whether `a` and `b` are the same caller: the same number, or both
+    /// withheld.
+    fn same_caller(&self, a: &Caller, b: &Caller) -> bool {
+        (*a == Caller::Withheld && *b == Caller::Withheld) || self.same_number(a, b)
+    }
+
     /// The Contacts state once the Phone leaves: a sync under way can't go
     /// on, leaving ready if anything is held.
     fn held_contacts_state(&self) -> ContactsState {
@@ -968,6 +992,43 @@ fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
     state.calls.push(call);
 }
 
+/// The Phone reports the Call over: it leaves the Desktop, and if it rang
+/// out, it may be a Missed Call.
+fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    let ended = state.calls.iter().find(|known| known.id == call).cloned();
+    end_call(state, call, effects);
+    if let Some(ended) = ended {
+        call_ended(state, &ended, effects);
+    }
+}
+
+/// The Call History refresh that decides whether a Call that rang out was
+/// missed, and what the user does with a Missed Call notification.
+fn missed_call_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    match input {
+        Input::CallHistoryRefreshed(call_history) => {
+            let refreshed = call_history.clone();
+            contacts_sync(state, Input::CallHistoryRefreshed(call_history), effects);
+            refresh_answered(state, Some(&refreshed), effects);
+        }
+        Input::CallHistoryRefreshFailed => refresh_answered(state, None, effects),
+        Input::OpenMissedCall(notification) => {
+            if let Some(notified) = state.missed.take(notification) {
+                open_dialer(state, String::new(), Some(notified.call));
+            }
+        }
+        Input::CallBack(notification) => {
+            if let Some(notified) = state.missed.take(notification) {
+                call_back(state, &notified, effects);
+            }
+        }
+        Input::MissedCallDismissed(notification) => {
+            state.missed.take(notification);
+        }
+        _ => {}
+    }
+}
+
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
     match input {
@@ -1002,6 +1063,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
                 state: call_state,
                 caller,
                 active_since: call_state.is_connected().then_some(at),
+                added_at: at,
                 request: Request::None,
             };
             call_added(&mut state, call, &mut effects);
@@ -1011,19 +1073,16 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             state: call_state,
             at,
         } => call_changed(&mut state, call, call_state, at, &mut effects),
-        Input::CallEnded { call } => {
-            let known = state.calls.iter().any(|known| known.id == call);
-            end_call(&mut state, call, &mut effects);
-            // The Call is now in the Phone's Call History.
-            if known && state.may_sync_contacts() {
-                effects.push(Effect::RefreshCallHistory);
-            }
-        }
+        Input::CallEnded { call } => phone_ended_call(&mut state, call, &mut effects),
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }
-        | Input::CallHistoryRefreshed(_)
         | Input::ContactsPermissionNeeded { .. }
         | Input::ContactsSyncFailed(_)) => contacts_sync(&mut state, input, &mut effects),
+        input @ (Input::CallHistoryRefreshed(_)
+        | Input::CallHistoryRefreshFailed
+        | Input::OpenMissedCall(_)
+        | Input::CallBack(_)
+        | Input::MissedCallDismissed(_)) => missed_call_input(&mut state, input, &mut effects),
         Input::TransportChanged(transport) => {
             transport_changed(&mut state, transport, &mut effects);
         }
@@ -1401,21 +1460,33 @@ fn dialer_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
 fn open_dialer(state: &mut State, query: String, select_call: Option<CallId>) {
     state.focus = Focus::None;
     state.dialer_openings = state.dialer_openings.wrapping_add(1);
-    let rows = matching::search(&query, &state.contacts, &state.call_history);
     let caller = select_call.and_then(|call| {
         state
             .recent_calls
             .iter()
             .rev()
             .find(|(id, _)| *id == call)
-            .map(|(_, caller)| caller)
+            .map(|(_, caller)| caller.clone())
     });
-    let selected = caller
-        .and_then(|caller| {
+    let mut query = query;
+    let mut rows = matching::search(&query, &state.contacts, &state.call_history);
+    let find = |rows: &[DialerRow]| {
+        caller.as_ref().and_then(|caller| {
             rows.iter()
-                .position(|row| state.same_number(&row.caller, caller))
+                .position(|row| state.same_caller(&row.caller, caller))
         })
-        .unwrap_or(0);
+    };
+    let mut found = find(&rows);
+    if let (None, true, Some(Caller::Number(number))) =
+        (found, query.trim().is_empty(), caller.as_ref())
+    {
+        // The Call isn't in the Call History the Desktop holds: look the
+        // caller up by number instead, so Enter calls them and nobody else.
+        query.clone_from(number);
+        rows = matching::search(&query, &state.contacts, &state.call_history);
+        found = find(&rows);
+    }
+    let selected = found.unwrap_or(0);
     state.dialer = Some(Dialer {
         notice: undialable(&query, &rows),
         query,
@@ -1655,6 +1726,112 @@ fn hang_up(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
             effects.push(Effect::Phone(PhoneCommand::HangUp(call)));
         }
         None => effects.push(Effect::ReportError(Failure::NoSuchCall)),
+    }
+}
+
+/// A Call the Phone had is over, and now in the Phone's Call History, so
+/// the Desktop refreshes it. A Call that rang out here waits for that
+/// refresh to say whether the Phone lists it as missed; if there can be no
+/// refresh, it is missed.
+fn call_ended(state: &mut State, ended: &Call, effects: &mut Vec<Effect>) {
+    let refreshes = state.may_sync_contacts();
+    if refreshes {
+        effects.push(Effect::RefreshCallHistory);
+        state.missed.refreshes_asked = state.missed.refreshes_asked.saturating_add(1);
+    }
+    if !ended.rang_out() {
+        return;
+    }
+    if refreshes {
+        state.missed.unconfirmed.push(Unconfirmed {
+            call: ended.id,
+            caller: ended.caller.clone(),
+            at: ended.added_at,
+            before: state.call_history.clone(),
+            refresh: state.missed.refreshes_asked,
+        });
+    } else {
+        missed(
+            state,
+            ended.id,
+            ended.caller.clone(),
+            ended.added_at,
+            effects,
+        );
+    }
+}
+
+/// A Call History refresh finished with `refreshed`, or failed. A Call
+/// waiting on it is missed if the refresh lists a Missed Call from its
+/// caller that wasn't there before, or if there is no refresh to go by.
+/// Otherwise it was declined on the Phone.
+fn refresh_answered(state: &mut State, refreshed: Option<&CallHistory>, effects: &mut Vec<Effect>) {
+    for unconfirmed in state.missed.answered() {
+        let listed = refreshed.is_none_or(|refreshed| {
+            refreshed.entries().iter().any(|entry| {
+                entry.kind == CallHistoryKind::Missed
+                    && state.same_caller(&entry.caller, &unconfirmed.caller)
+                    && !unconfirmed.before.entries().contains(entry)
+            })
+        });
+        if listed {
+            missed(
+                state,
+                unconfirmed.call,
+                unconfirmed.caller,
+                unconfirmed.at,
+                effects,
+            );
+        }
+    }
+}
+
+/// `call` from `caller` is a Missed Call: notify, adding it to the
+/// notification already shown for the caller.
+fn missed(
+    state: &mut State,
+    call: CallId,
+    caller: Caller,
+    at: Timestamp,
+    effects: &mut Vec<Effect>,
+) {
+    let shown = state
+        .missed
+        .notified
+        .iter()
+        .position(|notified| state.same_caller(&notified.caller, &caller));
+    let notified = if let Some(index) = shown {
+        let notified = &mut state.missed.notified[index];
+        notified.call = call;
+        notified.count = notified.count.saturating_add(1);
+        notified.at = at;
+        notified.clone()
+    } else {
+        let notified = Notified {
+            notification: call,
+            call,
+            caller,
+            count: 1,
+            at,
+        };
+        state.missed.notified.push(notified.clone());
+        notified
+    };
+    effects.push(Effect::NotifyMissedCall(MissedCallNotice {
+        notification: notified.notification,
+        call: notified.call,
+        contact: state.contact(&notified.caller),
+        caller: notified.caller,
+        count: notified.count,
+        at: notified.at,
+    }));
+}
+
+/// Calls back the caller of a Missed Call notification.
+fn call_back(state: &mut State, notified: &Notified, effects: &mut Vec<Effect>) {
+    match &notified.caller {
+        Caller::Number(number) => dial(state, number, effects),
+        Caller::Withheld => effects.push(Effect::ReportError(Failure::WithheldNumber)),
     }
 }
 

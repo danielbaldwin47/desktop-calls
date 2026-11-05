@@ -8,6 +8,7 @@ use crate::call::{AudioLocation, Caller, Timestamp};
 use crate::contacts::CallHistoryKind;
 use crate::contacts::NumberLabel;
 use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
+use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
 /// A failure the user can be told about.
@@ -350,6 +351,12 @@ pub enum Label {
     Outgoing,
     /// A Call History row with a withheld number.
     CantCallBack,
+    /// The Missed Call notification's button that places the Call.
+    CallBack,
+    /// The Missed Call notification's button that closes it.
+    Dismiss,
+    /// The Missed Call notification's click, for desktops that label it.
+    ShowInDialer,
 }
 
 /// The text of `label`.
@@ -383,6 +390,9 @@ pub fn label(label: Label) -> &'static str {
         Label::Incoming => "Incoming",
         Label::Outgoing => "Outgoing",
         Label::CantCallBack => "can't be called back",
+        Label::CallBack => "Call back",
+        Label::Dismiss => "Dismiss",
+        Label::ShowInDialer => "Show in Dialer",
     }
 }
 
@@ -504,6 +514,53 @@ pub fn dialer_row(row: &DialerRow, when: Option<&str>) -> DialerRowText {
             }
         }
     }
+}
+
+/// What a desktop notification says: its summary, and the body under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotificationText {
+    pub summary: String,
+    pub body: String,
+}
+
+/// What the Missed Call notification says: who, with the Contact's number
+/// label, and when, as [`when`] shows it; for repeats, how many and when
+/// the latest was. Omarchy lets a notification through Do Not Disturb if it
+/// looks like a verification code (4 to 8 digits near a word such as code,
+/// pin or confirm), so none of these words is used.
+#[must_use]
+pub fn missed_call(
+    notice: &MissedCallNotice,
+    now: Timestamp,
+    utc_offset_seconds: i64,
+) -> NotificationText {
+    let who = match (&notice.caller, notice.count) {
+        (Caller::Withheld, 1) => "a withheld number".to_owned(),
+        (Caller::Withheld, _) => "withheld numbers".to_owned(),
+        (caller, 1) => match &notice.contact {
+            Some(contact) if !contact.name.trim().is_empty() => {
+                format!("{} ({})", contact.name, number_label(&contact.label))
+            }
+            _ => self::caller(caller),
+        },
+        (caller, _) => caller_name(caller, notice.contact.as_ref()),
+    };
+    let summary = if notice.count == 1 {
+        format!("Missed call from {who}")
+    } else {
+        format!("{} missed calls from {who}", notice.count)
+    };
+    let time = when(notice.at, now, utc_offset_seconds);
+    let mut body = if notice.count == 1 {
+        time
+    } else {
+        format!("Latest {time}")
+    };
+    if notice.caller == Caller::Withheld {
+        body.push_str(" · ");
+        body.push_str(label(Label::CantCallBack));
+    }
+    NotificationText { summary, body }
 }
 
 const MONTHS: [&str; 12] = [

@@ -4,6 +4,7 @@
 //! signals themselves, however late the runner looks.
 
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -23,7 +24,8 @@ pub const PATH: &str = "/io/github/danielbaldwin47/DesktopCalls";
 pub const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 
 /// What the control interface publishes. Phone numbers are read but never
-/// kept: only whether the number is withheld.
+/// kept: only whether the number is withheld, and a fingerprint that tells
+/// whether two Calls had the same number.
 #[derive(Clone, Debug, Default)]
 pub struct AppState {
     pub connection_state: String,
@@ -35,6 +37,17 @@ pub struct AppState {
     pub codec: String,
     pub wideband: bool,
     pub surfaces: BTreeMap<String, BTreeMap<String, String>>,
+    /// Every `MissedCall` signal since watching began, oldest first.
+    pub missed_calls: Vec<AppMissedCall>,
+}
+
+/// One `MissedCall` signal: a Missed Call notified.
+#[derive(Clone, Debug)]
+pub struct AppMissedCall {
+    /// The Call's id.
+    pub call: u32,
+    pub withheld: bool,
+    pub number: Fingerprint,
 }
 
 /// One Call as the control interface lists it.
@@ -43,6 +56,20 @@ pub struct AppCall {
     pub id: u32,
     pub direction: String,
     pub state: String,
+    pub number: Fingerprint,
+}
+
+/// A phone number's fingerprint: equal for equal numbers. It stays in
+/// memory and is never written anywhere, so the number itself isn't kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fingerprint(u64);
+
+impl Fingerprint {
+    fn of(number: &str) -> Self {
+        let mut hasher = DefaultHasher::new();
+        number.hash(&mut hasher);
+        Self(hasher.finish())
+    }
 }
 
 impl AppState {
@@ -71,6 +98,18 @@ impl AppState {
         self.calls.iter().find(|call| call.id == id)
     }
 
+    /// The Missed Call notified for the Call with this id, if it was.
+    pub fn missed_call(&self, id: u32) -> Option<&AppMissedCall> {
+        self.missed_calls.iter().find(|missed| missed.call == id)
+    }
+
+    /// The Dialer's selected row, as it reads, while the Dialer is open.
+    pub fn dialer_selection(&self) -> Option<&str> {
+        let dialer = self.surfaces.get("dialer")?;
+        let selected = dialer.get("selected")?;
+        dialer.get(&format!("row-{selected}")).map(String::as_str)
+    }
+
     fn apply(&mut self, name: &str, value: OwnedVariant) -> zbus::Result<()> {
         match name {
             "ConnectionState" => self.connection_state = String::try_from(value)?,
@@ -78,10 +117,11 @@ impl AppState {
             "Calls" => {
                 self.calls = <Vec<(u32, String, String, String, String, u64)>>::try_from(value)?
                     .into_iter()
-                    .map(|(id, direction, state, ..)| AppCall {
+                    .map(|(id, direction, state, number, ..)| AppCall {
                         id,
                         direction,
                         state,
+                        number: Fingerprint::of(&number),
                     })
                     .collect();
             }
@@ -129,14 +169,13 @@ pub fn start(bus: &Connection, events: Sender<Event>) -> Result<Timeline, WatchE
     Ok(timeline)
 }
 
-/// Subscribes to the control interface's changes, then reads it whole, so no
-/// change slips between the two.
+/// Subscribes to the control interface's signals (its `PropertiesChanged`
+/// and `MissedCall`), then reads it whole, so no change slips between the
+/// two.
 async fn subscribe(bus: &Connection) -> zbus::Result<(MessageStream, AppState)> {
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
         .path(PATH)
-        .interface("org.freedesktop.DBus.Properties")
-        .member("PropertiesChanged")
         .build()?;
     let stream = MessageStream::for_match_rule(rule, bus, None).await?;
     let properties = PropertiesProxy::builder(bus)
@@ -157,30 +196,64 @@ async fn subscribe(bus: &Connection) -> zbus::Result<(MessageStream, AppState)> 
 async fn follow(mut stream: MessageStream, timeline: &Timeline, events: &Sender<Event>) {
     while let Some(Ok(message)) = stream.next().await {
         let arrived = Instant::now();
-        let Ok((interface, changed, _)) =
-            message
-                .body()
-                .deserialize::<(String, HashMap<String, OwnedVariant>, Vec<String>)>()
-        else {
+        let Some(change) = Change::from(&message) else {
             continue;
         };
-        if interface != INTERFACE {
-            continue;
-        }
         let mut timeline = timeline.lock().unwrap_or_else(PoisonError::into_inner);
         let mut state = timeline
             .last()
             .map(|(_, state)| state.clone())
             .unwrap_or_default();
-        for (name, value) in changed {
-            // A value the runner can't read leaves that property as it was;
-            // the step that needs it then says what it saw.
-            let _ = state.apply(&name, value);
+        match change {
+            Change::Properties(changed) => {
+                for (name, value) in changed {
+                    // A value the runner can't read leaves that property as
+                    // it was; the step that needs it then says what it saw.
+                    let _ = state.apply(&name, value);
+                }
+            }
+            Change::MissedCall(missed) => state.missed_calls.push(missed),
         }
         timeline.push((arrived, state));
         drop(timeline);
         if events.send(Event::Changed).is_err() {
             return;
+        }
+    }
+}
+
+/// A signal from the control interface that changes what the runner sees.
+enum Change {
+    Properties(HashMap<String, OwnedVariant>),
+    MissedCall(AppMissedCall),
+}
+
+impl Change {
+    fn from(message: &zbus::Message) -> Option<Self> {
+        let header = message.header();
+        match header.member().map(zbus::names::MemberName::as_str) {
+            Some("PropertiesChanged") => {
+                let (interface, changed, _) = message
+                    .body()
+                    .deserialize::<(String, HashMap<String, OwnedVariant>, Vec<String>)>()
+                    .ok()?;
+                (interface == INTERFACE).then_some(Self::Properties(changed))
+            }
+            Some("MissedCall")
+                if header.interface().map(zbus::names::InterfaceName::as_str)
+                    == Some(INTERFACE) =>
+            {
+                let (call, number, ..) = message
+                    .body()
+                    .deserialize::<(u32, String, String, u32, u64)>()
+                    .ok()?;
+                Some(Self::MissedCall(AppMissedCall {
+                    call,
+                    withheld: number.is_empty(),
+                    number: Fingerprint::of(&number),
+                }))
+            }
+            _ => None,
         }
     }
 }

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Map, Value};
 use test_harness::{Harness, Key, TestClient};
@@ -371,12 +371,16 @@ impl Sitting {
 /// The Simulated Phone and the app it runs against, for `--demo`. Typed
 /// actions act out what the Phone, the helper and the user would do:
 ///
-/// - the helper: `call` rings the Phone; `hang-up-on-phone` ends the Call
-///   from the other end;
+/// - the helper: `call` rings the Phone, `call-withheld` rings it with the
+///   number withheld; `hang-up-on-phone` ends the Call from the other end,
+///   and `ring-out` gives up while it rings, leaving a Missed Call in the
+///   Phone's Call History;
 /// - the person holding the Phone: `answer-on-phone`, `decline-on-phone`;
-/// - the user at the Desktop, through the control interface and the
-///   keyboard: `answer`, `decline`, `hang-up`, `mute`, `unmute`,
-///   `keybinding`, `escape`, `a`, `d`;
+/// - the Phone itself: `phone-dials` places the Call the app asked for;
+/// - the user at the Desktop, through the control interface, the
+///   notification server and the keyboard: `answer`, `decline`, `hang-up`,
+///   `mute`, `unmute`, `keybinding`, `escape`, `a`, `d`,
+///   `click-notification`, `enter`;
 /// - the Phone's quirks: `quirk NAME`, as the Simulated Phone names them.
 pub struct Demo {
     /// The user's own window, which has keyboard focus until the keybinding
@@ -385,6 +389,13 @@ pub struct Demo {
     pub harness: Harness,
     /// The Simulated Phone's object path for the last Call the helper made.
     call_path: Option<String>,
+    /// The number the helper last called from, or `None` if withheld.
+    calling_from: Option<&'static str>,
+    /// The Missed Calls the demo's Phone has added to its Call History,
+    /// newest first, as PBAP vCards.
+    missed: Vec<String>,
+    /// How many of the app's Dial requests the demo's Phone has placed.
+    dials_placed: usize,
 }
 
 /// The number the demo's helper calls from: an Ofcom drama number.
@@ -430,6 +441,56 @@ impl Demo {
             _window: window,
             harness,
             call_path: None,
+            calling_from: None,
+            missed: Vec::new(),
+            dials_placed: 0,
+        }
+    }
+
+    /// The Phone places the Call the app asked it to dial, as a real Phone
+    /// does on its own: the Simulated Phone waits to be told.
+    fn phone_dials(&mut self) {
+        let placed = self.dials_placed;
+        let phone = self.harness.simulated_phone();
+        phone.wait_for_recorded(
+            "the app asking the Phone to dial",
+            FOCUS_DEADLINE,
+            |calls| calls.iter().filter(|call| call.member == "Dial").count() > placed,
+        );
+        self.dials_placed += 1;
+        let _ = phone.alert();
+    }
+
+    /// The helper's Call rings out: like a real Phone, the demo's Phone
+    /// adds a Missed Call to its Call History as the Call ends.
+    fn ring_out(&mut self) {
+        let Some(path) = &self.call_path else {
+            println!("  demo: the helper hasn't called yet; type call first.");
+            return;
+        };
+        self.missed.insert(
+            0,
+            test_harness::vcards::call(
+                test_harness::vcards::CallKind::Missed,
+                self.calling_from,
+                &super::results::irmc_timestamp(SystemTime::now()),
+            ),
+        );
+        let phone = self.harness.simulated_phone();
+        phone.set_pbap_folder("cch", &self.missed.concat());
+        phone.caller_hangs_up(path);
+    }
+
+    /// The user clicks the newest notification from Desktop Calls.
+    fn click_notification(&self) {
+        let notifications = self.harness.notifications();
+        match notifications
+            .received()
+            .into_iter()
+            .rfind(|notification| notification.app_name == "Desktop Calls")
+        {
+            Some(notification) => notifications.invoke_default_action(notification.id),
+            None => println!("  demo: Desktop Calls hasn't shown a notification."),
         }
     }
 
@@ -466,6 +527,31 @@ impl Demo {
     }
 
     fn act_or_panic(&mut self, action: &str, call: Option<u32>) {
+        match action {
+            "call" => {
+                self.calling_from = Some(DEMO_NUMBER);
+                self.call_path = Some(self.harness.simulated_phone().ring(DEMO_NUMBER));
+            }
+            // As PipeWire reads the caller ID a Phone sends for a withheld
+            // number.
+            "call-withheld" => {
+                self.calling_from = None;
+                self.call_path = Some(
+                    self.harness
+                        .simulated_phone()
+                        .ring_with_caller_id("\"\",129"),
+                );
+            }
+            "ring-out" => self.ring_out(),
+            "click-notification" => self.click_notification(),
+            "enter" => self.harness.keyboard().press(Key::Return),
+            "phone-dials" => self.phone_dials(),
+            other => self.act_on_call(other, call),
+        }
+        flush();
+    }
+
+    fn act_on_call(&self, action: &str, call: Option<u32>) {
         let harness = &self.harness;
         let phone = harness.simulated_phone();
         let on_phone = |act: &dyn Fn(&str)| match &self.call_path {
@@ -477,7 +563,6 @@ impl Demo {
             None => println!("  demo: there is no Call to act on."),
         };
         match action {
-            "call" => self.call_path = Some(phone.ring(DEMO_NUMBER)),
             "answer-on-phone" => on_phone(&|path| phone.answer_on_phone(path)),
             "decline-on-phone" => on_phone(&|path| phone.decline_on_phone(path)),
             "hang-up-on-phone" => on_phone(&|path| phone.caller_hangs_up(path)),
@@ -503,13 +588,13 @@ impl Demo {
             other => match other.strip_prefix("quirk ") {
                 Some(quirk) => phone.enable_quirk(quirk.trim()),
                 None => println!(
-                    "  demo: unknown action {other:?}. The actions: call, answer-on-phone, \
-                     decline-on-phone, hang-up-on-phone, answer, decline, hang-up, mute, unmute, \
-                     keybinding, escape, a, d, quirk NAME; or skip, or quit."
+                    "  demo: unknown action {other:?}. The actions: call, call-withheld, \
+                     answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
+                     decline, hang-up, mute, unmute, keybinding, escape, a, d, \
+                     click-notification, enter, phone-dials, quirk NAME; or skip, or quit."
                 ),
             },
         }
-        flush();
     }
 }
 

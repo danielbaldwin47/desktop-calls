@@ -2,15 +2,18 @@
 //! CLI, tests, the keybinding and the Indicator.
 //!
 //! It publishes the Call state machine's state as properties with change
-//! signals, turns method calls into user intents for the state machine, and
-//! signals failures as `Error(kind, message)` with the Messages text. Bus name,
-//! object path and interface are in `CODING_STANDARDS.md`.
+//! signals, turns method calls into user intents for the state machine,
+//! signals failures as `Error(kind, message)` with the Messages text, and
+//! signals Missed Calls as `MissedCall`. Bus name, object path and interface
+//! are in `CODING_STANDARDS.md`.
 
 use std::collections::BTreeMap;
 
 use desktop_calls_core::matching::{self, DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure};
-use desktop_calls_core::{AudioLocation, CallId, Caller, ContactsState, Input, State};
+use desktop_calls_core::{
+    AudioLocation, CallId, Caller, ContactsState, Input, MissedCallNotice, State,
+};
 use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
@@ -311,6 +314,20 @@ impl ControlInterface {
     /// sentence to show.
     #[zbus(signal)]
     async fn error(emitter: &SignalEmitter<'_>, kind: &str, message: &str) -> zbus::Result<()>;
+
+    /// A Missed Call was notified: the Call's id, the caller's number (empty
+    /// if withheld), the Contact's name (or empty), how many Missed Calls
+    /// from this caller the notification now tells of, and when the Call
+    /// started ringing, in milliseconds since the Unix epoch.
+    #[zbus(signal)]
+    async fn missed_call(
+        emitter: &SignalEmitter<'_>,
+        call_id: u32,
+        number: &str,
+        display_name: &str,
+        count: u32,
+        rang_at_ms: u64,
+    ) -> zbus::Result<()>;
 }
 
 /// One row of `Search`'s reply.
@@ -462,6 +479,27 @@ impl Publisher {
             self.interface.signal_emitter(),
             failure.as_str(),
             message.text,
+        )
+        .await
+    }
+
+    /// Signals the Missed Call `notice` tells of as `MissedCall`.
+    pub async fn missed_call(&self, notice: &MissedCallNotice) -> zbus::Result<()> {
+        let number = match &notice.caller {
+            Caller::Number(number) => number.as_str(),
+            Caller::Withheld => "",
+        };
+        let name = notice
+            .contact
+            .as_ref()
+            .map_or("", |contact| contact.name.as_str());
+        ControlInterface::missed_call(
+            self.interface.signal_emitter(),
+            notice.call.0,
+            number,
+            name,
+            notice.count,
+            notice.at.0,
         )
         .await
     }

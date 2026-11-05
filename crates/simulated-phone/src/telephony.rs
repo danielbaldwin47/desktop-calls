@@ -444,6 +444,22 @@ pub fn add_audio_gateway(
     interfaces
 }
 
+/// The number PipeWire 1.6.9's hands-free backend reads from a `+CLIP` or
+/// `+CLCC` caller ID: `"%16[^\"]",%u` in `backend-native.c`, which needs 1
+/// to 16 characters between the quotes and a number type after them. When
+/// the parse fails, as it does for a withheld caller's `"",129`, PipeWire
+/// logs "Failed to parse number" and the Call's number stays empty.
+pub fn number_from_caller_id(caller_id: &str) -> String {
+    let parsed = caller_id.strip_prefix('"').and_then(|rest| {
+        let (number, after) = rest.split_once('"')?;
+        let kind = after.strip_prefix(',')?;
+        let digits = kind.trim_start();
+        let has_kind = digits.starts_with(|first: char| first.is_ascii_digit());
+        (has_kind && (1..=16).contains(&number.chars().count())).then(|| number.to_owned())
+    });
+    parsed.unwrap_or_default()
+}
+
 /// Registers an incoming Call from `number` on the AudioGateway at
 /// `audio_gateway`, as the Phone ringing does, and returns its path and the
 /// signals that announce it. While no audio link is up, the Phone's attempt

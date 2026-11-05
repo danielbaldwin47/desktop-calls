@@ -1187,7 +1187,7 @@ fn seconds_since(since: Timestamp) -> u64 {
     now().0.saturating_sub(since.0) / 1_000
 }
 
-fn now() -> Timestamp {
+pub(crate) fn now() -> Timestamp {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis());
@@ -1425,6 +1425,6 @@ fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRow
 }
 
 /// The Desktop's time zone's offset from UTC now, in seconds.
-fn utc_offset_seconds() -> i64 {
+pub(crate) fn utc_offset_seconds() -> i64 {
     glib::DateTime::now_local().map_or(0, |now| now.utc_offset().as_seconds())
 }

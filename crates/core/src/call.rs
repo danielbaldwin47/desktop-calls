@@ -215,6 +215,8 @@ pub struct Call {
     pub(crate) state: CallState,
     pub(crate) caller: Caller,
     pub(crate) active_since: Option<Timestamp>,
+    /// When the Phone reported the Call.
+    pub(crate) added_at: Timestamp,
     pub(crate) request: Request,
 }
 
@@ -249,6 +251,14 @@ impl Call {
     /// here yet.
     pub(crate) fn rings_here(&self) -> bool {
         self.state == CallState::Ringing && self.request == Request::None
+    }
+
+    /// Incoming, never connected, and not declined: once it ends, it may be
+    /// a Missed Call.
+    pub(crate) fn rang_out(&self) -> bool {
+        self.direction == Direction::Incoming
+            && self.active_since.is_none()
+            && !matches!(self.request, Request::Decline | Request::HangUp)
     }
 
     /// Shown in the Call Window: live, or answered here and connecting.

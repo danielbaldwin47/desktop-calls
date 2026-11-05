@@ -459,7 +459,11 @@ impl PhoneLink {
             path,
             "Call {id} is with this number"
         );
-        let caller = if object.number.is_empty() {
+        // oFono's convention, which PipeWire's Telephony API follows, gives a
+        // withheld number as "withheld"; PipeWire itself leaves it empty.
+        // `IncomingLine` is no fallback: it is the Phone's own number the
+        // caller dialled, never the caller's.
+        let caller = if object.number.is_empty() || object.number.eq_ignore_ascii_case("withheld") {
             Caller::Withheld
         } else {
             Caller::Number(object.number.clone())

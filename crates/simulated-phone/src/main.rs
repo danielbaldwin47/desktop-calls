@@ -434,6 +434,16 @@ impl Control {
         Ok(call)
     }
 
+    /// Rings the Phone with this caller ID as the Phone sends it in
+    /// `+CLIP` and `+CLCC`, such as `"+447700900123",145`, and PipeWire
+    /// 1.6.9 reads it: the number between the quotes, 1 to 16 characters,
+    /// becomes `LineIdentification`; anything else, such as a withheld
+    /// caller's `"",129`, fails PipeWire's parse and leaves it empty.
+    async fn ring_with_caller_id(&self, caller_id: String) -> zbus::fdo::Result<OwnedObjectPath> {
+        self.ring(telephony::number_from_caller_id(&caller_id))
+            .await
+    }
+
     /// The other end of the Call the Desktop dialled starts ringing: PipeWire
     /// registers the Call, `alerting`, and the Phone brings the audio to the
     /// Desktop if `RejectSCO` allows. Returns the Call's object path. Fails

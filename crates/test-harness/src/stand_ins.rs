@@ -371,12 +371,19 @@ impl StandIns {
     /// Clicks notification `id`, as Omarchy does: invokes its `default`
     /// action, then closes it as dismissed by the user.
     pub fn invoke_default_action(&self, id: u32) -> Result<(), String> {
+        self.invoke_action(id, "default")
+    }
+
+    /// Presses notification `id`'s button for action `key`: invokes the
+    /// action, then closes the notification as dismissed by the user, as
+    /// Omarchy does.
+    pub fn invoke_action(&self, id: u32, key: &str) -> Result<(), String> {
         let offered =
             self.shared.records().notifications.iter().any(|found| {
-                found.id == id && found.actions.iter().any(|(key, _)| key == "default")
+                found.id == id && found.actions.iter().any(|(offered, _)| offered == key)
             });
         if !offered {
-            return Err(format!("notification {id} has no default action"));
+            return Err(format!("notification {id} has no {key:?} action"));
         }
         zbus::block_on(async {
             self.connection
@@ -385,7 +392,7 @@ impl StandIns {
                     NOTIFICATIONS_PATH,
                     NOTIFICATIONS_INTERFACE,
                     "ActionInvoked",
-                    &(id, "default"),
+                    &(id, key),
                 )
                 .await?;
             self.connection

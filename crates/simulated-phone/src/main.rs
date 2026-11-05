@@ -479,9 +479,11 @@ impl Control {
 
     /// Rings the Phone from `number`, as a caller does: PipeWire registers an
     /// incoming Call on the AudioGateway and announces it. Returns the Call's
-    /// object path. Fails while hands-free is down.
+    /// object path. Fails while hands-free is down. With the
+    /// `late-line-identification` quirk the Call appears with no number,
+    /// and the number follows a moment later, while it still rings.
     async fn ring(&self, number: String) -> zbus::fdo::Result<OwnedObjectPath> {
-        let (call, signals) = {
+        let (call, signals, late) = {
             let mut world = lock(&self.world);
             let world = &mut *world;
             let Some(gateway) = world.audio_gateway.clone() else {
@@ -489,10 +491,33 @@ impl Control {
                     "hands-free is not connected, so the Phone cannot ring".to_owned(),
                 ));
             };
-            telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?
+            let (call, signals) =
+                telephony::ring(&mut world.telephony, &gateway, &world.behaviour, &number)?;
+            let late = world
+                .behaviour
+                .quirks
+                .contains(&telephony::Quirk::LateLineIdentification);
+            (call, signals, late)
         };
+        let session = self.telephony()?;
         for signal in signals {
-            signal.emit(&self.telephony()?).await?;
+            signal.emit(&session).await?;
+        }
+        if late {
+            let world = self.world.clone();
+            let call = call.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(telephony::LATE_LINE_IDENTIFICATION);
+                let signals =
+                    telephony::identify_caller(&mut lock(&world).telephony, &call, &number);
+                zbus::block_on(async {
+                    for signal in signals {
+                        if signal.emit(&session).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            });
         }
         Ok(call)
     }
@@ -623,11 +648,12 @@ impl Control {
     /// `"call1-hangup-missing"`, `"hangup-too-few-arguments"` or
     /// `"get-calls-empty-while-dialling"`, `"slow-property-writes"`,
     /// `"activate-ignored"`, `"activate-ignored-once"`,
-    /// `"earbuds-keep-audio"` or `"disconnect-profile-refused"`.
+    /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"` or
+    /// `"late-line-identification"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio and disconnect-profile-refused"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused and late-line-identification"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

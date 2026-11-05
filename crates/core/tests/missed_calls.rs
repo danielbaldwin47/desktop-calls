@@ -486,3 +486,75 @@ fn once_the_user_has_acted_on_a_notification_the_next_missed_call_starts_a_new_o
         assert_eq!(notices(&effects)[0].count, 1);
     }
 }
+
+/// Alice's Call rings, reported first with no number, then with hers, as
+/// a Phone without `+CLCC` reports it.
+fn rings_and_names_alice_late(state: State) -> State {
+    run(
+        state,
+        [
+            Input::CallAdded {
+                call: CallId(1),
+                state: CallState::Ringing,
+                caller: Caller::Withheld,
+                at: Timestamp(5_000),
+            },
+            Input::CallerChanged {
+                call: CallId(1),
+                caller: number(ALICE),
+            },
+        ],
+    )
+    .0
+}
+
+#[test]
+fn the_banner_names_a_caller_the_phone_reports_late() {
+    let state = rings_and_names_alice_late(synced());
+
+    let banner = state.surfaces().banner.expect("the Banner shows");
+    assert_eq!(
+        (banner.caller, banner.contact),
+        (number(ALICE), Some(alice()))
+    );
+}
+
+#[test]
+fn a_missed_call_whose_caller_came_late_names_them_and_opens_on_them() {
+    let state = rings_and_names_alice_late(synced());
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::CallEnded { call: CallId(1) },
+            Input::CallHistoryRefreshed(history(vec![missed(number(ALICE), 5_000)])),
+        ],
+    );
+    assert_eq!(
+        notices(&effects)
+            .iter()
+            .map(|notice| (&notice.caller, &notice.contact))
+            .collect::<Vec<_>>(),
+        [(&number(ALICE), &Some(alice()))]
+    );
+
+    let (state, _) = run(state, [Input::OpenMissedCall(CallId(1))]);
+    let dialer = state.surfaces().dialer.expect("the Dialer is open");
+    let selected = dialer.selected.expect("a row is selected");
+    assert_eq!(dialer.rows[selected].caller, number(ALICE));
+}
+
+#[test]
+fn a_caller_reported_for_a_call_already_over_changes_nothing() {
+    let (state, _) = rings_out(synced(), 1, Caller::Withheld, 5_000);
+
+    let (after, effects) = run(
+        state.clone(),
+        [Input::CallerChanged {
+            call: CallId(1),
+            caller: number(ALICE),
+        }],
+    );
+
+    assert_eq!((after, effects), (state, Vec::new()));
+}

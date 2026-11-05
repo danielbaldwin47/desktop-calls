@@ -15,6 +15,9 @@
 //! - PipeWire reuses a Call's object path for the next Call, so each Call
 //!   gets an app-assigned id when it appears, and everything known about it
 //!   is forgotten when it goes.
+//! - A Phone without `+CLCC` reports a ringing Call with no number, and the
+//!   number later, in a `PropertiesChanged` of `LineIdentification`; the
+//!   caller follows it.
 //! - A Call that goes away without first going `disconnected` may come back
 //!   within a second, as the same Call: the hands-free profile dropping
 //!   briefly, or `WirePlumber` restarting, does that mid-Call. Such a Call ends
@@ -357,51 +360,92 @@ impl PhoneLink {
                     }
                 }
             }
-            CALL => {
-                let Some(state) = changed.get("State").and_then(string) else {
-                    return;
-                };
-                let Some(object) = self.call_objects.get_mut(path) else {
-                    return;
-                };
-                object.state.clone_from(&state);
-                let Some(followed) = self.followed.get_mut(path) else {
-                    return;
-                };
-                if followed.ended {
-                    return;
-                }
-                match call_state(&state) {
-                    Some(call_state) => {
-                        tracing::info!(
-                            event_kind = %EventKind::CallChanged,
-                            call_id = followed.id.0,
-                            call_state = call_state.as_str(),
-                            "Call {} is {}",
-                            followed.id,
-                            call_state.as_str()
-                        );
-                        outcome.inputs.push(Input::CallChanged {
-                            call: followed.id,
-                            state: call_state,
-                            at: now(),
-                        });
-                    }
-                    None if state == "disconnected" => {
-                        followed.ending = true;
-                        followed.ended = true;
-                        tracing::info!(
-                            event_kind = %EventKind::CallEnded,
-                            call_id = followed.id.0,
-                            "Call {} ended",
-                            followed.id
-                        );
-                        outcome.inputs.push(Input::CallEnded { call: followed.id });
-                    }
-                    None => unknown_state(&state),
-                }
-            }
+            CALL => self.call_object_changed(path, changed, outcome),
             _ => {}
+        }
+    }
+
+    /// The Call object at `path` changed. The number goes first, so that a
+    /// change that also ends the Call ends it with the right caller.
+    fn call_object_changed(
+        &mut self,
+        path: &str,
+        changed: &HashMap<String, OwnedVariant>,
+        outcome: &mut Outcome,
+    ) {
+        let Some(object) = self.call_objects.get_mut(path) else {
+            return;
+        };
+        // A Phone without `+CLCC` reports a ringing Call before its number,
+        // which PipeWire sets from the `+CLIP` after the first `RING`.
+        let number = changed
+            .get("LineIdentification")
+            .and_then(string)
+            .filter(|number| *number != object.number);
+        if let Some(number) = &number {
+            object.number.clone_from(number);
+        }
+        let state = changed.get("State").and_then(string);
+        if let Some(state) = &state {
+            object.state.clone_from(state);
+        }
+        let Some(followed) = self.followed.get_mut(path) else {
+            return;
+        };
+        if followed.ended {
+            return;
+        }
+        if let Some(number) = number {
+            tracing::info!(
+                event_kind = %EventKind::CallerChanged,
+                call_id = followed.id.0,
+                "The Phone named Call {}'s caller",
+                followed.id
+            );
+            tracing::debug!(
+                event_kind = %EventKind::CallerChanged,
+                call_id = followed.id.0,
+                phone_number = %number,
+                path,
+                "Call {} is with this number",
+                followed.id
+            );
+            outcome.inputs.push(Input::CallerChanged {
+                call: followed.id,
+                caller: caller(&number),
+            });
+        }
+        let Some(state) = state else {
+            return;
+        };
+        match call_state(&state) {
+            Some(call_state) => {
+                tracing::info!(
+                    event_kind = %EventKind::CallChanged,
+                    call_id = followed.id.0,
+                    call_state = call_state.as_str(),
+                    "Call {} is {}",
+                    followed.id,
+                    call_state.as_str()
+                );
+                outcome.inputs.push(Input::CallChanged {
+                    call: followed.id,
+                    state: call_state,
+                    at: now(),
+                });
+            }
+            None if state == "disconnected" => {
+                followed.ending = true;
+                followed.ended = true;
+                tracing::info!(
+                    event_kind = %EventKind::CallEnded,
+                    call_id = followed.id.0,
+                    "Call {} ended",
+                    followed.id
+                );
+                outcome.inputs.push(Input::CallEnded { call: followed.id });
+            }
+            None => unknown_state(&state),
         }
     }
 
@@ -475,15 +519,7 @@ impl PhoneLink {
             path,
             "Call {id} is with this number"
         );
-        // oFono's convention, which PipeWire's Telephony API follows, gives a
-        // withheld number as "withheld"; PipeWire itself leaves it empty.
-        // `IncomingLine` is no fallback: it is the Phone's own number the
-        // caller dialled, never the caller's.
-        let caller = if object.number.is_empty() || object.number.eq_ignore_ascii_case("withheld") {
-            Caller::Withheld
-        } else {
-            Caller::Number(object.number.clone())
-        };
+        let caller = caller(&object.number);
         self.followed.insert(
             path.to_owned(),
             Followed {
@@ -756,6 +792,18 @@ fn call_state(state: &str) -> Option<CallState> {
         "active" => Some(CallState::Active),
         "held" => Some(CallState::Held),
         _ => None,
+    }
+}
+
+/// The caller a Call's `LineIdentification` names. oFono's convention, which
+/// PipeWire's Telephony API follows, gives a withheld number as "withheld";
+/// PipeWire itself leaves it empty. `IncomingLine` is no fallback: it is the
+/// Phone's own number the caller dialled, never the caller's.
+fn caller(number: &str) -> Caller {
+    if number.is_empty() || number.eq_ignore_ascii_case("withheld") {
+        Caller::Withheld
+    } else {
+        Caller::Number(number.to_owned())
     }
 }
 

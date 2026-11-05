@@ -9,7 +9,7 @@ use super::dialling::{adopt_dialled, dial_failed};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::missed_calls::missed;
 use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
-use crate::call::{Call, CallId, CallState, Direction, Request, Timestamp};
+use crate::call::{Call, CallId, CallState, Caller, Direction, Request, Timestamp};
 use crate::messages::Failure;
 use crate::missed::Unconfirmed;
 
@@ -157,6 +157,24 @@ pub(super) fn call_changed(
     }
     restore_audio(state, effects);
     call_back(state);
+}
+
+/// The Phone reported who `call` is with after reporting the Call. Every
+/// surface showing it follows, and so does the Missed Call it may become,
+/// since that takes the caller when the Call ends.
+pub(super) fn caller_changed(state: &mut State, call: CallId, caller: Caller) {
+    let Some(known) = state.call_mut(call) else {
+        return;
+    };
+    known.caller = caller.clone();
+    if let Some((_, recent)) = state
+        .recent_calls
+        .iter_mut()
+        .rev()
+        .find(|(id, _)| *id == call)
+    {
+        *recent = caller;
+    }
 }
 
 pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {

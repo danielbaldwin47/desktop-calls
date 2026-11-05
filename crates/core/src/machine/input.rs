@@ -34,6 +34,10 @@ pub enum Input {
         state: CallState,
         at: Timestamp,
     },
+    /// The Phone reported who is on the other end of a Call after reporting
+    /// the Call: some Phones send the number a moment after a Call starts
+    /// ringing.
+    CallerChanged { call: CallId, caller: Caller },
     /// A Call is over, however it ended.
     CallEnded { call: CallId },
     /// The Call audio link between Phone and Desktop changed.

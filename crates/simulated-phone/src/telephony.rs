@@ -68,7 +68,8 @@ mod tree;
 pub use methods::{ActivateLater, activate_later, answer};
 pub use phone::{
     Restart, alert, answer_on_phone, callee_answers, calls, dial_on_phone, end_call_on_phone,
-    number_from_caller_id, reregister_call, restart, ring, set_microphone_volume, unannounce_call,
+    identify_caller, number_from_caller_id, reregister_call, restart, ring, set_microphone_volume,
+    unannounce_call,
 };
 
 pub const SERVICE: &str = "org.pipewire.Telephony";
@@ -131,10 +132,24 @@ pub enum Quirk {
     /// BlueZ refuses `DisconnectProfile` with `org.bluez.Error.Failed`, and
     /// hands-free stays up: the Desktop can't move the audio to the Phone.
     DisconnectProfileRefused,
+    /// A ringing Call appears with no `LineIdentification`, and the caller's
+    /// number follows [`LATE_LINE_IDENTIFICATION`] later in a
+    /// `PropertiesChanged`, as PipeWire 1.6.9 reports a Phone without
+    /// `+CLCC`: it registers the Call on `+CIEV: callsetup,1`, and sets the
+    /// number from the `+CLIP` that follows the first `RING`, while the Call
+    /// is still ringing (`backend-native.c`). A withheld caller's `+CLIP`
+    /// fails PipeWire's parse, so that Call never gets a number.
+    LateLineIdentification,
 }
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
 pub const SLOW_REPLY: Duration = Duration::from_secs(1);
+
+/// How long after a ringing Call appears [`Quirk::LateLineIdentification`]
+/// reports its number. A real Phone's `+CLIP` follows within a `RING` or
+/// two; a second makes the change easy to see, and is still short against
+/// a Call that rings for 20 s or more.
+pub const LATE_LINE_IDENTIFICATION: Duration = Duration::from_secs(1);
 
 impl Quirk {
     /// The quirk with this control-interface name.
@@ -148,6 +163,7 @@ impl Quirk {
             "activate-ignored-once" => Some(Self::ActivateIgnoredOnce),
             "earbuds-keep-audio" => Some(Self::EarbudsKeepAudio),
             "disconnect-profile-refused" => Some(Self::DisconnectProfileRefused),
+            "late-line-identification" => Some(Self::LateLineIdentification),
             _ => None,
         }
     }

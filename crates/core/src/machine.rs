@@ -25,7 +25,8 @@ use audio::{
 };
 pub use calls::keypad_tones;
 use calls::{
-    answer, call_added, call_changed, decline, hang_up, phone_ended_call, send_tones, timer_fired,
+    answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
+    send_tones, timer_fired,
 };
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
 pub use input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
@@ -550,6 +551,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             state: call_state,
             at,
         } => call_changed(&mut state, call, call_state, at, &mut effects),
+        Input::CallerChanged { call, caller } => caller_changed(&mut state, call, caller),
         Input::CallEnded { call } => phone_ended_call(&mut state, call, &mut effects),
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }

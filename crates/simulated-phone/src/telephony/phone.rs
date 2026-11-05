@@ -8,7 +8,7 @@ use super::tree::{
     set_call_state, set_transport, transport_state,
 };
 use super::{
-    AUDIO_GATEWAY, AUDIO_GATEWAY_INTERFACES, Behaviour, CALL, Dialling, MANAGER_PATH, Signal,
+    AUDIO_GATEWAY, AUDIO_GATEWAY_INTERFACES, Behaviour, CALL, Dialling, MANAGER_PATH, Quirk, Signal,
 };
 use crate::objects::{ObjectTree, Properties};
 use zbus::{OwnedObjectPath, OwnedVariant, Str};
@@ -32,17 +32,24 @@ pub fn number_from_caller_id(caller_id: &str) -> String {
 /// Registers an incoming Call from `number` on the AudioGateway at
 /// `audio_gateway`, as the Phone ringing does, and returns its path and the
 /// signals that announce it. While no audio link is up, the Phone's attempt
-/// to bring one up is refused, and only the codec shows it.
+/// to bring one up is refused, and only the codec shows it. With
+/// [`Quirk::LateLineIdentification`] the Call appears with no number, which
+/// [`identify_caller`] gives it later.
 pub fn ring(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
     behaviour: &Behaviour,
     number: &str,
 ) -> zbus::Result<(OwnedObjectPath, Vec<Signal>)> {
+    let shown = if behaviour.quirks.contains(&Quirk::LateLineIdentification) {
+        ""
+    } else {
+        number
+    };
     let mut call = Properties::new();
     call.insert(
         "LineIdentification".into(),
-        OwnedVariant::from(Str::from(number.to_owned())),
+        OwnedVariant::from(Str::from(shown.to_owned())),
     );
     call.insert("IncomingLine".into(), OwnedVariant::from(Str::from("")));
     call.insert("Name".into(), OwnedVariant::from(Str::from("")));
@@ -58,6 +65,36 @@ pub fn ring(
         ));
     }
     Ok((path, signals))
+}
+
+/// Gives the Call at `call` the caller's `number`, as PipeWire does with the
+/// `+CLIP` that follows a ringing Call's `RING`, and returns the signals that
+/// report it: `PropertiesChanged` with `LineIdentification` alone, then
+/// `org.ofono.VoiceCall.PropertyChanged`. PipeWire takes a `+CLIP` only while
+/// the Call is `incoming`, and only with a number it can parse, so nothing
+/// changes for a Call that is no longer ringing, already has this number, or
+/// has a withheld caller's empty one.
+pub fn identify_caller(tree: &mut ObjectTree, call: &OwnedObjectPath, number: &str) -> Vec<Signal> {
+    let ringing = tree
+        .get(call, CALL, "State")
+        .and_then(|state| String::try_from(state.clone()).ok())
+        .is_some_and(|state| state == "incoming");
+    let value = OwnedVariant::from(Str::from(number.to_owned()));
+    if number.is_empty() || !ringing || !tree.set(call, CALL, "LineIdentification", value.clone()) {
+        return Vec::new();
+    }
+    vec![
+        Signal::PropertiesChanged {
+            path: call.clone(),
+            interface: CALL,
+            changed: Properties::from([("LineIdentification".to_owned(), value.clone())]),
+        },
+        Signal::VoiceCallPropertyChanged {
+            path: call.clone(),
+            name: "LineIdentification",
+            value,
+        },
+    ]
 }
 
 /// Registers the Call the Desktop dialled on the AudioGateway at

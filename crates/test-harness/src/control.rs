@@ -3,10 +3,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Output;
+use std::process::{Child, Output, Stdio};
 use std::sync::PoisonError;
-use std::thread;
-use std::time::Duration;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt as _;
 use zbus::fdo::PropertiesProxy;
@@ -407,25 +407,25 @@ impl Harness {
     }
 
     /// Asks the app to Call `number`, a number or a `tel:` link, as any
-    /// client of the control interface could. Returns the error's message
-    /// if the app refuses.
+    /// client of the control interface could. Returns once the Phone has
+    /// reported the Call, or with the error's message if the Call wasn't
+    /// placed. While the Simulated Phone waits for its `Alert`, use
+    /// [`Harness::start_dial`].
     ///
     /// # Errors
     ///
     /// The message of the app's refusal.
     pub fn dial(&self, number: &str) -> Result<(), String> {
-        zbus::block_on(self.session.call_method(
-            Some(APP_BUS_NAME),
-            APP_PATH,
-            Some(APP_INTERFACE),
-            "Dial",
-            &(number,),
-        ))
-        .map(drop)
-        .map_err(|error| match error {
-            zbus::Error::MethodError(_, Some(message), _) => message,
-            other => other.to_string(),
-        })
+        dial(&self.session, number)
+    }
+
+    /// Asks the app to Call `number` as [`Harness::dial`] does, but returns
+    /// at once, so the scenario can act as the Phone while the app waits.
+    #[must_use]
+    pub fn start_dial(&self, number: &str) -> PendingDial {
+        let session = self.session.clone();
+        let number = number.to_owned();
+        PendingDial(thread::spawn(move || dial(&session, &number)))
     }
 
     /// Opens `link` as a Desktop app would, with `gio open`, after
@@ -451,18 +451,67 @@ impl Harness {
         )
         .expect("make the app the handler for tel: links");
         let path = std::env::var("PATH").unwrap_or_default();
-        let output = self
+        // To files, not pipes: the handler inherits them, and a pipe would
+        // keep this waiting until the handler exits, which the app's Dial
+        // reply makes wait for the Phone.
+        let status = self
             .external_command("gio")
             .arg("open")
             .arg(link)
             .env("PATH", format!("{}:{path}", self.bin_directory.display()))
-            .output()
+            .stdout(self.log_file("gio-open.stdout"))
+            .stderr(self.log_file("gio-open.stderr"))
+            .status()
             .expect("run gio");
         assert!(
-            output.status.success(),
+            status.success(),
             "gio open {link} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            fs::read_to_string(self.directory.join("gio-open.stderr")).unwrap_or_default()
         );
+    }
+}
+
+fn dial(session: &zbus::Connection, number: &str) -> Result<(), String> {
+    zbus::block_on(session.call_method(
+        Some(APP_BUS_NAME),
+        APP_PATH,
+        Some(APP_INTERFACE),
+        "Dial",
+        &(number,),
+    ))
+    .map(drop)
+    .map_err(|error| match error {
+        zbus::Error::MethodError(_, Some(message), _) => message,
+        other => other.to_string(),
+    })
+}
+
+/// A `Dial` sent with [`Harness::start_dial`], whose reply may not have come
+/// yet. Dropping it stops nobody: the reply is ignored when it comes.
+pub struct PendingDial(JoinHandle<Result<(), String>>);
+
+impl PendingDial {
+    /// Waits for the app's reply, as [`Harness::dial`] returns it.
+    ///
+    /// # Errors
+    ///
+    /// The message of the app's refusal.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first.
+    pub fn outcome(self, deadline: Duration) -> Result<(), String> {
+        let started = Instant::now();
+        while !self.0.is_finished() {
+            assert!(
+                started.elapsed() < deadline,
+                "the app didn't reply to Dial within {deadline:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        self.0
+            .join()
+            .unwrap_or_else(|_| Err("the Dial thread panicked".to_owned()))
     }
 }
 
@@ -479,5 +528,66 @@ impl Harness {
             .args(arguments)
             .output()
             .expect("run the desktop-calls CLI")
+    }
+
+    /// Starts the `desktop-calls` CLI with `arguments` in this scenario's
+    /// environment, and returns while it runs, so the scenario can act as
+    /// the Phone while the CLI waits.
+    ///
+    /// # Panics
+    ///
+    /// If the binary can't be run at all.
+    #[must_use]
+    pub fn start_cli(&self, arguments: &[&str]) -> RunningCli {
+        let child = self
+            .command("desktop-calls")
+            .args(arguments)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start the desktop-calls CLI");
+        RunningCli { child }
+    }
+}
+
+/// The CLI as [`Harness::start_cli`] started it. It is killed with the rest
+/// of the scenario if it is still running then.
+pub struct RunningCli {
+    child: Child,
+}
+
+impl RunningCli {
+    /// Whether the CLI has exited.
+    ///
+    /// # Panics
+    ///
+    /// If its state can't be read.
+    pub fn has_exited(&mut self) -> bool {
+        self.child
+            .try_wait()
+            .expect("read whether the CLI has exited")
+            .is_some()
+    }
+
+    /// Waits for the CLI to exit, and returns its status and what it
+    /// printed.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first.
+    #[must_use]
+    pub fn finish(mut self, deadline: Duration) -> Output {
+        let started = Instant::now();
+        while !self.has_exited() {
+            if started.elapsed() >= deadline {
+                let _ = self.child.kill();
+                let output = self.child.wait_with_output();
+                panic!("the CLI didn't exit within {deadline:?}: {output:?}");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        self.child
+            .wait_with_output()
+            .expect("read what the CLI printed")
     }
 }

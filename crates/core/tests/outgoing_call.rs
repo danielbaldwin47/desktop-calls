@@ -3,8 +3,9 @@
 //! Call Window while the Call connects, and failures the Phone reports.
 
 use desktop_calls_core::{
-    AudioLocation, CallId, CallState, CallWindowPhase, Caller, Effect, Input, Phone, PhoneCommand,
-    PhoneRefusal, State, Timer, Timestamp, Transport, matching, messages::Failure, step,
+    AudioLocation, CallId, CallState, CallWindowPhase, Caller, DialProgress, Effect, Input, Phone,
+    PhoneCommand, PhoneRefusal, State, Timer, Timestamp, Transport, matching, messages::Failure,
+    step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -74,6 +75,25 @@ fn phone_commands(effects: &[Effect]) -> Vec<PhoneCommand> {
             _ => None,
         })
         .collect()
+}
+
+/// What the effects say became of dial attempts, for whoever asked.
+fn progress(effects: &[Effect]) -> Vec<DialProgress> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::DialProgress(progress) => Some(*progress),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The dial attempt `effects` say the Phone was asked to place.
+fn asked(effects: &[Effect]) -> u32 {
+    match progress(effects).as_slice() {
+        [DialProgress::Asked(attempt)] => *attempt,
+        other => panic!("not one dial asked of the Phone: {other:?}"),
+    }
 }
 
 fn reported(effects: &[Effect]) -> Vec<Failure> {
@@ -476,4 +496,95 @@ fn a_failed_dial_never_annotates_a_call_that_comes_after_it() {
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.call, Some(CALL));
     assert_eq!(window.notice, None);
+}
+
+#[test]
+fn a_dial_is_placed_once_the_phone_reports_its_call() {
+    let (state, effects) = run(connected(), [Input::Dial("07700 900123".to_owned())]);
+    let attempt = asked(&effects);
+
+    let (_, effects) = run(
+        state,
+        [Input::CallAdded {
+            call: CALL,
+            state: CallState::Dialing,
+            caller: number(),
+            at: Timestamp(1_000),
+        }],
+    );
+
+    assert_eq!(progress(&effects), vec![DialProgress::Placed(attempt)]);
+}
+
+#[test]
+fn a_dial_refused_at_once_is_not_placed_with_the_reason_in_the_same_step() {
+    let (state, _) = run(
+        connected(),
+        [Input::PhoneDisconnected {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+    let (_, first) = run(state.clone(), [Input::Dial("07700 900123".to_owned())]);
+    let (_, second) = run(state, [Input::Dial("call mum".to_owned())]);
+
+    assert!(
+        matches!(
+            progress(&first).as_slice(),
+            [DialProgress::NotPlaced(_, Failure::PhoneOutOfRange)]
+        ),
+        "{first:?}"
+    );
+    assert!(
+        matches!(
+            progress(&second).as_slice(),
+            [DialProgress::NotPlaced(_, Failure::Undialable)]
+        ),
+        "{second:?}"
+    );
+}
+
+#[test]
+fn a_dial_the_phone_refuses_is_not_placed_with_the_call_windows_reason() {
+    let (state, effects) = run(connected(), [Input::Dial("07700 900123".to_owned())]);
+    let attempt = asked(&effects);
+
+    let (state, effects) = run(state, [Input::DialFailed(PhoneRefusal::NoNetwork)]);
+
+    assert_eq!(
+        progress(&effects),
+        vec![DialProgress::NotPlaced(attempt, Failure::NoSignal)]
+    );
+    assert_eq!(
+        state
+            .surfaces()
+            .call_window
+            .and_then(|window| window.notice),
+        Some(Failure::NoSignal)
+    );
+}
+
+#[test]
+fn a_dial_that_times_out_or_loses_the_phone_is_not_placed() {
+    let (state, effects) = run(connected(), [Input::Dial("07700 900123".to_owned())]);
+    let attempt = asked(&effects);
+
+    let (_, timed_out) = run(
+        state.clone(),
+        [Input::TimerFired(Timer::DialTimedOut(attempt))],
+    );
+    let (_, unpaired) = run(
+        state,
+        [Input::PhoneUnpaired {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+
+    assert_eq!(
+        progress(&timed_out),
+        vec![DialProgress::NotPlaced(attempt, Failure::DialFailed)]
+    );
+    assert_eq!(
+        progress(&unpaired),
+        vec![DialProgress::NotPlaced(attempt, Failure::PhoneNotSetUp)]
+    );
 }

@@ -265,8 +265,10 @@ async fn get_all(session: &Connection) -> zbus::Result<HashMap<String, OwnedVari
         .map_err(Into::into)
 }
 
-/// `desktop-calls dial <number|tel: link>`: asks the service to Call it.
-/// Silent once the Phone has been asked to dial; otherwise says why not.
+/// `desktop-calls dial <number|tel: link>`, and a `tel:` link opened: asks
+/// the service to Call it. Silent, and successful, once the Phone reports the
+/// Call; otherwise fails with the sentence the Call Window shows, once the
+/// Phone refuses or the service gives up waiting for it.
 pub fn dial(number: &str) -> ExitCode {
     let context = MainContext::default();
     let outcome = context.block_on(request_dial(GlibRuntime::new(context.clone()), number));

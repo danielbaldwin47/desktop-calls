@@ -159,6 +159,20 @@ pub enum PhoneRefusal {
     Failed,
 }
 
+/// What became of a dial attempt, by its number. Each attempt is either
+/// [`DialProgress::NotPlaced`] at once, or [`DialProgress::Asked`] and then,
+/// in a later step, [`DialProgress::Placed`] or [`DialProgress::NotPlaced`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialProgress {
+    /// The Phone was asked to place the Call.
+    Asked(u32),
+    /// The Phone reported the Call, dialing or further on.
+    Placed(u32),
+    /// No Call was placed, for this reason: the one the Call Window shows,
+    /// unless the user hung up first.
+    NotPlaced(u32, Failure),
+}
+
 /// A timer the state machine can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Timer {
@@ -199,6 +213,8 @@ pub enum Effect {
     StartTimer { timer: Timer, after_ms: u32 },
     /// Tell the user something went wrong.
     ReportError(Failure),
+    /// What became of a dial attempt, for whoever asked for it.
+    DialProgress(DialProgress),
     /// Sync Contacts and Call History from the attached Phone.
     SyncContacts,
     /// Pull the Phone's Call History again.

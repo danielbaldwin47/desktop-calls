@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use test_harness::{AppState, Harness, Region};
+use test_harness::{AppState, Harness, Region, RunningCli};
 
 /// How long the app may take to show a change.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -84,20 +84,28 @@ fn statuses_seen(harness: &Harness) -> Vec<String> {
         .collect()
 }
 
-fn dial(harness: &Harness, number: &str) {
-    let output = harness.cli(&["dial", number]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+/// Starts the CLI dialling `number`, and waits until the Phone is asked to
+/// dial, so the Simulated Phone can `Alert`. The CLI runs until the Phone
+/// reports the Call or refuses it.
+fn dial(harness: &Harness, number: &str) -> RunningCli {
+    let cli = harness.start_cli(&["dial", number]);
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Phone is asked to dial", DEADLINE, |calls| {
+            calls.iter().any(|call| call.member == "Dial")
+        });
+    cli
+}
+
+fn stderr(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_owned()
 }
 
 #[test]
 fn a_placed_call_shows_calling_then_ringing_then_a_timer_with_the_audio_here() {
     let harness = connected_on_screen();
 
-    dial(&harness, TYPED);
+    let cli = dial(&harness, TYPED);
 
     let state = wait_for_status(&harness, "Calling…");
     let window = call_window(&state).expect("the Call Window shows");
@@ -107,6 +115,8 @@ fn a_placed_call_shows_calling_then_ringing_then_a_timer_with_the_audio_here() {
 
     let _call = harness.simulated_phone().alert();
     let state = wait_for_status(&harness, "Ringing…");
+    let output = cli.finish(DEADLINE);
+    assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(state.calls[0].direction, "outgoing");
     assert_eq!(
         call_window(&state)
@@ -135,7 +145,7 @@ fn a_placed_call_shows_calling_then_ringing_then_a_timer_with_the_audio_here() {
 #[test]
 fn hanging_up_while_calling_says_call_ended_and_hangs_the_call_up_when_it_appears() {
     let harness = connected_on_screen();
-    dial(&harness, TYPED);
+    let _cli = dial(&harness, TYPED);
     wait_for_status(&harness, "Calling…");
     let hang_up = find_on_screen(&harness, "calling", RED);
 
@@ -218,8 +228,13 @@ fn each_phone_failure_shows_one_plain_sentence_in_the_call_window() {
     for (error, sentence) in failures {
         harness.simulated_phone().refuse_next_dial(error);
 
-        dial(&harness, TYPED);
+        let output = harness.cli(&["dial", TYPED]);
 
+        assert!(
+            !output.status.success(),
+            "{error}: the CLI reported success"
+        );
+        assert_eq!(stderr(&output), sentence, "{error}");
         harness.wait_for_app(
             &format!("the Call Window explains {error}"),
             DEADLINE,
@@ -240,7 +255,7 @@ fn while_get_calls_is_empty_during_dialling_the_call_window_never_says_call_ende
         .simulated_phone()
         .enable_quirk("get-calls-empty-while-dialling");
 
-    dial(&harness, TYPED);
+    let _cli = dial(&harness, TYPED);
     wait_for_status(&harness, "Calling…");
     harness.app_holds(
         "the Call Window says Calling…",

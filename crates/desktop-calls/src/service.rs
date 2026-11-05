@@ -7,10 +7,11 @@
 //! inputs; the Call state machine decides; this module carries out its effects, renders the
 //! surfaces and publishes the state on the control interface.
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use desktop_calls_core::{AudioLocation, Effect, Input, State, messages, step};
+use desktop_calls_core::{AudioLocation, DialProgress, Effect, Input, State, messages, step};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::select;
@@ -18,7 +19,7 @@ use futures_util::stream;
 use glib::MainContext;
 use zbus::Connection;
 
-use crate::control::{DialRequest, Publisher, ShownSurfaces};
+use crate::control::{DialRequest, DialVerdict, Publisher, ShownSurfaces};
 use crate::glib_runtime::GlibRuntime;
 use crate::indicator::Indicator;
 use crate::logging::{self, EventKind};
@@ -265,6 +266,8 @@ impl Shell {
                         let _ = inputs.unbounded_send(Input::TimerFired(timer));
                     });
                 }
+                // The decide loop passes these on to whoever asked to dial.
+                Effect::DialProgress(_) => {}
                 Effect::ReportError(failure) => {
                     tracing::info!(
                         event_kind = %EventKind::ErrorReported,
@@ -298,7 +301,8 @@ impl Shell {
 
 /// Feeds every input to the Call state machine, carries out its effects,
 /// renders the surfaces and publishes the new state. A Dial request's
-/// verdict is the failure its step reports, if any.
+/// verdict waits for what the Call state machine says became of its dial
+/// attempt: placed, or not placed and why.
 async fn decide(
     inputs: UnboundedReceiver<Input>,
     dials: UnboundedReceiver<DialRequest>,
@@ -309,6 +313,8 @@ async fn decide(
         dials.map(|(number, verdict)| (Input::Dial(number), Some(verdict))),
     );
     let mut state = State::default();
+    // Dial requests waiting for the Phone, by dial attempt.
+    let mut waiting = BTreeMap::new();
     while let Some((input, verdict)) = inputs.next().await {
         if let Input::MoveAudio(location) = &input {
             handoff_requested(*location);
@@ -322,14 +328,7 @@ async fn decide(
         shell.stall_watch.watch(
             !next.calls().is_empty() || shown.banner.is_some() || shown.call_window.is_some(),
         );
-        if let Some(verdict) = verdict {
-            let refusal = effects.iter().find_map(|effect| match effect {
-                Effect::ReportError(failure) => Some(*failure),
-                _ => None,
-            });
-            // The caller may have given up waiting; nothing is lost.
-            let _ = verdict.send(refusal);
-        }
+        pass_on_dial_progress(&effects, verdict, &mut waiting);
         shell.carry_out(effects).await;
         let next_run = next.for_next_run();
         if next_run != state.for_next_run() {
@@ -361,6 +360,35 @@ async fn decide(
             publish_failed(&error);
         }
         state = next;
+    }
+}
+
+/// Gives the Dial requests waiting for a dial attempt its outcome. `verdict`
+/// is where this step's own Dial request, if any, wants its outcome: the
+/// step names its attempt, settled or asked of the Phone.
+fn pass_on_dial_progress(
+    effects: &[Effect],
+    mut verdict: Option<DialVerdict>,
+    waiting: &mut BTreeMap<u32, DialVerdict>,
+) {
+    for effect in effects {
+        let Effect::DialProgress(progress) = effect else {
+            continue;
+        };
+        let (attempt, outcome) = match *progress {
+            DialProgress::Asked(attempt) => {
+                if let Some(verdict) = verdict.take() {
+                    waiting.insert(attempt, verdict);
+                }
+                continue;
+            }
+            DialProgress::Placed(attempt) => (attempt, None),
+            DialProgress::NotPlaced(attempt, failure) => (attempt, Some(failure)),
+        };
+        if let Some(verdict) = waiting.remove(&attempt).or_else(|| verdict.take()) {
+            // The caller may have given up waiting; nothing is lost.
+            let _ = verdict.send(outcome);
+        }
     }
 }
 

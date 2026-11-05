@@ -8,6 +8,7 @@
 //! are in `CODING_STANDARDS.md`.
 
 use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use desktop_calls_core::matching::{self, DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure};
@@ -28,10 +29,13 @@ pub const ERROR_PREFIX: &str = "io.github.danielbaldwin47.DesktopCalls1.Error.";
 /// `"call-window"`), as the surfaces report it.
 pub type ShownSurfaces = BTreeMap<String, BTreeMap<String, String>>;
 
+/// Where a Dial request's outcome goes: the failure that kept the Call from
+/// being placed, or `None` once the Phone has reported the Call.
+pub type DialVerdict = oneshot::Sender<Option<Failure>>;
+
 /// A request to Call a number or `tel:` link, as the user gave it, with
-/// where the verdict goes: the failure that refused it, or `None` once the
-/// Phone has been asked to dial.
-pub type DialRequest = (String, oneshot::Sender<Option<Failure>>);
+/// where its outcome goes.
+pub type DialRequest = (String, DialVerdict);
 
 /// A request the Desktop refuses, as the D-Bus error a method returns: the
 /// failure kind as the error name, and the Messages sentence.
@@ -76,9 +80,13 @@ impl From<Failure> for Refused {
 }
 
 /// What the control interface publishes, and where its intents go.
+///
+/// The published state sits behind locks of its own, so publishing needs
+/// only shared access to the interface: a `Dial` call holds that until the
+/// Phone reports its Call, and publishing must go on meanwhile.
 pub struct ControlInterface {
-    state: State,
-    surfaces: ShownSurfaces,
+    state: Mutex<State>,
+    surfaces: Mutex<ShownSurfaces>,
     intents: UnboundedSender<Input>,
     dials: UnboundedSender<DialRequest>,
 }
@@ -88,14 +96,14 @@ impl ControlInterface {
     /// `"not-set-up"`, `"connecting"`, `"connected"` or `"disconnected"`.
     #[zbus(property)]
     fn connection_state(&self) -> String {
-        self.state.connection_state().as_str().to_owned()
+        self.state().connection_state().as_str().to_owned()
     }
 
     /// The Phone's name and Bluetooth address, or two empty strings while no
     /// Phone is set up.
     #[zbus(property)]
     fn phone(&self) -> (String, String) {
-        self.state
+        self.state()
             .phone()
             .map(|phone| (phone.name.clone(), phone.address.clone()))
             .unwrap_or_default()
@@ -108,7 +116,8 @@ impl ControlInterface {
     /// Call connected in milliseconds since the Unix epoch (0 until then).
     #[zbus(property)]
     fn calls(&self) -> Vec<(u32, String, String, String, String, u64)> {
-        self.state
+        let state = self.state();
+        state
             .calls()
             .iter()
             .map(|call| {
@@ -120,7 +129,7 @@ impl ControlInterface {
                         Caller::Number(number) => number.clone(),
                         Caller::Withheld => String::new(),
                     },
-                    self.state
+                    state
                         .contact(call.caller())
                         .map(|contact| contact.name)
                         .unwrap_or_default(),
@@ -133,7 +142,7 @@ impl ControlInterface {
     /// `"desktop"` or `"phone"`, or empty while there is no Call.
     #[zbus(property)]
     fn audio_location(&self) -> String {
-        self.state
+        self.state()
             .audio_location()
             .map_or("", |location| location.as_str())
             .to_owned()
@@ -142,28 +151,30 @@ impl ControlInterface {
     /// Whether the Desktop is ringing.
     #[zbus(property)]
     fn ringing(&self) -> bool {
-        self.state.ringing()
+        self.state().ringing()
     }
 
     /// Whether the Desktop has muted its microphone for the Call.
     #[zbus(property)]
     fn muted(&self) -> bool {
-        self.state.muted()
+        self.state().muted()
     }
 
     /// The codec the Desktop's Call audio negotiated (`"cvsd"`, `"msbc"`,
     /// `"lc3-swb"`, `"other"`, or empty) and whether it is wideband ("HD").
     #[zbus(property)]
     fn codec(&self) -> (String, bool) {
-        self.state.codec().map_or((String::new(), false), |codec| {
-            (codec.as_str().to_owned(), codec.is_wideband())
-        })
+        self.state()
+            .codec()
+            .map_or((String::new(), false), |codec| {
+                (codec.as_str().to_owned(), codec.is_wideband())
+            })
     }
 
     /// The surfaces shown now, each with its key content as shown.
     #[zbus(property)]
     fn surfaces(&self) -> ShownSurfaces {
-        self.surfaces.clone()
+        lock(&self.surfaces).clone()
     }
 
     /// How far Contacts and Call History are synced from the Phone: the
@@ -175,7 +186,7 @@ impl ControlInterface {
     /// `"prompt-timed-out"`, `"failed"`; otherwise empty).
     #[zbus(property)]
     fn contacts_state(&self) -> (String, u32, u32, u64, String) {
-        contacts_state(&self.state)
+        contacts_state(&self.state())
     }
 
     /// What is wrong that the user can put right: kind (such as
@@ -183,7 +194,7 @@ impl ControlInterface {
     /// empty.
     #[zbus(property)]
     fn problems(&self) -> Vec<(String, String, String)> {
-        problems(&self.state)
+        problems(&self.state())
     }
 
     /// The Call History, newest first: kind (`"incoming"`, `"outgoing"`,
@@ -192,12 +203,13 @@ impl ControlInterface {
     /// when in milliseconds since the Unix epoch (0 if the Phone didn't
     /// say).
     fn get_call_history(&self) -> Vec<(String, String, String, String, u64)> {
-        self.state
+        let state = self.state();
+        state
             .call_history()
             .entries()
             .iter()
             .map(|entry| {
-                let contact = self.state.contact(&entry.caller);
+                let contact = state.contact(&entry.caller);
                 let name = contact
                     .as_ref()
                     .map(|contact| contact.name.clone())
@@ -230,7 +242,8 @@ impl ControlInterface {
     /// (otherwise 0). With nothing typed, the rows are the Call History,
     /// newest first.
     fn search(&self, query: &str) -> Vec<SearchRow> {
-        matching::search(query, self.state.contacts(), self.state.call_history())
+        let state = self.state();
+        matching::search(query, state.contacts(), state.call_history())
             .iter()
             .map(search_row)
             .collect()
@@ -252,17 +265,20 @@ impl ControlInterface {
     }
 
     /// Calls `number`, a number as typed or a `tel:` link, with the audio on
-    /// the Desktop. Replies once the Phone has been asked to dial, or with
-    /// `Error.CallNotPlaced` and the sentence to show if the Call can't be
-    /// placed now. Failures the Phone reports later go to the Call Window and
-    /// the `Error` signal.
+    /// the Desktop. Replies once the Phone reports the Call (dialing,
+    /// alerting or further on), or with `Error.CallNotPlaced` and the
+    /// sentence the Call Window shows if the Call can't be placed now, the
+    /// Phone refuses it, or the Phone doesn't report it in time (15 s). The
+    /// Call Window and the `Error` signal show the same failure.
     async fn dial(&self, number: String) -> Result<(), Refused> {
-        let (verdict, refusal) = oneshot::channel();
+        let (verdict, outcome) = oneshot::channel();
         // The decide loop only stops with the service.
         let _ = self.dials.unbounded_send((number, verdict));
-        match refusal.await {
+        match outcome.await {
+            Ok(None) => Ok(()),
             Ok(Some(failure)) => Err(failure.into()),
-            Ok(None) | Err(oneshot::Canceled) => Ok(()),
+            // The service is stopping, so the Call won't be followed.
+            Err(oneshot::Canceled) => Err(Failure::DialFailed.into()),
         }
     }
 
@@ -386,11 +402,23 @@ fn problems(state: &State) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// Takes `lock`. A panic while it was held left nothing half-written: every
+/// write is one whole replacement.
+fn lock<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 impl ControlInterface {
+    /// The state published now.
+    fn state(&self) -> MutexGuard<'_, State> {
+        lock(&self.state)
+    }
+
     /// Sends `intent` to the Call state machine, unless the state published
     /// now refuses it.
     fn pass_on(&self, intent: Input) -> Result<(), Refused> {
-        if let Some(failure) = self.state.refusal(&intent) {
+        let refusal = self.state().refusal(&intent);
+        if let Some(failure) = refusal {
             return Err(failure.into());
         }
         let _ = self.intents.unbounded_send(intent);
@@ -414,8 +442,8 @@ impl Publisher {
     ) -> zbus::Result<Self> {
         let server = session.object_server();
         let control = ControlInterface {
-            state: State::default(),
-            surfaces: ShownSurfaces::new(),
+            state: Mutex::new(State::default()),
+            surfaces: Mutex::new(ShownSurfaces::new()),
             intents,
             dials,
         };
@@ -428,8 +456,8 @@ impl Publisher {
     /// Publishes `state`, signalling each property that changed.
     pub async fn publish(&self, state: &State) -> zbus::Result<()> {
         let emitter = self.interface.signal_emitter();
-        let mut published = self.interface.get_mut().await;
-        let old = std::mem::replace(&mut published.state, state.clone());
+        let published = self.interface.get().await;
+        let old = std::mem::replace(&mut *published.state(), state.clone());
         if old.connection_state() != state.connection_state() {
             published.connection_state_changed(emitter).await?;
         }
@@ -464,9 +492,14 @@ impl Publisher {
     /// Publishes what the surfaces show now.
     pub async fn publish_surfaces(&self, surfaces: ShownSurfaces) -> zbus::Result<()> {
         let emitter = self.interface.signal_emitter();
-        let mut published = self.interface.get_mut().await;
-        if published.surfaces != surfaces {
-            published.surfaces = surfaces;
+        let published = self.interface.get().await;
+        let changed = {
+            let mut shown = lock(&published.surfaces);
+            let changed = *shown != surfaces;
+            *shown = surfaces;
+            changed
+        };
+        if changed {
             published.surfaces_changed(emitter).await?;
         }
         Ok(())

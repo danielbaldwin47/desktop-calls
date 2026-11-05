@@ -255,9 +255,10 @@ const STATES: &[State] = &[
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().refuse_next_dial("cme:30");
-            if let Err(refusal) = harness.dial(NUMBER) {
-                panic!("the app refused to dial: {refusal}");
-            }
+            assert!(
+                harness.dial(NUMBER).is_err(),
+                "the app placed the Call the Phone refused"
+            );
             wait_for_status(harness, "Call not placed");
         },
         // Hang up is dimmed: there is no Call to hang up.
@@ -458,12 +459,17 @@ fn shows_dialer(screenshot: &Screenshot) -> bool {
     app_region(screenshot).is_some_and(|region| region.right - region.left > 500.0)
 }
 
-/// Asks the app to Call [`NUMBER`] and waits for "Calling…".
+/// Asks the app to Call [`NUMBER`] and waits for "Calling…" and for the
+/// Phone to be asked to dial, so it can `Alert`. The app's reply waits for
+/// the Phone, so nothing waits for it.
 fn dial(harness: &Harness) {
-    if let Err(refusal) = harness.dial(NUMBER) {
-        panic!("the app refused to dial: {refusal}");
-    }
+    let _reply = harness.start_dial(NUMBER);
     wait_for_status(harness, "Calling…");
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Phone is asked to dial", DEADLINE, |calls| {
+            calls.iter().any(|call| call.member == "Dial")
+        });
 }
 
 fn wait_for_status(harness: &Harness, status: &str) {

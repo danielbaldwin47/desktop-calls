@@ -29,8 +29,8 @@ pub use contacts::{
 pub use earlier_run::{EarlierCall, EarlierRun};
 pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView};
 pub use machine::{
-    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, Effect, Input, Mute,
-    PhoneCommand, PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,
+    BannerView, CallAudio, CallWindowPhase, CallWindowView, DialProgress, DialerView, Effect,
+    Input, Mute, PhoneCommand, PhoneRefusal, Problem, State, Surfaces, Timer, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

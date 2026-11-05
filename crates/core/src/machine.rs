@@ -27,8 +27,8 @@ pub use calls::keypad_tones;
 use calls::{
     answer, call_added, call_changed, decline, hang_up, phone_ended_call, send_tones, timer_fired,
 };
-use dialling::{cancel_dial, dial, dial_failed, dialer_input, refusal_failure};
-pub use input::{Effect, Input, PhoneCommand, PhoneRefusal, Timer};
+use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
+pub use input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
 use missed_calls::missed_call_input;
 use phone::{
     command_done, command_failed, contacts_sync, phone_connected, phone_disconnected,
@@ -505,7 +505,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             state.connection = ConnectionState::Connecting;
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => {
-            return (State::default(), vec![Effect::DetachPhone]);
+            let mut effects = vec![Effect::DetachPhone];
+            phone_unpaired(&state, &mut effects);
+            return (State::default(), effects);
         }
         Input::PhoneConnected { address } if state.is_our_phone(&address) => {
             phone_connected(&mut state, &mut effects);

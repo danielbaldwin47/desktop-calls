@@ -115,13 +115,13 @@ fn stderr(output: &std::process::Output) -> String {
 fn dialling_a_number_typed_with_spaces_clears_reject_sco_dials_and_brings_the_audio_here() {
     let harness = connected();
 
-    let output = harness.cli(&["dial", "07700 900123"]);
+    let cli = harness.start_cli(&["dial", "07700 900123"]);
 
+    assert_dialled_with_desktop_audio(&harness, "07700900123");
+    let _call = harness.simulated_phone().alert();
+    let output = cli.finish(DEADLINE);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stderr(&output), "");
-    assert_dialled_with_desktop_audio(&harness, "07700900123");
-
-    let _call = harness.simulated_phone().alert();
     let state = harness.wait_for_app(
         "the dialled Call rings at the other end",
         DEADLINE,
@@ -141,10 +141,34 @@ fn dialling_a_number_typed_with_spaces_clears_reject_sco_dials_and_brings_the_au
 fn a_tel_link_on_the_cli_dials_its_number() {
     let harness = connected();
 
-    let output = harness.cli(&["dial", "tel:+447700900123"]);
+    let cli = harness.start_cli(&["dial", "tel:+447700900123"]);
 
-    assert!(output.status.success(), "{}", stderr(&output));
     assert_dialled_with_desktop_audio(&harness, "+447700900123");
+    let _call = harness.simulated_phone().alert();
+    let output = cli.finish(DEADLINE);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn the_cli_waits_for_the_phone_to_report_the_call_then_exits_at_once() {
+    let harness = connected();
+
+    let mut cli = harness.start_cli(&["dial", "07700 900123"]);
+
+    wait_for_dial(&harness);
+    assert!(
+        !cli.has_exited(),
+        "the CLI exited before the Phone reported the Call"
+    );
+    let _call = harness.simulated_phone().alert();
+    let alerted = Instant::now();
+    let output = cli.finish(DEADLINE);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stderr(&output), "");
+    println!(
+        "The CLI exited {:?} after the Phone reported the Call",
+        alerted.elapsed()
+    );
 }
 
 #[test]
@@ -160,9 +184,11 @@ fn opening_a_tel_link_dials_it_through_the_desktop_file() {
 fn the_control_interface_dials_too() {
     let harness = connected();
 
-    harness.dial("07700 900123").expect("the app dials");
+    let dial = harness.start_dial("07700 900123");
 
     assert_dialled_with_desktop_audio(&harness, "07700900123");
+    let _call = harness.simulated_phone().alert();
+    dial.outcome(DEADLINE).expect("the app dials");
 }
 
 #[test]
@@ -232,7 +258,8 @@ fn an_undialable_number_is_refused_in_plain_words_and_never_dialled() {
 }
 
 #[test]
-fn each_phone_refusal_is_one_plain_sentence_and_the_raw_detail_is_only_in_the_log() {
+fn each_phone_refusal_fails_the_cli_with_one_plain_sentence_and_the_raw_detail_is_only_in_the_log()
+{
     // The Simulated Phone's error, the kind the app signals, and the raw
     // detail the Phone gave, which PipeWire passes on as the message.
     let refusals = [
@@ -272,10 +299,18 @@ fn each_phone_refusal_is_one_plain_sentence_and_the_raw_detail_is_only_in_the_lo
     for (count, (error, kind, detail)) in refusals.into_iter().enumerate() {
         harness.simulated_phone().refuse_next_dial(error);
 
+        let started = Instant::now();
         let output = harness.cli(&["dial", "07700 900123"]);
 
-        assert!(output.status.success(), "{error}: {}", stderr(&output));
-        let started = Instant::now();
+        assert!(
+            started.elapsed() < DEADLINE,
+            "{error}: the CLI took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            !output.status.success(),
+            "{error}: the CLI reported success"
+        );
         let signalled = loop {
             if let Some(signalled) = harness.app_errors().get(count).cloned() {
                 break signalled;
@@ -284,6 +319,7 @@ fn each_phone_refusal_is_one_plain_sentence_and_the_raw_detail_is_only_in_the_lo
             thread::sleep(Duration::from_millis(20));
         };
         assert_eq!(signalled.kind, kind, "{error}");
+        assert_eq!(stderr(&output), signalled.message, "{error}");
         assert!(
             signalled.message.ends_with('.') && signalled.message.matches(". ").count() == 0,
             "{error}: not one sentence: {:?}",

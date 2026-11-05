@@ -1,6 +1,6 @@
 //! Placing a Call from the Desktop, and the Dialer.
 
-use super::input::{Effect, Input, PhoneCommand, PhoneRefusal, Timer};
+use super::input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
 use super::{
     CALL_ENDED_MS, DIAL_TIMEOUT_MS, Dialer, Dialling, Focus, HungUpDial, NOTICE_MS, Notice, State,
 };
@@ -35,6 +35,7 @@ pub(super) fn dial(state: &mut State, text: &str, effects: &mut Vec<Effect>) {
     });
     effects.push(Effect::Phone(PhoneCommand::AllowAudioOnDesktop));
     effects.push(Effect::Phone(PhoneCommand::Dial(number)));
+    effects.push(Effect::DialProgress(DialProgress::Asked(attempt)));
     effects.push(Effect::StartTimer {
         timer: Timer::DialTimedOut(attempt),
         after_ms: DIAL_TIMEOUT_MS,
@@ -48,6 +49,7 @@ pub(super) fn adopt_dialled(state: &mut State, call: &mut Call, effects: &mut Ve
     let Some(dialling) = state.dialling.take() else {
         return;
     };
+    effects.push(Effect::DialProgress(DialProgress::Placed(dialling.attempt)));
     if call.caller == Caller::Withheld {
         call.caller = Caller::Number(dialling.number);
     }
@@ -95,6 +97,9 @@ fn refuse(
         state.ended = None;
         state.hung_up_dial = None;
     }
+    effects.push(Effect::DialProgress(DialProgress::NotPlaced(
+        attempt, failure,
+    )));
     notify(state, failure, attempt, alone.then_some(caller), effects);
 }
 
@@ -104,12 +109,26 @@ pub(super) fn dial_failed(state: &mut State, failure: Failure, effects: &mut Vec
     let Some(dialling) = state.dialling.take() else {
         return;
     };
+    effects.push(Effect::DialProgress(DialProgress::NotPlaced(
+        dialling.attempt,
+        failure,
+    )));
     if !dialling.cancelled {
         let caller = Caller::Number(dialling.number);
         notify(state, failure, dialling.attempt, Some(caller), effects);
     }
     if !state.has_desktop_audio() {
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    }
+}
+
+/// The Phone was unpaired, so a dial waiting for it places no Call.
+pub(super) fn phone_unpaired(state: &State, effects: &mut Vec<Effect>) {
+    if let Some(dialling) = &state.dialling {
+        effects.push(Effect::DialProgress(DialProgress::NotPlaced(
+            dialling.attempt,
+            Failure::PhoneNotSetUp,
+        )));
     }
 }
 

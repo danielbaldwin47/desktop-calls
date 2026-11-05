@@ -2,7 +2,16 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
-## 2026-11-05 04:30 UTC, main green again; batch of six in flight (supersedes the entries below)
+## 2026-11-05 ~08:00 UTC, batch 1 landed; batch 2 in flight (supersedes the entries below)
+
+- Merged since 04:30, each with green CI: #44 (CI once per PR push), #8 (PR #46), #15 (PR #50), #39 (PR #48), #9 (PR #52), #61 (three flakes, plus Connected/Muted only once the Phone confirms), #24 (PR #58), #56 (`just merge`), #42 (PR #60, gallery records on change), #10 (PR #49, `1231d8e`).
+- Merge with `just merge <n>` (verified 2026-11-05 on #56, #60 and #49). See [chief-of-staff-practice](chief-of-staff-practice.md).
+- In flight: #55 (faster CI, PR #57, fixing the docs/code race before merge), #11 (Dialer), #13 (the only agent on the real Phone), #54 (system Python).
+- Queued: #43 after #55 (both touch `ci.yml`); #65 after #11 (Dial code); then #47 and #53 after #43.
+- Waiting on the user: whether to audit and make the repo public. Free Actions minutes ran at about 235 a day before #55, so they would run out around 2026-11-12 (estimate). Also: delete the leftover GHCR package `desktop-calls-ci`, which needs the `delete:packages` scope.
+- Real-Phone facts gained: a PBAP pull of 319 Contacts takes 5.35 s; the Pixel caps each history pull at 50 entries ([contacts sync](../research/2026-11-04-contacts-sync.md)). A real Call via `test_call.py --desktop-audio` sent its audio to the Desktop (#10).
+
+## 2026-11-05 04:30 UTC, main green again; batch of six in flight (superseded above)
 
 - PR #41 merged at `41cecbb` after `gh pr checks 41 --watch` passed on both runs. There were two causes: the Banner waited on phone-number data loading on the main thread, and grim crashed with SIGBUS against Docker's 64 MB `/dev/shm`. See `docs/research/2026-11-04-ci-banner-latency.md`.
 - Verified 2026-11-05: branch protection and rulesets return HTTP 403 ("Upgrade to GitHub Pro or make this repository public") on this private Free repo. This supersedes "likely unavailable (unverified)" below. #42 adds `just merge` so that the guard lives in tooling.

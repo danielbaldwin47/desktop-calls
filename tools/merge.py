@@ -32,6 +32,10 @@ protection does. It refuses unless all of these hold, in this order:
   6. No Real-Phone Checklist step at the head lands with a closed ticket, or
      with one the PR closes (tools/checklist_tickets.py, ticket #120).
 
+When the head lacks commits on <base>, the refusal prints the one command
+that brings the branch up to date: merge origin/<base> locally, then `just
+ci-local` (one run, on the merge commit). It never calls `gh pr update-branch`.
+
 Then it squash-merges the head it checked (`--match-head-commit`) and
 deletes the PR's branch on GitHub. Local branches and worktrees are left
 alone. Each refusal names the condition that failed and the next command.
@@ -134,10 +138,7 @@ def require_contains_base(pr: dict) -> str | None:
     if not behind:
         return None
     noun, change = ("commit", "changes") if behind == 1 else ("commits", "change")
-    next_step = (
-        f"Next: gh pr update-branch {number}   (then `just merge {number}` "
-        "waits for the new checks)"
-    )
+    next_step = bring_up_to_date(pr)
     listed = len(commits) == behind and len(commits) < COMPARE_COMMITS_LIMIT
     listed = listed and len(files) < COMPARE_FILES_LIMIT
     code = [path for path in files if not changes.is_docs(path)]
@@ -164,6 +165,48 @@ def require_contains_base(pr: dict) -> str | None:
     return (
         f"Letting through {behind} docs-only {noun} on origin/{base} that PR #{number} lacks: "
         f"{names}"
+    )
+
+
+def checkout_of(branch: str) -> str | None:
+    """The directory of the worktree that has `branch` checked out, if any."""
+    path = None
+    for line in git("worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            path = line.removeprefix("worktree ")
+        elif line == f"branch refs/heads/{branch}":
+            return path
+    return None
+
+
+def bring_up_to_date(pr: dict) -> str:
+    """The `Next:` text for a head that lacks commits on the base: merge the
+    base into the branch here, then `just ci-local`, which tests that merge
+    commit, pushes it (a fast-forward, so never a force) and posts "CI passed"
+    on it, so one run covers it (ticket #181). `gh pr update-branch` would
+    make the merge commit on GitHub, where no "CI passed" is ever posted on
+    it.
+
+    The branch is first fast-forwarded to its copy on GitHub, since a merge
+    onto a stale local branch is not a fast-forward of the pushed one. If
+    another worktree has the branch checked out, `git switch` would refuse,
+    so the command runs there instead."""
+    number, base, branch = pr["number"], pr["baseRefName"], pr["headRefName"]
+    where = checkout_of(branch)
+    here = git("rev-parse", "--show-toplevel").strip()
+    if where is None:
+        start = f"git fetch origin && git switch {branch}"
+    elif where == here:
+        start = "git fetch origin"
+    else:
+        start = f"cd {where} && git fetch origin"
+    return (
+        f"Next: {start} && git merge --ff-only origin/{branch} "
+        f"&& git merge --no-edit origin/{base} && just ci-local   (then `just merge {number}`)\n"
+        "On a conflict: resolve it, commit, then `just ci-local`.\n"
+        "Merge, don't rebase: a rebased branch is not a fast-forward of the one on "
+        "GitHub, and `just ci-local` doesn't force-push. Not `gh pr update-branch`: "
+        'its merge commit has no "CI passed".'
     )
 
 

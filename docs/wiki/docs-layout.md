@@ -8,3 +8,4 @@ Decided 2026-11-04 by Claude, after the user asked for the mattpocock-skills app
 - `docs/research/`: raw subagent research reports, dated and never edited after filing.
 - GitHub Issues on `danielbaldwin47/desktop-calls`: specs and tickets (see `docs/agents/issue-tracker.md`).
 - 2026-11-04: Integration branch is `main`. Ticket branches merge via PR once checks pass (user Q28). Every implementer follows [`docs/agents/implementer-brief.md`](../agents/implementer-brief.md).
+- 2026-11-05: changes to `docs/wiki/` go through a PR and `just ci-local`, like code, and are not merged by their author ([chief-of-staff-practice](chief-of-staff-practice.md)).

@@ -58,6 +58,7 @@
 mod commands;
 
 use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::{
@@ -125,6 +126,8 @@ struct Resolved {
 
 /// Where a Phone command goes.
 enum Target {
+    /// This Call registration, only while the Phone link still follows it.
+    Call { path: String, current: Weak<()> },
     /// This Telephony object.
     Object(String),
     /// The Phone with this Bluetooth address, through BlueZ.
@@ -209,11 +212,11 @@ struct CallObject {
 /// A Call of the followed Phone, as reported to the state machine.
 struct Followed {
     id: CallId,
-    /// The Phone said `disconnected`, or the Desktop asked to hang up: going
-    /// away now is the end of the Call.
+    /// The Desktop asked to hang up: if the Call vanishes without ending,
+    /// the Hang up is sent again when it returns.
     ending: bool,
-    /// The Call has been reported ended.
-    ended: bool,
+    /// Dropped on disconnection or removal, invalidating queued commands.
+    current: Option<Rc<()>>,
 }
 
 /// One grace period of a vanished Call. Only the latest one of each Call
@@ -449,7 +452,7 @@ impl PhoneLink {
         let Some(followed) = self.followed.get_mut(path) else {
             return;
         };
-        if followed.ended {
+        if followed.current.is_none() {
             return;
         }
         if let Some(number) = number {
@@ -493,7 +496,7 @@ impl PhoneLink {
             }
             None if state == "disconnected" => {
                 followed.ending = true;
-                followed.ended = true;
+                followed.current = None;
                 tracing::info!(
                     event_kind = %EventKind::CallEnded,
                     call_id = followed.id.0,
@@ -550,6 +553,7 @@ impl PhoneLink {
             .position(|kinship| *kinship == Kinship::Same)
         {
             let Vanished { id, hang_up, .. } = self.vanished.remove(index);
+            let current = Rc::new(());
             tracing::info!(
                 event_kind = %EventKind::CallReturned,
                 call_id = id.0,
@@ -560,13 +564,16 @@ impl PhoneLink {
                 Followed {
                     id,
                     ending: hang_up,
-                    ended: false,
+                    current: Some(Rc::clone(&current)),
                 },
             );
             if hang_up {
                 outcome.batch.push(Resolved {
                     command: PhoneCommand::HangUp(id),
-                    target: Target::Object(path.to_owned()),
+                    target: Target::Call {
+                        path: path.to_owned(),
+                        current: Rc::downgrade(&current),
+                    },
                 });
             }
             outcome.inputs.push(Input::CallChanged {
@@ -592,19 +599,18 @@ impl PhoneLink {
             path,
             "Call {id} is with this number"
         );
-        let caller = caller(&object.number);
         self.followed.insert(
             path.to_owned(),
             Followed {
                 id,
                 ending: false,
-                ended: false,
+                current: Some(Rc::new(())),
             },
         );
         outcome.inputs.push(Input::CallAdded {
             call: id,
             state,
-            caller,
+            caller: caller(&object.number),
             at: now(),
         });
     }
@@ -614,7 +620,7 @@ impl PhoneLink {
         let Some(followed) = self.followed.remove(path) else {
             return;
         };
-        if followed.ended {
+        if followed.current.is_none() {
             return;
         }
         self.vanish(&followed, object.as_ref(), outcome);
@@ -710,7 +716,7 @@ impl PhoneLink {
     fn vanish_all(&mut self, outcome: &mut Outcome) {
         let followed: Vec<(String, Followed)> = self.followed.drain().collect();
         for (path, followed) in followed {
-            if followed.ended {
+            if followed.current.is_none() {
                 continue;
             }
             let object = self.call_objects.get(&path).cloned();
@@ -816,19 +822,22 @@ impl PhoneLink {
                     let found = self
                         .followed
                         .iter_mut()
-                        .find(|(_, followed)| followed.id == *id && !followed.ended)
-                        .map(|(path, followed)| {
+                        .find(|(_, followed)| followed.id == *id && followed.current.is_some())
+                        .and_then(|(path, followed)| {
                             if matches!(command, PhoneCommand::HangUp(_)) {
                                 followed.ending = true;
                             }
-                            path.clone()
+                            followed.current.as_ref().map(|current| Target::Call {
+                                path: path.clone(),
+                                current: Rc::downgrade(current),
+                            })
                         });
                     // While the Telephony service restarts, a Call is away
                     // for about a second; it is hung up once back.
                     if found.is_none() && self.hang_up_when_back(&command) {
                         continue;
                     }
-                    found.map(Target::Object)
+                    found
                 }
                 // Only a connected Phone has hands-free to drop.
                 PhoneCommand::MoveAudioToPhone => self

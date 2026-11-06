@@ -112,6 +112,26 @@ fn the_installed_service_picks_up_its_own_calls_after_a_crash() {
 }
 
 #[test]
+fn a_call_to_the_app_while_the_service_waits_to_restart_starts_it_as_the_unit() {
+    let harness = Harness::builder().phone_connected().installed().start();
+    harness.start_service();
+    let active_since_ms = live_call(&harness);
+
+    harness.kill_service();
+    // The unit restarts a second after the crash. A caller that reaches for
+    // the app's name before then, as `desktop-calls status` does, has the
+    // session bus start the app, which hands the start to the unit manager
+    // rather than running the app itself.
+    harness.wait_until_app_off_bus();
+    let state = harness.wait_for_app("the Call is live again", DEADLINE, is_live);
+
+    assert_eq!(
+        state.calls[0].active_since_ms, active_since_ms,
+        "the app started by the call kept its record somewhere the unit's restart doesn't"
+    );
+}
+
+#[test]
 fn the_installed_service_ignores_what_an_older_build_left_in_the_old_place() {
     let mut harness = Harness::builder().phone_connected().installed().start();
     // A dev run killed mid-Call leaves its record. Builds from before

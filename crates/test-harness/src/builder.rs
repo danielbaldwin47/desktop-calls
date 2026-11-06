@@ -446,8 +446,8 @@ impl Builder {
         // A service the session bus starts runs inside it, so where the app
         // is installed, the session bus too runs with the journal hidden.
         let [system_bus, session_bus] =
-            [("system", false), ("session", self.installed)].map(|(bus, hide_journal)| {
-                let address = start_bus(&directory, bus, hide_journal, &group, &mut processes);
+            [("system", false), ("session", self.installed)].map(|(bus, installed)| {
+                let address = start_bus(&directory, bus, installed, &group, &mut processes);
                 timeline
                     .monitor(&address, bus)
                     .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
@@ -614,13 +614,15 @@ pub(super) fn without_journal(program: &Path) -> Command {
     command
 }
 
-/// Starts a private `dbus-daemon` and returns its address. With
-/// `hide_journal`, it and every service it starts run where the journal
-/// can't be reached (see [`without_journal`]).
+/// Starts a private `dbus-daemon` and returns its address. Where the app
+/// is `installed`, the bus runs as the user's session bus does: it and
+/// every service it starts run where the journal can't be reached (see
+/// [`without_journal`]), and it leaves starting a service to the systemd
+/// user manager.
 fn start_bus(
     directory: &Path,
     name: &'static str,
-    hide_journal: bool,
+    installed: bool,
     group: &ProcessGroup,
     processes: &mut Vec<(&'static str, Child)>,
 ) -> String {
@@ -652,18 +654,25 @@ fn start_bus(
         ),
     )
     .expect("write the bus configuration");
-    let mut command = if hide_journal {
+    let mut command = if installed {
         without_journal(Path::new("dbus-daemon"))
     } else {
         Command::new("dbus-daemon")
     };
-    let mut child = group
-        .adopt(&mut command)
+    let command = group.adopt(&mut command);
+    command
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .arg("--nofork")
         .arg("--print-address")
-        .arg(format!("--config-file={}", config.display()))
+        .arg(format!("--config-file={}", config.display()));
+    if installed {
+        // As the user's session bus starts a service: through the systemd
+        // user manager, which the scenario's stand-in serves, not by
+        // running the service file's `Exec=` itself.
+        command.arg("--systemd-activation");
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(
             fs::File::create(directory.join(format!("{name}-bus.stderr")))

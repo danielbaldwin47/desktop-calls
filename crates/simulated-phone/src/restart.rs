@@ -21,11 +21,16 @@ pub fn come_back(
     let (connection, calls) = connection?;
     *lock(holder) = Some(connection.clone());
     let serving = connection.clone();
-    let world = world.clone();
+    let serving_world = world.clone();
     let holder = holder.clone();
     std::thread::spawn(move || {
-        if let Err(error) = zbus::block_on(serve(serving, calls, Service::Telephony, world, holder))
-        {
+        if let Err(error) = zbus::block_on(serve(
+            serving,
+            calls,
+            Service::Telephony,
+            serving_world,
+            holder,
+        )) {
             eprintln!("simulated-phone: the restarted Telephony service stopped: {error}");
         }
     });
@@ -38,7 +43,10 @@ pub fn come_back(
         }
         Ok::<_, zbus::Error>(())
     })?;
-    std::thread::sleep(std::time::Duration::from_millis(40));
+    let calls_back_after = lock(world)
+        .behaviour
+        .calls_back_after(std::time::Duration::from_millis(40));
+    std::thread::sleep(calls_back_after);
     zbus::block_on(async {
         for signal in &restart.calls_back {
             signal.emit(&connection).await?;

@@ -23,6 +23,10 @@ const ROUND_TRIP: Duration = Duration::from_secs(3);
 const GAP: Duration = Duration::from_millis(730);
 /// Long enough for the restart and the app's recovery from it.
 const RESTART: Duration = Duration::from_secs(3);
+/// How long a Call that ended is watched for coming back: longer than the
+/// 2 s the Simulated Phone's `calls-listed-late` quirk takes to list the
+/// Calls after the AudioGateway.
+const LISTED_LATE_WATCH: Duration = Duration::from_secs(3);
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
@@ -199,6 +203,42 @@ fn hang_up_while_the_service_is_away_ends_the_call_once_it_is_back() {
                 .any(|known| known.path == path && known.member == "Hangup")
         },
     );
+    assert!(
+        harness.app_errors().is_empty(),
+        "{:?}",
+        harness.app_errors()
+    );
+}
+
+/// Ticket #169: the restarted service lists its Calls 2 s after the
+/// AudioGateway rather than 40 ms. The Hang up pressed while it was away
+/// ends the Call once the Phone lists it, and the Call stays ended.
+#[test]
+fn hang_up_while_the_service_is_away_ends_the_call_even_when_it_is_listed_late() {
+    let harness = connected(Harness::builder());
+    let (path, call) = answered_here(&harness);
+    harness.simulated_phone().enable_quirk("calls-listed-late");
+
+    harness.simulated_phone().restart_telephony(GAP);
+    harness.wait_for_app("the Phone shows as disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+    harness.hang_up(call);
+
+    harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone was asked to hang up once it was back",
+        DEADLINE,
+        |recorded| {
+            recorded
+                .iter()
+                .any(|known| known.path == path && known.member == "Hangup")
+        },
+    );
+    harness.app_holds("the Call stays ended", LISTED_LATE_WATCH, |state| {
+        state.calls.is_empty()
+    });
+    assert_eq!(harness.simulated_phone().calls_on_phone(), []);
     assert!(
         harness.app_errors().is_empty(),
         "{:?}",

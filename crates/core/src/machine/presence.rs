@@ -256,8 +256,20 @@ pub(super) fn hang_up_undelivered(state: &mut State, call: CallId, effects: &mut
     };
     known.request = Request::None;
     effects.push(Effect::ReportError(Failure::HangUpFailed));
+    let losses = state.losses + 1;
     match state.connection_lost.as_mut() {
-        Some(lost) if lost.call.id == call => lost.notice = Failure::HangUpFailed,
+        // Already lost: it says so now, for as long as a fresh loss would.
+        Some(lost)
+            if lost.call.id == call || lost.held.as_ref().is_some_and(|held| held.id == call) =>
+        {
+            lost.notice = Failure::HangUpFailed;
+            lost.loss = losses;
+            state.losses = losses;
+            effects.push(Effect::StartTimer {
+                timer: Timer::ConnectionLost(losses),
+                after_ms: CONNECTION_LOST_MS,
+            });
+        }
         Some(_) => {}
         None => {
             let shown = state.call_window_calls().is_some_and(|(shown, held)| {

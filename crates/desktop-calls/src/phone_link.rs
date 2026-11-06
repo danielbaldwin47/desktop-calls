@@ -268,6 +268,11 @@ impl PhoneLink {
                 self.attached = None;
                 self.connected = None;
                 self.vanish_all(&mut outcome);
+                // No Hang up follows a Call to the next Phone attached,
+                // which may have a Call with the same number.
+                for vanished in &mut self.vanished {
+                    vanished.hang_up = false;
+                }
             }
             Event::Command(Command::Run(commands)) => {
                 outcome.batch = self.resolve(commands, &mut outcome.inputs);
@@ -558,19 +563,16 @@ impl PhoneLink {
     /// reached the Phone: it is hung up again then.
     fn vanish(&mut self, followed: &Followed, number: Option<String>, outcome: &mut Outcome) {
         let id = followed.id;
-        if followed.ending {
-            tracing::info!(
-                event_kind = %EventKind::CallVanished,
-                call_id = id.0,
-                "Call {id} went away without ending after the Hang up; it is hung up again if it comes back"
-            );
+        let then = if followed.ending {
+            "it is hung up again if it comes back"
         } else {
-            tracing::info!(
-                event_kind = %EventKind::CallVanished,
-                call_id = id.0,
-                "Call {id} went away without ending; waiting for it to come back"
-            );
-        }
+            "waiting for it to come back"
+        };
+        tracing::info!(
+            event_kind = %EventKind::CallVanished,
+            call_id = id.0,
+            "Call {id} went away without ending; {then}"
+        );
         let grace = self.start_grace(id, GRACE, outcome);
         self.vanished.push(Vanished {
             id,
@@ -591,11 +593,11 @@ impl PhoneLink {
         };
         let vanished = self.vanished.remove(index);
         if vanished.hang_up && self.connected.is_none() {
-            tracing::warn!(
+            tracing::error!(
                 event_kind = %EventKind::PhoneCommandFailed,
                 error_kind = "hang-up-undelivered",
                 call_id = id.0,
-                "Call {id} didn't come back, and the Hang up never reached the Phone"
+                "Call {id} didn't come back, and the Phone never confirmed the Hang up"
             );
             outcome.inputs.push(Input::HangUpUndelivered(id));
             return;

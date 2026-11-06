@@ -9,7 +9,7 @@ Legend: **[V]** = verified against the Simulated Phone on this machine. **[I]** 
 
 - dbus-daemon answers a method call left unanswered by a connection that closes with `org.freedesktop.DBus.Error.NoReply` "Message recipient disconnected from message bus without replying". **[V]** in the test bus. A call sent once the name has no owner gets `ServiceUnknown` "The name org.pipewire.Telephony was not provided by any .service files". **[V]**
 - zbus 6 turns both into `zbus::Error::FDO` variants, not `MethodError`. **[V]** from its source.
-- dbus-broker's `NoReply` text is "Remote peer disconnected". **[I]**: not on this machine. The app treats a `NoReply` as "the service went away" only if its text says "disconnected", so a `NoReply` that timed out still counts as a refusal.
+- The user's session bus is dbus-broker 37 (`dbus-broker-launch --scope user`), not dbus-daemon, which the tests run. **[V]** The binary holds the string "Remote peer disconnected" beside `org.freedesktop.DBus.Error.NoReply`. **[V]** That this is the text of a `NoReply` for a peer that leaves is **[I]**: never observed. The app treats a `NoReply` as "the service went away" only if its text says "disconnected", so a `NoReply` that timed out still counts as a refusal.
 - A real `WirePlumber` that exits for a restart closes its connection, so a Hang up it never read gets that `NoReply`. **[I]**: the 2026-11-04 restart probe sent no Hang up during the restart.
 
 ## Simulated Phone changes
@@ -23,5 +23,8 @@ Legend: **[V]** = verified against the Simulated Phone on this machine. **[I]** 
 - `telephony_restart::a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live` (a 12 s restart) failed before the fix: `call-ended: Call 1 ended: it didn't come back` at 11.2 s, and no `Error`. **[V]**
 
 ## Follow-up candidates
+
+- A Hang up the Phone took, followed by hands-free dropping before `disconnected` and not coming back within the grace, is reported undelivered: the Phone link doesn't know the reply came. The Call did end, so the user is told the Phone didn't hang up when it did. This needs a profile drop within milliseconds of the Hang up. **[I]** from the code.
+- Declining a ringing Call whose decline is undelivered says so only on the control interface. The Call has no Call Window to show it as lost.
 
 - `HangUpFailed` and other `Error`s reach only the control interface. A Call Window user sees nothing when the Phone refuses a Hang up outright. **[V]** from the code: the Call Window shows only dial, Call Waiting and audio notices.

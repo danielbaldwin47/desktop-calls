@@ -349,7 +349,7 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     );
     harness.simulated_phone().recorded_holds(
         "the Desktop never hung up the Call by itself",
-        Duration::ZERO,
+        LISTED_LATE_WATCH,
         |recorded| hang_ups(recorded, &path) == 0,
     );
 }

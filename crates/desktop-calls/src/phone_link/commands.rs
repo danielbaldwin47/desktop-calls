@@ -90,7 +90,7 @@ pub(super) async fn execute(
                 // Resolved to the Phone itself, above.
                 PhoneCommand::MoveAudioToPhone | PhoneCommand::ConnectHandsFree => Ok(()),
             };
-            if !report(command, result, inputs) {
+            if !report_and_go_on(command, result, inputs) {
                 break;
             }
         }
@@ -99,7 +99,7 @@ pub(super) async fn execute(
 
 /// Reports what became of `command` to the state machine, and returns
 /// whether the rest of its batch goes ahead.
-fn report(
+fn report_and_go_on(
     command: PhoneCommand,
     result: zbus::Result<()>,
     inputs: &UnboundedSender<Input>,
@@ -119,7 +119,7 @@ fn report(
             // The Call went with the service, so the Phone link sends the
             // Hang up again if it comes back, or reports it undelivered
             // (ticket #175).
-            tracing::info!(
+            tracing::warn!(
                 event_kind = %EventKind::PhoneCommandFailed,
                 error_kind = error_kind(&error),
                 command = %name,

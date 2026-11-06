@@ -2,6 +2,17 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
+## 2026-11-05 night into 2026-11-06: 12 more PRs merged, the load flakes fixed at their causes (supersedes the entry below on flakes and merging)
+
+- **Merged 2026-11-05 21:19 UTC to 2026-11-06 02:26 UTC, in order:** #164 (`5114208`, #161), #166 (`9ebed55`, #162), #165 (`6b4d43b`, #163), #173 (`4c8dc97`, part of #167), #174 (`95f225f`, #169 and #170, ADR-0007), #178 (`198f4e9`, #172), #177 (`7af1a67`, #171), #179 (`a7a6809`, #168), #176 (`b096898`, #175), #184 (`26e232f`, #180), #182 (`1139783`, #181), #186 (`f5b3e4c`, #185). Source: `git log` and `gh pr view` on 2026-11-06. Everything here is checked against the Simulated Phone only; none ran on the Pixel.
+- **#154 triage** (2026-11-05, GPT 6.1 Sol proposed, Sonnet approved; per the chief of staff Sonnet overturned 5 of 19, which #154's triage comment does not itemise). It closed #142's flake, #156's repeat-run failures and the `/tmp` leak as already fixed, and promoted three findings: #161 (PR #164), #162 (PR #166) and #163 (PR #165). Details on [chief-of-staff-practice](chief-of-staff-practice.md).
+- **Load flakes #168 to #172, #180 and #185**, by cause: app (#170), Simulated Phone (#169, #171), test (#172, #185), harness (#168, #180). Fixes are PRs #174, #177, #178, #179, #184 and #186; ADR-0007 comes from PR #174. Causes, and #167's partial fix (PR #173, #167 still open on 2026-11-06), are on [testing](testing.md).
+- **Lost Hang up** (#175, PR #176, extends ADR-0007): a Hang up that vanished with the Telephony service is sent again only to a Call that can be the same one; otherwise the Call Window says "The Call may still be live on your phone; check your phone and hang up there if it is." See [product-shape](product-shape.md).
+- **Merging** (#181, PR #182): `just merge` no longer calls `gh pr update-branch`; one `just ci-local` run brings a PR up to date. See [chief-of-staff-practice](chief-of-staff-practice.md).
+- **Process:** on 2026-11-05 the chief of staff decided wiki and docs changes go through PRs. `2173174` (the previous wiki update) was pushed straight to `main` and bypassed the gate. This entry is the first made under the rule.
+- Freeze unchanged: no new feature tickets until Real-Phone Checklist groups 1, 2 and 6 have run on the Pixel. #167 and the after-v1 items in #154's later comments (ADR-0007 point 6's gap for a declined ringing Call that rings straight back, among them) stay open.
+- Waiting on the user: the same Checklist groups as above.
+
 ## 2026-11-05 evening: 12 PRs merged, CI moved to this machine, freeze on (supersedes the entries below on CI and on what is in flight)
 
 - **Merged 2026-11-05, 15:52 to 20:22 UTC, in order:** #129 (`18e403c`, call waiting #16), #145 (`94dcb16`, #116), #142 (`234c2c3`, #123), #134 (`8735912`, #120), #156 (`7c8b607`, #155), #157 (`ba22b51`, #155), #149 (`f2ddbbf`, #121), #151 (`5eb631f`, #111), #159 (`700e1aa`, #158), #153 (`97278a3`, #23), #143 (`955394b`, #22), #160 (`1210b55`, step 1.2 follow-up to #143). Source: `git log` and `gh pr view` on 2026-11-05.

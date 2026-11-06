@@ -41,7 +41,7 @@ pub use input::{
 };
 use missed_calls::missed_call_input;
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
-use presence::{Presence, forget_phone, presence_input};
+use presence::{Presence, forget_phone, hang_up_undelivered, presence_input};
 use setup::Setup;
 pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
@@ -230,6 +230,8 @@ struct ConnectionLost {
     call: Call,
     /// The Call on hold behind it, as it was.
     held: Option<Call>,
+    /// What the Call Window says about it.
+    notice: Failure,
     /// Which loss this is, so only its own timer counts.
     loss: u32,
 }
@@ -729,6 +731,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         } => call_changed(&mut state, call, call_state, at, &mut effects),
         Input::CallerChanged { call, caller } => caller_changed(&mut state, call, caller),
         Input::CallEnded { call } => phone_ended_call(&mut state, call, &mut effects),
+        Input::HangUpUndelivered(call) => hang_up_undelivered(&mut state, call, &mut effects),
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }
         | Input::ContactsPermissionNeeded { .. }

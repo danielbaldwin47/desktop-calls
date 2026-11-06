@@ -33,6 +33,10 @@ pub enum Failure {
     AnswerFailed,
     /// The Phone did not hang up the Call.
     HangUpFailed,
+    /// The Desktop asked to hang up the Call, and can't tell whether the
+    /// Phone did: the Hang up may have been lost on its way, or the Phone may
+    /// have taken it with no word back before hands-free dropped.
+    CallMayStillBeLive,
     /// The Desktop asked for the Call's audio, and the Phone kept it.
     AudioNotMoved,
     /// The Desktop asked to move the Call's audio to the Phone, and it
@@ -121,6 +125,7 @@ impl Failure {
             Self::ServiceFailedToStart => "service-failed-to-start",
             Self::AnswerFailed => "answer-failed",
             Self::HangUpFailed => "hang-up-failed",
+            Self::CallMayStillBeLive => "call-may-still-be-live",
             Self::AudioNotMoved => "audio-not-moved",
             Self::AudioNotMovedToPhone => "audio-not-moved-to-phone",
             Self::NoSuchCall => "no-such-call",
@@ -200,6 +205,10 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::HangUpFailed => (
             "Your phone didn't hang up the Call; hang up on your phone instead.",
+            None,
+        ),
+        Failure::CallMayStillBeLive => (
+            "The Call may still be live on your phone; check your phone and hang up there if it is.",
             None,
         ),
         Failure::AudioNotMoved => (

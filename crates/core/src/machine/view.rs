@@ -195,7 +195,7 @@ impl State {
             contact: self.contact(&lost.caller),
             phase: phase(lost, false, Mute::Unavailable),
             audio: None,
-            notice: Some(Failure::ConnectionLost),
+            notice: Some(connection_lost.notice),
             focused: self.focus == Focus::CallWindow,
             held: connection_lost.held.as_ref().map(|held| HeldCall {
                 call: held.id,

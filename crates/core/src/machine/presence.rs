@@ -51,6 +51,8 @@ impl Presence {
 struct Reconnect {
     /// BlueZ is connecting the Phone now.
     connecting: bool,
+    /// Which BlueZ connect may still report a result.
+    pending: Option<u32>,
     /// Connects that failed since the Phone was last present: the longer
     /// it has been away, the longer the wait before the next, up to the
     /// last of [`RECONNECT_WAITS_MS`].
@@ -95,8 +97,20 @@ pub(super) fn presence_input(state: &mut State, input: Input, effects: &mut Vec<
         Input::PhoneAbsent { address } if state.is_our_phone(&address) => {
             phone_absent(state, effects);
         }
-        Input::ConnectPhoneDone => connect_done(state, effects),
-        Input::ConnectPhoneFailed(failure) => connect_failed(state, failure, effects),
+        Input::ConnectPhoneDone { attempt }
+            if state.presence.reconnect.pending == Some(attempt) =>
+        {
+            state.presence.reconnect.pending = None;
+            connect_done(state, effects);
+            super::setup::connect_ended(state, effects);
+        }
+        Input::ConnectPhoneFailed { attempt, failure }
+            if state.presence.reconnect.pending == Some(attempt) =>
+        {
+            state.presence.reconnect.pending = None;
+            connect_failed(state, failure, effects);
+            super::setup::connect_ended(state, effects);
+        }
         Input::Suspending => suspending(state),
         Input::Resumed => resumed(state, effects),
         _ => {}
@@ -107,8 +121,19 @@ pub(super) fn presence_input(state: &mut State, input: Input, effects: &mut Vec<
 /// Desktop is still asleep or awake.
 pub(super) fn forget_phone(state: &State) -> State {
     State {
+        // Outstanding timers and BlueZ futures outlive the attached Phone.
+        // Keep their identities distinct from work for the next Phone.
+        dial_attempts: state.dial_attempts,
+        connect_attempts: state.connect_attempts,
+        handoffs: state.handoffs,
+        waiting_notices: state.waiting_notices,
+        losses: state.losses,
         presence: Presence {
             suspended: state.presence.suspended,
+            reconnect: Reconnect {
+                wait: state.presence.reconnect.wait + 1,
+                ..Reconnect::default()
+            },
             ..Presence::default()
         },
         ..State::default()
@@ -344,15 +369,10 @@ fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
         state.presence.reconnect.at_once = true;
         return;
     }
-    let Some(phone) = &state.phone else {
-        return;
-    };
     state.presence.reconnect.wait += 1;
     state.presence.reconnect.connecting = true;
     if state.presence.absent() {
-        effects.push(Effect::ConnectPhone {
-            address: phone.address.clone(),
-        });
+        start_connect_phone(state, effects);
     } else {
         effects.push(Effect::Phone(PhoneCommand::ConnectHandsFree));
     }
@@ -361,16 +381,24 @@ fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
 /// Asks BlueZ to connect the Phone now, wherever it is: it was just
 /// paired. A connect already under way does instead.
 pub(super) fn connect_phone_now(state: &mut State, effects: &mut Vec<Effect>) {
-    let Some(phone) = &state.phone else {
-        return;
-    };
-    if state.presence.reconnect.connecting {
+    if state.phone.is_none() || state.presence.reconnect.connecting {
         return;
     }
     state.presence.reconnect.wait += 1;
     state.presence.reconnect.connecting = true;
+    start_connect_phone(state, effects);
+}
+
+/// Start one BlueZ connect whose result belongs only to this operation.
+fn start_connect_phone(state: &mut State, effects: &mut Vec<Effect>) {
+    let Some(phone) = &state.phone else {
+        return;
+    };
+    state.connect_attempts += 1;
+    state.presence.reconnect.pending = Some(state.connect_attempts);
     effects.push(Effect::ConnectPhone {
         address: phone.address.clone(),
+        attempt: state.connect_attempts,
     });
 }
 

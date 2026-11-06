@@ -79,7 +79,7 @@ fn warned() -> (State, Vec<Effect>) {
             },
             Input::ConfirmPairing,
             Input::PhonePaired(pixel()),
-            Input::ConnectPhoneDone,
+            Input::ConnectPhoneDone { attempt: 1 },
             Input::PhonePresent {
                 address: PHONE.to_owned(),
             },

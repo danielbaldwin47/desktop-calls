@@ -320,7 +320,7 @@ fn answer_call(
 fn hang_up(
     tree: &mut ObjectTree,
     audio_gateway: &OwnedObjectPath,
-    behaviour: &Behaviour,
+    behaviour: &mut Behaviour,
     call: &MethodCall,
 ) -> (Reply, Vec<Signal>) {
     let Some((path, properties)) = find_call(tree, audio_gateway, &call.path) else {
@@ -335,6 +335,10 @@ fn hang_up(
     }
     if behaviour.quirks.contains(&Quirk::HangupIgnored) {
         return (Reply::body(()), Vec::new());
+    }
+    if behaviour.quirks.remove(&Quirk::HangupUnansweredOnce) {
+        // No reply: the bus answers once the service's connection closes.
+        return (Reply::Unhandled, Vec::new());
     }
     let ended = hung_up_call(tree, audio_gateway, path, &state);
     let mut signals = end_call(tree, audio_gateway, &ended);

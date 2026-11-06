@@ -4,6 +4,7 @@
 //! as on the real Pixel (`docs/wiki/telephony-api-quirks.md`). The real
 //! restart is Real-Phone Checklist group 6.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use test_harness::{AppState, Builder, Harness, RecordedMethodCall};
@@ -29,6 +30,15 @@ const RESTART: Duration = Duration::from_secs(3);
 /// 2 s the Simulated Phone's `calls-listed-late` quirk takes to list the
 /// Calls after the AudioGateway.
 const LISTED_LATE_WATCH: Duration = Duration::from_secs(3);
+
+/// Longer than the 10 s the Desktop waits for the Telephony service to come
+/// back with its Calls.
+const OUTLASTS_THE_WAIT: Duration = Duration::from_secs(12);
+/// How long the Desktop may take to give up on a service that hasn't come
+/// back: the 10 s it waits, and then as long as any change may take.
+const SERVICE_GIVEN_UP: Duration = Duration::from_secs(15);
+/// What the Call Window says when the Hang up never reached the Phone.
+const NOT_HUNG_UP: &str = "Your phone didn't hang up the Call; hang up on your phone instead.";
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
@@ -77,6 +87,14 @@ fn count(recorded: &[RecordedMethodCall], member: &str, words: &[&str]) -> usize
                 && call.member == member
                 && words.iter().all(|word| call.arguments.contains(word))
         })
+        .count()
+}
+
+/// How many times the Phone was asked to hang up the Call at `path`.
+fn hang_ups(recorded: &[RecordedMethodCall], path: &str) -> usize {
+    recorded
+        .iter()
+        .filter(|known| known.path == path && known.member == "Hangup")
         .count()
 }
 
@@ -245,6 +263,94 @@ fn hang_up_while_the_service_is_away_ends_the_call_even_when_it_is_listed_late()
         harness.app_errors().is_empty(),
         "{:?}",
         harness.app_errors()
+    );
+}
+
+/// Ticket #175: the Hang up reaches the Telephony service just as it leaves
+/// for a restart, and never reaches the Phone. The Call goes without
+/// `disconnected` and the new service lists it again, live. The Desktop
+/// sends the Hang up again then, and the Call ends and stays ended.
+#[test]
+fn a_hang_up_lost_as_the_service_leaves_is_sent_again_once_the_call_is_back() {
+    let harness = connected(Harness::builder());
+    let (path, call) = answered_here(&harness);
+    harness
+        .simulated_phone()
+        .enable_quirk("hangup-unanswered-once");
+
+    harness.hang_up(call);
+    harness.simulated_phone().wait_for_recorded(
+        "the Hang up reached the service",
+        DEADLINE,
+        |recorded| hang_ups(recorded, &path) == 1,
+    );
+    harness.simulated_phone().restart_telephony(GAP);
+
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone was asked to hang up again once the Call was back",
+        DEADLINE,
+        |recorded| hang_ups(recorded, &path) == 2,
+    );
+    harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
+    harness.app_holds("the Call stays ended", LISTED_LATE_WATCH, |state| {
+        state.calls.is_empty()
+    });
+    assert_eq!(harness.simulated_phone().calls_on_phone(), []);
+    assert!(
+        harness.app_errors().is_empty(),
+        "{:?}",
+        harness.app_errors()
+    );
+}
+
+/// Ticket #175: the service stays away longer than the Desktop waits for
+/// it, with the Hang up the user pressed meanwhile still to send. The
+/// Desktop doesn't say the Call ended: the Call Window says the Phone
+/// didn't hang it up. Once the service is back and lists the Call, it shows
+/// again with its timer, and the Desktop doesn't hang it up by itself.
+#[test]
+fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
+    let harness = connected(Harness::builder().headless_screen());
+    let (path, call) = answered_here(&harness);
+    let active_since = harness.app_state().calls[0].active_since_ms;
+
+    harness
+        .simulated_phone()
+        .restart_telephony(OUTLASTS_THE_WAIT);
+    harness.wait_for_app("the Phone shows as disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+    harness.hang_up(call);
+
+    let error = harness.wait_for_app_error(SERVICE_GIVEN_UP);
+    assert_eq!(error.kind, "hang-up-failed", "{error:?}");
+    let state = harness.wait_for_app("the Call shows again, live", DEADLINE, |state| {
+        state.calls.len() == 1
+            && state.calls[0].state == "active"
+            && state.connection_state == "connected"
+    });
+    assert_eq!(state.calls[0].active_since_ms, active_since);
+    let windows: Vec<BTreeMap<String, String>> = harness
+        .surfaces_seen()
+        .into_iter()
+        .filter_map(|mut surfaces| surfaces.remove("call-window"))
+        .collect();
+    assert!(
+        windows
+            .iter()
+            .any(|window| window.get("notice").map(String::as_str) == Some(NOT_HUNG_UP)),
+        "{windows:#?}"
+    );
+    assert!(
+        !windows
+            .iter()
+            .any(|window| window.get("status").map(String::as_str) == Some("Call ended")),
+        "{windows:#?}"
+    );
+    harness.simulated_phone().recorded_holds(
+        "the Desktop never hung up the Call by itself",
+        Duration::ZERO,
+        |recorded| hang_ups(recorded, &path) == 0,
     );
 }
 

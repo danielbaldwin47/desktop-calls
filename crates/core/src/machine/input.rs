@@ -62,6 +62,10 @@ pub enum Input {
     CallerChanged { call: CallId, caller: Caller },
     /// A Call is over, however it ended.
     CallEnded { call: CallId },
+    /// The Phone link gave up on this Call before the Hang up the user asked
+    /// for reached the Phone: the Call went away without ending and didn't
+    /// come back while the Phone was away, so it may carry on on the Phone.
+    HangUpUndelivered(CallId),
     /// The Call audio link between Phone and Desktop changed.
     TransportChanged(Transport),
     /// The audio link's codec changed; `None` is the Phone's 0, "no link".

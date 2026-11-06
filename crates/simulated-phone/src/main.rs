@@ -270,6 +270,11 @@ pub(crate) async fn serve(
     telephony: TelephonyConnection,
 ) -> zbus::Result<()> {
     while let Some(message) = messages.next().await {
+        // A Telephony service that left for a restart closed its connection,
+        // as the old process exits.
+        if connection.is_closed() {
+            break;
+        }
         let message = message?;
         let Some(call) = MethodCall::from_message(&message) else {
             continue;
@@ -347,7 +352,10 @@ pub(crate) async fn serve(
             });
             continue;
         }
-        answer(&connection, &message, reply, signals).await?;
+        match answer(&connection, &message, reply, signals).await {
+            Err(_) if connection.is_closed() => break,
+            result => result?,
+        }
         if let Some((after, later)) = later {
             run_obex_later(world.clone(), connection.clone(), message, after, later);
         }
@@ -701,11 +709,12 @@ impl Control {
     /// `"earbuds-keep-audio"`, `"disconnect-profile-refused"`,
     /// `"connect-profile-fails"`, `"connect-profile-fails-once"`,
     /// `"late-line-identification"`, `"chld-unsupported"`,
-    /// `"hangup-ignored"`, `"slow-service-level"` or `"calls-listed-late"`.
+    /// `"hangup-ignored"`, `"hangup-unanswered-once"`,
+    /// `"slow-service-level"` or `"calls-listed-late"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, slow-service-level and calls-listed-late"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level and calls-listed-late"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);
@@ -746,8 +755,9 @@ impl Control {
 
     /// Restarts the Telephony service, as `systemctl --user restart
     /// wireplumber` does. The service unannounces the connected
-    /// AudioGateway's Calls, then the AudioGateway, and leaves the bus.
-    /// `gap_ms` later a new connection takes `org.pipewire.Telephony` and
+    /// AudioGateway's Calls, then the AudioGateway, and leaves the bus, its
+    /// connection closing as the old process exits: the bus answers any
+    /// method call it left unanswered with `NoReply`. `gap_ms` later a new connection takes `org.pipewire.Telephony` and
     /// announces the AudioGateway again at the same path, then, 40 ms later,
     /// its Calls at theirs. Returns once the service has left the bus. On the
     /// real Pixel the gap was 0.73 s.
@@ -764,6 +774,7 @@ impl Control {
         };
         *lock(&self.telephony) = None;
         old.release_name(telephony::SERVICE).await?;
+        old.close().await?;
         let holder = self.telephony.clone();
         let world = self.world.clone();
         std::thread::spawn(move || {

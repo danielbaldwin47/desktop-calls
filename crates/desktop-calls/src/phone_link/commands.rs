@@ -90,32 +90,58 @@ pub(super) async fn execute(
                 // Resolved to the Phone itself, above.
                 PhoneCommand::MoveAudioToPhone | PhoneCommand::ConnectHandsFree => Ok(()),
             };
-            let name = command_name(&command);
-            match result {
-                Ok(()) => {
-                    tracing::debug!(
-                        event_kind = %EventKind::PhoneCommandSent,
-                        command = %name,
-                        "The Phone did {name}"
-                    );
-                    let _ = inputs.unbounded_send(Input::PhoneCommandDone(command));
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        event_kind = %EventKind::PhoneCommandFailed,
-                        error_kind = error_kind(&error),
-                        command = %name,
-                        detail = %error,
-                        "The Phone refused {name}"
-                    );
-                    let input = match command {
-                        PhoneCommand::Dial(_) => Input::DialFailed(dial_refusal(&error)),
-                        command => Input::PhoneCommandFailed(command),
-                    };
-                    let _ = inputs.unbounded_send(input);
-                    break;
-                }
+            if !report(command, result, inputs) {
+                break;
             }
+        }
+    }
+}
+
+/// Reports what became of `command` to the state machine, and returns
+/// whether the rest of its batch goes ahead.
+fn report(
+    command: PhoneCommand,
+    result: zbus::Result<()>,
+    inputs: &UnboundedSender<Input>,
+) -> bool {
+    let name = command_name(&command);
+    match result {
+        Ok(()) => {
+            tracing::debug!(
+                event_kind = %EventKind::PhoneCommandSent,
+                command = %name,
+                "The Phone did {name}"
+            );
+            let _ = inputs.unbounded_send(Input::PhoneCommandDone(command));
+            true
+        }
+        Err(error) if matches!(command, PhoneCommand::HangUp(_)) && is_service_gone(&error) => {
+            // The Call went with the service, so the Phone link sends the
+            // Hang up again if it comes back, or reports it undelivered
+            // (ticket #175).
+            tracing::info!(
+                event_kind = %EventKind::PhoneCommandFailed,
+                error_kind = error_kind(&error),
+                command = %name,
+                detail = %error,
+                "The Telephony service went away before the Phone took {name}"
+            );
+            false
+        }
+        Err(error) => {
+            tracing::warn!(
+                event_kind = %EventKind::PhoneCommandFailed,
+                error_kind = error_kind(&error),
+                command = %name,
+                detail = %error,
+                "The Phone refused {name}"
+            );
+            let input = match command {
+                PhoneCommand::Dial(_) => Input::DialFailed(dial_refusal(&error)),
+                command => Input::PhoneCommandFailed(command),
+            };
+            let _ = inputs.unbounded_send(input);
+            false
         }
     }
 }
@@ -236,6 +262,9 @@ fn error_name(error: &zbus::Error) -> Option<&str> {
             zbus::fdo::Error::UnknownMethod(_) => "org.freedesktop.DBus.Error.UnknownMethod",
             zbus::fdo::Error::UnknownObject(_) => "org.freedesktop.DBus.Error.UnknownObject",
             zbus::fdo::Error::InvalidArgs(_) => "org.freedesktop.DBus.Error.InvalidArgs",
+            zbus::fdo::Error::NoReply(_) => "org.freedesktop.DBus.Error.NoReply",
+            zbus::fdo::Error::ServiceUnknown(_) => "org.freedesktop.DBus.Error.ServiceUnknown",
+            zbus::fdo::Error::NameHasNoOwner(_) => "org.freedesktop.DBus.Error.NameHasNoOwner",
             _ => return None,
         }),
         _ => None,
@@ -274,8 +303,27 @@ fn is_already_ending(error: &zbus::Error) -> bool {
     }
 }
 
+/// An error that says the Telephony service left the bus with the call
+/// unanswered, as `WirePlumber` exiting for a restart does, or had already
+/// gone. dbus-daemon says "Message recipient disconnected from message bus
+/// without replying", and dbus-broker "Remote peer disconnected"; a
+/// `NoReply` that only timed out is a failure like any other.
+fn is_service_gone(error: &zbus::Error) -> bool {
+    match error_name(error) {
+        Some("org.freedesktop.DBus.Error.NoReply") => error_text(error).contains("disconnected"),
+        Some(
+            "org.freedesktop.DBus.Error.ServiceUnknown"
+            | "org.freedesktop.DBus.Error.NameHasNoOwner",
+        ) => true,
+        _ => false,
+    }
+}
+
 /// The kind of a Phone command failure, for the log.
 fn error_kind(error: &zbus::Error) -> &'static str {
+    if is_service_gone(error) {
+        return "service-gone";
+    }
     match error_name(error) {
         Some("org.pipewire.Telephony.Error.InvalidState") => "invalid-state",
         Some("org.pipewire.Telephony.Error.InvalidFormat") => "invalid-format",

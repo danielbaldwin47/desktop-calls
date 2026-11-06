@@ -19,6 +19,13 @@ On 2026-11-05 the chief of staff decided, on the rule that UX wins: **while a Ca
 
 All of this stays in the Phone link (`crates/desktop-calls/src/phone_link.rs`), as ADR-0005 put it: it hides how PipeWire re-registers Calls, and the core sees one continuous Call.
 
+## Extended for a Hang up that never reached the Phone (#175)
+
+On 2026-11-05, ticket #175 extended this decision to a Call the Desktop has already asked to hang up. Going away is no proof that the Hang up worked: a `WirePlumber` restart takes Calls away without `disconnected`, and a Hang up the old service never passed on leaves the Call live on the Phone. On the Pixel, a Call that really is hung up goes `disconnected` first ([prototype note](../research/2026-11-04-handoff-to-phone-prototype.md) §4).
+
+4. **A hung-up Call that goes without `disconnected` is a vanished Call.** It is settled as in point 2: the Hang up goes again to the Call that comes back, and a Call the Phone doesn't list has ended. A Hang up the bus answers with "the service went away" is not reported as refused, since the Call went with the service.
+5. **If hands-free isn't back before the grace in point 1 runs out, the Hang up is undelivered.** The Desktop doesn't say "Call ended". It says "Your phone didn't hang up the Call; hang up on your phone instead.", and the Call Window shows the Call as lost, as for a lost connection. A Call that comes back later keeps its direction and timer, and isn't hung up by itself: by then the user may have taken it on the Phone.
+
 ## Considered options
 
 - **Widen `GRACE`.** It would only move the edge #170 fell over, and it would also keep a Call that really ended longer while hands-free is away, when the Desktop can't know. Rejected.

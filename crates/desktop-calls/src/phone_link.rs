@@ -27,6 +27,13 @@
 //!   the same Call if listed, ended if not listed within [`LISTING_GRACE`]
 //!   (ADR-0007). The AudioGateway comes back before its Calls, and nothing
 //!   says when the Phone has listed them all.
+//! - Going away is no proof that a Hang up worked: a `WirePlumber` restart
+//!   takes the Calls away without `disconnected`, and a Hang up it never
+//!   passed on leaves the Call live on the Phone. So a hung-up Call that
+//!   goes without `disconnected` is vanished like any other, and the Hang up
+//!   is sent again if it comes back. If hands-free isn't back in time to
+//!   settle it, the Hang up is reported undelivered, not the Call ended
+//!   (ticket #175).
 //! - `Call1.Hangup` falls back to `org.ofono.VoiceCall.Hangup` where `Call1`'s
 //!   method doesn't exist, and a hang-up error for a Call that is already
 //!   going counts as success.
@@ -294,18 +301,7 @@ impl PhoneLink {
                 // than the hands-free profile bouncing.
                 self.restart_graces(SERVICE_GRACE, &mut outcome);
             }
-            Event::GraceOver(grace) => {
-                let id = grace.call;
-                if let Some(index) = self.vanished.iter().position(|call| call.grace == grace) {
-                    self.vanished.remove(index);
-                    tracing::info!(
-                        event_kind = %EventKind::CallEnded,
-                        call_id = id.0,
-                        "Call {id} ended: it didn't come back"
-                    );
-                    outcome.inputs.push(Input::CallEnded { call: id });
-                }
-            }
+            Event::GraceOver(grace) => self.grace_over(grace, &mut outcome),
         }
         outcome
     }
@@ -554,32 +550,62 @@ impl PhoneLink {
         if followed.ended {
             return;
         }
-        if followed.ending {
-            tracing::info!(
-                event_kind = %EventKind::CallEnded,
-                call_id = followed.id.0,
-                "Call {} ended",
-                followed.id
-            );
-            outcome.inputs.push(Input::CallEnded { call: followed.id });
-            return;
-        }
-        self.vanish(followed.id, object.map(|object| object.number), outcome);
+        self.vanish(&followed, object.map(|object| object.number), outcome);
     }
 
-    fn vanish(&mut self, id: CallId, number: Option<String>, outcome: &mut Outcome) {
-        tracing::info!(
-            event_kind = %EventKind::CallVanished,
-            call_id = id.0,
-            "Call {id} went away without ending; waiting for it to come back"
-        );
+    /// The followed Call went away without `disconnected`. It may come back,
+    /// and so may a Call the Desktop asked to hang up, if the Hang up never
+    /// reached the Phone: it is hung up again then.
+    fn vanish(&mut self, followed: &Followed, number: Option<String>, outcome: &mut Outcome) {
+        let id = followed.id;
+        if followed.ending {
+            tracing::info!(
+                event_kind = %EventKind::CallVanished,
+                call_id = id.0,
+                "Call {id} went away without ending after the Hang up; it is hung up again if it comes back"
+            );
+        } else {
+            tracing::info!(
+                event_kind = %EventKind::CallVanished,
+                call_id = id.0,
+                "Call {id} went away without ending; waiting for it to come back"
+            );
+        }
         let grace = self.start_grace(id, GRACE, outcome);
         self.vanished.push(Vanished {
             id,
             grace,
             number: number.unwrap_or_default(),
-            hang_up: false,
+            hang_up: followed.ending,
         });
+    }
+
+    /// The latest grace of a vanished Call ran out. Once hands-free is back,
+    /// a Call the Phone didn't list has ended, hung up or not. While it is
+    /// away, nobody knows: a Hang up kept for the Call's return is reported
+    /// undelivered, as the Call may carry on on the Phone.
+    fn grace_over(&mut self, grace: Grace, outcome: &mut Outcome) {
+        let id = grace.call;
+        let Some(index) = self.vanished.iter().position(|call| call.grace == grace) else {
+            return;
+        };
+        let vanished = self.vanished.remove(index);
+        if vanished.hang_up && self.connected.is_none() {
+            tracing::warn!(
+                event_kind = %EventKind::PhoneCommandFailed,
+                error_kind = "hang-up-undelivered",
+                call_id = id.0,
+                "Call {id} didn't come back, and the Hang up never reached the Phone"
+            );
+            outcome.inputs.push(Input::HangUpUndelivered(id));
+            return;
+        }
+        tracing::info!(
+            event_kind = %EventKind::CallEnded,
+            call_id = id.0,
+            "Call {id} ended: it didn't come back"
+        );
+        outcome.inputs.push(Input::CallEnded { call: id });
     }
 
     /// Starts a grace period of `lasting` for the vanished Call `call`.
@@ -613,15 +639,11 @@ impl PhoneLink {
             if followed.ended {
                 continue;
             }
-            if followed.ending {
-                outcome.inputs.push(Input::CallEnded { call: followed.id });
-                continue;
-            }
             let number = self
                 .call_objects
                 .get(&path)
                 .map(|object| object.number.clone());
-            self.vanish(followed.id, number, outcome);
+            self.vanish(&followed, number, outcome);
         }
     }
 

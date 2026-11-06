@@ -23,6 +23,8 @@ can fail when HOME isn't the user's usual one.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -31,6 +33,49 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parent.parent
 APP_ID = "io.github.danielbaldwin47.DesktopCalls"
 UNIT = "desktop-calls.service"
+
+
+def systemd_command(path: Path) -> str:
+    """Encode the executable for ExecStart, including percent specifiers.
+
+    Environment expansion applies to arguments, not the executable path.
+    See systemd.service(5), Command lines, and systemd.syntax(7), Quoting.
+    """
+    text = str(path)
+    # systemd's executable validation rejects quotes, backslashes, globs and
+    # controls even when quoted. env accepts those paths as an argument.
+    indirect = any(
+        character in "'\"\\*?[" or ord(character) < 32 or ord(character) == 127
+        for character in text
+    )
+    text = text.replace("%", "%%")
+    if indirect:
+        text = text.replace("$", "$$")
+    if re.fullmatch(r"[\w/%.\-]+", text):
+        return text
+    text = "".join(
+        f"\\x{ord(character):02x}" if ord(character) < 32 or ord(character) == 127
+        else "\\" + character if character in '\\"' else character
+        for character in text
+    )
+    return ("/usr/bin/env -- " if indirect else "") + '"' + text + '"'
+
+
+def entry_value(text: str) -> str:
+    """Escape the string-value layer shared by desktop and D-Bus files."""
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+
+def desktop_command(path: Path) -> str:
+    """Desktop Entry Exec quoting, then string-value escaping (two layers)."""
+    # Gio checks argv[0] for existence before expanding %% into %.
+    prefix = "/usr/bin/env -- " if "%" in str(path) else ""
+    text = str(path).replace("%", "%%")
+    if re.fullmatch(r"[\w/%.\-]+", text):
+        return prefix + text
+    for character in ('\\', '"', '`', '$'):
+        text = text.replace(character, "\\" + character)
+    return prefix + entry_value('"' + text + '"')
 
 
 def directories() -> tuple[Path, Path]:
@@ -85,10 +130,16 @@ def install(binary: Path) -> None:
             staged(path).chmod(0o755)
         else:
             text = template.read_text()
-            text = text.replace("@BINDIR@", str(bin_directory))
+            if template.parent.name == "systemd":
+                command = systemd_command(installed_binary)
+            else:
+                # D-Bus unescapes the entry value before its shell-style
+                # argument parser. It does not expand variables or percent.
+                command = entry_value(shlex.quote(str(installed_binary)))
+            text = text.replace("@COMMAND@", command)
             # The desktop file runs the binary by its path, not through PATH,
             # which a launcher may not share with the shell.
-            text = text.replace("Exec=desktop-calls ", f"Exec={installed_binary} ")
+            text = text.replace("Exec=desktop-calls ", f"Exec={desktop_command(installed_binary)} ")
             write_atomically(staged(path), lambda file: file.write(text.encode()))
             staged(path).chmod(0o644)
         print(f"Installed {staged(path)}")

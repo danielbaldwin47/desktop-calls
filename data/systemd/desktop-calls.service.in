@@ -1,4 +1,4 @@
-# The systemd user unit `just install` installs, with @BINDIR@ filled in.
+# The systemd user unit `just install` installs, with @COMMAND@ filled in.
 # It starts Desktop Calls with the graphical session, stops it with the
 # session, and restarts it if it crashes; it then adopts any Call in progress.
 
@@ -12,7 +12,7 @@ After=graphical-session.target
 # Started once the control interface is on the session bus.
 Type=dbus
 BusName=io.github.danielbaldwin47.DesktopCalls
-ExecStart=@BINDIR@/desktop-calls service
+ExecStart=@COMMAND@ service
 Restart=on-failure
 RestartSec=1s
 # What a run after a crash needs (the Calls in progress) is kept in

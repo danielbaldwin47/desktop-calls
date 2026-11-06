@@ -12,9 +12,16 @@ use std::path::Path;
 /// The app's log at `path` so far, as far as its last finished line: empty
 /// before the app has logged anything.
 pub(crate) fn read(path: &Path) -> String {
-    let mut log = fs::read_to_string(path).unwrap_or_default();
-    log.truncate(log.rfind('\n').map_or(0, |last| last + 1));
-    log
+    let mut bytes = fs::read(path).unwrap_or_default();
+    // Cut on bytes: a write cut inside a multi-byte character isn't UTF-8
+    // yet, and the newline byte never occurs inside one.
+    bytes.truncate(
+        bytes
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+            .map_or(0, |last| last + 1),
+    );
+    String::from_utf8(bytes).unwrap_or_default()
 }
 
 /// Every event in `log`, as [`read`] returns it.
@@ -48,6 +55,31 @@ mod tests {
 
         assert_eq!(events.len(), 1, "only the finished line is an event");
         assert_eq!(events[0]["event_kind"], "service-started");
+    }
+
+    #[test]
+    fn a_write_cut_inside_a_character_leaves_the_finished_lines_readable() {
+        let directory = tempfile::tempdir().expect("make a directory");
+        let path = directory.path().join("desktop-calls.log");
+        let mut bytes = FINISHED.as_bytes().to_vec();
+        bytes.extend_from_slice(b"{\"contact_name\":\"Zo");
+        bytes.push(0xC3); // the first byte of the two-byte "\u{e9}"
+        fs::write(&path, bytes).expect("write the log");
+
+        let events = events(&read(&path));
+
+        assert_eq!(events.len(), 1, "only the finished line is an event");
+    }
+
+    #[test]
+    fn a_log_with_no_finished_line_reads_as_empty() {
+        let directory = tempfile::tempdir().expect("make a directory");
+        let path = directory.path().join("desktop-calls.log");
+        assert_eq!(read(&path), "", "the app hasn't made the file yet");
+
+        fs::write(&path, PARTIAL).expect("write the log");
+
+        assert_eq!(read(&path), "");
     }
 
     #[test]

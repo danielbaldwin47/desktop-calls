@@ -408,14 +408,11 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_rest
     }
     // The demo's Phone brings hands-free up 200 ms after BlueZ marks it
     // connected, as a real Phone takes a moment to, so 6.1 never reads 0 ms.
-    // The timing starts when the app logs the link back, which is after BlueZ
-    // marked it by however long the app took to notice: 190 ms was read on a
-    // busy Desktop (#167). So the bound is half the delay, not all of it.
     let back = step(&result, "6.1");
     assert!(
         back["measurements"]["reconnect_ms"]
             .as_u64()
-            .is_some_and(|ms| ms >= 100),
+            .is_some_and(|ms| ms >= 200),
         "{back:#}"
     );
     assert!(

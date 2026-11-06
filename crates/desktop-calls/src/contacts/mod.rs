@@ -470,7 +470,7 @@ impl ContactsSync {
         Ok((!folders.is_empty()).then_some(folders))
     }
 
-    /// Reads up to `pages` more pages of `folder`, until it is complete.
+    /// Reads up to `pages` more pages of `folder`, until complete or failed.
     /// False if the Phone can't give the folder at all. Stops the sync only
     /// if the Phone refuses, or obexd is gone.
     async fn pull(
@@ -484,18 +484,20 @@ impl ContactsSync {
         }
         folder.selected = false;
         for _ in 0..pages {
-            if folder.complete {
+            if folder.complete || folder.failed {
                 break;
             }
             let Ok(offset) = u16::try_from(folder.cards.len()) else {
-                folder.complete = true;
+                folder.failed = true;
                 break;
             };
             let page = match self.pull_page(session, folder.name, offset).await {
                 Ok(Some(page)) => page,
-                Ok(None) if offset == 0 => return Ok(false),
                 Ok(None) => {
-                    folder.complete = true;
+                    folder.failed = true;
+                    if offset == 0 {
+                        return Ok(false);
+                    }
                     break;
                 }
                 Err(error) => {
@@ -504,14 +506,17 @@ impl ContactsSync {
                     if offset == 0 {
                         return Ok(false);
                     }
-                    // Keeps the pages already read.
-                    folder.complete = true;
+                    // Keeps the pages already read, and the older cache.
                     break;
                 }
             };
-            // A Phone that ignores `Offset` gives the first page again.
-            if page.is_empty() || (offset > 0 && folder.cards.starts_with(&page)) {
+            if page.is_empty() {
                 folder.complete = true;
+                break;
+            }
+            // A repeated first page doesn't tell us the older Calls.
+            if offset > 0 && folder.cards.starts_with(&page) {
+                folder.failed = true;
                 break;
             }
             folder.cards.extend(page);
@@ -638,11 +643,11 @@ struct Folder {
     cards: Vec<vcard::Card>,
     /// How many vCards the Phone says the folder holds, once asked.
     size: Option<u16>,
-    /// Whether every page has been read, or no more can be.
+    /// Whether every page has been read, so the old cache can be replaced.
     complete: bool,
     /// Selected just now, so the next pull needn't select it again.
     selected: bool,
-    /// A pull failed part way, or before its first page.
+    /// No more pages can be read, without reaching the folder's end.
     failed: bool,
 }
 

@@ -32,6 +32,23 @@ pub struct Away {
     pub calls: Vec<(OwnedObjectPath, Properties)>,
 }
 
+impl Away {
+    /// The Calls carrying on on the Phone meanwhile, as `(path's last part,
+    /// State)`.
+    pub fn calls_away(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        self.calls.iter().map(|(call, properties)| {
+            (
+                call.as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+                crate::range::call_state(properties),
+            )
+        })
+    }
+}
+
 /// Drops the AudioGateway at `audio_gateway` and its Calls. Returns what
 /// went, and the signals that announce it.
 pub fn drop_hands_free(

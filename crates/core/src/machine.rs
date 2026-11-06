@@ -93,9 +93,10 @@ const RECONNECT_WAITS_MS: [u32; 3] = [1_000, 2_000, 3_000];
 /// How long the Call Window says the connection to the Phone was lost
 /// before it closes, if the Phone isn't back by then.
 const CONNECTION_LOST_MS: u32 = 10_000;
-/// How long a Call that lost the connection may take to show again once
-/// hands-free is back. The Phone link waits as long for a Call that went
-/// away briefly.
+/// How long a Call that lost the connection, and that the Phone link gave
+/// up on while hands-free was away, may take to show again once hands-free
+/// is back. A Call the Phone link still holds then gets 3 s from it to be
+/// listed again (ADR-0007), and this timer doesn't start for it.
 const LOST_CALL_BACK_MS: u32 = 2_000;
 /// How long a Call that rang with no number may wait for the Phone to
 /// report one before the Banner says the number is withheld. PipeWire 1.6.9

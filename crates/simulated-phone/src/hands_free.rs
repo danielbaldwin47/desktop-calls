@@ -74,16 +74,7 @@ impl Dropped {
     /// The Calls carrying on on the Phone while hands-free is down, as
     /// `(path's last part, State)`.
     pub fn calls_away(&self) -> impl Iterator<Item = (String, String)> + '_ {
-        self.away.calls.iter().map(|(call, properties)| {
-            (
-                call.as_str()
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned(),
-                crate::range::call_state(properties),
-            )
-        })
+        self.away.calls_away()
     }
 }
 
@@ -257,13 +248,14 @@ fn connect_profile(
         }
         emit(telephony, &telephony_signals).await
     })?;
-    std::thread::sleep(CALLS_BACK);
+    let calls_back_after = lock(world).behaviour.calls_back_after(CALLS_BACK);
+    std::thread::sleep(calls_back_after);
     let signals = {
         let mut world = lock(world);
         calls_back(&mut world.telephony, away)
     };
     zbus::block_on(emit(telephony, &signals))?;
-    std::thread::sleep(FIRST_AUDIO_LINK_TRY.saturating_sub(CALLS_BACK));
+    std::thread::sleep(FIRST_AUDIO_LINK_TRY.saturating_sub(calls_back_after));
     let tries = {
         let mut world = lock(world);
         let world = &mut *world;

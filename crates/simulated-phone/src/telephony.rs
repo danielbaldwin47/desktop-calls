@@ -71,9 +71,9 @@ mod tree;
 
 pub use methods::{ActivateLater, activate_later, answer};
 pub use phone::{
-    Restart, alert, answer_on_phone, callee_answers, calls, dial_on_phone, end_call_on_phone,
-    identify_caller, number_from_caller_id, reregister_call, restart, ring, set_microphone_volume,
-    unannounce_call,
+    Restart, alert, answer_on_phone, callee_answers, calls, calls_back_after_restart,
+    dial_on_phone, end_call_on_phone, identify_caller, number_from_caller_id, reregister_call,
+    restart, ring, set_microphone_volume, unannounce_call,
 };
 
 pub const SERVICE: &str = "org.pipewire.Telephony";
@@ -166,10 +166,23 @@ pub enum Quirk {
     /// connection taking its time, as it does on a real Phone. Off by
     /// default, so other tests keep their timings.
     SlowServiceLevel,
+    /// Once hands-free is back, after a `DisconnectProfile` or a Telephony
+    /// restart, the Phone's Calls are registered [`CALLS_LISTED_LATE`] after
+    /// the AudioGateway rather than the Pixel's 30 to 60 ms: a slow `+CLCC`
+    /// reply, or a busy `WirePlumber`. Tests use it to order "hands-free is
+    /// back" well before "the Calls are listed" (tickets #169 and #170).
+    CallsListedLate,
 }
 
 /// How long [`Quirk::SlowServiceLevel`] takes to bring hands-free up.
 pub const SERVICE_LEVEL_TIME: Duration = Duration::from_millis(200);
+
+/// How long after the AudioGateway [`Quirk::CallsListedLate`] registers
+/// the Calls. Hands-free is back 0.6 s after a `DisconnectProfile`, so the
+/// Calls come 2.6 s after it: after the Desktop's 2 s grace for a vanished
+/// Call, counted from the drop, and within the 3 s it waits for the Calls
+/// once hands-free is back (ADR-0007).
+pub const CALLS_LISTED_LATE: Duration = Duration::from_secs(2);
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
 pub const SLOW_REPLY: Duration = Duration::from_secs(1);
@@ -198,6 +211,7 @@ impl Quirk {
             "chld-unsupported" => Some(Self::ChldUnsupported),
             "hangup-ignored" => Some(Self::HangupIgnored),
             "slow-service-level" => Some(Self::SlowServiceLevel),
+            "calls-listed-late" => Some(Self::CallsListedLate),
             _ => None,
         }
     }
@@ -214,6 +228,19 @@ pub struct Behaviour {
     /// How long the Phone takes after `Activate` to act on it. PipeWire
     /// replies at once either way.
     pub activate_delay: Duration,
+}
+
+impl Behaviour {
+    /// How long after the AudioGateway is back the Phone's Calls are
+    /// registered again: `usual`, or [`CALLS_LISTED_LATE`] with
+    /// [`Quirk::CallsListedLate`].
+    pub fn calls_back_after(&self, usual: Duration) -> Duration {
+        if self.quirks.contains(&Quirk::CallsListedLate) {
+            CALLS_LISTED_LATE
+        } else {
+            usual
+        }
+    }
 }
 
 /// Earbuds connected to the Phone beside the Desktop: a second hands-free

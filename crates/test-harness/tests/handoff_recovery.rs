@@ -6,6 +6,10 @@
 //! hands-free returns. Checked through the control interface, the Call
 //! Window's `Surfaces`, the notifications stand-in, and what the Simulated
 //! Phone was asked and still has.
+//!
+//! Ticket #170 adds the Phone listing its Calls late once hands-free is
+//! back: the Call is settled by what the Phone lists, not by the grace that
+//! started when it vanished (ADR-0007).
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -217,5 +221,45 @@ fn with_connect_profile_failing_always_the_call_is_never_shown_as_ended() {
     assert_eq!(on_phone.len(), 1, "{on_phone:?}");
     assert_eq!(on_phone[0].1, "active");
     // Not a Missed Call, nor anything else to notify.
+    assert_eq!(harness.notifications().received(), []);
+}
+
+#[test]
+fn with_the_calls_listed_late_after_hands_free_returns_the_call_keeps_its_id_and_timer() {
+    let harness = connected();
+    let before = live_here(&harness);
+    // Hands-free is back 0.6 s after the drop, long before the 2 s grace
+    // for the vanished Call runs out; the Phone lists the Call 2 s later,
+    // after it has.
+    harness.simulated_phone().enable_quirk("calls-listed-late");
+    let ended = Cell::new(false);
+    let watch = |state: &AppState| {
+        ended.set(ended.get() || shows_ended(state));
+    };
+
+    harness
+        .move_audio("phone")
+        .expect("MoveAudio(\"phone\") is accepted");
+
+    let state = harness.wait_for_app(
+        "the Call is back, live, with its audio on the Phone",
+        DEADLINE,
+        |state| {
+            watch(state);
+            state.connection_state == "connected"
+                && state.calls.len() == 1
+                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
+                && shown(state, "handoff").as_deref() == Some("Move audio here")
+        },
+    );
+    assert!(!ended.get(), "the Call Window said Call ended");
+    let call = &state.calls[0];
+    assert_eq!(call.id, before.id, "the same Call: {state:?}");
+    assert_eq!(call.state, "active");
+    assert_eq!(
+        call.active_since_ms, before.active_since_ms,
+        "the same timer"
+    );
+    assert_eq!(shown(&state, "call"), Some(call.id.to_string()));
     assert_eq!(harness.notifications().received(), []);
 }

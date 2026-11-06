@@ -20,9 +20,13 @@
 //!   caller follows it.
 //! - A Call that goes away without first going `disconnected` may come back
 //!   within a second, as the same Call: the hands-free profile dropping
-//!   briefly, or `WirePlumber` restarting, does that mid-Call. Such a Call ends
-//!   only if it isn't back within [`GRACE`], or [`SERVICE_GRACE`] once the
-//!   whole service has gone.
+//!   briefly, or `WirePlumber` restarting, does that mid-Call. While
+//!   hands-free is away, such a Call ends only if hands-free isn't back
+//!   within [`GRACE`], or [`SERVICE_GRACE`] once the whole service has gone.
+//!   Once hands-free is back, it is settled by the Calls the Phone lists:
+//!   the same Call if listed, ended if not listed within [`LISTING_GRACE`]
+//!   (ADR-0007). The AudioGateway comes back before its Calls, and nothing
+//!   says when the Phone has listed them all.
 //! - `Call1.Hangup` falls back to `org.ofono.VoiceCall.Hangup` where `Call1`'s
 //!   method doesn't exist, and a hang-up error for a Call that is already
 //!   going counts as success.
@@ -67,8 +71,18 @@ const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
 const CALL: &str = "org.pipewire.Telephony.Call1";
 
 /// How long a Call that vanished without going `disconnected` may take to
-/// come back as the same Call. The Pixel's took 0.5 to 1.1 s.
+/// come back as the same Call while hands-free is away. The Pixel's took
+/// 0.5 to 1.1 s.
 const GRACE: Duration = Duration::from_secs(2);
+
+/// How long, once hands-free is back, a vanished Call may take to be listed
+/// again, whatever is left of its grace (ADR-0007). The Pixel lists its
+/// Calls 30 to 60 ms after the AudioGateway; a loaded Desktop stalled for
+/// 366 ms in ticket #170, and a busy `WirePlumber` may be slower still.
+/// Waiting longer costs only this: a Call that ended on the Phone while
+/// hands-free was away shows up to 3 s more, where ending a live Call
+/// would show "Call ended" and bring it back as a new Call.
+const LISTING_GRACE: Duration = Duration::from_secs(3);
 
 /// How long the Calls of a Telephony service that left the bus may take to
 /// come back with it. After a `WirePlumber` restart the real service was back
@@ -278,13 +292,7 @@ impl PhoneLink {
                 self.call_objects.clear();
                 // The Calls come back with the service, which takes longer
                 // than the hands-free profile bouncing.
-                let ids: Vec<CallId> = self.vanished.iter().map(|call| call.id).collect();
-                for id in ids {
-                    let grace = self.start_grace(id, SERVICE_GRACE, &mut outcome);
-                    if let Some(vanished) = self.vanished.iter_mut().find(|call| call.id == id) {
-                        vanished.grace = grace;
-                    }
-                }
+                self.restart_graces(SERVICE_GRACE, &mut outcome);
             }
             Event::GraceOver(grace) => {
                 let id = grace.call;
@@ -585,6 +593,18 @@ impl PhoneLink {
         grace
     }
 
+    /// Gives every vanished Call a grace of `lasting` from now, in place of
+    /// the one it had.
+    fn restart_graces(&mut self, lasting: Duration, outcome: &mut Outcome) {
+        let ids: Vec<CallId> = self.vanished.iter().map(|call| call.id).collect();
+        for id in ids {
+            let grace = self.start_grace(id, lasting, outcome);
+            if let Some(vanished) = self.vanished.iter_mut().find(|call| call.id == id) {
+                vanished.grace = grace;
+            }
+        }
+    }
+
     /// Every followed Call goes away without ending, as when the
     /// AudioGateway or the whole service does.
     fn vanish_all(&mut self, outcome: &mut Outcome) {
@@ -631,6 +651,9 @@ impl PhoneLink {
         if let Some(transport) = self.transports.get(path) {
             transport_changed(transport, outcome);
         }
+        // Hands-free is back: the Calls that vanished are settled by what
+        // the Phone lists from now on, not by when they went (ADR-0007).
+        self.restart_graces(LISTING_GRACE, outcome);
         let calls: Vec<String> = self.call_objects.keys().cloned().collect();
         for call in calls {
             self.follow_call(&call, outcome);

@@ -188,8 +188,7 @@ impl Timeline {
             .started_at
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| since.as_micros());
-        fs::read_to_string(log)
-            .unwrap_or_default()
+        crate::app_log::read(&log)
             .lines()
             .filter_map(|line| {
                 let serde_json::Value::Object(mut event) = serde_json::from_str(line).ok()? else {

@@ -15,7 +15,7 @@ use super::app::{
     AppCallHistoryEntry, AppDialerRow, AppError, AppState, MissedCall, Published, ShownSurfaces,
     read_app_state,
 };
-use super::{APP_BUS_NAME, APP_INTERFACE, APP_PATH, DESKTOP_FILE, Harness, within};
+use super::{APP_BUS_NAME, APP_INTERFACE, APP_PATH, DESKTOP_FILE, Harness, app_log, within};
 
 /// How long after a moment a `main-loop-stalled` event about it may come:
 /// the app's stall watch ticks every 20 ms and notices a held-up main loop
@@ -136,8 +136,7 @@ impl Harness {
         let log = self.app_log_path();
         let started = std::time::Instant::now();
         loop {
-            if let Some(line) = fs::read_to_string(&log)
-                .unwrap_or_default()
+            if let Some(line) = app_log::read(&log)
                 .lines()
                 .find(|line| line.contains(needle))
             {
@@ -154,10 +153,11 @@ impl Harness {
     }
 
     /// The app's log so far, one JSON object per line: empty before the app
-    /// has logged anything.
+    /// has logged anything. A line the app is still writing is left out
+    /// until it is finished.
     #[must_use]
     pub fn app_log(&self) -> String {
-        fs::read_to_string(self.app_log_path()).unwrap_or_default()
+        app_log::read(&self.app_log_path())
     }
 
     /// How long the app took, by its own log, from its first event matching
@@ -264,13 +264,7 @@ impl Harness {
 
     /// Every event in the app's log so far.
     fn app_events(&self) -> Vec<serde_json::Value> {
-        self.app_log()
-            .lines()
-            .map(|line| {
-                serde_json::from_str(line)
-                    .unwrap_or_else(|error| panic!("{line:?} isn't JSON: {error}"))
-            })
-            .collect()
+        app_log::events(&self.app_log())
     }
 
     /// Checks the app took no longer than `target` from `from` to `to`, by
@@ -320,8 +314,7 @@ impl Harness {
         let log = self.directory.join("state/desktop-calls/desktop-calls.log");
         let started = Instant::now();
         let at = loop {
-            let found = fs::read_to_string(&log)
-                .unwrap_or_default()
+            let found = app_log::read(&log)
                 .lines()
                 .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
                 .filter(|event| to.matches(event))

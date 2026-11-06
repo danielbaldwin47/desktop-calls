@@ -40,6 +40,7 @@ use std::thread;
 use std::time::Duration;
 
 mod app;
+mod app_log;
 mod builder;
 mod client;
 mod control;

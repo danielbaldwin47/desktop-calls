@@ -230,12 +230,7 @@ fn without_omarchy_the_banner_is_stock_adwaita_and_the_app_logs_no_error() {
         "the Banner's background isn't stock Adwaita's; see {}",
         patch.path.display()
     );
-    let log = std::fs::read_to_string(
-        harness
-            .directory()
-            .join("state/desktop-calls/desktop-calls.log"),
-    )
-    .expect("read the app's log");
+    let log = harness.app_log();
     let errors: Vec<_> = log
         .lines()
         .filter(|line| line.contains("\"level\":\"ERROR\""))

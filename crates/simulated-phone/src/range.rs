@@ -351,6 +351,42 @@ pub fn answer_connect(
     });
 }
 
+/// How a `Connect` ended, and what it changed: the failure BlueZ answers
+/// with, if any; the signals of the Phone connecting; and, if the service
+/// level connection is slow, the signals of hands-free coming up after it.
+type Ended = (Option<&'static str>, Option<Change>, Option<Change>);
+
+/// Ends the `Connect` that was under way. `failure` is how it fails by what
+/// the Phone was when it began.
+///
+/// The Phone can forget the pairing while a connect to it is under way: the
+/// link key is checked as the link comes up, so that connect fails too, and
+/// never brings the Phone back (ticket #171).
+fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Result<Ended> {
+    let mut world = lock(world);
+    world.range.connecting = false;
+    let failure = failure.or_else(|| {
+        world
+            .range
+            .forgot_pairing
+            .then_some("br-connection-key-missing")
+    });
+    if failure.is_some() {
+        return Ok((failure, None, None));
+    }
+    let slow = world
+        .behaviour
+        .quirks
+        .contains(&telephony::Quirk::SlowServiceLevel);
+    let change = crate::pairing::connected_by_phone(&mut world)?;
+    Ok(if slow {
+        let (connected, hands_free) = change.split_at_hands_free();
+        (None, Some(connected), Some(hands_free))
+    } else {
+        (None, Some(change), None)
+    })
+}
+
 fn connect(
     world: &SharedWorld,
     system: &Connection,
@@ -424,25 +460,7 @@ fn connect(
         std::thread::sleep(CONNECT_TIME);
         None
     };
-    let (change, service_level) = {
-        let mut world = lock(world);
-        world.range.connecting = false;
-        let slow = world
-            .behaviour
-            .quirks
-            .contains(&telephony::Quirk::SlowServiceLevel);
-        if failure.is_some() {
-            (None, None)
-        } else {
-            let change = crate::pairing::connected_by_phone(&mut world)?;
-            if slow {
-                let (connected, hands_free) = change.split_at_hands_free();
-                (Some(connected), Some(hands_free))
-            } else {
-                (Some(change), None)
-            }
-        }
-    };
+    let (failure, change, service_level) = end_connect(world, failure)?;
     if let Some(change) = change {
         zbus::block_on(emit(system, telephony, change))?;
     }

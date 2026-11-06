@@ -131,24 +131,45 @@ fn back_in_range_the_phone_is_connected_within_10_s_and_contacts_and_call_histor
 /// Scenario 18.
 #[test]
 fn after_resume_the_phone_is_connected_within_10_s() {
-    let harness = connected();
+    suspended_out_of_range_then_resumed(&connected());
+}
+
+/// The app pages a Phone that is not in range as soon as it starts, so
+/// whether a Connect has already gone out when the Phone appears depends on
+/// timing. Here it has, and the Desktop still must not page while it sleeps.
+#[test]
+fn after_resume_the_phone_is_connected_within_10_s_when_the_app_had_already_paged_it() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    harness.simulated_phone().wait_for_recorded(
+        "the app pages the Phone before it is in range",
+        DEADLINE,
+        |recorded| connects(recorded) >= 1,
+    );
+    harness.simulated_phone().connect();
+    wait_connected(&harness, DEADLINE);
+    suspended_out_of_range_then_resumed(&harness);
+}
+
+fn suspended_out_of_range_then_resumed(harness: &Harness) {
     let phone = harness.simulated_phone();
 
     phone.prepare_for_sleep(true);
-    std::thread::sleep(Duration::from_millis(200));
-    out_of_range(&harness);
+    // The app logs this just before it acts on the notice.
+    harness.wait_for_app_log("desktop-suspending", DEADLINE);
+    let before = connects(&recorded(harness));
+    out_of_range(harness);
     // Asleep, the Desktop doesn't page the Phone.
     let asleep = phone.recorded_holds(
         "no connect while suspended",
         Duration::from_secs(2),
-        |recorded| connects(recorded) == 0,
+        |recorded| connects(recorded) == before,
     );
-    assert_eq!(connects(&asleep), 0);
+    assert_eq!(connects(&asleep), before);
     phone.prepare_for_sleep(false);
     let resumed = Instant::now();
     phone.return_to_range();
 
-    wait_connected(&harness, RECONNECT_DEADLINE);
+    wait_connected(harness, RECONNECT_DEADLINE);
     assert!(
         resumed.elapsed() < RECONNECT_DEADLINE,
         "{:?}",
@@ -203,6 +224,27 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
 fn a_phone_that_forgets_the_pairing_is_a_problem_not_out_of_range() {
     let harness = connected();
 
+    forgets_the_pairing_and_the_app_says_so(&harness);
+}
+
+/// The Desktop was already paging the Phone when it came back into range, so
+/// that connect is still under way when the Phone forgets the pairing: it
+/// must fail as any connect made after the Phone forgot would (ticket #171).
+#[test]
+fn a_phone_that_forgets_the_pairing_while_a_connect_is_under_way_is_a_problem_too() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    harness.simulated_phone().wait_for_recorded(
+        "the app pages the Phone before it is in range",
+        DEADLINE,
+        |recorded| connects(recorded) >= 1,
+    );
+    harness.simulated_phone().connect();
+    wait_connected(&harness, DEADLINE);
+
+    forgets_the_pairing_and_the_app_says_so(&harness);
+}
+
+fn forgets_the_pairing_and_the_app_says_so(harness: &Harness) {
     harness.simulated_phone().forget_pairing();
 
     let state = harness.wait_for_app("ConnectionState is pairing-lost", DEADLINE, |state| {
@@ -217,12 +259,12 @@ fn a_phone_that_forgets_the_pairing_is_a_problem_not_out_of_range() {
         ["pairing-lost"]
     );
     indicator_shows(
-        &harness,
+        harness,
         "NeedsAttention",
         "My Pixel not connected · Pairing lost",
     );
     // Each connect would ask whoever holds the Phone to pair.
-    let tried = connects(&recorded(&harness));
+    let tried = connects(&recorded(harness));
     let held = harness.simulated_phone().recorded_holds(
         "no more connects",
         Duration::from_secs(4),

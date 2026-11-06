@@ -7,6 +7,7 @@
 //! does. The user's real systemd is never touched.
 
 use std::fs;
+use std::process::Command;
 use std::time::Duration;
 
 use test_harness::{AppEvent, AppState, Harness};
@@ -87,7 +88,27 @@ fn a_dev_run_stopped_mid_call_leaves_nothing_for_the_installed_service() {
     // The dev run's own record is still there for the next dev run.
     harness.stop_service();
     let before_dev_run = harness.app_log().len();
+    // The app is on the bus before it reads the record, so a dev run is
+    // reachable a moment before it has said what it picked up. Hold the
+    // read until the test has seen exactly that, so the ordering is the
+    // same on every run, whatever else the Desktop is doing.
+    let record = harness
+        .directory()
+        .join("runtime/desktop-calls-dev/earlier-run.json");
+    let kept = fs::read(&record).expect("read the record the dev run left");
+    fs::remove_file(&record).expect("take the record away");
+    let made = Command::new("mkfifo")
+        .arg(&record)
+        .status()
+        .expect("run mkfifo");
+    assert!(made.success(), "mkfifo made a pipe where the record was");
     harness.start_app_by_hand();
+    assert!(
+        !picked_up_since(&harness, before_dev_run),
+        "the dev run was held at reading the record, yet had picked up the Call"
+    );
+    fs::write(&record, kept).expect("hand the record to the dev run's read");
+    harness.wait_for_app_log(r#""event_kind":"earlier-run-loaded""#, DEADLINE);
     assert!(
         picked_up_since(&harness, before_dev_run),
         "the next dev run picked up the Call the last one left"

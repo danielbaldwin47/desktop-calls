@@ -6,9 +6,10 @@
 use super::audio::end_handoff_to_phone;
 use super::input::{ConnectFailure, Effect, Input, PhoneCommand, Timer};
 use super::{CONNECTION_LOST_MS, ConnectionLost, LOST_CALL_BACK_MS, RECONNECT_WAITS_MS, State};
-use crate::call::{CallId, Transport};
+use crate::call::{CallId, Request, Transport};
 use crate::connection::ConnectionState;
 use crate::earlier_run::EarlierCall;
+use crate::messages::Failure;
 
 /// Whether the Phone is within reach, and what the Desktop does about it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -142,7 +143,7 @@ fn phone_absent(state: &mut State, effects: &mut Vec<Effect>) {
     // Connecting the Phone brings hands-free back with it.
     state.presence.reach = Reach::Absent;
     if !was_absent {
-        lose_calls(state, effects);
+        lose_calls(state, Failure::ConnectionLost, effects);
     }
     connect_now(state, effects);
 }
@@ -154,7 +155,7 @@ fn phone_absent(state: &mut State, effects: &mut Vec<Effect>) {
 /// first failed connect, so the Desktop asks BlueZ again after the first
 /// wait.
 pub(super) fn hands_free_lost(state: &mut State, effects: &mut Vec<Effect>) {
-    lose_calls(state, effects);
+    lose_calls(state, Failure::ConnectionLost, effects);
     if state.presence.absent() {
         return;
     }
@@ -187,8 +188,8 @@ pub(super) fn hands_free_connect_failed(state: &mut State, effects: &mut Vec<Eff
 
 /// The Calls can't be acted on from here any more. The live one in the
 /// Call Window, and the one on hold behind it, carry on on the Phone: the
-/// window says so for a while.
-fn lose_calls(state: &mut State, effects: &mut Vec<Effect>) {
+/// window says so for a while, with `notice`.
+fn lose_calls(state: &mut State, notice: Failure, effects: &mut Vec<Effect>) {
     // The audio stays with the Call on the Phone once the Phone is back.
     state.restore_audio = None;
     let Some((call, held)) = state
@@ -206,6 +207,7 @@ fn lose_calls(state: &mut State, effects: &mut Vec<Effect>) {
     state.connection_lost = Some(ConnectionLost {
         call,
         held,
+        notice,
         loss: state.losses,
     });
     effects.push(Effect::StartTimer {
@@ -240,6 +242,45 @@ pub(super) fn lost_track(state: &mut State, call: CallId) {
         state.restore_audio = None;
         state.audio_notice = None;
     }
+}
+
+/// The Phone link gave up on `call` with no word from the Phone that the
+/// Hang up the user asked for worked: it may carry on there. The user is
+/// told the Call may still be live on the Phone, and the Call Window shows
+/// it as lost for a while, saying so. A Call that comes back with the Phone keeps
+/// its direction and timer, and isn't hung up by itself: by then the user
+/// may have picked it up on the Phone.
+pub(super) fn hang_up_undelivered(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+    let Some(known) = state.call_mut(call) else {
+        return;
+    };
+    known.request = Request::None;
+    effects.push(Effect::ReportError(Failure::CallMayStillBeLive));
+    let losses = state.losses + 1;
+    match state.connection_lost.as_mut() {
+        // Already lost: it says so now, for as long as a fresh loss would.
+        Some(lost)
+            if lost.call.id == call || lost.held.as_ref().is_some_and(|held| held.id == call) =>
+        {
+            lost.notice = Failure::CallMayStillBeLive;
+            lost.loss = losses;
+            state.losses = losses;
+            effects.push(Effect::StartTimer {
+                timer: Timer::ConnectionLost(losses),
+                after_ms: CONNECTION_LOST_MS,
+            });
+        }
+        Some(_) => {}
+        None => {
+            let shown = state.call_window_calls().is_some_and(|(shown, held)| {
+                shown.id == call || held.is_some_and(|held| held.id == call)
+            });
+            if shown {
+                lose_calls(state, Failure::CallMayStillBeLive, effects);
+            }
+        }
+    }
+    lost_track(state, call);
 }
 
 /// Hands-free is up again with the Call that lost the connection still to

@@ -161,6 +161,12 @@ pub enum Quirk {
     /// request. Tests use it to see what the Desktop does when hanging up
     /// doesn't end the Call.
     HangupIgnored,
+    /// The next `Hangup` is recorded and neither carried out nor answered,
+    /// and the Call carries on: a `WirePlumber` that is shutting down for a
+    /// restart and never reads it, so it never reaches the Phone. Once the
+    /// service leaves the bus, the bus answers it with `NoReply` (ticket
+    /// #175). Later `Hangup`s work as usual.
+    HangupUnansweredOnce,
     /// On `Connect`, hands-free comes up [`SERVICE_LEVEL_TIME`] after BlueZ
     /// marks the Phone connected, rather than at once: the service level
     /// connection taking its time, as it does on a real Phone. Off by
@@ -210,6 +216,7 @@ impl Quirk {
             "late-line-identification" => Some(Self::LateLineIdentification),
             "chld-unsupported" => Some(Self::ChldUnsupported),
             "hangup-ignored" => Some(Self::HangupIgnored),
+            "hangup-unanswered-once" => Some(Self::HangupUnansweredOnce),
             "slow-service-level" => Some(Self::SlowServiceLevel),
             "calls-listed-late" => Some(Self::CallsListedLate),
             _ => None,

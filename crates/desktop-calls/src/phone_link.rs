@@ -31,8 +31,10 @@
 //!   takes the Calls away without `disconnected`, and a Hang up it never
 //!   passed on leaves the Call live on the Phone. So a hung-up Call that
 //!   goes without `disconnected` is vanished like any other, and the Hang up
-//!   is sent again if it comes back. If hands-free isn't back in time to
-//!   settle it, the Hang up is reported undelivered, not the Call ended
+//!   is sent again if it comes back: only to a Call that can be the same
+//!   one, with the same known number and a state it can have moved on to. If
+//!   hands-free isn't back in time to settle it, or a Call comes back with no
+//!   number to tell, the Hang up is reported undelivered, not the Call ended
 //!   (ticket #175).
 //! - `Call1.Hangup` falls back to `org.ofono.VoiceCall.Hangup` where `Call1`'s
 //!   method doesn't exist, and a hang-up error for a Call that is already
@@ -198,6 +200,7 @@ struct Outcome {
 }
 
 /// A Call object as the Phone reports it.
+#[derive(Clone)]
 struct CallObject {
     state: String,
     number: String,
@@ -227,9 +230,52 @@ struct Vanished {
     id: CallId,
     grace: Grace,
     number: String,
+    /// Its state when it went, if known.
+    state: Option<CallState>,
     /// The Desktop asked to hang up meanwhile: the Call is hung up as soon
     /// as it is back.
     hang_up: bool,
+    /// A Call came back that may be this one, with no number to tell: it
+    /// isn't hung up on a guess, and this Call may still be live.
+    doubt: bool,
+}
+
+/// Whether a Call the Phone lists is a vanished Call come back.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kinship {
+    Same,
+    /// It may be, with no number to tell.
+    Unsure,
+    Other,
+}
+
+impl Vanished {
+    /// Whether a Call listed as `state`, from `number`, is this Call come
+    /// back. A Call never goes back to ringing, nor to dialling, so a
+    /// ringing Call is never a vanished connected or outgoing Call. With a
+    /// Hang up to send again, only the same number makes it the same Call:
+    /// a withheld number, or none, may be another Call.
+    fn kinship(&self, state: CallState, number: &str) -> Kinship {
+        let ringing = |state| matches!(state, CallState::Ringing | CallState::Waiting);
+        let dialling = |state| matches!(state, CallState::Dialing | CallState::Alerting);
+        let earlier = match self.state {
+            Some(was) => (ringing(state) && !ringing(was)) || (dialling(state) && !dialling(was)),
+            None => ringing(state) || dialling(state),
+        };
+        if earlier {
+            return Kinship::Other;
+        }
+        let known = |number: &str| matches!(caller(number), Caller::Number(_));
+        match (known(&self.number), known(number)) {
+            (true, true) if self.number == number => Kinship::Same,
+            (true, true) => Kinship::Other,
+            _ if self.hang_up => Kinship::Unsure,
+            // Nothing is sent on the strength of it: the Call only keeps its
+            // timer (ADR-0007).
+            _ if self.number == number => Kinship::Same,
+            _ => Kinship::Other,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -482,10 +528,26 @@ impl PhoneLink {
             return;
         };
         // A Call that vanished and is back, by its number, is the same Call.
-        if let Some(index) = self
+        let kinships: Vec<Kinship> = self
             .vanished
             .iter()
-            .position(|call| call.number == object.number)
+            .map(|call| call.kinship(state, &object.number))
+            .collect();
+        for (call, kinship) in self.vanished.iter_mut().zip(&kinships) {
+            if *kinship == Kinship::Unsure && !call.doubt {
+                call.doubt = true;
+                tracing::info!(
+                    event_kind = %EventKind::CallVanished,
+                    call_id = call.id.0,
+                    "A Call came back with no number to tell whether it is Call {}; \
+                     it isn't hung up on a guess",
+                    call.id
+                );
+            }
+        }
+        if let Some(index) = kinships
+            .iter()
+            .position(|kinship| *kinship == Kinship::Same)
         {
             let Vanished { id, hang_up, .. } = self.vanished.remove(index);
             tracing::info!(
@@ -555,13 +617,13 @@ impl PhoneLink {
         if followed.ended {
             return;
         }
-        self.vanish(&followed, object.map(|object| object.number), outcome);
+        self.vanish(&followed, object.as_ref(), outcome);
     }
 
     /// The followed Call went away without `disconnected`. It may come back,
     /// and so may a Call the Desktop asked to hang up, if the Hang up never
     /// reached the Phone: it is hung up again then.
-    fn vanish(&mut self, followed: &Followed, number: Option<String>, outcome: &mut Outcome) {
+    fn vanish(&mut self, followed: &Followed, object: Option<&CallObject>, outcome: &mut Outcome) {
         let id = followed.id;
         let then = if followed.ending {
             "it is hung up again if it comes back"
@@ -577,27 +639,37 @@ impl PhoneLink {
         self.vanished.push(Vanished {
             id,
             grace,
-            number: number.unwrap_or_default(),
+            number: object
+                .map(|object| object.number.clone())
+                .unwrap_or_default(),
+            state: object.and_then(|object| call_state(&object.state)),
             hang_up: followed.ending,
+            doubt: false,
         });
     }
 
     /// The latest grace of a vanished Call ran out. Once hands-free is back,
     /// a Call the Phone didn't list has ended, hung up or not. While it is
     /// away, nobody knows: a Hang up kept for the Call's return is reported
-    /// undelivered, as the Call may carry on on the Phone.
+    /// undelivered, as the Call may carry on on the Phone. So it is when a
+    /// Call came back that may have been this one, with no number to tell.
     fn grace_over(&mut self, grace: Grace, outcome: &mut Outcome) {
         let id = grace.call;
         let Some(index) = self.vanished.iter().position(|call| call.grace == grace) else {
             return;
         };
         let vanished = self.vanished.remove(index);
-        if vanished.hang_up && self.connected.is_none() {
+        if vanished.hang_up && (self.connected.is_none() || vanished.doubt) {
+            let why = if vanished.doubt {
+                "may be a Call that came back with no number"
+            } else {
+                "didn't come back"
+            };
             tracing::error!(
                 event_kind = %EventKind::PhoneCommandFailed,
                 error_kind = "hang-up-undelivered",
                 call_id = id.0,
-                "Call {id} didn't come back, and the Phone never confirmed the Hang up"
+                "Call {id} {why}, and the Phone never confirmed the Hang up"
             );
             outcome.inputs.push(Input::HangUpUndelivered(id));
             return;
@@ -641,11 +713,8 @@ impl PhoneLink {
             if followed.ended {
                 continue;
             }
-            let number = self
-                .call_objects
-                .get(&path)
-                .map(|object| object.number.clone());
-            self.vanish(&followed, number, outcome);
+            let object = self.call_objects.get(&path).cloned();
+            self.vanish(&followed, object.as_ref(), outcome);
         }
     }
 

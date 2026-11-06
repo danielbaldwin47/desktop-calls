@@ -37,8 +37,12 @@ const OUTLASTS_THE_WAIT: Duration = Duration::from_secs(12);
 /// How long the Desktop may take to give up on a service that hasn't come
 /// back: the 10 s it waits, and then as long as any change may take.
 const SERVICE_GIVEN_UP: Duration = Duration::from_secs(15);
-/// What the Call Window says when the Hang up never reached the Phone.
-const NOT_HUNG_UP: &str = "Your phone didn't hang up the Call; hang up on your phone instead.";
+/// What the Call Window says when the Desktop can't tell whether the Hang up
+/// reached the Phone.
+const MAY_STILL_BE_LIVE: &str =
+    "The Call may still be live on your phone; check your phone and hang up there if it is.";
+/// The control interface's `Error` kind for it.
+const MAY_STILL_BE_LIVE_KIND: &str = "call-may-still-be-live";
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
@@ -55,7 +59,12 @@ fn connected(builder: Builder) -> Harness {
 /// A Call answered on the Desktop, live with its audio here. Returns its
 /// object path on the Phone and its app-assigned id.
 fn answered_here(harness: &Harness) -> (String, u32) {
-    let path = harness.simulated_phone().ring(NUMBER);
+    answered_from(harness, NUMBER)
+}
+
+/// [`answered_here`], from `number`: empty for a withheld caller.
+fn answered_from(harness: &Harness, number: &str) -> (String, u32) {
+    let path = harness.simulated_phone().ring(number);
     let state = harness.wait_for_app("the Call rings", DEADLINE, |state| {
         state.ringing && state.calls.len() == 1
     });
@@ -274,17 +283,7 @@ fn hang_up_while_the_service_is_away_ends_the_call_even_when_it_is_listed_late()
 fn a_hang_up_lost_as_the_service_leaves_is_sent_again_once_the_call_is_back() {
     let harness = connected(Harness::builder());
     let (path, call) = answered_here(&harness);
-    harness
-        .simulated_phone()
-        .enable_quirk("hangup-unanswered-once");
-
-    harness.hang_up(call);
-    harness.simulated_phone().wait_for_recorded(
-        "the Hang up reached the service",
-        DEADLINE,
-        |recorded| hang_ups(recorded, &path) == 1,
-    );
-    harness.simulated_phone().restart_telephony(GAP);
+    hang_up_lost_in_a_restart(&harness, &path, call, GAP);
 
     harness.simulated_phone().wait_for_recorded(
         "the Phone was asked to hang up again once the Call was back",
@@ -300,6 +299,102 @@ fn a_hang_up_lost_as_the_service_leaves_is_sent_again_once_the_call_is_back() {
         harness.app_errors().is_empty(),
         "{:?}",
         harness.app_errors()
+    );
+}
+
+/// The user hangs up `call`, and the Hang up is lost as the Telephony
+/// service leaves for a restart that takes `gap`.
+fn hang_up_lost_in_a_restart(harness: &Harness, path: &str, call: u32, gap: Duration) {
+    harness
+        .simulated_phone()
+        .enable_quirk("hangup-unanswered-once");
+    harness.hang_up(call);
+    harness.simulated_phone().wait_for_recorded(
+        "the Hang up reached the service",
+        DEADLINE,
+        |recorded| hang_ups(recorded, path) == 1,
+    );
+    harness.simulated_phone().restart_telephony(gap);
+}
+
+/// The caller hangs up `call` while the service is away, after the
+/// Desktop's Hang up was lost, and rings straight back from `number` once
+/// hands-free is back. The new Call rings as a Call of its own: the Desktop
+/// doesn't take it for the Call it hung up, nor decline it.
+fn rings_back_as_a_new_call(number: &str) {
+    let harness = connected(Harness::builder());
+    let (path, call) = answered_from(&harness, number);
+    hang_up_lost_in_a_restart(&harness, &path, call, ENDS_MEANWHILE_GAP);
+    harness.simulated_phone().caller_hangs_up(&path);
+    harness.wait_for_app("the Phone is connected again", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+
+    let rings_back = harness.simulated_phone().ring(number);
+    let rings_anew = |state: &AppState| {
+        state.calls.len() == 1 && state.calls[0].id != call && state.calls[0].state == "ringing"
+    };
+    harness.wait_for_app("the caller rings again, as a new Call", DEADLINE, rings_anew);
+    harness.simulated_phone().recorded_holds(
+        "the new Call is never declined",
+        LISTED_LATE_WATCH,
+        // The new Call may have the old one's object path, so count them all.
+        |recorded| count(recorded, "Hangup", &[]) == 1,
+    );
+    harness.app_holds("the new Call still rings", Duration::ZERO, rings_anew);
+    assert_eq!(
+        harness.simulated_phone().calls_on_phone(),
+        [(rings_back, "incoming".to_owned())]
+    );
+    assert!(
+        harness.app_errors().is_empty(),
+        "{:?}",
+        harness.app_errors()
+    );
+}
+
+/// Ticket #175, review: a ringing Call is never the Call the user hung up,
+/// though the caller is the same.
+#[test]
+fn a_caller_who_rings_straight_back_is_not_declined_as_the_call_hung_up() {
+    rings_back_as_a_new_call(NUMBER);
+}
+
+/// Ticket #175, review: with no number to tell them apart, a withheld Call
+/// that rings is never the withheld Call the user hung up.
+#[test]
+fn a_withheld_caller_who_rings_after_a_withheld_call_is_not_declined() {
+    rings_back_as_a_new_call("");
+}
+
+/// Ticket #175, review: a withheld Call the user hung up comes back listed
+/// as live with no number, so the Desktop can't tell it is the same Call.
+/// It doesn't guess and hang up whatever Call that is: the Call Window says
+/// the Call may still be live on the Phone.
+#[test]
+fn a_returning_call_with_no_number_is_not_hung_up_on_a_guess() {
+    let harness = connected(Harness::builder().headless_screen());
+    let (path, call) = answered_from(&harness, "");
+    hang_up_lost_in_a_restart(&harness, &path, call, GAP);
+
+    let error = harness.wait_for_app_error(SERVICE_GIVEN_UP);
+    assert_eq!(error.kind, MAY_STILL_BE_LIVE_KIND, "{error:?}");
+    assert!(
+        harness
+            .surfaces_seen()
+            .into_iter()
+            .filter_map(|mut surfaces| surfaces.remove("call-window"))
+            .any(|window| window.get("notice").map(String::as_str) == Some(MAY_STILL_BE_LIVE)),
+        "{:#?}",
+        harness.surfaces_seen()
+    );
+    harness.wait_for_app("the Call shows, live, to hang up", DEADLINE, |state| {
+        state.calls.len() == 1 && state.calls[0].state == "active"
+    });
+    harness.simulated_phone().recorded_holds(
+        "the Phone is never asked to hang up again",
+        LISTED_LATE_WATCH,
+        |recorded| count(recorded, "Hangup", &[]) == 1,
     );
 }
 
@@ -323,7 +418,7 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     harness.hang_up(call);
 
     let error = harness.wait_for_app_error(SERVICE_GIVEN_UP);
-    assert_eq!(error.kind, "hang-up-failed", "{error:?}");
+    assert_eq!(error.kind, MAY_STILL_BE_LIVE_KIND, "{error:?}");
     let state = harness.wait_for_app("the Call shows again, live", DEADLINE, |state| {
         state.calls.len() == 1
             && state.calls[0].state == "active"
@@ -338,7 +433,7 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     assert!(
         windows
             .iter()
-            .any(|window| window.get("notice").map(String::as_str) == Some(NOT_HUNG_UP)),
+            .any(|window| window.get("notice").map(String::as_str) == Some(MAY_STILL_BE_LIVE)),
         "{windows:#?}"
     );
     assert!(

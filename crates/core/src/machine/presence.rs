@@ -244,10 +244,10 @@ pub(super) fn lost_track(state: &mut State, call: CallId) {
     }
 }
 
-/// The Phone link gave up on `call` while the Phone was away, before the
-/// Hang up the user asked for reached the Phone: it may carry on there. The
-/// user is told the Phone didn't hang it up, and the Call Window shows it as
-/// lost for a while, saying so. A Call that comes back with the Phone keeps
+/// The Phone link gave up on `call` with no word from the Phone that the
+/// Hang up the user asked for worked: it may carry on there. The user is
+/// told the Call may still be live on the Phone, and the Call Window shows
+/// it as lost for a while, saying so. A Call that comes back with the Phone keeps
 /// its direction and timer, and isn't hung up by itself: by then the user
 /// may have picked it up on the Phone.
 pub(super) fn hang_up_undelivered(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
@@ -255,14 +255,14 @@ pub(super) fn hang_up_undelivered(state: &mut State, call: CallId, effects: &mut
         return;
     };
     known.request = Request::None;
-    effects.push(Effect::ReportError(Failure::HangUpFailed));
+    effects.push(Effect::ReportError(Failure::CallMayStillBeLive));
     let losses = state.losses + 1;
     match state.connection_lost.as_mut() {
         // Already lost: it says so now, for as long as a fresh loss would.
         Some(lost)
             if lost.call.id == call || lost.held.as_ref().is_some_and(|held| held.id == call) =>
         {
-            lost.notice = Failure::HangUpFailed;
+            lost.notice = Failure::CallMayStillBeLive;
             lost.loss = losses;
             state.losses = losses;
             effects.push(Effect::StartTimer {
@@ -276,7 +276,7 @@ pub(super) fn hang_up_undelivered(state: &mut State, call: CallId, effects: &mut
                 shown.id == call || held.is_some_and(|held| held.id == call)
             });
             if shown {
-                lose_calls(state, Failure::HangUpFailed, effects);
+                lose_calls(state, Failure::CallMayStillBeLive, effects);
             }
         }
     }

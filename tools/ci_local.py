@@ -2,7 +2,7 @@
 """Run CI's jobs on this machine, and post "CI passed" on the commit if they pass.
 
 Usage (through just):
-  just ci-local                  # every job on HEAD: lint, test, scenarios
+  just ci-local                  # every job on HEAD: lint, test, scenarios, timings
   just ci-local lint             # one or more jobs; nothing is posted
   just ci-local --rebuild-image  # throw the image away and build it again
 
@@ -22,7 +22,7 @@ What it does, in order:
      is two weeks old, as CI's is new each run. Refuses to run with
      DESKTOP_CALLS_OFFLINE set, which would skip lint's ticket check.
   5. Checks out HEAD into a scratch directory and runs each job in the
-     image, under nice, with a private /tmp. The jobs that run tests have
+     image, under nice (the timings, below, excepted), with a private /tmp. The jobs that run tests have
      no network, and nothing reaches the host's D-Bus, PipeWire, Bluetooth
      or home, so a run can't touch the real Phone. Before each job that runs
      tests in parallel it measures how much of the Desktop other programs

@@ -21,11 +21,14 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     // The gallery is one test, so the test runner's limit on how many run at
     // once doesn't reach it. `just ci-local` sets that limit to what the
     // Desktop has to spare, and each state here is a compositor and an app.
-    if let Some(threads) = std::env::var("RUST_TEST_THREADS")
+    // Never more than one per CPU, which is what the gallery does unasked.
+    let spare = std::env::var("RUST_TEST_THREADS")
         .ok()
-        .filter(|threads| threads.parse::<u32>().is_ok_and(|threads| threads > 0))
-    {
-        command.args(["--workers", &threads]);
+        .and_then(|threads| threads.parse::<usize>().ok())
+        .filter(|threads| *threads > 0);
+    if let Some(spare) = spare {
+        let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        command.args(["--workers", &spare.min(cpus).to_string()]);
     }
     let rendered = command.output().expect("run automation screenshot");
 

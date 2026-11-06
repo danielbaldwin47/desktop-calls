@@ -791,6 +791,8 @@ pub struct Options {
     pub only: Option<String>,
     /// How many times to render it, at least once.
     pub repeat: u32,
+    /// How many states to render at a time. Default: one per CPU.
+    pub workers: Option<u32>,
 }
 
 /// `automation screenshot`: renders the gallery, or with `only` one state
@@ -835,7 +837,7 @@ pub fn run(options: &Options) -> ExitCode {
         .flat_map(|state| LOOKS.map(|look| (*state, look)))
         .collect();
     for repetition in 1..=options.repeat {
-        render_all(&shots, &output);
+        render_all(&shots, &output, options.workers);
         if options.repeat > 1 {
             println!("Rendered {repetition} of {} times.", options.repeat);
         }
@@ -889,12 +891,17 @@ pub fn run(options: &Options) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Renders each of `shots` into `output`, several at a time: one scenario
-/// per CPU. Each has its own compositor, buses and app, so they don't meet.
-/// One at a time, the 56 shots took 139 s of a CI run (#118).
-fn render_all(shots: &[(&State, Look)], output: &Path) {
+/// Renders each of `shots` into `output`, several at a time: `workers`, or
+/// one scenario per CPU. Each has its own compositor, buses and app, so they
+/// don't meet. One at a time, the 56 shots took 139 s of a CI run (#118).
+/// With a CPU's worth of them each on a machine others are building on, a
+/// screen was late past its deadline (#167).
+fn render_all(shots: &[(&State, Look)], output: &Path, workers: Option<u32>) {
     let next = AtomicUsize::new(0);
-    let workers = thread::available_parallelism().map_or(1, NonZeroUsize::get);
+    let workers = workers.map_or_else(
+        || thread::available_parallelism().map_or(1, NonZeroUsize::get),
+        |workers| workers as usize,
+    );
     thread::scope(|scope| {
         for _ in 0..workers.min(shots.len()) {
             scope.spawn(|| {

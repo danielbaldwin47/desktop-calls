@@ -16,6 +16,11 @@
 //! returning a job at once and doing the work after), and the unit's
 //! `ActiveState` and `Job`. `Job` names a start job until the start ends,
 //! active or not, as systemd's does; stop jobs aren't shown there.
+//!
+//! The scenario's session bus runs with `--systemd-activation`, as the
+//! user's does: a caller reaching for the app's name while the service is
+//! down has the bus signal `Activator.ActivationRequest` here, and the
+//! stand-in starts the unit, rather than the bus running the app itself.
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::os::unix::fs::DirBuilderExt as _;
@@ -27,10 +32,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+use futures_util::StreamExt as _;
+
 use zbus::OwnedObjectPath;
 use zbus::fdo::DBusProxy;
+use zbus::message::Type;
 use zbus::names::BusName;
-use zbus::{Connection, DBusError, interface};
+use zbus::{Connection, DBusError, MessageStream, interface};
 
 use crate::builder::without_journal;
 
@@ -192,6 +200,9 @@ impl ServiceManager {
                 .name(MANAGER_NAME)
                 .build(),
         )?;
+        let requests = MessageStream::from(&connection);
+        let requested = unit.clone();
+        thread::spawn(move || zbus::block_on(start_when_asked(requests, &requested)));
         Ok(Self {
             unit,
             _connection: connection,
@@ -429,6 +440,27 @@ impl Unit {
             self.remove_runtime_directory(&file, file.preserve == Preserve::Yes);
         }
         self.running().set("inactive");
+    }
+}
+
+/// Starts the unit each time the session bus asks the manager to, as the
+/// bus does when a caller reaches for the name of a service it has no owner
+/// for: a bus run with `--systemd-activation` signals
+/// `Activator.ActivationRequest` with the unit's name to
+/// `org.freedesktop.systemd1`, and leaves the starting to the manager.
+async fn start_when_asked(mut messages: MessageStream, unit: &Arc<Unit>) {
+    while let Some(Ok(message)) = messages.next().await {
+        let header = message.header();
+        let asks = message.message_type() == Type::Signal
+            && header.interface().is_some_and(|interface| {
+                interface.as_str() == "org.freedesktop.systemd1.Activator"
+            })
+            && header
+                .member()
+                .is_some_and(|member| member.as_str() == "ActivationRequest");
+        if asks && message.body().deserialize::<String>().as_deref() == Ok(UNIT_NAME) {
+            Unit::start(unit);
+        }
     }
 }
 

@@ -307,7 +307,11 @@ impl Harness {
     }
 
     /// Waits until nothing owns the app's control interface.
-    fn wait_until_app_off_bus(&self) {
+    ///
+    /// # Panics
+    ///
+    /// If something still owns it after the startup deadline.
+    pub fn wait_until_app_off_bus(&self) {
         let left = zbus::block_on(within(STARTUP_DEADLINE, async {
             let bus = DBusProxy::new(&self.session).await?;
             let mut owner_changes = bus.receive_name_owner_changed().await?;

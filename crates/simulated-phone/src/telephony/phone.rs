@@ -3,6 +3,7 @@
 //! `WirePlumber` restarting.
 
 use super::call_waiting::{has_live_call, waiting_rings};
+use super::hands_free::Away;
 use super::methods::{bring_audio_up, rejects_sco};
 use super::tree::{
     announce_call, call_state, end_call, find_call, insert_call, open_audio_link, register_call,
@@ -236,19 +237,24 @@ pub fn reregister_call(
 pub struct Restart {
     pub gone: Vec<Signal>,
     pub audio_gateway_back: Vec<Signal>,
-    pub calls_back: Vec<Signal>,
+    /// The Calls, which carry on on the Phone but are no Telephony objects
+    /// until the new service registers them, after the AudioGateway.
+    pub away: Away,
 }
 
 /// Restarts the Telephony service's view of the AudioGateway at
-/// `audio_gateway`. Its Calls and volumes stay; its audio link drops with
-/// the old service, so the new one starts idle and rejecting audio, as for a
-/// new AudioGateway. That the link drops is inferred, not observed.
+/// `audio_gateway`. Its Calls leave the service with it, to come back with
+/// [`calls_back_after_restart`]; its volumes stay. Its audio link drops
+/// with the old service, so the new one starts idle and rejecting audio, as
+/// for a new AudioGateway. That the link drops, and that the new service
+/// doesn't list the Calls before it announces them, are inferred, not
+/// observed.
 pub fn restart(tree: &mut ObjectTree, audio_gateway: &OwnedObjectPath) -> zbus::Result<Restart> {
     let mut gone = Vec::new();
-    let mut calls_back = Vec::new();
-    for (call, properties) in calls(tree, audio_gateway.as_str()) {
-        gone.extend(unannounce_call(audio_gateway, &call));
-        calls_back.extend(announce_call(audio_gateway, &call, properties));
+    let calls = calls(tree, audio_gateway.as_str());
+    for (call, _) in &calls {
+        tree.remove(call);
+        gone.extend(unannounce_call(audio_gateway, call));
     }
     let manager = OwnedObjectPath::try_from(MANAGER_PATH)?;
     gone.push(Signal::InterfacesRemoved {
@@ -278,8 +284,22 @@ pub fn restart(tree: &mut ObjectTree, audio_gateway: &OwnedObjectPath) -> zbus::
             object: audio_gateway.clone(),
             interfaces,
         }],
-        calls_back,
+        away: Away {
+            audio_gateway: audio_gateway.clone(),
+            calls,
+        },
     })
+}
+
+/// The restarted service registers the Calls that were away: returns the
+/// signals that announce them.
+pub fn calls_back_after_restart(tree: &mut ObjectTree, away: Away) -> Vec<Signal> {
+    let mut signals = Vec::new();
+    for (call, properties) in away.calls {
+        insert_call(tree, &call, properties.clone());
+        signals.extend(announce_call(&away.audio_gateway, &call, properties));
+    }
+    signals
 }
 
 /// The Calls on the AudioGateway at `audio_gateway`, by path.

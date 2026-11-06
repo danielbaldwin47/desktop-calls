@@ -122,6 +122,9 @@ struct World {
     audio_gateway: Option<OwnedObjectPath>,
     /// Hands-free dropped for `DisconnectProfile`, until it is back.
     dropped: Option<hands_free::Dropped>,
+    /// The Calls away while the Telephony service restarts, until the new
+    /// one registers them.
+    restarting: Option<telephony::hands_free::Away>,
     range: range::Range,
     pairing: pairing::Pairing,
     behaviour: telephony::Behaviour,
@@ -176,6 +179,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         next_audio_gateway_index: arguments.first_audio_gateway_index,
         audio_gateway: None,
         dropped: None,
+        restarting: None,
         behaviour: telephony::Behaviour::default(),
         dialling: telephony::Dialling::default(),
         recorded: Vec::new(),
@@ -507,6 +511,12 @@ impl Control {
                 .iter()
                 .flat_map(hands_free::Dropped::calls_away),
         );
+        calls.extend(
+            world
+                .restarting
+                .iter()
+                .flat_map(telephony::hands_free::Away::calls_away),
+        );
         calls
     }
 
@@ -743,26 +753,22 @@ impl Control {
     /// real Pixel the gap was 0.73 s.
     async fn restart_telephony(&self, gap_ms: u32) -> zbus::fdo::Result<()> {
         let old = self.telephony()?;
-        let restart = {
-            let mut world = lock(&self.world);
-            let world = &mut *world;
-            match world.audio_gateway.clone() {
-                Some(gateway) => Some(telephony::restart(&mut world.telephony, &gateway)?),
-                None => None,
+        let audio_gateway_back = match restart::leave(&self.world)? {
+            Some((gone, audio_gateway_back)) => {
+                for signal in &gone {
+                    signal.emit(&old).await?;
+                }
+                Some(audio_gateway_back)
             }
+            None => None,
         };
-        if let Some(restart) = &restart {
-            for signal in &restart.gone {
-                signal.emit(&old).await?;
-            }
-        }
         *lock(&self.telephony) = None;
         old.release_name(telephony::SERVICE).await?;
         let holder = self.telephony.clone();
         let world = self.world.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(u64::from(gap_ms)));
-            if let Err(error) = restart::come_back(&holder, &world, restart) {
+            if let Err(error) = restart::come_back(&holder, &world, audio_gateway_back) {
                 eprintln!("simulated-phone: the Telephony service didn't come back: {error}");
             }
         });
@@ -883,7 +889,12 @@ impl Control {
     /// Ends the Call at `call` from the other end, ringing or live, as the
     /// caller hanging up does. Returns once the Call is gone. On the
     /// Desktop's side of the bus it looks just like a decline on the Phone.
+    /// While the Telephony service restarts, the Call just ends on the
+    /// Phone, and the new service never registers it.
     async fn caller_hangs_up(&self, call: OwnedObjectPath) -> zbus::fdo::Result<()> {
+        if restart::end_call_away(&self.world, &call) {
+            return Ok(());
+        }
         self.end_call_on_phone(&call, false).await
     }
 

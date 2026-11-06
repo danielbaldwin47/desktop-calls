@@ -74,16 +74,7 @@ impl Dropped {
     /// The Calls carrying on on the Phone while hands-free is down, as
     /// `(path's last part, State)`.
     pub fn calls_away(&self) -> impl Iterator<Item = (String, String)> + '_ {
-        self.away.calls.iter().map(|(call, properties)| {
-            (
-                call.as_str()
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned(),
-                crate::range::call_state(properties),
-            )
-        })
+        self.away.calls_away()
     }
 }
 

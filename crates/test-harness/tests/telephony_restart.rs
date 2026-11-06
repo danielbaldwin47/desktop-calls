@@ -21,6 +21,8 @@ const ROUND_TRIP: Duration = Duration::from_secs(3);
 /// How long Telephony was off the bus when `WirePlumber` restarted on the
 /// real Pixel.
 const GAP: Duration = Duration::from_millis(730);
+/// Long enough for the caller to hang up while the service is away.
+const ENDS_MEANWHILE_GAP: Duration = Duration::from_secs(2);
 /// Long enough for the restart and the app's recovery from it.
 const RESTART: Duration = Duration::from_secs(3);
 /// How long a Call that ended is watched for coming back: longer than the
@@ -239,6 +241,36 @@ fn hang_up_while_the_service_is_away_ends_the_call_even_when_it_is_listed_late()
         state.calls.is_empty()
     });
     assert_eq!(harness.simulated_phone().calls_on_phone(), []);
+    assert!(
+        harness.app_errors().is_empty(),
+        "{:?}",
+        harness.app_errors()
+    );
+}
+
+/// The caller hangs up while the service is away, so the new service
+/// doesn't list the Call. It ends on the Desktop within 3 s of hands-free
+/// being back, rather than when the 10 s the service had to come back run
+/// out (ADR-0007).
+#[test]
+fn a_call_that_ends_while_the_service_is_away_ends_here_soon_after_it_is_back() {
+    let harness = connected(Harness::builder());
+    let (path, call) = answered_here(&harness);
+
+    harness.simulated_phone().restart_telephony(ENDS_MEANWHILE_GAP);
+    harness.simulated_phone().caller_hangs_up(&path);
+    harness.wait_for_app("the Phone is connected again", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+
+    harness.wait_for_app("the Call ended", DEADLINE, |state| {
+        !state.calls.iter().any(|known| known.id == call)
+    });
+    harness.simulated_phone().recorded_holds(
+        "the Desktop never asked to hang up",
+        Duration::ZERO,
+        |recorded| !recorded.iter().any(|known| known.member == "Hangup"),
+    );
     assert!(
         harness.app_errors().is_empty(),
         "{:?}",

@@ -71,9 +71,9 @@ mod tree;
 
 pub use methods::{ActivateLater, activate_later, answer};
 pub use phone::{
-    Restart, alert, answer_on_phone, callee_answers, calls, dial_on_phone, end_call_on_phone,
-    identify_caller, number_from_caller_id, reregister_call, restart, ring, set_microphone_volume,
-    unannounce_call,
+    Restart, alert, answer_on_phone, callee_answers, calls, calls_back_after_restart,
+    dial_on_phone, end_call_on_phone, identify_caller, number_from_caller_id, reregister_call,
+    restart, ring, set_microphone_volume, unannounce_call,
 };
 
 pub const SERVICE: &str = "org.pipewire.Telephony";

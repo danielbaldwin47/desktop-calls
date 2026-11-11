@@ -2,6 +2,8 @@
 //! to Telephony, or to BlueZ for the Handoff to the Phone, with the
 //! fallbacks and error readings the Phones need.
 
+use std::rc::Weak;
+
 use desktop_calls_core::{Input, PhoneCommand, PhoneRefusal};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures_util::StreamExt as _;
@@ -24,8 +26,17 @@ pub(super) async fn execute(
 ) {
     while let Some(batch) = batches.next().await {
         for Resolved { command, target } in batch {
-            let path = match target {
-                Target::Object(path) => path,
+            let (path, current) = match target {
+                Target::Call { path, current } => {
+                    // No await or strong token survives this check: only
+                    // the followed registration keeps this target valid.
+                    // A vanished Hang up gets a fresh target on return.
+                    if current.upgrade().is_none() {
+                        break;
+                    }
+                    (path, Some(current))
+                }
+                Target::Object(path) => (path, None),
                 Target::Phone(address) => {
                     // Each logs its own failure.
                     let done = if command == PhoneCommand::ConnectHandsFree {
@@ -53,7 +64,15 @@ pub(super) async fn execute(
             };
             let result = match &command {
                 PhoneCommand::Answer(_) => call(session, &path, CALL, "Answer", &()).await,
-                PhoneCommand::HangUp(_) => hang_up(session, &path).await,
+                PhoneCommand::HangUp(_) => {
+                    let Some(current) = current.as_ref() else {
+                        break;
+                    };
+                    let Some(result) = hang_up(session, &path, current).await else {
+                        break;
+                    };
+                    result
+                }
                 PhoneCommand::MoveAudioToDesktop => {
                     match set_reject_sco(session, &path, false).await {
                         Ok(()) => call(session, &path, TRANSPORT, "Activate", &()).await,
@@ -228,9 +247,12 @@ async fn send_tones(session: &Connection, path: &str, tones: &str) -> zbus::Resu
 /// Hangs up the Call at `path`: through `Call1`, or `org.ofono.VoiceCall`
 /// where `Call1`'s method doesn't exist. An error that says the Call is
 /// already going, or gone, means it ended.
-async fn hang_up(session: &Connection, path: &str) -> zbus::Result<()> {
+async fn hang_up(session: &Connection, path: &str, current: &Weak<()>) -> Option<zbus::Result<()>> {
     let result = match call(session, path, CALL, "Hangup", &()).await {
         Err(error) if is_missing_method(&error) => {
+            // The first method's reply may have waited while this Call
+            // ended and another Call took its path.
+            current.upgrade()?;
             // At info, so the journal records which hang-up path the Phone
             // needs; the Real-Phone Checklist reports it.
             tracing::info!(
@@ -242,7 +264,7 @@ async fn hang_up(session: &Connection, path: &str) -> zbus::Result<()> {
         }
         result => result,
     };
-    match result {
+    Some(match result {
         Err(error) if is_already_ending(&error) => {
             tracing::debug!(
                 event_kind = %EventKind::PhoneCommandSent,
@@ -252,7 +274,7 @@ async fn hang_up(session: &Connection, path: &str) -> zbus::Result<()> {
             Ok(())
         }
         result => result,
-    }
+    })
 }
 
 fn error_name(error: &zbus::Error) -> Option<&str> {

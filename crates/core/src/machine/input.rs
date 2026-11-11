@@ -35,10 +35,15 @@ pub enum Input {
     /// The Phone with this address has no Bluetooth connection to the
     /// Desktop: it is out of range, or its Bluetooth is off.
     PhoneAbsent { address: String },
-    /// The Phone connected, as [`Effect::ConnectPhone`] asked.
-    ConnectPhoneDone,
-    /// The Phone didn't connect, as [`Effect::ConnectPhone`] asked.
-    ConnectPhoneFailed(ConnectFailure),
+    /// The Phone connected, as [`Effect::ConnectPhone`] asked with this
+    /// attempt. An earlier attempt's result is ignored.
+    ConnectPhoneDone { attempt: u32 },
+    /// The Phone didn't connect, as [`Effect::ConnectPhone`] asked with this
+    /// attempt. An earlier attempt's result is ignored.
+    ConnectPhoneFailed {
+        attempt: u32,
+        failure: ConnectFailure,
+    },
     /// The Desktop is about to suspend.
     Suspending,
     /// The Desktop resumed from suspend.
@@ -377,8 +382,9 @@ pub enum Effect {
     /// Stop following the Phone.
     DetachPhone,
     /// Ask BlueZ to connect the Phone with this address. Each ends in
-    /// [`Input::ConnectPhoneDone`] or [`Input::ConnectPhoneFailed`].
-    ConnectPhone { address: String },
+    /// [`Input::ConnectPhoneDone`] or [`Input::ConnectPhoneFailed`], echoing
+    /// the attempt so its result belongs only to this operation.
+    ConnectPhone { address: String, attempt: u32 },
     /// Ask the Phone to do something. The Phone commands of one step run in
     /// order, and stop at the first that fails.
     Phone(PhoneCommand),

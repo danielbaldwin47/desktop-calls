@@ -317,15 +317,15 @@ impl Shell {
                     self.contacts_command(contacts::Command::Detach);
                     self.command(Command::Detach);
                 }
-                Effect::ConnectPhone { address } => {
+                Effect::ConnectPhone { address, attempt } => {
                     let system = self.system.clone();
                     let inputs = self.inputs.clone();
                     // A Phone out of range takes BlueZ's page timeout to
                     // fail; the Desktop carries on meanwhile.
                     MainContext::default().spawn_local(async move {
                         let input = match bluez::connect_phone(&system, &address).await {
-                            Ok(()) => Input::ConnectPhoneDone,
-                            Err(failure) => Input::ConnectPhoneFailed(failure),
+                            Ok(()) => Input::ConnectPhoneDone { attempt },
+                            Err(failure) => Input::ConnectPhoneFailed { attempt, failure },
                         };
                         let _ = inputs.unbounded_send(input);
                     });

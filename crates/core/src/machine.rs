@@ -263,6 +263,8 @@ pub struct State {
     unwanted: Option<CallId>,
     /// How many times the user has asked to dial.
     dial_attempts: u32,
+    /// How many times the Desktop has asked BlueZ to connect a Phone.
+    connect_attempts: u32,
     /// The Phone's latest report of its hands-free microphone gain.
     microphone_volume: Option<u8>,
     muting: Muting,
@@ -715,9 +717,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhoneDisconnected { address } if state.is_our_phone(&address) => {
             hands_free_down(&mut state, &mut effects);
         }
-        input @ (Input::ConnectPhoneDone | Input::ConnectPhoneFailed(_)) => {
+        input @ (Input::ConnectPhoneDone { .. } | Input::ConnectPhoneFailed { .. }) => {
             presence_input(&mut state, input, &mut effects);
-            setup::connect_ended(&mut state, &mut effects);
         }
         input @ (Input::PhonePresent { .. }
         | Input::PhoneAbsent { .. }

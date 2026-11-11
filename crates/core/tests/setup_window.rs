@@ -196,6 +196,7 @@ fn once_paired_the_phone_is_followed_trusted_and_connected() {
         },
         Effect::ConnectPhone {
             address: PHONE.to_owned(),
+            attempt: 1,
         },
     ] {
         assert!(effects.contains(&wanted), "{wanted:?} in {effects:?}");
@@ -212,7 +213,7 @@ fn once_the_phone_is_connected_for_calls_the_window_goes_on_to_contacts() {
     let (state, _) = run(
         state,
         [
-            Input::ConnectPhoneDone,
+            Input::ConnectPhoneDone { attempt: 1 },
             Input::PhonePresent {
                 address: PHONE.to_owned(),
             },
@@ -303,7 +304,7 @@ fn a_rejected_pairing_goes_back_to_the_list_and_says_why() {
 #[test]
 fn a_phone_connected_without_hands_free_is_asked_for_it_alone() {
     let (state, _) = paired();
-    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let (state, effects) = run(state, [Input::ConnectPhoneDone { attempt: 1 }]);
     let timers = setup_timers(&effects);
     assert_eq!(timers.len(), 1);
 
@@ -334,7 +335,7 @@ fn a_phone_connected_without_hands_free_is_asked_for_it_alone() {
 #[test]
 fn a_phone_that_did_not_answer_for_hands_free_says_to_bring_it_close_and_connects_it_again() {
     let (state, _) = paired();
-    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let (state, effects) = run(state, [Input::ConnectPhoneDone { attempt: 1 }]);
     let (state, _) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
 
     let (state, _) = run(state, [Input::HandsFreeUnreachable]);
@@ -346,7 +347,8 @@ fn a_phone_that_did_not_answer_for_hands_free_says_to_bring_it_close_and_connect
     // Try again connects the Phone afresh: it may be back.
     let (state, effects) = run(state, [Input::RetryHandsFree]);
     assert!(effects.contains(&Effect::ConnectPhone {
-        address: PHONE.to_owned()
+        address: PHONE.to_owned(),
+        attempt: 2
     }));
     assert_eq!(
         setup_step(&state),
@@ -357,7 +359,7 @@ fn a_phone_that_did_not_answer_for_hands_free_says_to_bring_it_close_and_connect
 #[test]
 fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_again() {
     let (state, _) = paired();
-    let (state, effects) = run(state, [Input::ConnectPhoneDone]);
+    let (state, effects) = run(state, [Input::ConnectPhoneDone { attempt: 1 }]);
     let (state, _) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
 
     let (state, _) = run(state, [Input::HandsFreeRefused]);
@@ -432,7 +434,10 @@ fn pair_again_after_the_phone_forgot_the_pairing_pairs_from_the_phone() {
             Input::PhonePaired(pixel()),
             Input::PairedPhonesListed,
             Input::PhoneAbsent { address: address() },
-            Input::ConnectPhoneFailed(ConnectFailure::PairingLost),
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::PairingLost,
+            },
         ],
     );
     assert_eq!(state.connection_state(), &ConnectionState::PairingLost);
@@ -474,7 +479,10 @@ fn a_phone_paired_again_that_does_not_connect_by_itself_is_connected() {
             Input::PhonePaired(pixel()),
             Input::PairedPhonesListed,
             Input::PhoneAbsent { address: address() },
-            Input::ConnectPhoneFailed(ConnectFailure::PairingLost),
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::PairingLost,
+            },
             Input::OpenSetupWindow,
             Input::PairingCode {
                 phone: pixel(),
@@ -485,7 +493,10 @@ fn a_phone_paired_again_that_does_not_connect_by_itself_is_connected() {
     let (state, effects) = run(state, [Input::ConfirmPairing]);
     let (state, effects) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
 
-    assert!(effects.contains(&Effect::ConnectPhone { address: address() }));
+    assert!(effects.contains(&Effect::ConnectPhone {
+        address: address(),
+        attempt: 2
+    }));
     assert_eq!(
         setup_step(&state),
         Some(SetupStep::Connecting { phone: pixel() })

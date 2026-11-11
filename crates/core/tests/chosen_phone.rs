@@ -156,7 +156,8 @@ fn choosing_a_phone_that_is_paired_already_follows_and_keeps_it_without_pairing(
         address: OLD.to_owned()
     }));
     assert!(effects.contains(&Effect::ConnectPhone {
-        address: OLD.to_owned()
+        address: OLD.to_owned(),
+        attempt: 1
     }));
     assert!(
         !effects

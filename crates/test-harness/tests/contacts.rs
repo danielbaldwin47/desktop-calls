@@ -712,6 +712,95 @@ fn older_call_history_pages_the_phone_fails_leave_contacts_read() {
 }
 
 #[test]
+fn a_failed_older_page_keeps_call_history_cached_before_a_restart() {
+    let mut harness = Harness::start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(10, 0));
+    phone.set_pbap_folder("cch", &vcards::call_history(120));
+    synced(&harness);
+    harness.wait_for_app("all 120 Calls are cached", SYNC_DEADLINE, |state| {
+        state.contacts.call_history == 120
+    });
+    harness.wait_for_app_log(r#""event_kind":"contacts-sync-ended""#, SYNC_DEADLINE);
+    phone.fail_history_pulls_from(50);
+
+    harness.restart_app();
+
+    // The first sync reads three pages; the restarted sync tries two.
+    wait_for_call_history_pulls(&harness, 5);
+    let started = Instant::now();
+    loop {
+        let completed = harness
+            .app_log()
+            .lines()
+            .filter(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .is_ok_and(|event| event["event_kind"] == "contacts-sync-ended")
+            })
+            .count();
+        if completed >= 2 {
+            break;
+        }
+        assert!(
+            started.elapsed() < SYNC_DEADLINE,
+            "the restarted sync did not finish within {SYNC_DEADLINE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let history = harness.call_history();
+    assert_eq!(
+        history.len(),
+        120,
+        "a failed page must keep older cached Calls"
+    );
+    assert_eq!(
+        history.last().map(|entry| entry.number.as_str()),
+        Some(vcards::number(119).as_str()),
+        "the oldest cached Call is still shown"
+    );
+
+    // With the Phone away, only the cache can restore the older Calls.
+    harness.simulated_phone().disconnect();
+    harness.restart_app();
+    let state = harness.wait_for_app("the cache is loaded again", DEADLINE, |state| {
+        state.contacts.contacts == 10
+    });
+    assert_ne!(state.connection_state, "connected");
+    assert_eq!(state.contacts.call_history, 120);
+    assert_eq!(
+        harness.call_history().last().map(|entry| entry.number.as_str()),
+        Some(vcards::number(119).as_str()),
+        "the oldest cached Call survives another restart"
+    );
+}
+
+#[test]
+fn a_complete_sync_removes_cached_calls_deleted_from_the_phone() {
+    let mut harness = Harness::start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("cch", &vcards::call_history(120));
+    synced(&harness);
+    harness.wait_for_app("all 120 Calls are cached", SYNC_DEADLINE, |state| {
+        state.contacts.call_history == 120
+    });
+    // The Phone deleted its oldest 60 Calls. Reading both remaining pages
+    // is authoritative, so the cached Calls must go too.
+    phone.set_pbap_folder("cch", &vcards::call_history(60));
+
+    harness.restart_app();
+
+    harness.wait_for_app("only the Phone's 60 Calls remain", SYNC_DEADLINE, |state| {
+        state.contacts.call_history == 60
+    });
+    let history = harness.call_history();
+    assert_eq!(history.len(), 60);
+    assert_eq!(
+        history.last().map(|entry| entry.number.as_str()),
+        Some(vcards::number(59).as_str())
+    );
+}
+
+#[test]
 fn after_a_call_only_the_newest_page_is_pulled_and_older_calls_are_kept() {
     let harness = Harness::start();
     let phone = harness.simulated_phone();

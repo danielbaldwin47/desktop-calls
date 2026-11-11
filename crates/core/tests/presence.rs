@@ -43,12 +43,6 @@ fn absent() -> Input {
     }
 }
 
-fn connect() -> Effect {
-    Effect::ConnectPhone {
-        address: ADDRESS.to_owned(),
-    }
-}
-
 fn hands_free_up() -> [Input; 2] {
     [
         Input::PhoneConnected {
@@ -86,7 +80,9 @@ fn reconnect_waits(effects: &[Effect]) -> Vec<(Timer, u32)> {
 fn connects(effects: &[Effect]) -> usize {
     effects
         .iter()
-        .filter(|effect| **effect == connect())
+        .filter(
+            |effect| matches!(effect, Effect::ConnectPhone { address, .. } if address == ADDRESS),
+        )
         .count()
 }
 
@@ -128,10 +124,13 @@ fn going_out_of_range_is_quiet_and_says_so_on_the_indicator() {
 fn a_phone_that_doesnt_answer_is_tried_again_after_waits_capped_at_3_s() {
     let (mut state, _) = run(connected(), [hands_free_down(), absent()]);
     let mut waits = Vec::new();
-    for _ in 0..4 {
+    for attempt in 1..=4 {
         let (next, effects) = step(
             state,
-            Input::ConnectPhoneFailed(ConnectFailure::Unreachable),
+            Input::ConnectPhoneFailed {
+                attempt,
+                failure: ConnectFailure::Unreachable,
+            },
         );
         let [(timer, after_ms)] = reconnect_waits(&effects)[..] else {
             panic!("one wait expected: {effects:?}");
@@ -150,10 +149,19 @@ fn once_the_phone_is_back_the_waits_stop_and_start_short_again() {
     let (state, _) = run(connected(), [hands_free_down(), absent()]);
     let (state, effects) = run(
         state,
-        [
-            Input::ConnectPhoneFailed(ConnectFailure::Unreachable),
-            Input::ConnectPhoneFailed(ConnectFailure::Unreachable),
-        ],
+        [Input::ConnectPhoneFailed {
+            attempt: 1,
+            failure: ConnectFailure::Unreachable,
+        }],
+    );
+    let (wait, _) = reconnect_waits(&effects)[0];
+    let (state, _) = step(state, Input::TimerFired(wait));
+    let (state, effects) = step(
+        state,
+        Input::ConnectPhoneFailed {
+            attempt: 2,
+            failure: ConnectFailure::Unreachable,
+        },
     );
     let old_wait = reconnect_waits(&effects).last().map(|(timer, _)| *timer);
 
@@ -165,7 +173,10 @@ fn once_the_phone_is_back_the_waits_stop_and_start_short_again() {
     assert_eq!(connects(&effects), 1);
     let (_, effects) = run(
         state,
-        [Input::ConnectPhoneFailed(ConnectFailure::Unreachable)],
+        [Input::ConnectPhoneFailed {
+            attempt: 3,
+            failure: ConnectFailure::Unreachable,
+        }],
     );
     assert_eq!(
         reconnect_waits(&effects)
@@ -179,7 +190,7 @@ fn once_the_phone_is_back_the_waits_stop_and_start_short_again() {
 #[test]
 fn coming_back_reconnects_hands_free_and_refreshes_contacts_and_call_history() {
     let (state, _) = run(connected(), [hands_free_down(), absent()]);
-    let (state, effects) = run(state, [Input::ConnectPhoneDone, present()]);
+    let (state, effects) = run(state, [Input::ConnectPhoneDone { attempt: 1 }, present()]);
     let (state, more) = run(state, hands_free_up());
 
     assert_eq!(state.connection_state(), &ConnectionState::Connected);
@@ -197,7 +208,10 @@ fn nothing_is_connected_while_the_desktop_is_suspended() {
     let (state, effects) = run(
         state,
         [
-            Input::ConnectPhoneFailed(ConnectFailure::Unreachable),
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::Unreachable,
+            },
             Input::Suspending,
         ],
     );
@@ -218,7 +232,10 @@ fn resuming_connects_the_phone_at_once() {
             Input::Suspending,
             hands_free_down(),
             absent(),
-            Input::ConnectPhoneFailed(ConnectFailure::Unreachable),
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::Unreachable,
+            },
         ],
     );
 
@@ -236,7 +253,10 @@ fn resuming_while_a_connect_is_under_way_connects_again_as_soon_as_it_fails() {
     assert_eq!(connects(&effects), 0);
     let (_, effects) = run(
         state,
-        [Input::ConnectPhoneFailed(ConnectFailure::Unreachable)],
+        [Input::ConnectPhoneFailed {
+            attempt: 1,
+            failure: ConnectFailure::Unreachable,
+        }],
     );
 
     assert_eq!(connects(&effects), 1);
@@ -249,7 +269,10 @@ fn a_phone_that_forgot_the_pairing_is_a_problem_not_out_of_range() {
 
     let (state, effects) = run(
         state,
-        [Input::ConnectPhoneFailed(ConnectFailure::PairingLost)],
+        [Input::ConnectPhoneFailed {
+            attempt: 1,
+            failure: ConnectFailure::PairingLost,
+        }],
     );
 
     assert_eq!(state.connection_state(), &ConnectionState::PairingLost);
@@ -282,7 +305,10 @@ fn a_phone_that_connects_after_all_is_no_longer_a_pairing_problem() {
         [
             hands_free_down(),
             absent(),
-            Input::ConnectPhoneFailed(ConnectFailure::PairingLost),
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::PairingLost,
+            },
         ],
     );
 
@@ -365,7 +391,7 @@ fn hanging_up_a_call_that_lost_the_connection_says_it_cant() {
 fn the_call_back_with_the_phone_keeps_its_timer_and_loses_the_notice() {
     let (state, _) = run(live_call(), link_lost());
 
-    let (state, _) = run(state, [Input::ConnectPhoneDone, present()]);
+    let (state, _) = run(state, [Input::ConnectPhoneDone { attempt: 1 }, present()]);
     let (state, _) = run(state, hands_free_up());
     let (state, _) = run(
         state,
@@ -409,7 +435,7 @@ fn connection_lost_timers(effects: &[Effect]) -> Vec<(Timer, u32)> {
 #[test]
 fn the_window_closes_if_the_call_doesnt_come_back_with_the_phone() {
     let (state, _) = run(live_call(), link_lost());
-    let (state, _) = run(state, [Input::ConnectPhoneDone, present()]);
+    let (state, _) = run(state, [Input::ConnectPhoneDone { attempt: 1 }, present()]);
     let (state, effects) = run(state, hands_free_up());
     let [(timer, 2_000)] = connection_lost_timers(&effects)[..] else {
         panic!("a 2 s timer expected: {effects:?}");

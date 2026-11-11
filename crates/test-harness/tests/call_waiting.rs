@@ -29,6 +29,144 @@ const ALICE: &str = "+447700900456";
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 
+/// Blocks the serialized Phone commands with a Mute the Phone has received.
+fn slow_mute(harness: &Harness) -> usize {
+    let before = microphone_writes(&harness.simulated_phone().wait_for_recorded(
+        "the record before Mute",
+        DEADLINE,
+        |_| true,
+    ));
+    harness.simulated_phone().enable_quirk("slow-property-writes");
+    harness
+        .set_muted(true)
+        .unwrap_or_else(|error| panic!("Mute was refused: {error:?}"));
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone is processing Mute",
+        DEADLINE,
+        |recorded| microphone_writes(recorded) == before + 1,
+    );
+    before
+}
+
+fn microphone_writes(recorded: &[RecordedMethodCall]) -> usize {
+    recorded
+        .iter()
+        .filter(|call| call.member == "Set" && call.arguments.contains("MicrophoneVolume"))
+        .count()
+}
+
+fn queue_decline(harness: &Harness, call: u32) {
+    harness.decline(call);
+    harness.wait_for_app("the Desktop has accepted Decline", DEADLINE, |state| {
+        banner(state).is_none() && state.calls.iter().any(|known| known.id == call)
+    });
+}
+
+fn return_call(harness: &Harness, path: &str, call: u32) {
+    harness
+        .simulated_phone()
+        .reregister_call(path, Duration::from_millis(50));
+    harness.wait_for_app_log(&format!("Call {call} came back"), DEADLINE);
+}
+
+/// A queued Decline must retain its selected Call, including an automatic
+/// retry after that Call vanished. A path and even a number can be reused.
+fn queued_decline_preserves_next_call(number: &str, returned: bool) {
+    let harness = connected();
+    let (_, live) = on_a_call(&harness);
+    let before = slow_mute(&harness);
+    let (old_path, old) = alice_waits(&harness);
+    queue_decline(&harness, old);
+    if returned {
+        return_call(&harness, &old_path, old);
+    }
+    harness.simulated_phone().caller_hangs_up(&old_path);
+    harness.wait_for_app("the first Waiting Call has ended", DEADLINE, |state| {
+        state_of(state, old).is_none()
+    });
+    let new_path = harness.simulated_phone().ring(number);
+    assert_eq!(old_path, new_path, "the Phone reused the released Call path");
+    let state = harness.wait_for_app("a new Waiting Call rings", DEADLINE, |state| {
+        banner(state).is_some()
+            && state.calls.len() == 2
+            && state.calls.iter().any(|call| call.id != old && call.id != live)
+    });
+    let new = state
+        .calls
+        .iter()
+        .find(|call| call.id != live)
+        .unwrap_or_else(|| panic!("the new Waiting Call is missing: {state:?}"))
+        .id;
+    // Unmute is queued after Decline and any returned-Call retry. Once
+    // the Phone receives it, those older batches have been dispatched.
+    harness
+        .set_muted(false)
+        .unwrap_or_else(|error| panic!("Unmute was refused: {error:?}"));
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone has processed the queue through Unmute",
+        DEADLINE,
+        |recorded| microphone_writes(recorded) == before + 2,
+    );
+    harness.app_holds(
+        "the new caller keeps ringing until the user acts",
+        HOLD,
+        |state| banner(state).is_some() && state_of(state, new) == Some("waiting"),
+    );
+    let recorded = harness.simulated_phone().wait_for_recorded("the record", DEADLINE, |_| true);
+    assert!(!hung_up(&recorded, &new_path), "no stale Hang up was sent");
+
+    harness.decline(new);
+    harness.wait_for_app("the selected new Waiting Call ends", DEADLINE, |state| {
+        state.calls.len() == 1 && state_of(state, live) == Some("active")
+    });
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone received the current Decline",
+        DEADLINE,
+        |recorded| hung_up(recorded, &new_path),
+    );
+    assert!(harness.app_errors().is_empty(), "{:?}", harness.app_errors());
+}
+
+#[test]
+fn a_queued_decline_does_not_decline_the_next_caller() {
+    queued_decline_preserves_next_call(BOB, false);
+}
+
+#[test]
+fn a_queued_decline_does_not_decline_the_same_number_ringing_again() {
+    queued_decline_preserves_next_call(ALICE, false);
+}
+
+#[test]
+fn a_queued_returned_call_decline_does_not_decline_the_next_caller() {
+    queued_decline_preserves_next_call(BOB, true);
+}
+
+#[test]
+fn a_queued_decline_reaches_the_same_waiting_call_after_it_returns() {
+    let harness = connected();
+    let (_, live) = on_a_call(&harness);
+    slow_mute(&harness);
+    let (path, call) = alice_waits(&harness);
+    queue_decline(&harness, call);
+    return_call(&harness, &path, call);
+
+    harness.wait_for_app("the returned Waiting Call ends", DEADLINE, |state| {
+        state.calls.len() == 1 && state_of(state, live) == Some("active")
+    });
+    let recorded = harness.simulated_phone().wait_for_recorded(
+        "the Phone received the returned Call's Decline",
+        DEADLINE,
+        |recorded| hung_up(recorded, &path),
+    );
+    assert_eq!(
+        recorded.iter().filter(|known| known.member == "Hangup" && known.path == path).count(),
+        1,
+        "only the current registration received Hang up"
+    );
+    assert!(harness.app_errors().is_empty(), "{:?}", harness.app_errors());
+}
+
 /// Connected, on a screen of its own: the surfaces show only on a screen.
 fn connected() -> Harness {
     connect(Harness::builder().headless_screen().start())

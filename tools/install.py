@@ -33,6 +33,9 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parent.parent
 APP_ID = "io.github.danielbaldwin47.DesktopCalls"
 UNIT = "desktop-calls.service"
+# Runs the path given as its first argument with the rest. env would not do:
+# it reads any word containing "=" as an assignment, even after "--".
+RUN_ARGUMENT = """/bin/sh -c 'exec "$0" "$@"'"""
 
 
 def systemd_command(path: Path) -> str:
@@ -43,7 +46,7 @@ def systemd_command(path: Path) -> str:
     """
     text = str(path)
     # systemd's executable validation rejects quotes, backslashes, globs and
-    # controls even when quoted. env accepts those paths as an argument.
+    # controls even when quoted. RUN_ARGUMENT accepts them as an argument.
     indirect = any(
         character in "'\"\\*?[" or ord(character) < 32 or ord(character) == 127
         for character in text
@@ -58,7 +61,8 @@ def systemd_command(path: Path) -> str:
         else "\\" + character if character in '\\"' else character
         for character in text
     )
-    return ("/usr/bin/env -- " if indirect else "") + '"' + text + '"'
+    prefix = RUN_ARGUMENT.replace("$", "$$") + " " if indirect else ""
+    return prefix + '"' + text + '"'
 
 
 def entry_value(text: str) -> str:
@@ -68,14 +72,20 @@ def entry_value(text: str) -> str:
 
 def desktop_command(path: Path) -> str:
     """Desktop Entry Exec quoting, then string-value escaping (two layers)."""
-    # Gio checks argv[0] for existence before expanding %% into %.
-    prefix = "/usr/bin/env -- " if "%" in str(path) else ""
     text = str(path).replace("%", "%%")
-    if re.fullmatch(r"[\w/%.\-]+", text):
-        return prefix + text
+    if not re.fullmatch(r"[\w/%.\-]+", text):
+        text = '"' + quote_exec(text) + '"'
+    # Gio checks argv[0] for existence before expanding %% into %.
+    if "%" in str(path):
+        text = '/bin/sh -c "' + quote_exec("exec \"$0\" \"$@\"") + '" ' + text
+    return entry_value(text)
+
+
+def quote_exec(text: str) -> str:
+    """Escape the characters Desktop Entry Exec reserves inside double quotes."""
     for character in ('\\', '"', '`', '$'):
         text = text.replace(character, "\\" + character)
-    return prefix + entry_value('"' + text + '"')
+    return text
 
 
 def directories() -> tuple[Path, Path]:

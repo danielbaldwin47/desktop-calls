@@ -24,6 +24,7 @@ HOMES = (
     "home", "home with spaces", "home%u", "home$HOME${HOME}",
     "home'quote\"\\backtick`", "home*?[glob]",
     "home %u $HOME ${HOME} 'quote\" \\backtick`",
+    "home%u=1", "home'quote=1", "home é ü",
 )
 
 

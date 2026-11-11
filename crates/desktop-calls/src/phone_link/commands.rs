@@ -31,7 +31,12 @@ pub(super) async fn execute(
                     // No await or strong token survives this check: only
                     // the followed registration keeps this target valid.
                     // A vanished Hang up gets a fresh target on return.
+                    // Anything else fails, as resolving it now would, so
+                    // the Desktop stops waiting on it.
                     if current.upgrade().is_none() {
+                        if !matches!(command, PhoneCommand::HangUp(_)) {
+                            let _ = inputs.unbounded_send(Input::PhoneCommandFailed(command));
+                        }
                         break;
                     }
                     (path, Some(current))

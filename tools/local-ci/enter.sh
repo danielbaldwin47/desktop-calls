@@ -40,6 +40,13 @@ mount --bind "$SRC" "$R/src"
 mount --bind "$CACHE" "$R/cache"
 mkdir -p "$R/src/target"
 mount --bind "$CACHE/target" "$R/src/target"
+# GitHub's job container runs as root on a checkout another user (the runner's)
+# owns, so there git refuses the repository ("detected dubious ownership").
+# Inside this namespace the checkout is root's own, so a test that ran git
+# against it passed here and failed on GitHub for a week (#196). Hand the
+# checkout, but not the cache mounted at target, to uid 1, another user
+# mapped into this namespace.
+find "$R/src" -path "$R/src/target" -prune -o -exec chown -h 1:1 {} +
 cp -L /etc/resolv.conf "$R/etc/resolv.conf"
 ip link set lo up 2>/dev/null || true
 

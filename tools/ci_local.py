@@ -54,6 +54,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import resource
 import shutil
 import signal
@@ -377,6 +378,14 @@ def checkout(sha: str, scratch: pathlib.Path) -> None:
     subprocess.run(["git", "-C", str(scratch), "checkout", "--quiet", "--detach", sha], check=True)
 
 
+def owner_and_name(url: str) -> str:
+    """`owner/name` from a GitHub remote's URL, as GITHUB_REPOSITORY has it."""
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+    if not match:
+        raise Refused(f"origin ({url}) isn't a GitHub repository.\nNext: git remote set-url origin <its URL>")
+    return match.group(1)
+
+
 def run_in_image(
     log: Log,
     scratch: pathlib.Path,
@@ -389,6 +398,10 @@ def run_in_image(
     """Runs `command` in the image. With `threads`, the test runners (cargo
     test, nextest, the gallery) run that many tests at a time."""
     flags = [] if network else ["--net"]
+    # GitHub Actions sets this in every step. The checkout there belongs to
+    # another user, so git refuses it and a check can't read origin's URL
+    # (enter.sh hands the checkout to another user here too).
+    command = f"export GITHUB_REPOSITORY={owner_and_name(git('remote', 'get-url', 'origin'))} && {command}"
     if threads is not None:
         command = f"export RUST_TEST_THREADS={threads} NEXTEST_TEST_THREADS={threads} && {command}"
     CACHE.mkdir(parents=True, exist_ok=True)

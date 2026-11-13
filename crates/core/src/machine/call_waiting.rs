@@ -134,7 +134,7 @@ pub(super) fn answer_beside_held(state: &mut State, effects: &mut Vec<Effect>) {
 /// does.
 pub(super) fn answer_once_ringing(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
     effects.push(Effect::Phone(PhoneCommand::Answer(call)));
-    bring_audio_here(state, effects);
+    bring_audio_here(state, Some(call), effects);
 }
 
 /// The Phone didn't hang up the Call being placed for End & Answer: the
@@ -169,7 +169,7 @@ fn answer_waiting(
         && state.moving_audio.is_none()
         && state.moving_to_phone.is_none()
     {
-        bring_audio_here(state, effects);
+        bring_audio_here(state, Some(waiting), effects);
     }
 }
 

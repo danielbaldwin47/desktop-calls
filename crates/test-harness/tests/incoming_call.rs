@@ -26,6 +26,11 @@ const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
 const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
+/// A number the user calls from the Phone.
+const OTHER_NUMBER: &str = "+447700900456";
+/// Longer than a Handoff to the Desktop may take before the user is told
+/// the audio didn't move (3 s).
+const HANDOFF_LIMIT: Duration = Duration::from_secs(4);
 
 fn connected() -> Harness {
     let harness = Harness::start();
@@ -497,6 +502,83 @@ fn the_caller_hanging_up_while_ringing_stops_the_desktop_ringing_at_once() {
     harness.wait_for_app("the Desktop stops ringing", KEEP_UP_DEADLINE, |state| {
         !state.ringing && state.calls.is_empty()
     });
+    assert!(
+        harness.app_errors().is_empty(),
+        "{:?}",
+        harness.app_errors()
+    );
+}
+
+/// Answer waits behind slow Phone commands. Meanwhile the user places a
+/// Call on the Phone, and the ringing caller gives up before Answer is
+/// sent, so the Phone link drops it. Nothing was answered and no audio was
+/// asked for: the placed Call's Call Window offers to move its audio here
+/// at once, and no "audio not moved" error follows when the Handoff's limit
+/// would have run out.
+#[test]
+fn an_answer_dropped_because_the_caller_gave_up_leaves_no_handoff_under_way() {
+    let harness = Harness::builder().headless_screen().start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    let (first_path, _) = answered(&harness);
+    // Mute, the unmute when the Call ends and RejectSCO=true after it each
+    // hold the serialized Phone commands for a second.
+    harness.simulated_phone().enable_quirk("slow-property-writes");
+    harness
+        .set_muted(true)
+        .unwrap_or_else(|error| panic!("Mute was refused: {error:?}"));
+    wait_for_telephony(&harness, "the Phone is processing Mute", |calls| {
+        calls
+            .iter()
+            .any(|call| call.member == "Set" && call.arguments.contains("MicrophoneVolume"))
+    });
+    harness.simulated_phone().caller_hangs_up(&first_path);
+    harness.wait_for_app("the first Call is gone", DEADLINE, |state| {
+        state.calls.is_empty()
+    });
+    let (path, call) = ring(&harness);
+    harness.answer(call);
+    harness.wait_for_app("the Desktop has accepted Answer", DEADLINE, |state| {
+        state.surface("banner").is_none()
+    });
+    let _ = harness.simulated_phone().dial_on_phone(OTHER_NUMBER);
+    let state = harness.wait_for_app("the Call placed on the Phone is listed", DEADLINE, |state| {
+        state.calls.len() == 2
+    });
+    let placed = state
+        .calls
+        .iter()
+        .find(|known| known.id != call)
+        .unwrap_or_else(|| panic!("the placed Call is missing: {state:?}"))
+        .id;
+
+    harness.simulated_phone().caller_hangs_up(&path);
+
+    harness.wait_for_app("only the placed Call is left", DEADLINE, |state| {
+        state.calls.len() == 1 && state.calls[0].id == placed
+    });
+    harness.app_holds(
+        "the placed Call offers to move its audio here, with no notice",
+        HANDOFF_LIMIT,
+        |state| {
+            let window = state.surface("call-window");
+            window.and_then(|window| window.get("handoff")).map(String::as_str)
+                == Some("Move audio here")
+                && window.is_some_and(|window| !window.contains_key("notice"))
+        },
+    );
+    let calls = wait_for_telephony(&harness, "the record", |_| true);
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|recorded| recorded.member == "Answer")
+            .count(),
+        1,
+        "only the first Call was answered; a second Answer means the queue reached it before \
+         the caller gave up, and this run proves nothing: {calls:#?}"
+    );
     assert!(
         harness.app_errors().is_empty(),
         "{:?}",

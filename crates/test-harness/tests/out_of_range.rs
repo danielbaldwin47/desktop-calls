@@ -128,6 +128,34 @@ fn back_in_range_the_phone_is_connected_within_10_s_and_contacts_and_call_histor
     assert_eq!(harness.notifications().received(), []);
 }
 
+/// A connect under way when the Phone leaves must not bring it back (#196).
+/// The app pages the Phone as it starts; once the Phone is in range that
+/// connect takes another 600 ms to finish, and finishing it after the Phone
+/// had left brought the Phone back, so GitHub's run of
+/// `restarted_with_the_phone_away_the_cached_contacts_still_count` saw the
+/// app connected.
+#[test]
+fn a_connect_under_way_when_the_phone_leaves_does_not_bring_it_back() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    harness.simulated_phone().wait_for_recorded(
+        "the app pages the Phone before it is in range",
+        DEADLINE,
+        |recorded| connects(recorded) >= 1,
+    );
+    harness.simulated_phone().connect();
+    wait_connected(&harness, DEADLINE);
+
+    // Long enough for the Simulated Phone to have seen the Phone in range and
+    // begun the 600 ms the app's connect takes to finish (it looks every
+    // 20 ms), well inside them.
+    std::thread::sleep(Duration::from_millis(150));
+    out_of_range(&harness);
+
+    harness.app_holds("the Phone stays away", Duration::from_secs(2), |state| {
+        state.connection_state != "connected"
+    });
+}
+
 /// Scenario 18.
 #[test]
 fn after_resume_the_phone_is_connected_within_10_s() {

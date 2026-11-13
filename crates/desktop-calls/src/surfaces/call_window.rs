@@ -19,8 +19,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 mod held;
+mod pill;
 
 use held::HeldRow;
+use pill::CallPill;
 
 /// The Call Window.
 pub(super) struct CallWindow {
@@ -60,6 +62,8 @@ pub(super) struct CallWindow {
     /// Called whenever the window may have changed height, so the Banner
     /// stays below it.
     resized: RefCell<Option<Box<dyn Fn()>>>,
+    /// What the window shows as while it is collapsed.
+    pill: CallPill,
 }
 
 impl CallWindow {
@@ -68,9 +72,9 @@ impl CallWindow {
             "call-window",
             Layer::Top,
             KeyboardMode::OnDemand,
-            Input::ReleaseFocus,
+            Some(Input::CollapseCallWindow),
             intents,
-            report,
+            report.clone(),
         );
         let (heading, caller, hd) = heading();
         let detail = detail_label();
@@ -156,6 +160,7 @@ impl CallWindow {
             ticker: RefCell::default(),
             view: Rc::default(),
             resized: RefCell::default(),
+            pill: CallPill::new(intents, report),
         });
         window.connect();
         window
@@ -176,11 +181,15 @@ impl CallWindow {
             }
         });
         let weak = Rc::downgrade(self);
-        self.keypad_shown.connect_toggled(move |_| {
+        self.keypad_shown.connect_toggled(move |toggle| {
             if let Some(window) = weak.upgrade() {
+                let _ = window
+                    .intents
+                    .unbounded_send(Input::KeypadShown(toggle.is_active()));
                 window.update();
             }
         });
+        self.report_use();
         for (row, tones) in (0..).zip(KEYPAD) {
             for (column, tone) in (0..).zip(tones) {
                 let button = gtk::Button::with_label(tone);
@@ -255,6 +264,26 @@ impl CallWindow {
             }
         });
         self.surface.window.add_controller(keys);
+    }
+
+    /// Reports the pointer entering and leaving the window, and the window
+    /// getting and losing the keyboard, so the Call state machine knows when
+    /// the user is using it.
+    fn report_use(&self) {
+        let pointer = gtk::EventControllerMotion::new();
+        let intents = self.intents.clone();
+        pointer.connect_enter(move |_, _, _| {
+            let _ = intents.unbounded_send(Input::PointerOverCallWindow(true));
+        });
+        let intents = self.intents.clone();
+        pointer.connect_leave(move |_| {
+            let _ = intents.unbounded_send(Input::PointerOverCallWindow(false));
+        });
+        self.surface.window.add_controller(pointer);
+        let intents = self.intents.clone();
+        self.surface.window.connect_is_active_notify(move |window| {
+            let _ = intents.unbounded_send(Input::CallWindowKeyboard(window.is_active()));
+        });
     }
 
     fn toggle_mute(&self) {
@@ -498,15 +527,25 @@ impl CallWindow {
         let Some(view) = view else {
             self.stop_ticker();
             self.surface.hide();
+            self.pill.hide();
             return;
         };
-        self.surface.call.set(view.call);
         let live = matches!(view.phase, CallWindowPhase::Live { .. });
         if live {
             self.start_ticker();
         } else {
             self.stop_ticker();
         }
+        if view.collapsed {
+            // The window keeps its keypad and tones for when it expands.
+            if self.surface.window.is_visible() {
+                self.surface.hide();
+            }
+            self.update();
+            return;
+        }
+        self.pill.hide();
+        self.surface.call.set(view.call);
         self.update();
         if live && !was_live {
             // Once the update has enabled it: a disabled entry can't take
@@ -521,6 +560,10 @@ impl CallWindow {
         let Some(view) = self.view.borrow().clone() else {
             return;
         };
+        if view.collapsed {
+            self.pill.render(&view);
+            return;
+        }
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
         who.show_detail(&self.detail);
@@ -636,6 +679,11 @@ impl CallWindow {
         if WidgetExt::is_visible(&self.tones) && !tones.is_empty() {
             content.insert("tones".to_owned(), tones.to_string());
         }
+    }
+
+    /// The Call Pill's surface.
+    pub(super) fn pill_surface(&self) -> &Surface {
+        &self.pill.surface
     }
 
     /// Calls `resized` whenever the window may have changed height.

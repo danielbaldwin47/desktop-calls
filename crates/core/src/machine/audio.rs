@@ -1,6 +1,7 @@
 //! Where the Call's audio goes: Handoff between the Phone and the Desktop, and
 //! Mute.
 
+use super::collapse::expand_with_keyboard;
 use super::dialling::{dial_failed, open_dialer};
 use super::input::{Effect, Input, PhoneCommand, Timer};
 use super::phone::{phone_connected, phone_disconnected};
@@ -66,7 +67,8 @@ pub(super) fn still_silenced(state: &mut State) {
 }
 
 /// The keybinding: focus the Banner while a Call rings here, otherwise the
-/// Call Window while a Call is live, otherwise open the Dialer. Neither
+/// Call Window while a Call is live, expanding it if it is collapsed,
+/// otherwise open the Dialer. Neither
 /// touches the Call itself. Only one surface can have the keyboard, so the
 /// Dialer closes when another takes it.
 pub(super) fn activate(state: &mut State) {
@@ -80,8 +82,7 @@ pub(super) fn activate(state: &mut State) {
             CallWindowPhase::Ended | CallWindowPhase::NotPlaced
         )
     }) {
-        state.focus = Focus::CallWindow;
-        state.dialer = None;
+        expand_with_keyboard(state);
     } else if state.dialer.is_none() {
         open_dialer(state, String::new(), None);
     }

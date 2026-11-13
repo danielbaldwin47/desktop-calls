@@ -66,7 +66,7 @@ use setup_window::SetupWindow;
 /// Hyprland can't say. Omarchy 4.5's is 394.
 const FALLBACK_TOAST_COLUMN_WIDTH: i32 = 400;
 /// Space between a surface and what it sits next to.
-const GAP: i32 = 12;
+pub(crate) const GAP: i32 = 12;
 const WIDTH: i32 = 340;
 const DIALER_WIDTH: i32 = 560;
 /// The Dialer's list stays this tall, so the Dialer doesn't jump about as
@@ -193,10 +193,11 @@ impl Surfaces {
     }
 
     /// Each surface's name and window.
-    fn windows(&self) -> [(&'static str, gtk::Window); 3] {
+    fn windows(&self) -> [(&'static str, gtk::Window); 4] {
         [
             &self.banner.surface,
             &self.call_window.surface,
+            self.call_window.pill_surface(),
             &self.dialer.surface,
         ]
         .map(|surface| (surface.name, surface.window.clone()))
@@ -369,7 +370,7 @@ fn surface_shown(name: &str) {
 /// the new theme (ticket #99). A hidden surface draws nothing, so it logs
 /// nothing.
 fn theme_shown_when_drawn(
-    surfaces: [(&'static str, gtk::Window); 3],
+    surfaces: [(&'static str, gtk::Window); 4],
 ) -> impl Fn(Option<&'static str>) + 'static {
     move |mode| {
         for &(name, ref window) in &surfaces {
@@ -415,12 +416,12 @@ fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMa
 
 impl Surface {
     /// A surface named `name` in the top-right corner. Escape sends
-    /// `escape`.
+    /// `escape`, if the surface takes the keyboard at all.
     fn new(
         name: &'static str,
         layer: Layer,
         keyboard: KeyboardMode,
-        escape: Input,
+        escape: Option<Input>,
         intents: &UnboundedSender<Input>,
         report: SharedReport,
     ) -> Self {
@@ -480,7 +481,9 @@ impl Surface {
                     .set(name, Some(reported(&content.borrow(), window)));
             }
         });
-        surface.on_escape(escape, intents);
+        if let Some(escape) = escape {
+            surface.on_escape(escape, intents);
+        }
         let (mapped, report) = (surface.mapped.clone(), surface.report.clone());
         surface.window.connect_unmap(move |_| {
             mapped.set(false);

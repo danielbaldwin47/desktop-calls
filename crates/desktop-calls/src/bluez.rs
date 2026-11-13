@@ -203,7 +203,7 @@ fn connected(device: &HashMap<String, OwnedVariant>) -> Option<bool> {
 
 /// Whether the Phone at `address` has a Bluetooth connection to the
 /// Desktop, as an input.
-fn presence(address: &str, connected: bool) -> Input {
+pub(crate) fn presence(address: &str, connected: bool) -> Input {
     let address = address.to_owned();
     if connected {
         // At info, as its absence is: the Real-Phone Checklist times the
@@ -224,21 +224,44 @@ fn presence(address: &str, connected: bool) -> Input {
     }
 }
 
+/// How a connect of the Phone ended well.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Connected {
+    /// BlueZ connected the Phone as asked: it reports the Phone present
+    /// itself.
+    AsAsked,
+    /// BlueZ had the Phone connected already: the Phone is present, whatever
+    /// the Desktop last heard.
+    Already,
+}
+
 /// Asks BlueZ to connect the Phone at `address`: `Device1.Connect`, which
 /// pages it and connects the profiles it offers (ADR-0004). A Phone out of
-/// range fails it after BlueZ's page timeout, about 5 s.
+/// range fails it after BlueZ's page timeout, about 5 s. With `away` (the
+/// Desktop last heard the Phone has no Bluetooth connection), a Phone BlueZ
+/// has connected after all isn't paged: on the real Desktop each such
+/// `Connect` paged it for about 42 s, and failed (ticket #212). Without, a
+/// connected Phone is asked anyway: `Connect` brings up the profiles a Phone
+/// just paired hasn't connected yet.
 ///
 /// # Errors
 ///
 /// Why the Phone didn't connect; the raw BlueZ error is logged here.
-pub async fn connect_phone(system: &Connection, address: &str) -> Result<(), ConnectFailure> {
-    tracing::debug!(
-        event_kind = %EventKind::PhoneConnectRequested,
-        phone_address = %address,
-        "Asking BlueZ to connect the Phone"
-    );
-    let device = match find_device(system, address).await {
-        Ok(Some(device)) => device,
+pub async fn connect_phone(
+    system: &Connection,
+    address: &str,
+    away: bool,
+) -> Result<Connected, ConnectFailure> {
+    let device = match find_phone(system, address).await {
+        Ok(Some((_, true))) if away => {
+            tracing::debug!(
+                event_kind = %EventKind::PhoneConnectRequested,
+                phone_address = %address,
+                "BlueZ has the Phone connected already: not asking it to connect"
+            );
+            return Ok(Connected::Already);
+        }
+        Ok(Some((device, _))) => device,
         Ok(None) => {
             connect_failed(
                 address,
@@ -252,14 +275,19 @@ pub async fn connect_phone(system: &Connection, address: &str) -> Result<(), Con
             return Err(ConnectFailure::Unreachable);
         }
     };
+    tracing::debug!(
+        event_kind = %EventKind::PhoneConnectRequested,
+        phone_address = %address,
+        "Asking BlueZ to connect the Phone"
+    );
     let failure = match system
         .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Connect", &())
         .await
     {
-        Ok(_) => return Ok(()),
+        Ok(_) => return Ok(Connected::AsAsked),
         Err(zbus::Error::MethodError(name, message, _)) => {
             match connect_failure(name.as_str(), message.as_deref().unwrap_or_default()) {
-                None => return Ok(()),
+                None => return Ok(Connected::Already),
                 Some(failure) => (failure, format!("{name}: {}", message.unwrap_or_default())),
             }
         }
@@ -273,7 +301,10 @@ pub async fn connect_phone(system: &Connection, address: &str) -> Result<(), Con
 /// is connected after all.
 fn connect_failure(name: &str, message: &str) -> Option<ConnectFailure> {
     match name {
+        // BlueZ's error table has both; the real Desktop answered the
+        // second while the Phone connected by itself (ticket #212).
         "org.bluez.Error.AlreadyConnected" => None,
+        "org.bluez.Error.Failed" if message == "br-connection-already-connected" => None,
         // The Phone answered the page and had no link key for the Desktop.
         "org.bluez.Error.AuthenticationFailed" | "org.bluez.Error.AuthenticationRejected" => {
             Some(ConnectFailure::PairingLost)
@@ -424,6 +455,12 @@ pub(crate) async fn find_device(
     system: &Connection,
     address: &str,
 ) -> zbus::Result<Option<String>> {
+    Ok(find_phone(system, address).await?.map(|(device, _)| device))
+}
+
+/// The object path of BlueZ's device with `address`, if it has one, and
+/// whether BlueZ has it connected now.
+async fn find_phone(system: &Connection, address: &str) -> zbus::Result<Option<(String, bool)>> {
     let objects = ObjectManagerProxy::builder(system)
         .destination(SERVICE)
         .path(ROOT)
@@ -431,17 +468,16 @@ pub(crate) async fn find_device(
         .await?
         .get_managed_objects()
         .await?;
-    Ok(objects
-        .into_iter()
-        .find(|(_, interfaces)| {
-            interfaces
-                .iter()
-                .find(|(name, _)| name.as_str() == DEVICE)
-                .and_then(|(_, device)| device.get("Address"))
-                .and_then(|value| String::try_from(value.clone()).ok())
-                .is_some_and(|found| found.eq_ignore_ascii_case(address))
-        })
-        .map(|(path, _)| path.to_string()))
+    Ok(objects.into_iter().find_map(|(path, interfaces)| {
+        let (_, device) = interfaces
+            .into_iter()
+            .find(|(name, _)| name.as_str() == DEVICE)?;
+        device
+            .get("Address")
+            .and_then(|value| String::try_from(value.clone()).ok())
+            .is_some_and(|found| found.eq_ignore_ascii_case(address))
+            .then(|| (path.to_string(), connected(&device).unwrap_or(false)))
+    }))
 }
 
 fn bounce_failed(kind: BounceError, error: &zbus::Error) -> BounceError {

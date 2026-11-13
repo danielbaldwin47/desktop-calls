@@ -197,6 +197,7 @@ fn once_paired_the_phone_is_followed_trusted_and_connected() {
         Effect::ConnectPhone {
             address: PHONE.to_owned(),
             attempt: 1,
+            away: false,
         },
     ] {
         assert!(effects.contains(&wanted), "{wanted:?} in {effects:?}");
@@ -348,7 +349,8 @@ fn a_phone_that_did_not_answer_for_hands_free_says_to_bring_it_close_and_connect
     let (state, effects) = run(state, [Input::RetryHandsFree]);
     assert!(effects.contains(&Effect::ConnectPhone {
         address: PHONE.to_owned(),
-        attempt: 2
+        attempt: 2,
+        away: false,
     }));
     assert_eq!(
         setup_step(&state),
@@ -495,7 +497,8 @@ fn a_phone_paired_again_that_does_not_connect_by_itself_is_connected() {
 
     assert!(effects.contains(&Effect::ConnectPhone {
         address: address(),
-        attempt: 2
+        attempt: 2,
+        away: true,
     }));
     assert_eq!(
         setup_step(&state),

@@ -187,6 +187,68 @@ fn once_the_phone_is_back_the_waits_stop_and_start_short_again() {
     );
 }
 
+/// Every wait the effects started, fired: the connects that follow.
+fn connects_after_waits(state: &State, effects: &[Effect]) -> usize {
+    reconnect_waits(effects)
+        .iter()
+        .map(|(timer, _)| connects(&run(state.clone(), [Input::TimerFired(*timer)]).1))
+        .sum()
+}
+
+/// Ticket #212: the Phone connects by itself while the Desktop pages it, and
+/// the page then fails. A connected Phone is not paged again.
+#[test]
+fn a_connect_that_fails_after_the_phone_came_back_mid_connect_is_not_tried_again() {
+    let (state, _) = run(connected(), [hands_free_down(), absent()]);
+    let (state, _) = run(state, [present()]);
+    let (state, mut effects) = run(state, hands_free_up());
+
+    let (state, more) = run(
+        state,
+        [Input::ConnectPhoneFailed {
+            attempt: 1,
+            failure: ConnectFailure::Unreachable,
+        }],
+    );
+    effects.extend(more);
+
+    assert_eq!(connects(&effects), 0, "{effects:?}");
+    assert_eq!(connects_after_waits(&state, &effects), 0);
+}
+
+/// Ticket #212: a connect for a Phone the Desktop last heard was away says
+/// so, so that a Phone BlueZ has connected after all is reported present
+/// rather than paged.
+#[test]
+fn a_connect_for_a_phone_held_as_away_says_so() {
+    let (_, effects) = run(connected(), [hands_free_down(), absent()]);
+
+    assert!(
+        effects.contains(&Effect::ConnectPhone {
+            address: ADDRESS.to_owned(),
+            attempt: 1,
+            away: true,
+        }),
+        "{effects:?}"
+    );
+}
+
+/// Ticket #212: a hands-free connect result that comes late, with the Phone
+/// present, starts no connect either: hands-free results carry no attempt,
+/// and each of them reaches the reconnect waits.
+#[test]
+fn a_late_hands_free_connect_result_does_not_page_a_present_phone() {
+    for result in [
+        Input::PhoneCommandDone(PhoneCommand::ConnectHandsFree),
+        Input::PhoneCommandFailed(PhoneCommand::ConnectHandsFree),
+    ] {
+        let (state, effects) = run(connected(), [result]);
+
+        assert_eq!(connects(&effects), 0, "{effects:?}");
+        assert_eq!(connects_after_waits(&state, &effects), 0);
+    }
+}
+
 #[test]
 fn coming_back_reconnects_hands_free_and_refreshes_contacts_and_call_history() {
     let (state, _) = run(connected(), [hands_free_down(), absent()]);

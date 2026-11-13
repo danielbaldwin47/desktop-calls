@@ -156,6 +156,33 @@ fn a_connect_under_way_when_the_phone_leaves_does_not_bring_it_back() {
     });
 }
 
+/// The Phone connects by itself while the Desktop is paging it, and BlueZ
+/// then fails that page as connected already: the Desktop must not page a
+/// connected Phone again (ticket #212, where the real Desktop paged one about
+/// every 45 s through a Call).
+#[test]
+fn a_phone_that_connects_by_itself_during_a_page_is_not_paged_again() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    let phone = harness.simulated_phone();
+    phone.wait_for_recorded(
+        "the app pages the Phone before it is in range",
+        DEADLINE,
+        |recorded| connects(recorded) >= 1,
+    );
+    phone.connect();
+    wait_connected(&harness, DEADLINE);
+
+    // The page under way is recorded already; it ends 600 ms after the
+    // Phone connected, with BlueZ's `br-connection-already-connected`.
+    let paged = connects(&recorded(&harness));
+    let held = phone.recorded_holds(
+        "no Connect to a connected Phone",
+        RECONNECT_DEADLINE,
+        |recorded| connects(recorded) == paged,
+    );
+    assert_eq!(connects(&held), paged);
+}
+
 /// Scenario 18.
 #[test]
 fn after_resume_the_phone_is_connected_within_10_s() {

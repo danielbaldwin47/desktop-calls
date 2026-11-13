@@ -25,8 +25,28 @@ BUILD_ROOTFS = (REPOSITORY / "tools/local-ci/build-rootfs.sh").read_text()
 JUSTFILE = (REPOSITORY / "justfile").read_text()
 
 
+REPO_EXPORT = "export GITHUB_REPOSITORY=o/r"
+
+
 def packages(text: str) -> set[str]:
     return set(text.split())
+
+
+class Repository(unittest.TestCase):
+    """The run is told which repository it is, as GitHub Actions tells CI."""
+
+    def test_either_form_of_a_github_url_gives_owner_and_name(self):
+        for url in ("https://github.com/o/r.git", "git@github.com:o/r.git", "https://github.com/o/r"):
+            self.assertEqual(ci_local.owner_and_name(url), "o/r", url)
+
+    def test_another_host_is_refused_with_what_to_do(self):
+        with self.assertRaises(ci_local.Refused) as raised:
+            ci_local.owner_and_name("https://example.com/o/r.git")
+        self.assertIn("Next:", str(raised.exception))
+
+    def test_the_checkout_in_the_image_belongs_to_another_user_as_on_github(self):
+        script = (REPOSITORY / "tools/local-ci/enter.sh").read_text()
+        self.assertRegex(script, r'chown -h 1:1 \{\}')
 
 
 class SameAsCI(unittest.TestCase):
@@ -236,7 +256,8 @@ class Load(unittest.TestCase):
         log = mock.Mock()
         log.stream.return_value = 0
         with tempfile.TemporaryDirectory() as cache, \
-                mock.patch.object(ci_local, "CACHE", pathlib.Path(cache)):
+                mock.patch.object(ci_local, "CACHE", pathlib.Path(cache)), \
+                mock.patch.object(ci_local, "git", return_value="git@github.com:o/r.git"):
             ci_local.run_in_image(
                 log, pathlib.Path("/src"), pathlib.Path("/tmp"), "just something", network=False,
                 **options,
@@ -246,11 +267,12 @@ class Load(unittest.TestCase):
     def test_a_job_with_a_thread_count_exports_it_for_every_test_runner(self):
         command = self.run_in_image(threads=5)
         self.assertEqual(
-            command[-1], "export RUST_TEST_THREADS=5 NEXTEST_TEST_THREADS=5 && just something"
+            command[-1],
+            f"export RUST_TEST_THREADS=5 NEXTEST_TEST_THREADS=5 && {REPO_EXPORT} && just something",
         )
 
-    def test_a_job_without_one_runs_its_command_as_it_is(self):
-        self.assertEqual(self.run_in_image()[-1], "just something")
+    def test_a_job_without_one_runs_its_command_as_it_is_but_for_the_repository(self):
+        self.assertEqual(self.run_in_image()[-1], f"{REPO_EXPORT} && just something")
 
     def test_a_job_runs_under_nice_unless_it_is_not_polite(self):
         self.assertEqual(self.run_in_image()[:3], ["nice", "-n", "19"])

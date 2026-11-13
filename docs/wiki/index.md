@@ -10,7 +10,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb.
 
-- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, and built behaviour as implementers shipped it, dated (updated 2026-11-06).
+- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, and built behaviour as implementers shipped it, dated (updated 2026-11-13).
 
 ## Environment
 
@@ -22,7 +22,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## Process
 
-- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-05 night into 2026-11-06, 12 more PRs merged, load flakes fixed at their causes).
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-06 to 2026-11-13, the Sol audit's five fixes in PR #193 and the outside request #194).
 
 - [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions and the Sonnet implementer trial (2026-11-05).
 

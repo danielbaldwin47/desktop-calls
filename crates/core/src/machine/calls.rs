@@ -366,9 +366,11 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
             .is_some_and(|moving| moving.answering == Some(call))
     {
         // The user answered a Call that ended before it connected, so the
-        // Handoff that followed its Answer is moot: the Phone link drops
-        // an Answer whose Call is gone, with the commands behind it. The
-        // Call still live keeps its audio where it is.
+        // Handoff that followed its Answer is moot. The Phone link drops a
+        // plain Answer whose Call is gone, with the commands behind it, and
+        // reports nothing; Hold & Answer and the like are still sent, and
+        // their refusal comes later. The Call still live keeps its audio
+        // where it is.
         state.moving_audio = None;
         if !state.has_desktop_audio() {
             effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));

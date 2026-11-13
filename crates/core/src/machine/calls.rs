@@ -360,5 +360,15 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         state.restore_audio = None;
         state.audio_notice = None;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    } else if ended.request == Request::Answer
+        && ended.active_since.is_none()
+        && state.moving_audio.take().is_some()
+    {
+        // The user answered a Call that ended before it connected: the
+        // Phone link dropped its Answer, and the audio asked for with it.
+        // The Call still live keeps its audio where it is.
+        if !state.has_desktop_audio() {
+            effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+        }
     }
 }

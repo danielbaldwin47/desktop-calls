@@ -1,6 +1,6 @@
 # UI pass: a design review of every surface
 
-Date: 2026-11-13. No ticket: a design proposal for the user to review. It changes no product code and opens no implementation tickets.
+Date: 2026-11-13. No ticket: a design proposal for the user to review. It changes no product code and opens no tickets itself; the tickets came after the user's review (see below).
 Reviewed by the user the same day: see **User's verdict, 2026-11-13** at the end. The work is specified in #221.
 Sources: `just screenshot` on `40411a0` (the real binary against the Simulated Phone in headless sway: 96 captures of 24 states, plus the Indicator's 5 icons, light and dark); two Setup Window Problem states captured with a temporary, uncommitted gallery change; `crates/desktop-calls/src/surfaces.rs`, `theme.rs` and `crates/core/src/messages.rs`; issues #197 (Call Pill) and #198 (Calls Off and Quiet Hours); Omarchy's shell style (`/usr/share/omarchy/shell/Commons/Style.qml`); `docs/research/2026-11-13-real-call-log.md`. Nothing touched the Phone, Bluetooth or WirePlumber.
 Companion page: the same review with the current screenshots and before-and-after mockups in light and dark is a private artifact, https://claude.ai/artifact/9tnmmuUZBu2PgEP7gh2sWE.
@@ -185,4 +185,3 @@ Decisions, specified in **#221** (tickets #222 to #237):
   - The Incoming Call Banner sits flush top-right, drawn above Omarchy's notification cards while it rings.
     - Pushing the cards aside is impossible: the notification column ignores exclusive zones and has no IPC to reserve space. Verified from Omarchy's source; citations are in #221.
     - That the Banner draws above the cards is inferred, and is judged at Real-Phone Checklist step 7.2.
-

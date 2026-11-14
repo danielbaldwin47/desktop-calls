@@ -114,6 +114,7 @@ fn record_pending(until: Option<Deadline>) -> CallsOffRecord {
         address: ADDRESS.to_owned(),
         until,
         quiet_hours: false,
+        exception: false,
     }
 }
 

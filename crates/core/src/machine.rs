@@ -60,8 +60,8 @@ pub use setup::{
 };
 pub use view::{
     BannerChoice, BannerFooter, BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase,
-    CallWindowView, DialerKey, DialerView, HeldCall, Mute, OtherCall, RingingCaller, StateLine,
-    Surfaces, WaitingOptions,
+    CallWindowView, DialerCallsOff, DialerKey, DialerView, HeldCall, Mute, OtherCall,
+    RingingCaller, StateLine, Surfaces, WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so
@@ -80,6 +80,9 @@ const NOTICE_MS: u32 = 6_000;
 /// How long the Phone may take to report a Call it was asked to dial. The
 /// Pixel's took under a second.
 const DIAL_TIMEOUT_MS: u32 = 15_000;
+/// How long the Phone, unblocked for a Call placed while calls are off, may
+/// take to connect before the Call isn't placed (ticket #206).
+const PHONE_FOR_DIAL_MS: u32 = 15_000;
 /// How long the Phone may take to bring the audio here, from the Desktop
 /// asking until the Call Window says it didn't come. The Pixel took under
 /// 0.5 s 12 times in 15, 2.8 s and 2.9 s once each, and ignored `Activate()`
@@ -173,6 +176,8 @@ struct Dialling {
     attempt: u32,
     /// The user hung up already; the Call is hung up as soon as it appears.
     cancelled: bool,
+    /// Placed while calls were off: the Phone is dialled once it connects.
+    waiting_for_phone: bool,
 }
 
 /// A dial attempt the user hung up before the Phone reported its Call: the
@@ -534,7 +539,15 @@ impl State {
     /// Why a Call can't be placed now, if it can't.
     fn dial_refusal(&self) -> Option<Failure> {
         if !self.calls_on() && self.phone.is_some() {
-            return Some(Failure::CallsOff);
+            // While calls are off a Call is an exception that connects the
+            // Phone for it; while they are turning on, the Phone is coming.
+            return if !self.calls.is_empty() || self.dialling.is_some() {
+                Some(Failure::CallInProgress)
+            } else if self.calls_off() {
+                None
+            } else {
+                Some(Failure::PhoneConnecting)
+            };
         }
         match self.connection {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
@@ -732,6 +745,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     setup::follow_connection(&mut state, &mut effects);
     setup::follow_contacts(&mut state, &mut effects);
     follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
+    dialling::place_once_connected(&mut state, &mut effects);
     calls_off::apply_pending(&mut state, &mut effects);
     quiet_hours::apply(&mut state, &mut effects);
     calls_off::hold_back_connects(&state, &mut effects);

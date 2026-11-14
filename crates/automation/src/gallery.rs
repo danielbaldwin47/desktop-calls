@@ -382,6 +382,26 @@ const STATES: &[State] = &[
         shown: |screenshot, _| shows_dialer(screenshot),
     },
     State {
+        name: "dialer-calls-off",
+        title: "The Dialer while calls are off until 07:00: the strip says Enter calls anyway, and the footer's Enter reads Call anyway",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+            harness.wait_for_app("calls are off", DEADLINE, |state| {
+                state.calls_off == "off" && state.connection_state == "disconnected"
+            });
+            open_dialer(harness, "smith");
+            harness.wait_for_app("the Dialer says calls are off", DEADLINE, |state| {
+                state
+                    .surface("dialer")
+                    .is_some_and(|dialer| dialer.contains_key("calls-off"))
+            });
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
         name: "setup-window-choose",
         title: "The Setup Window on a fresh install, listing the Phone nearby",
         still: |_| true,

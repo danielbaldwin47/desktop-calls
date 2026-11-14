@@ -28,6 +28,8 @@ pub(super) enum Icon {
     ChevronUp,
     /// The Dialer's search row: a magnifying glass.
     Search,
+    /// Calls are off: a crescent moon.
+    Moon,
 }
 
 /// An icon, 16 px square, that can be changed in place.
@@ -165,6 +167,13 @@ fn draw(cr: &cairo::Context, icon: Icon) -> Result<(), cairo::Error> {
             cr.new_sub_path();
             cr.arc(7.0, 7.0, 4.2, 0.0, 2.0 * PI);
             line(cr, (10.2, 10.2), (14.0, 14.0));
+        }
+        Icon::Moon => {
+            // The outer arc, then the inner one cut by a second circle.
+            cr.move_to(6.2, 3.5);
+            cr.arc_negative(7.07, 8.93, 5.5, -1.729, 0.159);
+            cr.arc(11.63, 4.37, 5.5, 1.412, 3.300);
+            cr.close_path();
         }
         Icon::Warning => {
             cr.move_to(8.0, 2.2);

@@ -5,6 +5,7 @@ Usage (through just):
   just ci-local                  # every job on HEAD: lint, test, scenarios, timings
   just ci-local lint             # one or more jobs; nothing is posted
   just ci-local --full           # every job, even for a change that touches only docs
+  just ci-local --cancel         # stop the run started from this worktree, queued or running
   just ci-local --rebuild-image  # throw the image away and build it again
 
 GitHub runs the full CI only on pushes to main (ticket #158). Everywhere
@@ -16,7 +17,10 @@ chroot, no sudo, no container engine.
 What it does, in order:
   1. Refuses unless the working tree is clean: it tests the commit HEAD, and
      the status it posts says that commit passed.
-  2. Takes a lock, so runs from several agents take turns.
+  2. Takes a lock, so runs from several agents take turns. A run waiting
+     for it tests HEAD as it is when its turn comes, so committing while
+     queued is fine. A worktree has one run at a time: a second is refused,
+     naming the first, and --cancel stops the first (and only it).
   3. Removes /tmp/desktop-calls-test-* folders of yours that are over an
      hour old (the harness leaks them).
   4. Builds the image the first time (a few minutes, 2 GB), and again once it
@@ -65,6 +69,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
@@ -97,6 +102,11 @@ LOGS = ROOT / "logs"
 RUNS = ROOT / "runs"
 LOCK = ROOT / "lock"
 BUILT = ROOT / "image-built"
+# One file per worktree with a run queued or running: its process ID and
+# state. A file whose process is gone is stale and ignored.
+CLAIMS = ROOT / "claims"
+# How long --cancel waits for the stopped run to exit.
+CANCEL_SECONDS = 20
 
 # How old the image may get before a run builds it again. CI installs the
 # newest packages on every run, so an old image drifts from it.
@@ -192,6 +202,99 @@ def require_clean_head() -> str:
 # -- The lock, the folders, the log ------------------------------------------
 
 
+def worktree() -> str:
+    """The root of the checkout this run was started from."""
+    return os.path.realpath(git("rev-parse", "--show-toplevel"))
+
+
+def is_ci_local(pid: int) -> bool:
+    """Whether `pid` is a live ci-local run: a process ID alone may have been
+    reused by anything since the run that held it ended."""
+    try:
+        command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    return any(argument.endswith(b"ci_local.py") for argument in command.split(b"\0"))
+
+
+class Claim:
+    """A worktree's one queued or running ci-local run, in CLAIMS."""
+
+    def __init__(self, directory: str) -> None:
+        self.directory = directory
+        digest = hashlib.sha256(directory.encode()).hexdigest()[:16]
+        self.path = CLAIMS / f"{digest}.json"
+
+    def read(self) -> dict | None:
+        """The live run's record, or None if there is none (a stale file is removed)."""
+        try:
+            record = json.loads(self.path.read_text())
+            if is_ci_local(int(record["pid"])):
+                return record
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        self.path.unlink(missing_ok=True)
+        return None
+
+    def write(self, state: str, sha: str) -> None:
+        record = {
+            "pid": os.getpid(), "worktree": self.directory, "sha": sha, "state": state,
+            "since": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+        }
+        temporary = self.path.with_suffix(f".{os.getpid()}")
+        temporary.write_text(json.dumps(record))
+        temporary.replace(self.path)
+
+    def take(self, sha: str) -> None:
+        """Records this run as the worktree's, or refuses naming the one that is."""
+        CLAIMS.mkdir(parents=True, exist_ok=True)
+        first = self.read()
+        if first and first["pid"] != os.getpid():
+            raise Refused(
+                f"This worktree already has a ci-local run: process {first['pid']}, "
+                f"{first['state']} since {first['since']}, on {first['sha'][:7]}. "
+                "It tests HEAD as it is when its turn comes, so commit what you like.\n"
+                "Next: leave it to finish, or just ci-local --cancel to stop it"
+            )
+        self.write("waiting", sha)
+
+    def release(self) -> None:
+        record = self.read()
+        if record and record["pid"] == os.getpid():
+            self.path.unlink(missing_ok=True)
+
+
+def cancel(directory: str) -> int:
+    """Stops the run started from this worktree, and no other."""
+    record = Claim(directory).read()
+    if not record:
+        print("No ci-local run is queued or running from this worktree.")
+        return EXIT_PASSED
+    pid = int(record["pid"])
+    # SIGTERM takes the run's whole tree down with it (stop_on_sigterm).
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + CANCEL_SECONDS
+    while is_ci_local(pid) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if is_ci_local(pid):
+        print(f"Sent the run (process {pid}) SIGTERM, but it is still stopping.", file=sys.stderr)
+        return EXIT_REFUSED
+    print(f"Stopped the {record['state']} run (process {pid}) on {record['sha'][:7]}.")
+    return EXIT_PASSED
+
+
+def running_elsewhere() -> str:
+    """Who has the lock, for the message of a run that must wait."""
+    for path in sorted(CLAIMS.glob("*.json")) if CLAIMS.is_dir() else []:
+        try:
+            record = json.loads(path.read_text())
+            if record["state"] == "running" and is_ci_local(int(record["pid"])):
+                return f" (the run from {record['worktree']}, process {record['pid']})"
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return ""
+
+
 def take_turn() -> object:
     """Holds the lock until the process exits, and says so if it must wait."""
     ROOT.mkdir(parents=True, exist_ok=True)
@@ -199,7 +302,12 @@ def take_turn() -> object:
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print("Another ci-local run has the lock; waiting for it to finish...", flush=True)
+        print(
+            f"Another ci-local run has the lock{running_elsewhere()}; waiting for it to finish. "
+            "This run tests HEAD as it is when its turn comes, so committing while it waits is "
+            "fine. To stop it: just ci-local --cancel, in this worktree.",
+            flush=True,
+        )
         fcntl.flock(handle, fcntl.LOCK_EX)
     return handle
 
@@ -714,18 +822,26 @@ def main() -> int:
                         help=f"one of {', '.join(JOBS)}; default all, which alone posts a status")
     parser.add_argument("--rebuild-image", action="store_true",
                         help="remove the image and build it again from the newest archlinux:latest")
+    parser.add_argument("--cancel", action="store_true",
+                        help="stop the run started from this worktree, queued or running, and no other")
     parser.add_argument("--full", action="store_true",
                         help="run every job even when the change touches only docs")
     args = parser.parse_args()
     jobs = args.jobs or list(JOBS)
     every_job = not args.jobs or set(args.jobs) == set(JOBS)
     docs_only = False
-    stop_on_sigterm()
+    claim = None
     try:
+        if args.cancel:
+            return cancel(worktree())
+        stop_on_sigterm()
         if every_job:
             require_online()
         sha = require_clean_head()
+        claim = Claim(worktree())
+        claim.take(sha)
         lock = take_turn()  # held until the process exits
+        claim.write("running", sha)
         log = Log(sha)
         log.line(f"ci-local on {sha[:7]}: {', '.join(jobs)}; log {log.display_path()}")
         removed = clear_stale_test_folders()
@@ -734,6 +850,7 @@ def main() -> int:
         prune_old_runs()
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
+        claim.write("running", sha)
         if every_job and not args.full and is_docs_only(sha, log):
             docs_only, jobs = True, ["lint"]
             log.line("Docs only: lint alone, as GitHub CI skips the test jobs for such a change.")
@@ -756,6 +873,9 @@ def main() -> int:
     except KeyboardInterrupt:
         print("Interrupted; nothing was posted.", file=sys.stderr)
         return EXIT_REFUSED
+    finally:
+        if claim:
+            claim.release()
 
 
 if __name__ == "__main__":

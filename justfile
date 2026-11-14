@@ -45,7 +45,9 @@ ci-first-frame-timings:
 # It tests HEAD in CI's image: lint, tests, gallery, scorecard and every
 # scenario. If all pass, it pushes the branch if GitHub lacks the commit and
 # posts the status "CI passed", which branch protection requires and `just
-# merge` reads. Refuses a dirty tree. Runs from several agents take turns.
+# merge` reads. Refuses a dirty tree. Runs from several agents take turns, and
+# a waiting run tests HEAD as it is when its turn comes. `just ci-local --cancel`
+# stops this worktree's run, and only it. Rules for agents: docs/agents/shared-machine.md.
 # Cache, image and logs: ~/.cache/desktop-calls-ci. `just ci-local --help`.
 # Run CI here, and post "CI passed" on HEAD if it passes.
 [positional-arguments]

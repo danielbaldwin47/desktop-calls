@@ -37,3 +37,12 @@ Retros on subagent sessions, with what was pursued. Per chief-of-staff practice,
   - #160 (`1210b55`): passed one review.
   - Reading (the chief of staff's, with the user): comparable to Opus implementers. Three PRs is too few to rank the models.
 - A lesson from #143 and the local-CI switch is on [chief-of-staff-practice](chief-of-staff-practice.md): `just merge`'s checklist check only fires at merge time, and a rebase can break a test that local CI then catches.
+
+## 2026-11-13 evening, where agents' time went (CI and waiting)
+
+- Source: the chief of staff's retro of the evening, from `~/.cache/desktop-calls-ci/logs` and `gh pr list`; not a transcript analysis.
+- Runs took 177 to 222 s whether the Desktop was alone or busy, so a run's own length did not depend on load. The contention was queueing: the median wait for the lock was about 3 minutes, over 13 waits.
+- 22 full runs: 9 tested docs-only PRs. PR #220 spent about 25 of its 38 minutes waiting on CI.
+- 4 failures, none from load. One failed lint in 4 s and the other jobs still ran for 205 s (head `8b3c277`).
+- 31 sleep or poll loops were written in the evening to wait on CI or reviewers. One agent ran `pkill -f 'tools/ci_local.py'` to replace its own queued run and killed two other agents' runs, one at 346 of 348 scenarios.
+- Applied: a docs-only run is lint alone and a failed lint ends the run (#239, PR #242); [Shared machine](../agents/shared-machine.md) and `just ci-local --cancel` (#240); the checkpoint rule on [chief-of-staff-practice](chief-of-staff-practice.md).

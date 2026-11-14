@@ -124,6 +124,10 @@ impl<B: IsA<gtk::Button>> Tile<B> {
         overlay.set_child(Some(&face));
         overlay.add_overlay(&cap);
         let tile = button.as_ref();
+        // A key is shown only while it works: a disabled tile shows none.
+        tile.bind_property("sensitive", &cap, "visible")
+            .sync_create()
+            .build();
         tile.add_css_class(class::TILE);
         tile.set_child(Some(&overlay));
         tile.set_hexpand(true);
@@ -707,6 +711,12 @@ fn show_shortcut(
     }
     label.append(text);
     label.append(&shortcut);
+    // A key is shown only while it works: a disabled control shows none.
+    button
+        .as_ref()
+        .bind_property("sensitive", &shortcut, "visible")
+        .sync_create()
+        .build();
     button.as_ref().set_child(Some(&label));
     button.as_ref().set_hexpand(true);
     shown

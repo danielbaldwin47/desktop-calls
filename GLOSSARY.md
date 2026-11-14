@@ -73,7 +73,7 @@ The search-as-you-type window for starting a Call from a name or number.
 _Avoid_: launcher, call picker
 
 **Call Window**:
-The small window shown during a Call: who and the timer, the State Line, three Tiles (Mute, Keypad, and To phone or Move here), and Hang up; with a Call on hold, its row with Swap. A Notice above the Tiles says what went wrong, such as lost contact.
+The small window shown during a Call: who and the timer, the State Line, three Tiles (Mute, Keypad, and To phone or Move here), and Hang up; with a Call on hold, its row with Swap. A notice above the Tiles says what went wrong, such as lost contact.
 _Avoid_: in-call screen, call UI
 
 **State Line**:

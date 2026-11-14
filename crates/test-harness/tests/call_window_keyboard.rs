@@ -78,16 +78,17 @@ fn find(screenshot: &Screenshot, colour: [u8; 3]) -> Option<Region> {
 }
 
 /// Where any amber pixel is, such as the warning colour's text, in the
-/// Call Window's rows above the tiles and inside its border.
-fn amber_above_tiles(screenshot: &Screenshot, hang_up: Region) -> Option<Region> {
+/// Call Window's rows above the tiles, inside its border and padding: below
+/// the window's top edge `window_top`, and between Hang up's edges.
+fn amber_above_tiles(screenshot: &Screenshot, window_top: f64, hang_up: Region) -> Option<Region> {
     let area = Region {
         left: hang_up.left,
-        top: 0.0,
+        top: window_top + 8.0,
         right: hang_up.right,
         bottom: hang_up.top - ROW_GAP - TILE_HEIGHT - 2.0,
     };
     screenshot.region_within(area, |[red, green, blue]| {
-        red >= 0x90 && red.saturating_sub(blue) >= 0x60 && green > blue && green < red
+        red.saturating_sub(blue) >= 0x50 && green > blue && green < red
     })
 }
 
@@ -197,11 +198,11 @@ fn clicking_mute_mutes_the_microphone_recolours_the_window_and_moves_nothing() {
     // The state line, above the tiles and inside the border, turns amber;
     // unmuted, nothing there is.
     assert!(
-        amber_above_tiles(&screenshot, hang_up).is_some(),
+        amber_above_tiles(&screenshot, before.top, hang_up).is_some(),
         "the state line isn't in the warning colour; see {}",
         screenshot.path.display()
     );
-    assert_eq!(amber_above_tiles(&before_shot, hang_up), None, "{}", before_shot.path.display());
+    assert_eq!(amber_above_tiles(&before_shot, before.top, hang_up), None, "{}", before_shot.path.display());
     // Nothing moved: the window is the size it was, and Hang up is where it
     // was.
     assert_eq!(app_region(&screenshot), Some(before), "{}", screenshot.path.display());

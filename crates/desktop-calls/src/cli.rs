@@ -19,6 +19,8 @@ const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 struct Status {
     connection_state: ConnectionState,
     phone: Option<Phone>,
+    /// The Phone is in range, without hands-free.
+    hands_free_lost: bool,
 }
 
 /// `desktop-calls status [--json]`: prints whether the Phone is connected.
@@ -41,7 +43,11 @@ pub fn status(json: bool) -> ExitCode {
         Ok(status) => {
             println!(
                 "{}",
-                messages::status(&status.connection_state, status.phone.as_ref())
+                messages::status(
+                    &status.connection_state,
+                    status.phone.as_ref(),
+                    status.hands_free_lost
+                )
             );
             ExitCode::SUCCESS
         }
@@ -253,9 +259,15 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         .cloned()
         .and_then(|value| <(String, String)>::try_from(value).ok())
         .ok_or(Failure::UnexpectedReply)?;
+    // An app from before ticket #216 doesn't publish it.
+    let hands_free_lost = properties
+        .get("HandsFreeLost")
+        .and_then(|value| bool::try_from(value).ok())
+        .unwrap_or(false);
     Ok(Status {
         connection_state,
         phone: (!address.is_empty()).then_some(Phone { name, address }),
+        hands_free_lost,
     })
 }
 

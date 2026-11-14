@@ -459,3 +459,89 @@ fn unpairing_the_phone_drops_the_waiting_turn_off() {
     assert!(effects.contains(&Effect::KeepCallsOff(None)), "{effects:?}");
     assert!(!blocks(&effects), "nothing was blocked: {effects:?}");
 }
+
+/// Ticket #230: whether the Call Window, and so the Call Pill, carry the
+/// "Calls off after" tag. Panics without a Call Window.
+fn tagged(state: &State) -> bool {
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    window.calls_off_after
+}
+
+#[test]
+fn the_call_window_is_tagged_calls_off_after_while_a_turn_off_waits() {
+    for call_state in [CallState::Active, CallState::Held, CallState::Dialing] {
+        let state = with_call(call_state);
+        assert!(!tagged(&state), "{call_state:?}: nothing waits yet");
+
+        let (state, _) = run(state, [Input::TurnCallsOff { until: None }]);
+        assert!(tagged(&state), "{call_state:?}: a turn-off waits");
+    }
+}
+
+#[test]
+fn the_tag_stays_while_contact_with_the_call_is_lost() {
+    let (state, _) = run(
+        with_call(CallState::Active),
+        [
+            Input::TurnCallsOff { until: None },
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+        ],
+    );
+
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    assert!(window.connection_lost);
+    assert!(window.calls_off_after, "the Call carries on on the Phone");
+}
+
+#[test]
+fn keep_calls_on_and_turn_calls_on_take_the_tag_away() {
+    for cancel in [Input::KeepCallsOn, Input::TurnCallsOn] {
+        let (state, _) = run(
+            with_call(CallState::Active),
+            [Input::TurnCallsOff { until: None }],
+        );
+        assert!(tagged(&state));
+
+        let (state, _) = run(state, [cancel.clone()]);
+        assert!(!tagged(&state), "{cancel:?}");
+    }
+}
+
+#[test]
+fn the_tag_goes_when_the_call_ends() {
+    let (state, _) = run(
+        with_call(CallState::Active),
+        [Input::TurnCallsOff { until: None }, ended()],
+    );
+
+    assert!(state.calls_off());
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call ended window shows");
+    };
+    assert!(!window.calls_off_after, "calls are off now, not off after");
+}
+
+#[test]
+fn a_deadline_that_passes_during_the_call_takes_the_tag_away() {
+    let (state, _) = run(
+        with_call(CallState::Active),
+        [
+            Input::TurnCallsOff {
+                until: Some(in_an_hour()),
+            },
+            clock(61),
+        ],
+    );
+
+    assert!(!state.calls_off_pending());
+    assert!(!tagged(&state), "calls simply stay on");
+}

@@ -38,7 +38,7 @@ mod render;
 use super::icons::{Icon, IconView};
 use change::{CHANGE_MS, Change, SMALLEST_CONTENT};
 use held::HeldRow;
-use pill::CallPill;
+use pill::{CallPill, calls_off_tag};
 
 /// The style class GTK gives a button between its activation from the
 /// keyboard and its click, 250 ms later.
@@ -53,6 +53,8 @@ pub(super) struct CallWindow {
     pub(super) surface: Surface,
     intents: UnboundedSender<Input>,
     caller: gtk::Label,
+    /// "Calls off after", while a turn-off waits for the Call to end.
+    calls_off: gtk::Label,
     timer: gtk::Label,
     /// The number's label and the number, or "Not in Contacts".
     meta: gtk::Label,
@@ -169,7 +171,7 @@ impl CallWindow {
             intents,
             report.clone(),
         );
-        let (top, caller, timer) = top_line();
+        let (top, caller, calls_off, timer) = top_line();
         let meta = detail_label();
         let mut shortcuts = BTreeMap::new();
         let (tiles, mute, keypad_shown, handoff) = tiles(&mut shortcuts);
@@ -226,6 +228,7 @@ impl CallWindow {
             surface,
             intents: intents.clone(),
             caller,
+            calls_off,
             timer,
             meta,
             state,
@@ -663,9 +666,9 @@ fn tiles(
     (tiles, mute, keypad_shown, handoff)
 }
 
-/// The top line: who, and the timer at the right. Returns the line, who and
-/// the timer.
-fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
+/// The top line: who, the "Calls off after" tag while a turn-off waits, and
+/// the timer at the right. Returns the line, who, the tag and the timer.
+fn top_line() -> (gtk::Box, gtk::Label, gtk::Label, gtk::Label) {
     let caller = gtk::Label::new(None);
     caller.add_css_class(class::WHO);
     caller.set_xalign(0.0);
@@ -676,10 +679,13 @@ fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
     timer.add_css_class(class::TIMER);
     timer.set_xalign(1.0);
     timer.set_valign(gtk::Align::BaselineFill);
+    let calls_off = calls_off_tag();
+    calls_off.set_valign(gtk::Align::BaselineFill);
     let line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
     line.append(&caller);
+    line.append(&calls_off);
     line.append(&timer);
-    (line, caller, timer)
+    (line, caller, calls_off, timer)
 }
 
 /// The tone entry, and the keypad's buttons, hidden until the keypad opens.

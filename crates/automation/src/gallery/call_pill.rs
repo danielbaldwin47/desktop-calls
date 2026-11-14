@@ -97,6 +97,64 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         },
     },
     State {
+        name: "call-window-calls-off-after",
+        title: "The Call Window while a turn-off waits for the Call to end: the Calls off after tag on the top line, between who and the timer",
+        still: |state| expanded(state) && window_has(state, "calls-off-after"),
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            turn_calls_off(harness);
+            harness.wait_for_app("the Call Window is tagged", DEADLINE, |state| {
+                expanded(state) && window_has(state, "calls-off-after")
+            });
+            hold_call_window_expanded(harness);
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-pill-calls-off-after",
+        title: "The Call Pill while a turn-off waits for the Call to end: the Calls off after tag beside the caller, in the Muted tag's style",
+        still: |state| collapsed(state) && pill_has(state, "calls-off-after"),
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            turn_calls_off(harness);
+            harness.wait_for_app("the Call Pill is tagged", DEADLINE, |state| {
+                collapsed(state) && pill_has(state, "calls-off-after")
+            });
+        },
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red())
+                && shows(screenshot, look.green())
+                && in_corner(screenshot)
+        },
+    },
+    State {
+        name: "call-pill-muted-calls-off-after",
+        title: "The Call Pill, muted while a turn-off waits for the Call to end: Muted and Calls off after, the caller's name still readable",
+        still: |state| collapsed(state) && state.muted && pill_has(state, "calls-off-after"),
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            turn_calls_off(harness);
+            wait_until_collapsed(harness);
+            harness
+                .set_muted(true)
+                .unwrap_or_else(|error| panic!("mute: {error:?}"));
+            harness.wait_for_app("the Call Pill is muted and tagged", DEADLINE, |state| {
+                pill_has(state, "muted") && pill_has(state, "calls-off-after")
+            });
+        },
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red())
+                && shows(screenshot, look.warning())
+                && in_corner(screenshot)
+        },
+    },
+    State {
         name: "call-pill-audio-on-phone",
         title: "The Call Pill, answered on the phone: On phone, and Mute unavailable",
         still: |state| collapsed(state) && pill_has(state, "audio-location"),
@@ -194,6 +252,22 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
 ];
+
+/// Turns calls off from the command line during the Call, so the turn-off
+/// waits for it to end.
+pub(super) fn turn_calls_off(harness: &Harness) {
+    let output = harness.cli(&["calls", "off"]);
+    assert!(output.status.success(), "calls off failed: {output:?}");
+    harness.wait_for_app("a turn-off waits for the Call", DEADLINE, |state| {
+        state.calls_off_pending
+    });
+}
+
+fn window_has(state: &AppState, key: &str) -> bool {
+    state
+        .surface("call-window")
+        .is_some_and(|window| window.contains_key(key))
+}
 
 fn pill_has(state: &AppState, key: &str) -> bool {
     state

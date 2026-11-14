@@ -15,6 +15,13 @@ pub fn call_pill_tag(tag: CallPillTag) -> &'static str {
     }
 }
 
+/// The tag the Call Window and the Call Pill show while a turn-off waits for
+/// the Call to end (ticket #230), in the same style as the Call Pill's tags.
+#[must_use]
+pub fn calls_off_after_tag() -> &'static str {
+    "Calls off after"
+}
+
 /// The tooltip of the Call Pill's button labelled `name`, whose shortcut in
 /// the expanded Call Window is shown as `shortcut`: "Hang up · Ctrl+H".
 #[must_use]

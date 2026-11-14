@@ -64,6 +64,11 @@ fn shown<'a>(state: &'a AppState, surface: &str, key: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
+/// What `surface` says its "Calls off after" tag reads, if it shows one.
+fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
+    shown(state, surface, "calls-off-after")
+}
+
 /// Opens the Dialer and types the number: it says calls are off, and that
 /// Enter calls anyway.
 fn dialer_typed(harness: &Harness) -> AppState {
@@ -153,9 +158,15 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
 
     harness.keyboard().press(Key::Return);
     answered(&harness);
-    harness.wait_for_app("the Call is live", DEADLINE, |state| {
+    let state = harness.wait_for_app("the Call is live", DEADLINE, |state| {
         state.calls.len() == 1 && state.calls[0].state == "active" && state.calls_off_pending
     });
+    // Ticket #230: the Call Window, or the Call Pill once it has
+    // collapsed, says calls go off after the Call.
+    assert_eq!(
+        tag(&state, "call-window").or_else(|| tag(&state, "call-pill")),
+        Some("Calls off after")
+    );
     says_again(&harness);
     let menu = harness.tray().menu();
     assert!(
@@ -195,9 +206,12 @@ fn the_phone_not_connecting_in_15_s_says_out_of_range_and_calls_go_back_off() {
 
     harness.keyboard().press(Key::Return);
 
-    harness.wait_for_app("the Call Window says it is connecting", DEADLINE, |state| {
+    let state = harness.wait_for_app("the Call Window says it is connecting", DEADLINE, |state| {
         shown(state, "call-window", "state") == Some(CONNECTING)
     });
+    // Ticket #230: from "Connecting to your phone…" on, the Call Window
+    // says calls go off after the Call.
+    assert_eq!(tag(&state, "call-window"), Some("Calls off after"));
     let state = harness.wait_for_app(
         "the Call Window says the Phone is out of range",
         PHONE_FOR_DIAL,

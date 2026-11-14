@@ -75,6 +75,7 @@ impl CallWindow {
         }
         self.show_who(&view, &mut content);
         self.show_timer(&view, &mut content);
+        self.show_calls_off_after(&view, &mut content);
         self.show_state_line(&view, &mut content);
         self.show_notice(&view, &mut content);
         let live = matches!(view.phase, CallWindowPhase::Live { .. }) && !view.connection_lost;
@@ -163,6 +164,18 @@ impl CallWindow {
         set_class(&self.timer, class::STRUCK, view.connection_lost);
         if !timer.is_empty() {
             content.insert("timer".to_owned(), timer);
+        }
+    }
+
+    /// The "Calls off after" tag on the top line, while a turn-off waits
+    /// for the Call to end.
+    fn show_calls_off_after(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
+        self.calls_off.set_visible(view.calls_off_after);
+        if view.calls_off_after {
+            content.insert(
+                "calls-off-after".to_owned(),
+                messages::calls_off_after_tag().to_owned(),
+            );
         }
     }
 

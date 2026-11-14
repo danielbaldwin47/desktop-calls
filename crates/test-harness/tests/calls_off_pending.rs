@@ -215,3 +215,90 @@ fn a_deadline_that_passes_during_the_call_leaves_calls_on() {
     harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
     stays_on(&harness);
 }
+
+/// How long the Call Window may take to collapse by itself: the 5 s, and a
+/// margin for a loaded runner.
+const COLLAPSE_DEADLINE: Duration = Duration::from_secs(9);
+const TAG: &str = "Calls off after";
+
+/// The app on a headless screen, so its surfaces are reported, with the
+/// Phone connected.
+fn on_screen() -> Harness {
+    let harness = Harness::builder()
+        .headless_screen()
+        .omarchy_bar()
+        .phone_name(PHONE_NAME)
+        .start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("the Phone is connected", DEADLINE, |state| {
+        state.connection_state == "connected" && state.calls_off == "on"
+    });
+    harness
+}
+
+/// What `surface` says its "Calls off after" tag reads, if it shows one.
+fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
+    state
+        .surface(surface)
+        .and_then(|content| content.get("calls-off-after"))
+        .map(String::as_str)
+}
+
+/// What the Call Window, or once it has collapsed the Call Pill, says its
+/// "Calls off after" tag reads.
+fn tagged(state: &AppState) -> Option<&str> {
+    tag(state, "call-window").or_else(|| tag(state, "call-pill"))
+}
+
+/// Whether the Call Window or the Call Pill is on screen.
+fn shown(state: &AppState) -> bool {
+    state.surface("call-window").is_some() || state.surface("call-pill").is_some()
+}
+
+#[test]
+fn the_call_window_is_tagged_calls_off_after_while_a_turn_off_waits_and_the_tag_goes_on_keep_calls_on()
+ {
+    let harness = on_screen();
+    let call = live_call(&harness);
+    // The Call Window collapses to the Call Pill 5 s after the Call
+    // connects, so on a slow runner either surface may be the one shown.
+    harness.wait_for_app("the Call shows, untagged", DEADLINE, |state| {
+        shown(state) && tagged(state).is_none()
+    });
+
+    cli_ok(&harness, &["calls", "off"]);
+
+    harness.wait_for_app("the Call is tagged", DEADLINE, |state| {
+        state.calls_off_pending && tagged(state) == Some(TAG)
+    });
+
+    harness.tray().click("Keep calls on");
+
+    harness.wait_for_app("the tag goes, the Call still shown", DEADLINE, |state| {
+        !state.calls_off_pending && shown(state) && tagged(state).is_none()
+    });
+    harness.simulated_phone().caller_hangs_up(&call);
+}
+
+#[test]
+fn the_call_pill_is_tagged_too_and_the_tag_goes_when_the_call_ends() {
+    let harness = on_screen();
+    let call = live_call(&harness);
+    cli_ok(&harness, &["calls", "off"]);
+    wait_waiting(&harness);
+
+    harness.wait_for_app(
+        "the Call Window collapses to a tagged Call Pill",
+        COLLAPSE_DEADLINE,
+        |state| state.surface("call-window").is_none() && tag(state, "call-pill") == Some(TAG),
+    );
+
+    harness.simulated_phone().caller_hangs_up(&call);
+
+    wait_off(&harness);
+    // The Ended window lasts 2 s, which `wait_off` may outlast, so this
+    // holds once it has gone too; the core tests cover the Ended window.
+    harness.wait_for_app("no surface is tagged", DEADLINE, |state| {
+        tagged(state).is_none()
+    });
+}

@@ -307,7 +307,7 @@ fn a_connected_phone_without_hands_free_is_not_called_out_of_range() {
     let printed = harness.cli(&["status"]);
     let status = String::from_utf8_lossy(&printed.stdout);
     assert!(
-        status.contains("is connected, but not for Calls"),
+        status.contains("is in range, but not connected for Calls"),
         "{printed:?}"
     );
 }

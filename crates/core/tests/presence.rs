@@ -477,6 +477,86 @@ fn live_call() -> State {
     .0
 }
 
+fn ringing_call() -> State {
+    run(
+        connected(),
+        [Input::CallAdded {
+            call: CALL,
+            state: CallState::Ringing,
+            caller: caller(),
+            at: Timestamp(1_000),
+        }],
+    )
+    .0
+}
+
+/// Ticket #216: hands-free drops with the Phone present and no Handoff
+/// under way. The Desktop asks for hands-free again after the first wait.
+#[test]
+fn hands_free_dropped_with_the_phone_present_is_connected_again() {
+    let (state, effects) = run(connected(), [hands_free_down()]);
+    let [(timer, 1_000)] = reconnect_waits(&effects)[..] else {
+        panic!("a 1 s wait expected: {effects:?}");
+    };
+
+    let (state, effects) = run(state, [Input::TimerFired(timer)]);
+
+    assert!(
+        effects.contains(&Effect::Phone(PhoneCommand::ConnectHandsFree)),
+        "{effects:?}"
+    );
+    assert_eq!(tooltip(&state), "Connection to My Pixel lost");
+}
+
+/// Ticket #216: hands-free back by itself first, as after a `WirePlumber`
+/// restart, makes the wait connect nothing.
+#[test]
+fn hands_free_back_by_itself_first_cancels_the_retry() {
+    let (state, effects) = run(connected(), [hands_free_down()]);
+    let (state, _) = run(state, hands_free_up());
+
+    assert_eq!(connects_after_waits(&state, &effects), 0);
+    let [(timer, _)] = reconnect_waits(&effects)[..] else {
+        panic!("one wait expected: {effects:?}");
+    };
+    let (_, effects) = run(state, [Input::TimerFired(timer)]);
+    assert!(
+        !effects.contains(&Effect::Phone(PhoneCommand::ConnectHandsFree)),
+        "{effects:?}"
+    );
+}
+
+/// Ticket #216: a plain hands-free drop keeps the Calls within reach. A
+/// ringing Call keeps ringing, and if it then ends it is a Missed Call.
+#[test]
+fn a_ringing_call_rings_on_through_a_plain_hands_free_drop() {
+    let (state, _) = run(ringing_call(), [hands_free_down()]);
+    assert!(state.ringing());
+    assert!(state.surfaces().banner.is_some());
+
+    let (_, effects) = run(state, [Input::CallEnded { call: CALL }]);
+
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::NotifyMissedCall(_))),
+        "{effects:?}"
+    );
+}
+
+/// Ticket #216: a live Call that ends during a plain hands-free drop shows
+/// as ended, as before.
+#[test]
+fn a_live_call_ending_during_a_plain_hands_free_drop_shows_as_ended() {
+    let (state, _) = run(
+        live_call(),
+        [hands_free_down(), Input::CallEnded { call: CALL }],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(window.phase, CallWindowPhase::Ended);
+}
+
 /// The Bluetooth connection drops mid-Call: hands-free goes with it, and
 /// the Phone link gives up waiting for the Call.
 fn link_lost() -> [Input; 3] {

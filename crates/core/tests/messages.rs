@@ -15,19 +15,19 @@ fn pixel() -> Phone {
 #[test]
 fn status_says_the_connection_state_and_names_the_phone() {
     assert_eq!(
-        messages::status(&ConnectionState::Connected, Some(&pixel())),
+        messages::status(&ConnectionState::Connected, Some(&pixel()), false),
         "Connected to My Pixel (AA:BB:CC:DD:EE:FF)."
     );
     assert_eq!(
-        messages::status(&ConnectionState::Connecting, Some(&pixel())),
+        messages::status(&ConnectionState::Connecting, Some(&pixel()), false),
         "Connecting to My Pixel (AA:BB:CC:DD:EE:FF)."
     );
     assert_eq!(
-        messages::status(&ConnectionState::Disconnected, Some(&pixel())),
+        messages::status(&ConnectionState::Disconnected, Some(&pixel()), false),
         "My Pixel (AA:BB:CC:DD:EE:FF) is out of range or has Bluetooth off."
     );
     assert_eq!(
-        messages::status(&ConnectionState::NotSetUp, None),
+        messages::status(&ConnectionState::NotSetUp, None, false),
         "No Phone is set up yet."
     );
 }

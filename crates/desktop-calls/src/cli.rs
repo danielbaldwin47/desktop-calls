@@ -41,13 +41,14 @@ pub fn status(json: bool) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(status) => {
-            let sentence = match (&status.connection_state, &status.phone) {
-                (ConnectionState::Disconnected, Some(phone)) if status.hands_free_lost => {
-                    messages::hands_free_lost_status(phone)
-                }
-                (connection_state, phone) => messages::status(connection_state, phone.as_ref()),
-            };
-            println!("{sentence}");
+            println!(
+                "{}",
+                messages::status(
+                    &status.connection_state,
+                    status.phone.as_ref(),
+                    status.hands_free_lost
+                )
+            );
             ExitCode::SUCCESS
         }
         Err(failure) => report(failure),

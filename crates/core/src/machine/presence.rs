@@ -36,6 +36,12 @@ enum Reach {
     /// Phone and didn't come back: the Desktop connects hands-free again
     /// (ticket #101).
     HandsFreeLost,
+    /// The Phone is present, and hands-free dropped by itself or for
+    /// another app, with no Handoff under way: the Desktop connects it
+    /// again. The Calls stay within reach meanwhile, since hands-free may
+    /// come back with them by itself, as after a `WirePlumber` restart
+    /// (ticket #216).
+    HandsFreeDropped,
 }
 
 impl Presence {
@@ -81,14 +87,17 @@ impl State {
     /// or hands-free didn't come back after a Handoff to the Phone. The Phone
     /// link giving up on a Call then says nothing about how it ended.
     pub(super) fn calls_out_of_reach(&self) -> bool {
-        self.presence.reach != Reach::Present
+        matches!(self.presence.reach, Reach::Absent | Reach::HandsFreeLost)
     }
 
-    /// Whether the Phone is present, and hands-free didn't come back after
-    /// a Handoff to the Phone: not out of range, though not connected.
+    /// Whether the Phone is present without hands-free, which the Desktop
+    /// is connecting again: not out of range, though not connected.
     #[must_use]
     pub fn hands_free_lost(&self) -> bool {
-        self.presence.reach == Reach::HandsFreeLost
+        matches!(
+            self.presence.reach,
+            Reach::HandsFreeLost | Reach::HandsFreeDropped
+        )
     }
 }
 
@@ -196,13 +205,15 @@ pub(super) fn hands_free_lost(state: &mut State, effects: &mut Vec<Effect>) {
 /// Hands-free dropped by itself, or for another app, with the Phone still
 /// present: the Desktop connects hands-free again after the first wait,
 /// unless it comes back by itself first, as after a `WirePlumber` restart
-/// (ticket #216). A Phone going away drops hands-free first; BlueZ
-/// reporting it absent then connects it at once instead.
+/// (ticket #216). The Calls stay within reach: how a Call that vanishes
+/// meanwhile ends is the Phone link's to say, as before. A Phone going away
+/// drops hands-free first; BlueZ reporting it absent then connects it at
+/// once instead.
 pub(super) fn hands_free_dropped(state: &mut State, effects: &mut Vec<Effect>) {
     if state.presence.reach != Reach::Present {
         return;
     }
-    state.presence.reach = Reach::HandsFreeLost;
+    state.presence.reach = Reach::HandsFreeDropped;
     if !state.presence.reconnect.connecting {
         connect_later(state, effects);
     }
@@ -210,7 +221,7 @@ pub(super) fn hands_free_dropped(state: &mut State, effects: &mut Vec<Effect>) {
 
 /// Hands-free is up: any connect it needed is over.
 pub(super) fn hands_free_back(state: &mut State) {
-    if state.presence.reach == Reach::HandsFreeLost {
+    if state.hands_free_lost() {
         state.presence.reach = Reach::Present;
         state.presence.reconnect.failures = 0;
         state.presence.reconnect.wait += 1;

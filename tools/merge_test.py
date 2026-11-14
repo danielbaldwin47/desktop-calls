@@ -101,10 +101,10 @@ class BehindMain(unittest.TestCase):
         self.assertIn("Next: the one command", self.refusal(1, ["crates/core/src/lib.rs"]))
 
     def test_too_many_commits_to_list(self):
-        self.assertIn("Next: the one command", self.refusal(400, ["README.md"]))
+        self.assertIn("Next: the one command", self.refusal(400, ["fixture-notes.md"]))
 
     def test_docs_that_code_names(self):
-        message = self.refusal(1, ["docs/wiki/polish-scorecard.md"], {"docs/wiki/polish-scorecard.md": "a.rs"})
+        message = self.refusal(1, ["docs/fixture/page.md"], {"docs/fixture/page.md": "a.rs"})
         self.assertIn("which a.rs names", message)
         self.assertIn("Next: the one command", message)
 
@@ -116,7 +116,7 @@ class BehindMain(unittest.TestCase):
         self.assertNotIn("git rebase", text)
 
     def test_a_docs_only_gap_is_still_let_through(self):
-        with mock.patch.object(merge, "gh", return_value=compare(1, ["docs/wiki/index.md"])):
+        with mock.patch.object(merge, "gh", return_value=compare(1, ["docs/fixture/index.md"])):
             with mock.patch.object(merge, "docs_named_by_code", return_value={}):
                 with mock.patch.object(merge, "git", git_stub(worktrees())):
                     allowed = merge.require_contains_base(PR)

@@ -114,13 +114,14 @@ impl State {
 
     /// Why calls can't be turned off now, until `until`, if they can't.
     pub(super) fn calls_off_refusal(&self, until: Option<Deadline>) -> Option<Failure> {
+        let passed = until.is_some_and(|until| self.passed(until.at));
         if self.calls_off() {
-            None
+            passed.then_some(Failure::CallsOffUntilPassed)
         } else if self.phone.is_none() {
             Some(Failure::PhoneNotSetUp)
         } else if self.call_keeps_calls_on() {
             Some(Failure::CallsOffDuringCall)
-        } else if until.is_some_and(|until| self.passed(until.at)) {
+        } else if passed {
             Some(Failure::CallsOffUntilPassed)
         } else {
             None
@@ -216,9 +217,27 @@ fn read_clock_at(until: Option<Deadline>, effects: &mut Vec<Effect>) {
 /// The user turned calls off, until `until` or until they turn them on:
 /// the record is kept first, then the Phone is blocked, which drops it.
 /// While calls are being turned on it waits: the unblock is already on its
-/// way.
+/// way. Turned off again while off, calls stay off until the new choice.
 fn turn_off(state: &mut State, until: Option<Deadline>, effects: &mut Vec<Effect>) {
-    if state.calls_off_refusal(until).is_some() || !state.calls_on() {
+    if state.calls_off_refusal(until).is_some() {
+        return;
+    }
+    if let CallsOff::Off {
+        address,
+        until: old,
+    } = &mut state.calls_off
+    {
+        if *old != until {
+            *old = until;
+            effects.push(Effect::KeepCallsOff(Some(CallsOffRecord::Off {
+                address: address.clone(),
+                until,
+            })));
+            read_clock_at(until, effects);
+        }
+        return;
+    }
+    if !state.calls_on() {
         return;
     }
     let Some(phone) = &state.phone else {

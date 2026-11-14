@@ -175,8 +175,6 @@ impl Demo {
         }
     }
 
-    /// The Phone places the Call the app asked it to dial, as a real Phone
-    /// does on its own: the Simulated Phone waits to be told.
     /// Turns calls off until [`CALLS_OFF_SOON`] from now.
     fn calls_off_soon(&mut self) {
         let now = SystemTime::now()
@@ -198,6 +196,8 @@ impl Demo {
         self.harness.simulated_phone().prepare_for_sleep(false);
     }
 
+    /// The Phone places the Call the app asked it to dial, as a real Phone
+    /// does on its own: the Simulated Phone waits to be told.
     fn phone_dials(&mut self) {
         let placed = self.dials_placed;
         let phone = self.harness.simulated_phone();

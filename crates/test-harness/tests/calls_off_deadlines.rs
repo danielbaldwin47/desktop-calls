@@ -107,10 +107,59 @@ fn cli_ok(harness: &Harness, arguments: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// Waits for calls to come back on and the Phone to connect, and checks
+/// it happened within the scorecard's 10 s of `until`, by the wall clock.
+fn connected_within_10_s_of(harness: &Harness, until: u64) {
+    let left = Duration::from_secs(until.saturating_sub(now()));
+    wait_connected(harness, left + RECONNECT_DEADLINE);
+    assert!(now() >= until, "calls came back on before the deadline");
+}
+
+#[test]
+fn a_deadline_replaced_by_a_later_one_doesnt_delay_the_later_one() {
+    let harness = harness_in("UTC");
+    let first = now() + 3;
+    harness.turn_calls_off(first).expect("calls turn off");
+    wait_off_until(&harness, first);
+    cli_ok(&harness, &["calls", "on"]);
+    wait_connected(&harness, RECONNECT_DEADLINE);
+
+    let later = now() + 8;
+    harness.turn_calls_off(later).expect("calls turn off again");
+    wait_off_until(&harness, later);
+
+    // The first deadline passes while calls are off until the later one:
+    // nothing happens then, and the later one still turns calls on in time.
+    wait_until_past(first);
+    harness.app_holds("calls stay off past the replaced deadline", Duration::from_secs(1), |state| {
+        state.calls_off == "off"
+    });
+    connected_within_10_s_of(&harness, later);
+}
+
+#[test]
+fn turning_calls_off_again_while_they_are_off_sets_the_new_end_time() {
+    let harness = harness_in("UTC");
+    let first = now() + 3_600;
+    harness.turn_calls_off(first).expect("calls turn off");
+    wait_off_until(&harness, first);
+
+    let sooner = now() + 6;
+    harness.turn_calls_off(sooner).expect("calls turn off until sooner");
+
+    wait_off_until(&harness, sooner);
+    let record_text = fs::read_to_string(record(&harness)).expect("read the record");
+    assert!(
+        record_text.contains(&format!(r#""until":{sooner}"#)),
+        "{record_text}"
+    );
+    connected_within_10_s_of(&harness, sooner);
+}
+
 #[test]
 fn a_deadline_a_few_seconds_ahead_turns_calls_on_by_itself_and_reconnects_within_10_s() {
     let harness = harness_in("UTC");
-    let until = now() + 4;
+    let until = now() + 6;
 
     harness.turn_calls_off(until).expect("calls turn off");
 
@@ -127,7 +176,7 @@ fn a_deadline_a_few_seconds_ahead_turns_calls_on_by_itself_and_reconnects_within
         state.calls_off == "off"
     });
 
-    wait_connected(&harness, Duration::from_secs(4) + RECONNECT_DEADLINE);
+    wait_connected(&harness, Duration::from_secs(6) + RECONNECT_DEADLINE);
     let took = connected_after(&harness, "calls-off-deadline-passed");
     assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after the deadline");
     assert!(now() >= until, "calls came back on before the deadline");

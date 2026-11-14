@@ -5,6 +5,7 @@
 //! (`TZ`, or `/etc/localtime`), across daylight-saving changes. It only
 //! converts: which times to ask for is the core's choice.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::clock::{FOR_AN_HOUR_MS, MORNING};
@@ -12,6 +13,8 @@ use desktop_calls_core::{Deadline, Input, TimeOfDay, Timestamp, WallClock};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
+
+use crate::logging::EventKind;
 
 const MINUTE_MS: u64 = 60_000;
 const DAY_MS: u64 = 24 * 60 * MINUTE_MS;
@@ -55,6 +58,7 @@ pub fn local_time(at: Timestamp) -> TimeOfDay {
     // GLib can't place it: read it as UTC rather than not at all.
     let (hour, minute) = local.map_or_else(
         || {
+            read_as_utc(at);
             let minutes = i32::try_from(at.0 % DAY_MS / MINUTE_MS).unwrap_or(0);
             (minutes / 60, minutes % 60)
         },
@@ -92,6 +96,7 @@ pub fn next(time: TimeOfDay, after: Timestamp) -> Timestamp {
     });
     // GLib can't place it: read the clock as UTC rather than not at all.
     found.unwrap_or_else(|| {
+        read_as_utc(after);
         let wanted = (u64::from(time.hour) * 60 + u64::from(time.minute)) * MINUTE_MS;
         let midnight = after.0 - after.0 % DAY_MS;
         let today = midnight + wanted;
@@ -103,19 +108,30 @@ pub fn next(time: TimeOfDay, after: Timestamp) -> Timestamp {
     })
 }
 
+/// GLib couldn't place `at` in the Desktop's time zone, so the time shown
+/// or chosen is read as UTC.
+fn read_as_utc(at: Timestamp) {
+    tracing::warn!(
+        event_kind = %EventKind::ClockFailed,
+        error_kind = "local-time-unreadable",
+        at_ms = at.0,
+        "Couldn't read the local time; showing UTC instead"
+    );
+}
+
 fn seconds(at: Timestamp) -> Option<i64> {
     i64::try_from(at.0 / 1_000).ok()
 }
 
 /// Reports the wall clock to `inputs` on each minute, at each instant
 /// `wakes` asks for, and at once on each resume, until either closes.
+/// Every instant asked for is kept until it passes, so an earlier one,
+/// such as a deadline since replaced, can't hide a later one.
 pub async fn run(mut wakes: UnboundedReceiver<Wake>, inputs: UnboundedSender<Input>) {
-    let mut wake_at: Option<Timestamp> = None;
+    let mut wake_at: BTreeSet<Timestamp> = BTreeSet::new();
     loop {
         let now = now();
-        if wake_at.is_some_and(|at| at <= now) {
-            wake_at = None;
-        }
+        wake_at.retain(|at| *at > now);
         if inputs
             .unbounded_send(Input::ClockTicked(wall_clock(now)))
             .is_err()
@@ -123,12 +139,14 @@ pub async fn run(mut wakes: UnboundedReceiver<Wake>, inputs: UnboundedSender<Inp
             return;
         }
         let next_minute = now.0 - now.0 % MINUTE_MS + MINUTE_MS;
-        let until = wake_at.map_or(next_minute, |at| at.0.min(next_minute));
+        let until = wake_at
+            .first()
+            .map_or(next_minute, |at| at.0.min(next_minute));
         let timer = glib::timeout_future(Duration::from_millis(until.saturating_sub(now.0)));
         match select(timer, wakes.next()).await {
             Either::Left(_) | Either::Right((Some(Wake::Resumed), _)) => {}
             Either::Right((Some(Wake::At(at)), _)) => {
-                wake_at = Some(wake_at.map_or(at, |earlier| earlier.min(at)));
+                wake_at.insert(at);
             }
             Either::Right((None, _)) => return,
         }

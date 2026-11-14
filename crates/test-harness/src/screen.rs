@@ -102,10 +102,37 @@ impl Screenshot {
     /// If the screenshot can't be decoded.
     #[must_use]
     pub fn region_where(&self, matches: impl Fn([u8; 3]) -> bool) -> Option<Region> {
+        self.region_within(
+            Region {
+                left: 0.0,
+                top: 0.0,
+                right: f64::INFINITY,
+                bottom: f64::INFINITY,
+            },
+            matches,
+        )
+    }
+
+    /// As [`Screenshot::region_where`], counting only the pixels inside
+    /// `area`, such as one half of the screen.
+    ///
+    /// # Panics
+    ///
+    /// If the screenshot can't be decoded.
+    #[must_use]
+    pub fn region_within(&self, area: Region, matches: impl Fn([u8; 3]) -> bool) -> Option<Region> {
         let pixels = Pixels::read(&self.path);
         let (mut left, mut top, mut right, mut bottom) = (usize::MAX, usize::MAX, 0, 0);
         for (row, line) in pixels.data.chunks_exact(pixels.line_size).enumerate() {
+            let y = to_layout(row);
+            if y < area.top || y >= area.bottom {
+                continue;
+            }
             for column in 0..pixels.width {
+                let x = to_layout(column);
+                if x < area.left || x >= area.right {
+                    continue;
+                }
                 let pixel = &line[column * pixels.channels..column * pixels.channels + 3];
                 if matches([pixel[0], pixel[1], pixel[2]]) {
                     left = left.min(column);

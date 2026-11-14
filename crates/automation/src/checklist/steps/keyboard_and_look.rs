@@ -1,4 +1,4 @@
-//! Group 7's scripts: the Incoming Call Banner beside a notification, the
+//! Group 7's scripts: the Incoming Call Banner over a notification, the
 //! Indicator in the bar, and the Dialer's first frame.
 
 use std::thread;
@@ -230,8 +230,12 @@ fn end_wrong_call(sitting: &mut Sitting, call: u32, why: &str) -> Result<(), Sto
     Ok(())
 }
 
-/// 7.2: the Banner beside a real notification, neither covering the other.
-pub(super) fn banner_beside_a_notification(sitting: &mut Sitting) -> Result<(), Stop> {
+/// 7.2: the Banner flush top right over a real notification. While it
+/// rings it shows in full above the notification sent meanwhile, and once
+/// it goes the notification is in view. That the Banner draws above
+/// Omarchy's notification cards is inferred from Hyprland's drawing order
+/// (spec #221), so this step is where it is judged.
+pub(super) fn banner_over_a_notification(sitting: &mut Sitting) -> Result<(), Stop> {
     let call = helper_calls(sitting, "Ask your helper to call you. Don't answer yet.")?;
     match sitting.notify(
         "A sample notification",
@@ -246,15 +250,15 @@ pub(super) fn banner_beside_a_notification(sitting: &mut Sitting) -> Result<(), 
             return Ok(());
         }
     }
-    let clear = sitting.ask(
-        "Do the Banner and the notification both show in full, with neither covering the other?",
+    let on_top = sitting.ask(
+        "Is the Banner flush in the top-right corner, and does it show in full, above the notification?",
     )?;
     sitting.check(
-        clear,
-        if clear {
-            "The Banner and the notification were both in full view.".to_owned()
+        on_top,
+        if on_top {
+            "The Banner sat flush top right, in full, above the notification.".to_owned()
         } else {
-            "The Banner and the notification overlapped.".to_owned()
+            "The Banner wasn't flush top right, or the notification drew over it.".to_owned()
         },
     );
     call_ends(
@@ -263,6 +267,19 @@ pub(super) fn banner_beside_a_notification(sitting: &mut Sitting) -> Result<(), 
         "Decline the Call, on either device.",
         &["decline"],
     )?;
+    let kept = sitting.ask("Now that the Banner has gone, is the notification in view?")?;
+    sitting.check(
+        kept,
+        if kept {
+            "The notification was in view once the Banner went.".to_owned()
+        } else {
+            "The notification wasn't in view once the Banner went.".to_owned()
+        },
+    );
+    sitting.say(
+        "Dismiss the sample notification: it stays until you do.",
+        &[],
+    );
     Ok(())
 }
 

@@ -19,6 +19,7 @@ mod problems;
 mod setup;
 pub use calls_off::{
     calls_off_for_too_long, calls_off_status, calls_off_until_unreadable, calls_turned,
+    phone_left_blocked_by_removal, phone_unblocked_for_removal,
 };
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};

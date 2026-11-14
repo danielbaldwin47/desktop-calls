@@ -153,6 +153,89 @@ class Install(unittest.TestCase):
         subprocess.run(command + ["--uninstall"], env=environment, check=True, capture_output=True)
         self.assertFalse(any(path.is_file() for path in installed.rglob("*")))
 
+    def installed_with_recorder(self):
+        """A temporary home with the fixture installed, whose runs of the
+        installed binary go to `calls.log`, one JSON line each, and whose
+        exit status is `exit_status.txt`'s number."""
+        home = self.root / "home-for-removal"
+        log = self.root / "calls.log"
+        status = self.root / "exit_status.txt"
+        status.write_text("0")
+        self.binary.write_text(
+            f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+            f"with open({str(log)!r}, 'a') as file:\n"
+            "    file.write(json.dumps([sys.argv[1:], os.path.exists(os.path.expanduser("
+            "'~/.local/share/applications'))]) + '\\n')\n"
+            f"sys.exit(int(Path({str(status)!r}).read_text()))\n"
+        )
+        environment = os.environ | {
+            "HOME": str(home), "XDG_DATA_HOME": str(home / ".local/share"), "DESTDIR": "",
+        }
+        subprocess.run(
+            [sys.executable, str(REPOSITORY / "tools/install.py"), str(self.binary)],
+            env=environment, check=True, capture_output=True,
+        )
+        return home, environment, log, status
+
+    def uninstall(self, environment, *arguments):
+        return subprocess.run(
+            [sys.executable, str(REPOSITORY / "tools/install.py"), *(arguments or ("--uninstall",))],
+            env=environment, capture_output=True, text=True,
+        )
+
+    def test_uninstall_turns_calls_on_while_the_binary_is_still_installed(self):
+        home, environment, log, _ = self.installed_with_recorder()
+        result = self.uninstall(environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # One run, with the files still installed when it ran: the second
+        # item says the launcher entry existed.
+        self.assertEqual(
+            [json.loads(line) for line in log.read_text().splitlines()],
+            [[["calls", "on", "--uninstalling"], True]],
+        )
+        self.assertFalse((home / ".local/bin/desktop-calls").exists())
+
+    def test_uninstall_carries_on_when_turning_calls_on_fails(self):
+        home, environment, log, status = self.installed_with_recorder()
+        status.write_text("1")
+        result = self.uninstall(environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        self.assertFalse(any(path.is_file() for path in home.rglob("*")))
+
+    def test_uninstall_carries_on_when_the_binary_cannot_run(self):
+        home, environment, log, _ = self.installed_with_recorder()
+        (home / ".local/bin/desktop-calls").write_text("not a program")
+        (home / ".local/bin/desktop-calls").chmod(0o755)
+        result = self.uninstall(environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bluetoothctl unblock", result.stderr)
+        self.assertFalse((home / ".local/bin/desktop-calls").exists())
+
+    def test_uninstall_without_the_binary_removes_what_is_left(self):
+        home, environment, log, _ = self.installed_with_recorder()
+        (home / ".local/bin/desktop-calls").unlink()
+        result = self.uninstall(environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(log.exists())
+        self.assertFalse(any(path.is_file() for path in home.rglob("*")))
+
+    def test_staged_uninstall_never_runs_the_binary(self):
+        home, environment, log, _ = self.installed_with_recorder()
+        result = self.uninstall(environment | {"DESTDIR": str(self.root / "stage")})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(log.exists())
+        self.assertTrue((home / ".local/bin/desktop-calls").exists())
+
+    def test_the_two_halves_of_removal_run_alone(self):
+        home, environment, log, _ = self.installed_with_recorder()
+        self.uninstall(environment, "--turn-calls-on")
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        self.assertTrue((home / ".local/bin/desktop-calls").exists())
+        self.uninstall(environment, "--remove")
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        self.assertFalse((home / ".local/bin/desktop-calls").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

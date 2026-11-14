@@ -25,11 +25,13 @@ mod setup_checks;
 mod stall_watch;
 mod surfaces;
 mod theme;
+mod uninstall;
 mod wireplumber;
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::error::ErrorKind;
+use clap::{CommandFactory as _, Parser, Subcommand};
 use desktop_calls_core::AudioLocation;
 
 /// Take and place your Phone's Calls on this Desktop.
@@ -84,6 +86,11 @@ enum Command {
     Calls {
         #[command(subcommand)]
         turn: CallsTurn,
+        /// What removing Desktop Calls runs with `on`, while it is still
+        /// installed: unblocks the Phone if Desktop Calls blocked it,
+        /// through the running service if there is one.
+        #[arg(long, hide = true, global = true)]
+        uninstalling: bool,
     },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
@@ -138,15 +145,30 @@ fn main() -> ExitCode {
         Some(Command::Connect) => cli::connect_phone(),
         Some(Command::Audio { to }) => cli::audio(to.into()),
         Some(Command::Calls {
+            turn: CallsTurn::On,
+            uninstalling: true,
+        }) => uninstall::calls_on(),
+        Some(Command::Calls {
+            turn: CallsTurn::Off { .. },
+            uninstalling: true,
+        }) => Cli::command()
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--uninstalling goes with `calls on`",
+            )
+            .exit(),
+        Some(Command::Calls {
             turn:
                 CallsTurn::Off {
                     length,
                     until,
                     until_morning,
                 },
+            ..
         }) => cli::calls_off(length.as_deref(), until.as_deref(), until_morning),
         Some(Command::Calls {
             turn: CallsTurn::On,
+            ..
         }) => cli::calls_on(),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),

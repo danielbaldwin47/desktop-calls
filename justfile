@@ -175,14 +175,16 @@ install:
         systemctl --user restart desktop-calls.service; \
     fi
 
-# Stop Desktop Calls and remove what `just install` installed. Contacts and
-# Call History cached in ~/.cache/desktop-calls stay.
+# Turn calls back on (unblocking a Phone Desktop Calls blocked, through the
+# running service), stop Desktop Calls and remove what `just install`
+# installed. Contacts and Call History cached in ~/.cache/desktop-calls stay.
 [no-exit-message]
 uninstall:
+    /usr/bin/python3 tools/install.py --turn-calls-on
     if [ -z "${DESTDIR:-}" ]; then \
         systemctl --user disable --now desktop-calls.service || true; \
     fi
-    /usr/bin/python3 tools/install.py --uninstall
+    /usr/bin/python3 tools/install.py --remove
     if [ -z "${DESTDIR:-}" ]; then systemctl --user daemon-reload; fi
 
 # A Real-Phone Checklist step without a script names the open tickets it

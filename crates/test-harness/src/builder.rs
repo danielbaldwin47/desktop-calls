@@ -36,7 +36,7 @@ pub struct Builder {
     phone_connected: bool,
     phone_name: Option<String>,
     omarchy_theme: Option<OmarchyTheme>,
-    hyprland: Option<HyprlandSettings>,
+    hyprland: Option<hyprland::Config>,
     installed: bool,
     notification_state: NotificationState,
     /// The Simulated Phone's arguments saying who is nearby, and what the
@@ -146,41 +146,20 @@ impl NotificationState {
     }
 }
 
-/// What the Hyprland stand-in reports.
-#[derive(Clone, Copy)]
-struct HyprlandSettings {
-    toast_column: u32,
-    rounding: u32,
-}
-
-impl Default for HyprlandSettings {
-    /// As on the user's Desktop: Omarchy 4.5's toast column, and Omarchy's
-    /// default square corners.
-    fn default() -> Self {
-        Self {
-            toast_column: hyprland::OMARCHY_TOAST_COLUMN_WIDTH,
-            rounding: 0,
-        }
-    }
-}
-
-impl HyprlandSettings {
-    /// Serves the Hyprland stand-in in the scenario's `directory`, and names
-    /// it in `environment` as Hyprland names itself.
-    fn serve(
-        self,
-        directory: &Path,
-        environment: &mut Vec<(&'static str, String)>,
-    ) -> hyprland::Hyprland {
-        let hyprland =
-            hyprland::serve_hyprland(&directory.join("runtime"), self.toast_column, self.rounding)
-                .expect("serve the Hyprland stand-in");
-        environment.push((
-            "HYPRLAND_INSTANCE_SIGNATURE",
-            hyprland::HYPRLAND_SIGNATURE.to_owned(),
-        ));
-        hyprland
-    }
+/// Serves the Hyprland stand-in with `config` in the scenario's
+/// `directory`, and names it in `environment` as Hyprland names itself.
+fn serve_hyprland(
+    config: hyprland::Config,
+    directory: &Path,
+    environment: &mut Vec<(&'static str, String)>,
+) -> hyprland::Hyprland {
+    let hyprland = hyprland::serve_hyprland(&directory.join("runtime"), config)
+        .expect("serve the Hyprland stand-in");
+    environment.push((
+        "HYPRLAND_INSTANCE_SIGNATURE",
+        hyprland::HYPRLAND_SIGNATURE.to_owned(),
+    ));
+    hyprland
 }
 
 impl Builder {
@@ -220,11 +199,13 @@ impl Builder {
         self
     }
 
-    /// Runs the app under a Hyprland stand-in whose `hyprctl layers -j`
-    /// reports Omarchy's notification-toast column `width` wide. Without
-    /// it there is no Hyprland, as under sway.
-    pub fn hyprland_toast_column(mut self, width: u32) -> Self {
-        self.hyprland.get_or_insert_default().toast_column = width;
+    /// Runs the app under a Hyprland stand-in whose `general:gaps_out` is
+    /// `gaps_out` on every side. Without it the stand-in has no
+    /// `general:gaps_out` to report, and without any Hyprland setting there
+    /// is no Hyprland, as under sway. [`Harness::set_hyprland_gaps_out`]
+    /// changes it later.
+    pub fn hyprland_gaps_out(mut self, gaps_out: u32) -> Self {
+        self.hyprland.get_or_insert_default().gaps_out = Some(gaps_out);
         self
     }
 
@@ -459,7 +440,7 @@ impl Builder {
         }
         let hyprland = self
             .hyprland
-            .map(|settings| settings.serve(&directory, &mut environment));
+            .map(|config| serve_hyprland(config, &directory, &mut environment));
         self.set_up_home(&directory);
         let screen = self.screen.as_ref().map(|kind| {
             let screen = Screen::start(kind, &directory, &environment, &group, &mut processes);

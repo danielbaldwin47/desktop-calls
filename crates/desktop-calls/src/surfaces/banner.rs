@@ -1,6 +1,6 @@
 //! The Incoming Call Banner.
 
-use super::{SharedReport, Surface, Who, class, detail_label, has_command_modifier};
+use super::{Anchor, SharedReport, Surface, Who, class, detail_label, has_command_modifier};
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{BannerView, CallId, Input, RingingCaller, WaitingOptions};
 use futures_channel::mpsc::UnboundedSender;
@@ -35,6 +35,7 @@ impl Banner {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Self {
         let surface = Surface::new(
             "banner",
+            Anchor::TopRight,
             Layer::Overlay,
             KeyboardMode::None,
             Some(Input::ReleaseFocus),

@@ -266,9 +266,9 @@ impl CallWindow {
         self.surface.window.add_controller(keys);
     }
 
-    /// Reports the pointer entering and leaving the window, and the window
-    /// getting and losing the keyboard, so the Call state machine knows when
-    /// the user is using it.
+    /// Reports the pointer entering and leaving the window, each click and
+    /// key press in it, and the window getting and losing the keyboard, so
+    /// the Call state machine knows when the user is using it.
     fn report_use(&self) {
         let pointer = gtk::EventControllerMotion::new();
         let intents = self.intents.clone();
@@ -280,6 +280,22 @@ impl CallWindow {
             let _ = intents.unbounded_send(Input::PointerOverCallWindow(false));
         });
         self.surface.window.add_controller(pointer);
+        // Before any control takes the click or the key.
+        let click = gtk::GestureClick::new();
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let intents = self.intents.clone();
+        click.connect_pressed(move |_, _, _, _| {
+            let _ = intents.unbounded_send(Input::CallWindowUsed);
+        });
+        self.surface.window.add_controller(click);
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let intents = self.intents.clone();
+        keys.connect_key_pressed(move |_, _, _, _| {
+            let _ = intents.unbounded_send(Input::CallWindowUsed);
+            glib::Propagation::Proceed
+        });
+        self.surface.window.add_controller(keys);
         let intents = self.intents.clone();
         self.surface.window.connect_is_active_notify(move |window| {
             let _ = intents.unbounded_send(Input::CallWindowKeyboard(window.is_active()));

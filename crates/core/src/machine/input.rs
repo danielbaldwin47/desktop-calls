@@ -117,14 +117,16 @@ pub enum Input {
     /// The user clicked the Call Pill: expand the Call Window, with the
     /// keyboard.
     ExpandCallWindow,
-    /// The user clicked the Indicator: expand the collapsed Call Window, or
-    /// otherwise open the Dialer.
+    /// The user clicked the Indicator: expand the Call Window, collapsed
+    /// during a Call, or otherwise open the Dialer.
     IndicatorActivated,
     /// The pointer moved over the Call Window (`true`) or left it.
     PointerOverCallWindow(bool),
     /// The Call Window got the keyboard (`true`) or lost it, however it
     /// did.
     CallWindowKeyboard(bool),
+    /// The user clicked in the Call Window, or pressed a key in it.
+    CallWindowUsed,
     /// The Call Window's keypad opened (`true`) or closed.
     KeypadShown(bool),
     /// Open the Dialer with `query` typed, selecting the Call History row of

@@ -53,11 +53,21 @@ impl CallPill {
         let caller = gtk::Label::new(None);
         caller.add_css_class("pill-caller");
         caller.set_xalign(0.0);
-        caller.set_hexpand(true);
         caller.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        caller.set_width_chars(6);
+        // Room for a number written out in full, and most names.
+        caller.set_width_chars(15);
+        caller.set_max_width_chars(15);
         let status = gtk::Label::new(None);
         status.add_css_class("numeric");
+        status.add_css_class("dim-label");
+        status.set_xalign(0.0);
+        // The caller over the timer, so the strip stays narrow and one row
+        // of controls high.
+        let who = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        who.set_hexpand(true);
+        who.set_valign(gtk::Align::Center);
+        who.append(&caller);
+        who.append(&status);
         let mute = gtk::Button::with_label(messages::label(Label::Mute));
         mute.add_css_class("mute");
         let muted = Rc::new(Cell::new(false));
@@ -67,9 +77,11 @@ impl CallPill {
         });
         let hang_up = hang_up_button(&surface, intents);
         hang_up.set_child(Some(&gtk::Label::new(Some(messages::label(Label::HangUp)))));
+        for button in [&mute, &hang_up] {
+            button.set_valign(gtk::Align::Center);
+        }
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.append(&caller);
-        row.append(&status);
+        row.append(&who);
         row.append(&mute);
         row.append(&hang_up);
         surface.window.set_child(Some(&row));

@@ -21,7 +21,7 @@ mod missed_calls;
 mod range_and_power;
 
 use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
-use during_a_call::{keypad_tones, mute};
+use during_a_call::{call_pill, keypad_tones, mute};
 use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
@@ -79,6 +79,10 @@ const TALK_DEADLINE: Duration = Duration::from_secs(300);
 const APP_DEADLINE: Duration = Duration::from_secs(10);
 /// How long the audio must stay on the Phone after answering there.
 const STAYS_ON_PHONE: Duration = Duration::from_secs(3);
+
+/// What a step says before it has the user click in the Call Window, which
+/// collapses to the Call Pill about 5 s after a Call connects.
+const EXPAND_FIRST: &str = "If the Call Window has collapsed to the Call Pill in the bottom-right corner, click the Call Pill or press your keybinding to expand it.";
 
 /// What steps need, as the runner lists it before a group starts.
 const HELPER: &str = "A helper with a second phone who can call you.";
@@ -216,6 +220,13 @@ pub const GROUPS: &[Group] = &[
                 script: Some(keypad_tones),
                 lands_with: &[],
             },
+            Step {
+                id: "3.4",
+                needs: &[HELPER, KEYBINDING],
+                title: "On a real Call, the Call Window collapses to the Call Pill about 5 s after it connects; click the Call Pill to expand it; press Escape to collapse it; press the keybinding to expand it again",
+                script: Some(call_pill),
+                lands_with: &[],
+            },
         ],
     },
     Group {
@@ -320,7 +331,7 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "7.1",
                 needs: &[KEYBINDING, TEST_NUMBER],
-                title: "Place and end a Call using only the keyboard",
+                title: "Place and end a Call using only the keyboard: the keybinding expands the collapsed Call Window with the keyboard in it",
                 script: Some(keyboard_only_call),
                 lands_with: &[],
             },

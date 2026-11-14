@@ -183,7 +183,16 @@ fn the_keyboard_keeps_it_expanded_and_it_collapses_five_seconds_after_it_leaves(
     let (state, effects) = connecting();
     let first = collapse_timer(&effects);
 
-    let (state, _) = run(state, [Input::CallWindowKeyboard(true)]);
+    // A click gives it the keyboard; the pointer then leaves.
+    let (state, _) = run(
+        state,
+        [
+            Input::PointerOverCallWindow(true),
+            Input::CallWindowKeyboard(true),
+            Input::CallWindowUsed,
+            Input::PointerOverCallWindow(false),
+        ],
+    );
     let (state, effects) = run(state, [Input::TimerFired(first)]);
     assert!(!collapsed(&state), "the keyboard keeps it expanded");
     assert_eq!(collapse_timers(&effects), []);
@@ -444,4 +453,62 @@ fn a_late_report_of_the_pointer_or_keyboard_on_the_collapsed_window_is_ignored()
     // Neither stale report keeps the window expanded.
     let (state, _) = run(state, [Input::TimerFired(collapse_timer(&effects))]);
     assert!(collapsed(&state));
+}
+
+#[test]
+fn the_keyboard_the_compositor_hands_a_newly_shown_window_doesnt_keep_it_expanded() {
+    let (state, effects) = connecting();
+
+    let (state, _) = run(
+        state,
+        [
+            Input::CallWindowKeyboard(true),
+            Input::TimerFired(collapse_timer(&effects)),
+        ],
+    );
+
+    assert!(collapsed(&state));
+}
+
+#[test]
+fn a_keystroke_in_a_window_the_compositor_focused_keeps_it_expanded() {
+    let (state, effects) = connecting();
+
+    let (state, _) = run(
+        state,
+        [
+            Input::CallWindowKeyboard(true),
+            Input::CallWindowUsed,
+            Input::TimerFired(collapse_timer(&effects)),
+        ],
+    );
+    assert!(!collapsed(&state));
+
+    let (state, effects) = run(state, [Input::CallWindowKeyboard(false)]);
+    let (state, _) = run(state, [Input::TimerFired(collapse_timer(&effects))]);
+    assert!(collapsed(&state));
+}
+
+#[test]
+fn once_the_call_has_ended_the_indicator_opens_the_dialer() {
+    // While the Call Pill still says Call ended, and after it has gone.
+    let (ended, _) = run(collapsed_by_itself(), [Input::CallEnded { call: CALL }]);
+    assert!(collapsed(&ended), "the Call Pill says Call ended");
+    let (gone, _) = run(
+        ended.clone(),
+        [Input::TimerFired(Timer::CloseCallWindow(CALL))],
+    );
+    assert!(
+        gone.surfaces().call_window.is_none(),
+        "the Call Window has gone"
+    );
+
+    for state in [ended, gone] {
+        let (state, _) = run(state, [Input::IndicatorActivated]);
+
+        assert!(
+            state.surfaces().dialer.is_some(),
+            "the Indicator opens the Dialer"
+        );
+    }
 }

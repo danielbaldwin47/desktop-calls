@@ -1,11 +1,19 @@
-//! Group 3's scripts: Mute and keypad tones during a Call.
+//! Group 3's scripts: Mute, keypad tones and the Call Pill during a Call.
+
+use std::time::Duration;
 
 use super::incoming::audio_reaches_the_desktop;
 use super::{
-    ACT_DEADLINE, CALL_DEADLINE, call_ends, handled_on_desktop, helper_calls, no_call_left,
-    stopped_ringing,
+    ACT_DEADLINE, CALL_DEADLINE, EXPAND_FIRST, call_ends, handled_on_desktop, helper_calls,
+    no_call_left, stopped_ringing,
 };
-use crate::checklist::sitting::{Sitting, Stop};
+use crate::checklist::sitting::{Sitting, Stop, seconds};
+use crate::checklist::watch::AppState;
+
+/// How long after a Call connects the Call Window may take to collapse to
+/// the Call Pill, while the user moves the pointer off it: 5 s, and time
+/// to read the instruction.
+const COLLAPSE_DEADLINE: Duration = Duration::from_secs(30);
 
 /// 3.2: mute and unmute on a Call answered on the Desktop; the helper says
 /// whether they heard silence, which decides #51.
@@ -92,8 +100,10 @@ pub(super) fn keypad_tones(sitting: &mut Sitting) -> Result<(), Stop> {
     };
     sitting.observed("Your Call from the Pixel connected.".to_owned());
     sitting.say(
-        "When the menu asks, click Keypad in the Call Window and press the digits it wants.",
-        &[],
+        &format!(
+            "When the menu asks: {EXPAND_FIRST} Then click Keypad in the Call Window and press the digits it wants."
+        ),
+        &["expand"],
     );
     let answered = sitting.ask("Did the menu respond to the tones?")?;
     sitting.check(
@@ -106,4 +116,125 @@ pub(super) fn keypad_tones(sitting: &mut Sitting) -> Result<(), Stop> {
     );
     call_ends(sitting, call, "Hang up.", &["hang-up"])?;
     Ok(())
+}
+
+/// 3.4: on a real Call, the Call Window collapses to the Call Pill about 5 s
+/// after it connects; a click on the Call Pill expands it with the
+/// keyboard, Escape collapses it, and the keybinding expands it again.
+pub(super) fn call_pill(sitting: &mut Sitting) -> Result<(), Stop> {
+    let call = helper_calls(sitting, "Ask your helper to call you.")?;
+    sitting.say("Click Answer on the Banner.", &["answer"]);
+    let answered = sitting.wait_for("Answer on the Desktop", ACT_DEADLINE, |state| {
+        handled_on_desktop(state, call) || stopped_ringing(state, call)
+    })?;
+    if !handled_on_desktop(&answered.state, call) {
+        sitting.check(
+            false,
+            "The Call stopped ringing without Answer on the Desktop.".to_owned(),
+        );
+        return Ok(());
+    }
+    if !audio_reaches_the_desktop(sitting, call, &answered)? {
+        return Ok(());
+    }
+    sitting.say(
+        "Move the pointer off the Call Window and leave it: about 5 s after the Call connected, the Call Window collapses to the Call Pill in the bottom-right corner.",
+        &[],
+    );
+    let collapsed = sitting.wait_for("the Call Pill", COLLAPSE_DEADLINE, |state| {
+        state.shows("call-pill") || state.call(call).is_none()
+    })?;
+    if !collapsed.state.shows("call-pill") {
+        sitting.check(
+            false,
+            "The Call ended before the Call Window collapsed.".to_owned(),
+        );
+        return Ok(());
+    }
+    sitting.measure(
+        "collapsed_after_answer",
+        seconds(collapsed.at.duration_since(answered.at)),
+    );
+    sitting.observed("The Call Window collapsed to the Call Pill.".to_owned());
+    let looks_right = sitting.ask(
+        "Is the Call Pill in the bottom-right corner, showing the caller, the timer, Mute and Hang up?",
+    )?;
+    sitting.check(
+        looks_right,
+        if looks_right {
+            "The Call Pill sat bottom right with the caller, the timer, Mute and Hang up."
+                .to_owned()
+        } else {
+            "The Call Pill was out of place, or missing the caller, the timer, Mute or Hang up."
+                .to_owned()
+        },
+    );
+    let _ = acts_on_call_window(
+        sitting,
+        call,
+        Act {
+            request: "Click the Call Pill, away from its buttons.",
+            demo_action: "pill-click",
+            done: expanded_with_keyboard,
+            passed: "A click on the Call Pill expanded the Call Window with the keyboard in it.",
+        },
+    )? && acts_on_call_window(
+        sitting,
+        call,
+        Act {
+            request: "Press Escape.",
+            demo_action: "escape",
+            done: |state| state.shows("call-pill") && !state.shows("call-window"),
+            passed: "Escape collapsed the Call Window to the Call Pill.",
+        },
+    )? && acts_on_call_window(
+        sitting,
+        call,
+        Act {
+            request: "Press your Desktop Calls keybinding.",
+            demo_action: "keybinding",
+            done: expanded_with_keyboard,
+            passed: "The keybinding expanded the Call Window with the keyboard in it.",
+        },
+    )?;
+    call_ends(sitting, call, "Hang up.", &["hang-up"])?;
+    Ok(())
+}
+
+/// The Call Window shows expanded, with the keyboard in it.
+fn expanded_with_keyboard(state: &AppState) -> bool {
+    state.focused("call-window") && !state.shows("call-pill")
+}
+
+/// One thing step 3.4 has the user do to the Call Window.
+#[derive(Clone, Copy)]
+struct Act {
+    request: &'static str,
+    demo_action: &'static str,
+    /// What the app shows once it has worked.
+    done: fn(&AppState) -> bool,
+    /// The finding when it worked.
+    passed: &'static str,
+}
+
+/// Has the user do `act`, and records whether the Call Window did as it
+/// should. Returns whether it did.
+fn acts_on_call_window(sitting: &mut Sitting, call: u32, act: Act) -> Result<bool, Stop> {
+    sitting.say(act.request, &[act.demo_action]);
+    let seen = sitting.happens_within(act.request, ACT_DEADLINE, |state| {
+        (act.done)(state) || state.call(call).is_none()
+    })?;
+    let worked = seen.as_ref().is_some_and(|seen| (act.done)(&seen.state));
+    sitting.check(
+        worked,
+        if worked {
+            act.passed.to_owned()
+        } else {
+            format!(
+                "After \"{}\" the Call Window didn't do as the step says.",
+                act.request
+            )
+        },
+    );
+    Ok(worked)
 }

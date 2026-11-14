@@ -321,7 +321,7 @@ fn step_7_3_sees_the_indicator_open_the_dialer_and_its_menu_mute_and_hang_up() {
     for seen in [
         "Treating your Test Number as +44 (from your locale).",
         "opened the Dialer",
-        "Call Window the keyboard",
+        "expanded the collapsed Call Window with the keyboard in it",
         "keyboard alone",
     ] {
         assert!(evidence.contains(seen), "{seen}: {keyboard:#}");
@@ -354,6 +354,19 @@ fn step_3_1_sees_two_handoffs_to_the_phone_and_back_and_asks_about_the_earpiece_
             })
             .count();
         assert_eq!(moved, 2, "{place}: {handoff:#}");
+    }
+
+    // 3.4: the Call Window collapses by itself, and the Call Pill, Escape
+    // and the keybinding each do their part.
+    let pill = step(&result, "3.4");
+    assert_eq!(pill["result"], "pass", "{pill:#}");
+    for seen in [
+        "collapsed to the Call Pill.",
+        "A click on the Call Pill expanded",
+        "Escape collapsed",
+        "The keybinding expanded",
+    ] {
+        assert!(says(pill, seen), "{seen}: {pill:#}");
     }
 }
 
@@ -619,11 +632,14 @@ fn step_7_1_fails_the_focus_check_when_the_keybinding_never_moves_the_keyboard()
     assert!(
         says(
             keyboard,
-            "never went from showing without the keyboard to having it"
+            "never went from collapsed to expanded with the keyboard"
         ),
         "{keyboard:#}"
     );
-    assert!(!says(keyboard, "Call Window the keyboard"), "{keyboard:#}");
+    assert!(
+        !says(keyboard, "expanded the collapsed Call Window"),
+        "{keyboard:#}"
+    );
 }
 
 #[test]
@@ -774,7 +790,7 @@ fn step_7_1_fails_the_focus_check_when_the_call_window_had_the_keyboard_before_t
     assert!(
         says(
             keyboard,
-            "never went from showing without the keyboard to having it"
+            "never went from collapsed to expanded with the keyboard"
         ),
         "{keyboard:#}"
     );

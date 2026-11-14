@@ -777,6 +777,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::IndicatorActivated
         | Input::PointerOverCallWindow(_)
         | Input::CallWindowKeyboard(_)
+        | Input::CallWindowUsed
         | Input::KeypadShown(_)) => form_input(&mut state, &input),
         input @ (Input::OpenDialer { .. }
         | Input::DialerQuery(_)

@@ -2,11 +2,11 @@
 //! dark Desktop without Omarchy (stock Adwaita) and under a light and a dark
 //! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
-//! Each surface ticket adds its states to [`STATES`]. The Indicator's
+//! Each surface ticket adds its states to [`STATES`], or to a list of its
+//! own in a module here, such as [`call_pill::CALL_PILL_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -17,11 +17,15 @@ use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
 
+mod call_pill;
 mod indicator;
+mod page;
 
+use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, draw_indicator, indicator_path,
 };
+use page::index_html;
 use test_harness::{
     AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
 };
@@ -160,7 +164,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-live",
         title: "The Call Window, answered here, with HD audio on this computer",
-        still: |_| true,
+        still: expanded,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -177,6 +181,7 @@ const STATES: &[State] = &[
                         })
                 },
             );
+            hold_call_window_expanded(harness);
         },
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
@@ -237,7 +242,7 @@ const STATES: &[State] = &[
     State {
         name: "call-window-mute-unavailable",
         title: "The Call Window, answered on the phone, so Mute is unavailable",
-        still: |_| true,
+        still: expanded,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -255,6 +260,7 @@ const STATES: &[State] = &[
                         .is_some_and(|window| window.contains_key("mute-unavailable"))
                 },
             );
+            hold_call_window_expanded(harness);
         },
         shown: |screenshot, look| {
             shows(screenshot, look.red())
@@ -290,11 +296,12 @@ const STATES: &[State] = &[
     State {
         name: "call-waiting-banner",
         title: "A Waiting Call: the Banner, with Hold & Answer, below the Call Window",
-        still: |_| true,
+        still: expanded,
         prepare: as_is,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
+            hold_call_window_expanded(harness);
             waiting(harness);
         },
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
@@ -799,10 +806,10 @@ pub struct Options {
 /// of it, `repeat` times, into `output` or `target/screenshots/gallery`.
 pub fn run(options: &Options) -> ExitCode {
     let states: Vec<&State> = match &options.only {
-        None => STATES.iter().collect(),
+        None => all_states().collect(),
         Some(only) => {
-            let Some(state) = STATES.iter().find(|state| state.name == only) else {
-                let names: Vec<&str> = STATES.iter().map(|state| state.name).collect();
+            let Some(state) = all_states().find(|state| state.name == only) else {
+                let names: Vec<&str> = all_states().map(|state| state.name).collect();
                 eprintln!(
                     "The gallery has no state {only:?}. Its states: {}.",
                     names.join(", ")
@@ -857,8 +864,7 @@ pub fn run(options: &Options) -> ExitCode {
     }
 
     // Every state rendered, now or by an earlier run.
-    let shots: Vec<(&State, Look, PathBuf)> = STATES
-        .iter()
+    let shots: Vec<(&State, Look, PathBuf)> = all_states()
         .flat_map(|state| LOOKS.map(|look| (state, look)))
         .map(|(state, look)| {
             let path = output.join(format!("{}.png", file_stem(state, look)));
@@ -889,6 +895,11 @@ pub fn run(options: &Options) -> ExitCode {
     );
     println!("{}", index.display());
     ExitCode::SUCCESS
+}
+
+/// Every state the gallery shows, in order.
+fn all_states() -> impl Iterator<Item = &'static State> {
+    STATES.iter().chain(CALL_PILL_STATES)
 }
 
 /// Renders each of `shots` into `output`, several at a time: `workers`, or
@@ -936,56 +947,4 @@ fn render(state: &State, look: Look, output: &Path) {
 /// A state's file name under `look`, without `.png`.
 fn file_stem(state: &State, look: Look) -> String {
     format!("{}-{}", state.name, look.as_str())
-}
-
-/// The gallery page: one row per state, stock light and dark, then Omarchy
-/// light and dark; then the Indicator, one row per state, Omarchy light and
-/// dark, enlarged without smoothing so each pixel shows.
-fn index_html(
-    shots: &[(&State, Look, PathBuf)],
-    indicators: &[(&IndicatorState, OmarchyTheme, PathBuf)],
-) -> String {
-    let mut figures = String::new();
-    for (state, look, path) in shots {
-        let file = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        let _ = writeln!(
-            figures,
-            "<figure><a href=\"{file}\"><img src=\"{file}\" alt=\"{title}, {look}\"></a>\
-             <figcaption>{title} ({look})</figcaption></figure>",
-            title = state.title,
-            look = look.as_str(),
-        );
-    }
-    let mut icons = String::new();
-    for (state, theme, path) in indicators {
-        let file = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        let _ = writeln!(
-            icons,
-            "<figure><a href=\"{file}\"><img class=\"icon\" src=\"{file}\" \
-             alt=\"{title}, {look}\"></a><figcaption>{title} ({look})</figcaption></figure>",
-            title = state.title,
-            look = theme.as_str(),
-        );
-    }
-    format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <title>Desktop Calls screenshot gallery</title>\n\
-         <style>body{{font-family:sans-serif;margin:16px}}\
-         main{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}}\
-         img{{width:100%;border:1px solid #888}}\
-         img.icon{{image-rendering:pixelated}}\
-         main.indicator{{grid-template-columns:repeat(2,minmax(0,384px))}}</style>\n\
-         </head>\n<body>\n\
-         <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n\
-         <h2>The Indicator in Omarchy's bar</h2>\n\
-         <p>Each icon as Omarchy's tray draws it: the SVG the app names, 12 logical pixels \
-         at 2× scale, painted in the bar's foreground through its alpha mask.</p>\n\
-         <main class=\"indicator\">\n{icons}</main>\n</body>\n</html>\n"
-    )
 }

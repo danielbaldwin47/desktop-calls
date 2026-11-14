@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
-use test_harness::{Bus, Harness, Key, TestClient};
+use test_harness::{Bus, Harness, Key, LAYOUT_SIZE, TestClient};
 
 use super::{SYSTEM_PYTHON, flush};
 use crate::checklist::results;
@@ -109,6 +109,10 @@ const DEMO_BINDINGS: &str = "-- Keep only your personal keybinding overrides her
 /// How long the keybinding's focus, or the user's window, may take to
 /// arrive in the demo.
 const FOCUS_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long the Call Window may take to collapse to the Call Pill in the
+/// demo: 5 s after the Call connects, and a margin.
+const COLLAPSE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Whether the Setup Window has keyboard focus and shows exactly `buttons`.
 fn setup_window_shows(state: &test_harness::AppState, buttons: &str) -> bool {
@@ -426,6 +430,17 @@ impl Demo {
                 });
             }
             "escape" => harness.keyboard().press(Key::Escape),
+            "pill-click" => click_call_pill(harness),
+            "wait-for-call-pill" => {
+                harness.wait_for_app("the Call Pill", COLLAPSE_DEADLINE, |state| {
+                    state.surface("call-pill").is_some()
+                });
+            }
+            "expand" => {
+                if harness.app_state().surface("call-pill").is_some() {
+                    click_call_pill(harness);
+                }
+            }
             "indicator-click" => harness.tray().activate(),
             "indicator-mute" => harness.tray().click("Mute"),
             "indicator-hang-up" => harness.tray().click("Hang up"),
@@ -435,7 +450,7 @@ impl Demo {
                 None => println!(
                     "  demo: unknown action {other:?}. The actions: call, call-withheld, \
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
-                     decline, hang-up, mute, unmute, keybinding, escape, a, d, \
+                     decline, hang-up, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
                      open-setup-window, contacts-access-off, allow-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm,indicator-click, indicator-mute, \
@@ -450,4 +465,23 @@ impl Demo {
             },
         }
     }
+}
+
+/// Clicks the Call Pill's body, away from its buttons, where the app says
+/// it sits: anchored bottom right, its gap from both edges, at its size.
+fn click_call_pill(harness: &Harness) {
+    let state = harness.app_state();
+    let Some(pill) = state.surface("call-pill") else {
+        println!("  demo: the Call Pill isn't showing.");
+        return;
+    };
+    let number = |key: &str| {
+        pill.get(key)
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    };
+    let (screen_width, screen_height) = LAYOUT_SIZE;
+    let left = screen_width - number("margin") - number("width");
+    let middle = screen_height - number("margin") - number("height") / 2.0;
+    harness.pointer().click(left + 30.0, middle);
 }

@@ -32,6 +32,11 @@ pub(super) struct CallWindowForm {
     pointer_over: bool,
     /// The Call Window has the keyboard, however it got it.
     keyboard: bool,
+    /// The user has clicked in the Call Window or pressed a key in it since
+    /// it last got the keyboard. A compositor may hand a newly shown window
+    /// the keyboard by itself, as sway does with nothing else focused: that
+    /// alone is no sign of the user using it.
+    typed: bool,
     /// The Call Window's keypad is open.
     keypad_open: bool,
     /// The collapse timer that counts, by number, while one runs.
@@ -49,7 +54,8 @@ impl CallWindowForm {
 /// Handles the inputs about the Call Window's form: `input` is one of
 /// [`Input::CollapseCallWindow`], [`Input::ExpandCallWindow`],
 /// [`Input::IndicatorActivated`], [`Input::PointerOverCallWindow`],
-/// [`Input::CallWindowKeyboard`] and [`Input::KeypadShown`].
+/// [`Input::CallWindowKeyboard`], [`Input::CallWindowUsed`] and
+/// [`Input::KeypadShown`].
 pub(super) fn form_input(state: &mut State, input: &Input) {
     match input {
         Input::CollapseCallWindow => collapse_by_hand(state),
@@ -59,7 +65,14 @@ pub(super) fn form_input(state: &mut State, input: &Input) {
             }
         }
         Input::IndicatorActivated => {
-            if state.form.collapsed && state.surfaces().call_window.is_some() {
+            // Once the Call has ended, the Call Pill only says so, and the
+            // Indicator opens the Dialer as it does with no Call.
+            if state.form.collapsed
+                && state
+                    .surfaces()
+                    .call_window
+                    .is_some_and(|w| collapsible(&w))
+            {
                 expand_with_keyboard(state);
             } else {
                 open_dialer(state, String::new(), None);
@@ -70,6 +83,14 @@ pub(super) fn form_input(state: &mut State, input: &Input) {
         }
         Input::CallWindowKeyboard(keyboard) => {
             state.form.keyboard = *keyboard && !state.form.collapsed;
+            if !*keyboard {
+                state.form.typed = false;
+            }
+        }
+        Input::CallWindowUsed => {
+            state.form.typed = !state.form.collapsed;
+            // The time to collapse starts again once the user stops.
+            state.form.pending = None;
         }
         Input::KeypadShown(open) => state.form.keypad_open = *open,
         _ => {}
@@ -105,6 +126,7 @@ fn collapse(state: &mut State) {
     state.form.collapsed = true;
     state.form.pointer_over = false;
     state.form.keyboard = false;
+    state.form.typed = false;
     state.form.pending = None;
 }
 
@@ -127,9 +149,7 @@ pub(super) fn timer_ran_out(state: &mut State, timer: u32) {
 
 /// After each step: forgets the form once the Call Window closes, and keeps
 /// the collapse timer running exactly while the Call Window is expanded and
-/// nothing keeps it so. `window` is the Call Window as the step left it. A
-/// keystroke or a click in the window comes with the keyboard or the pointer
-/// on it, which keep it expanded, so the time starts again once they leave.
+/// nothing keeps it so. `window` is the Call Window as the step left it.
 pub(super) fn follow_call_window(
     state: &mut State,
     window: Option<&CallWindowView>,
@@ -162,7 +182,7 @@ pub(super) fn follow_call_window(
 fn in_use(state: &State, window: &CallWindowView) -> bool {
     let form = &state.form;
     state.focus == Focus::CallWindow
-        || form.keyboard
+        || (form.keyboard && form.typed)
         || form.pointer_over
         || form.keypad_open
         || window.notice.is_some()

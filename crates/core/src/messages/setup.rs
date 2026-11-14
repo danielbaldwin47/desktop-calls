@@ -7,6 +7,12 @@ use crate::keybinding::KeybindingCheck;
 use crate::machine::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
+use crate::messages::{ProblemKind, copy_command_label, fix_label};
+use std::ops::Range;
+
+/// The keys that work, each as its keycaps and what pressing it does, for
+/// the foot of the window: Up and Down are two keys doing one thing.
+pub type Keys = Vec<(&'static [&'static str], &'static str)>;
 
 /// The Setup Window's text for one step.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,14 +40,15 @@ pub struct SetupWindowText {
     pub empty_list: Option<&'static str>,
     /// The buttons, the default one first.
     pub buttons: Vec<&'static str>,
-    /// The keys that work, shown at the foot.
-    pub keys: String,
+    /// The keys that work now, shown at the foot.
+    pub keys: Keys,
 }
 
 /// What the Setup Window says for `view` at `now`: the countdown and the
-/// time left reading Contacts change by the second.
+/// time left reading Contacts change by the second. `home` is the Desktop's
+/// home directory, which a file in it is shown relative to, as `~`.
 #[must_use]
-pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
+pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) -> SetupWindowText {
     let desktop = view
         .desktop_name
         .as_deref()
@@ -59,7 +66,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
         notice: view.notice.map(notice),
         empty_list: None,
         buttons: Vec::new(),
-        keys: String::new(),
+        keys: Vec::new(),
     };
     let (heading, instructions, buttons): Page =
         match &view.step {
@@ -124,13 +131,17 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
                 connected,
                 contacts,
                 keybinding,
-            } => done(&mut text, phone, *connected, *contacts, keybinding, &desktop),
+            } => done(
+                &mut text,
+                phone,
+                *connected,
+                *contacts,
+                keybinding,
+                &desktop,
+                home,
+            ),
         };
-    text.keys = if view.problem_has_focus {
-        "Enter presses the highlighted button; Tab moves between buttons; Escape closes".to_owned()
-    } else {
-        keys(&view.step, &buttons)
-    };
+    text.keys = keys(&view.step, &buttons, view.problem_has_focus);
     text.heading = heading;
     text.instructions = instructions;
     text.buttons = buttons;
@@ -140,18 +151,70 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp) -> SetupWindowText {
 /// A page's heading, instructions and buttons, the default one first.
 type Page = (String, Vec<String>, Vec<&'static str>);
 
-/// The keys that work, for the foot of the window.
-fn keys(step: &SetupStep, buttons: &[&'static str]) -> String {
-    match (step, buttons) {
-        (SetupStep::Choose { .. }, _) => {
-            "Up and Down choose a phone, Enter pairs it; Escape closes".to_owned()
-        }
-        (_, [only]) => format!("Enter: {only}; Escape closes"),
-        (_, buttons) => format!(
-            "Enter: {}; Tab moves between buttons; Escape closes",
-            buttons.first().copied().unwrap_or_default()
-        ),
+/// The keys that work now, for the foot of the window: the Problem's button
+/// when it has the keyboard, otherwise the step's.
+fn keys(step: &SetupStep, buttons: &[&'static str], problem: Option<ProblemKind>) -> Keys {
+    const ENTER: &[&str] = &["Enter"];
+    const CLOSE: (&[&str], &str) = (&["Esc"], "Close");
+    const NEXT: (&[&str], &str) = (&["Tab"], "Next button");
+    if let Some(problem) = problem {
+        let does = fix_label(problem).unwrap_or_else(copy_command_label);
+        return vec![(ENTER, does), NEXT, CLOSE];
     }
+    match (step, buttons) {
+        (SetupStep::Choose { phones }, _) => {
+            let mut keys = Keys::new();
+            if phones.len() > 1 {
+                keys.push((&["↑", "↓"], "Choose"));
+            }
+            if !phones.is_empty() {
+                keys.push((ENTER, "Pair"));
+            }
+            keys.push(CLOSE);
+            keys
+        }
+        // Enter and Escape do one thing: one entry says it.
+        (_, ["Close"]) => vec![(&["Enter", "Esc"], "Close")],
+        (_, [only]) => vec![(ENTER, only), CLOSE],
+        (_, buttons) => vec![
+            (ENTER, buttons.first().copied().unwrap_or_default()),
+            NEXT,
+            CLOSE,
+        ],
+    }
+}
+
+/// `file` as the Setup Window names it: relative to `home` as `~` when it
+/// is in it, otherwise whole.
+#[must_use]
+pub fn shown_path(file: &str, home: Option<&str>) -> String {
+    let Some(home) = home.map(|home| home.trim_end_matches('/')) else {
+        return file.to_owned();
+    };
+    match file.strip_prefix(home) {
+        Some(rest) if !home.is_empty() && rest.starts_with('/') => format!("~{rest}"),
+        _ => file.to_owned(),
+    }
+}
+
+/// The parts of `text` a line may not break inside: a line may break only
+/// at a space or after a `/`, so a path wraps between its folders and never
+/// in the middle of a name, hyphens and dots included.
+#[must_use]
+pub fn unbreakable_runs(text: &str) -> Vec<Range<usize>> {
+    let mut runs = Vec::new();
+    let mut start = 0;
+    for (at, character) in text.char_indices() {
+        if character == ' ' || character == '/' {
+            let end = at + character.len_utf8();
+            runs.push(start..end);
+            start = end;
+        }
+    }
+    if start < text.len() {
+        runs.push(start..text.len());
+    }
+    runs
 }
 
 /// The step for a Phone that didn't answer.
@@ -236,12 +299,13 @@ fn done(
     contacts: ContactsOutcome,
     keybinding: &KeybindingStage,
     desktop: &str,
+    home: Option<&str>,
 ) -> Page {
     text.summary = Some(contacts_outcome(contacts, desktop));
     text.tip = Some(
         "Tip: in Omarchy, to keep Desktop Calls in the bar, right-click the arrow at the bar's tray and pin Desktop Calls.",
     );
-    let (instructions, buttons) = finish(keybinding, &mut text.line);
+    let (instructions, buttons) = finish(keybinding, &mut text.line, home);
     let heading = if connected {
         format!("{} is connected", phone.name)
     } else {
@@ -352,10 +416,13 @@ fn count(count: usize) -> u64 {
     u64::try_from(count).unwrap_or(u64::MAX)
 }
 
-/// The finish page's invitation to a first Call, and the keybinding.
+/// The finish page's invitation to a first Call, and the keybinding. The
+/// Hyprland config's file is named relative to `home`; the line the user
+/// confirms, and the command to bind, are shown exactly as they are written.
 fn finish(
     keybinding: &KeybindingStage,
     line: &mut Option<String>,
+    home: Option<&str>,
 ) -> (Vec<String>, Vec<&'static str>) {
     let from_the_bar = "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.".to_owned();
     let check = match keybinding {
@@ -367,6 +434,7 @@ fn finish(
             ..
         }) => {
             *line = Some(shown.clone());
+            let file = shown_path(file, home);
             let place = if *before_return {
                 format!("This line goes into {file}, just before its final return:")
             } else {
@@ -386,8 +454,9 @@ fn finish(
         KeybindingCheck::Available { keys, file, .. } => (
             vec![
                 format!(
-                    "Add a keybinding, and {} opens the Dialer from anywhere: {file} doesn't use those keys yet.",
-                    shown_keys(keys)
+                    "Add a keybinding, and {} opens the Dialer from anywhere: {} doesn't use those keys yet.",
+                    shown_keys(keys),
+                    shown_path(file, home)
                 ),
                 from_the_bar,
             ],
@@ -407,8 +476,9 @@ fn finish(
         } => (
             vec![
                 format!(
-                    "{} already does something else in {file}; to open the Dialer from a key, bind another one to run {command}",
-                    shown_keys(keys)
+                    "{} already does something else in {}; to open the Dialer from a key, bind another one to run {command}",
+                    shown_keys(keys),
+                    shown_path(file, home)
                 ),
                 from_the_bar,
             ],
@@ -417,7 +487,8 @@ fn finish(
         KeybindingCheck::Unreadable { file, command } => (
             vec![
                 format!(
-                    "{file} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}"
+                    "{} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}",
+                    shown_path(file, home)
                 ),
                 from_the_bar,
             ],

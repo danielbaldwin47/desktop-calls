@@ -1,10 +1,11 @@
-//! The Desktop's Problems, at the top of the Setup Window: each with its
-//! heading, one plain sentence, and either the button that puts it right
-//! once pressed (Turn on, Set up audio) or the command to run and a button
-//! that copies it. While Bluetooth is off or blocked on the choose step,
-//! the first button has keyboard focus, so Enter presses it; otherwise the
-//! step keeps focus, so Enter pairs or confirms, and Shift+Tab reaches the
-//! Problems.
+//! The Desktop's Problems, under the Setup Window's heading: each one card
+//! on the warning tint, with its icon, heading, one plain sentence, and
+//! either the button that puts it right once pressed (Turn on, Set up
+//! audio) or the command to run and a button that copies it. Nothing else
+//! in the window says the Problem again. While Bluetooth is off or blocked
+//! on the choose step, the first button has keyboard focus and shows its
+//! keycap, so Enter presses it; otherwise the step keeps focus, so Enter
+//! pairs or confirms, and Shift+Tab reaches the Problems.
 //!
 //! It reports `setup-problems` while shown, with `problems` (kinds),
 //! `headings`, `messages`, `commands` and `buttons` (one per line, in
@@ -21,7 +22,9 @@ use desktop_calls_core::{FixFailure, Input, SetupProblemsView, SetupWindowView};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
 
-use super::SharedReport;
+use super::icons::{Icon, IconView};
+use super::{SharedReport, class};
+use crate::theme::space;
 use crate::wireplumber;
 
 const NAME: &str = "setup-problems";
@@ -35,7 +38,8 @@ pub(super) struct SetupProblems {
     pub(super) widget: gtk::Box,
     problems: gtk::Box,
     status: gtk::Label,
-    notice: gtk::Label,
+    notice: gtk::Box,
+    notice_text: gtk::Label,
     intents: UnboundedSender<Input>,
     report: SharedReport,
     content: RefCell<BTreeMap<String, String>>,
@@ -47,25 +51,22 @@ pub(super) struct SetupProblems {
     shown: RefCell<Shown>,
     /// Each fix button.
     fix_buttons: RefCell<Vec<gtk::Button>>,
-    /// The first button, which takes focus.
-    first_button: RefCell<Option<gtk::Button>>,
+    /// The first button, which takes focus, and its keycap, shown while
+    /// Enter presses it.
+    first_button: RefCell<Option<(gtk::Button, gtk::Label)>>,
     /// The command last copied, while the same Problems show.
     copied: RefCell<Option<String>>,
 }
 
 impl SetupProblems {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
-        let widget = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let widget = gtk::Box::new(gtk::Orientation::Vertical, space::S);
         widget.set_visible(false);
-        let problems = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let problems = gtk::Box::new(gtk::Orientation::Vertical, space::S);
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
         status.add_css_class("dim-label");
-        let notice = gtk::Label::new(None);
-        notice.set_xalign(0.0);
-        notice.set_wrap(true);
-        notice.set_max_width_chars(50);
-        notice.add_css_class("error");
+        let (notice, notice_text) = notice_card();
         for child in [
             problems.upcast_ref::<gtk::Widget>(),
             status.upcast_ref(),
@@ -73,12 +74,12 @@ impl SetupProblems {
         ] {
             widget.append(child);
         }
-        widget.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         let problems = Rc::new(Self {
             widget,
             problems,
             status,
             notice,
+            notice_text,
             intents: intents.clone(),
             report,
             content: RefCell::default(),
@@ -173,6 +174,11 @@ impl SetupProblems {
         for button in self.fix_buttons.borrow().iter() {
             button.set_sensitive(view.fixing.is_none());
         }
+        // The first button shows the key that presses it, while it has the
+        // keyboard.
+        if let Some((_, keycap)) = self.first_button.borrow().as_ref() {
+            keycap.set_visible(view.blocks_step);
+        }
         // What is under way, or else that a command was copied.
         let status = view.fixing.map(messages::fixing).or_else(|| {
             self.copied
@@ -183,15 +189,16 @@ impl SetupProblems {
         self.status.set_text(status.unwrap_or_default());
         self.status.set_visible(status.is_some());
         let notice = view.notice.map(notice_text);
-        self.notice.set_text(notice.as_deref().unwrap_or_default());
+        self.notice_text
+            .set_text(notice.as_deref().unwrap_or_default());
         self.notice.set_visible(notice.is_some());
         self.widget.set_visible(true);
         *self.content.borrow_mut() = self.report_content(view);
         self.set_focused_field();
         self.publish();
         if changed
-            && view.takes_focus
-            && let Some(button) = self.first_button.borrow().as_ref()
+            && view.blocks_step
+            && let Some((button, _)) = self.first_button.borrow().as_ref()
         {
             button.grab_focus();
         }
@@ -205,32 +212,50 @@ impl SetupProblems {
         let mut first_button = None;
         for kind in problems {
             let message = messages::problem(*kind);
-            let row = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            let card = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+            card.add_css_class(class::NOTICE);
+            card.add_css_class("problem-card");
+            let icon = IconView::new(Icon::Warning);
+            icon.area.add_css_class("notice-icon");
+            icon.area.set_valign(gtk::Align::Start);
+            let body = gtk::Box::new(gtk::Orientation::Vertical, space::XS);
+            body.set_hexpand(true);
             let heading = gtk::Label::new(Some(messages::problem_heading(*kind)));
-            heading.add_css_class("heading");
+            heading.add_css_class("notice-heading");
             heading.set_xalign(0.0);
             let text = gtk::Label::new(Some(message.text));
             text.set_xalign(0.0);
             text.set_wrap(true);
             text.set_max_width_chars(50);
-            row.append(&heading);
-            row.append(&text);
+            body.append(&heading);
+            body.append(&text);
+            // Under the sentence, one row: the command, if the user must run
+            // it, and the button at the right. Beside the sentence, a long
+            // one would be squeezed into a narrow column.
+            let actions = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+            actions.set_margin_top(space::XS);
             let button = if let Some(label) = messages::fix_label(*kind) {
-                let button = gtk::Button::with_label(label);
-                button.add_css_class("suggested-action");
+                let (button, keycap) = fix_button(label);
+                button.add_css_class(class::ACCENT);
+                // Alone in its row, it takes the row to sit at its right.
+                button.set_hexpand(true);
                 let (intents, kind) = (self.intents.clone(), *kind);
                 button.connect_clicked(move |_| {
                     let _ = intents.unbounded_send(Input::Fix(kind));
                 });
                 fix_buttons.push(button.clone());
-                Some(button)
+                Some((button, keycap))
             } else if let Some(NextAction::Command(command)) = message.next_action {
                 let shown = gtk::Label::new(Some(command));
                 shown.add_css_class("monospace");
                 shown.set_selectable(true);
                 shown.set_xalign(0.0);
-                row.append(&shown);
-                let button = gtk::Button::with_label(messages::copy_command_label());
+                shown.set_wrap(true);
+                shown.set_wrap_mode(gtk::pango::WrapMode::Word);
+                shown.set_hexpand(true);
+                shown.set_valign(gtk::Align::Center);
+                actions.append(&shown);
+                let (button, keycap) = fix_button(messages::copy_command_label());
                 let weak = Rc::downgrade(self);
                 button.connect_clicked(move |button| {
                     button.clipboard().set_text(command);
@@ -245,16 +270,20 @@ impl SetupProblems {
                         problems.publish();
                     }
                 });
-                Some(button)
+                Some((button, keycap))
             } else {
                 None
             };
-            if let Some(button) = button {
-                button.set_halign(gtk::Align::Start);
-                row.append(&button);
-                first_button.get_or_insert(button);
+            if let Some((button, keycap)) = button {
+                button.set_halign(gtk::Align::End);
+                button.set_valign(gtk::Align::Center);
+                actions.append(&button);
+                body.append(&actions);
+                first_button.get_or_insert((button, keycap));
             }
-            self.problems.append(&row);
+            card.append(&icon.area);
+            card.append(&body);
+            self.problems.append(&card);
         }
         self.fix_buttons.replace(fix_buttons);
         self.first_button.replace(first_button);
@@ -314,6 +343,43 @@ impl SetupProblems {
         }
         content
     }
+}
+
+/// A button with `label` and, after it, the keycap for the key that presses
+/// it, hidden until it does.
+fn fix_button(label: &str) -> (gtk::Button, gtk::Label) {
+    let keycap = gtk::Label::new(Some(messages::problem_keycap()));
+    keycap.add_css_class(class::KEYCAP);
+    keycap.set_valign(gtk::Align::Center);
+    keycap.set_visible(false);
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+    content.set_halign(gtk::Align::Center);
+    content.append(&gtk::Label::new(Some(label)));
+    content.append(&keycap);
+    let button = gtk::Button::new();
+    button.add_css_class(class::SMALL);
+    button.set_child(Some(&content));
+    (button, keycap)
+}
+
+/// A notice for the Setup Window, hidden: the warning icon beside the
+/// words of why the last attempt didn't work. It is a card on the warning
+/// tint, like a Problem, but says what went wrong, not a standing Problem.
+pub(super) fn notice_card() -> (gtk::Box, gtk::Label) {
+    let icon = IconView::new(Icon::Warning);
+    icon.area.add_css_class("notice-icon");
+    icon.area.set_valign(gtk::Align::Start);
+    let text = gtk::Label::new(None);
+    text.set_xalign(0.0);
+    text.set_wrap(true);
+    text.set_max_width_chars(50);
+    text.set_hexpand(true);
+    let card = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+    card.add_css_class(class::NOTICE);
+    card.append(&icon.area);
+    card.append(&text);
+    card.set_visible(false);
+    (card, text)
 }
 
 /// Why a fix didn't work, naming where the audio settings go.

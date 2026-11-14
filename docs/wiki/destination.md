@@ -14,7 +14,7 @@ v1 is done, and the work pauses, when all five hold:
 
 Where each stood on 2026-11-13 at about 19:05 EST (checked on GitHub then; the full list is in the session-log entry):
 
-- Item 2: the GitHub runs on `c3e05dd` (run 43528683478) and `40411a0` (run 43529718982), the two pushes to `main` that day which changed code, passed every job. Before them `main` had been red since `1139783` ([testing](testing.md)). Two docs-only pushes after them skipped the test jobs.
+- Item 2: the GitHub runs on `c3e05dd` (run 43528683478) and `40411a0` (run 43529718982), the two pushes to `main` that day which changed code, passed every job. Before them `main` had been red since `1139783` ([testing](testing.md)). Two docs-only pushes, `81dcfe0` just before them and `13bece2` after them, skipped the test jobs.
 - Item 3: the Call Pill's tickets #200 and #201 and Calls Off's tickets #202 to #207, #209 and #215 were open, with the reconnect fixes #212, #213 and #216 to land first. None had a PR open.
 - Items 1, 4 and 5: not checked on 2026-11-13. The scorecard's three-tier report ([chief-of-staff-practice](chief-of-staff-practice.md)) was not redone that day.
 

@@ -123,6 +123,14 @@ impl ControlInterface {
         self.state().connection_state().as_str().to_owned()
     }
 
+    /// Whether the Phone is in range and connected to the Desktop, without
+    /// hands-free: `ConnectionState` is then `"disconnected"`, though the
+    /// Phone isn't out of range (ticket #216).
+    #[zbus(property)]
+    fn hands_free_lost(&self) -> bool {
+        self.state().hands_free_lost()
+    }
+
     /// The Phone's name and Bluetooth address, or two empty strings while no
     /// Phone is set up.
     #[zbus(property)]
@@ -560,6 +568,9 @@ impl Publisher {
         }
         if old.phone() != state.phone() {
             published.phone_changed(emitter).await?;
+        }
+        if old.hands_free_lost() != state.hands_free_lost() {
+            published.hands_free_lost_changed(emitter).await?;
         }
         // A Call's display name changes when Contacts do.
         if old.calls() != state.calls() || old.contacts() != state.contacts() {

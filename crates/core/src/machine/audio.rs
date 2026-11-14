@@ -204,6 +204,7 @@ pub(super) fn hands_free_down(state: &mut State, effects: &mut Vec<Effect>) {
     } else {
         phone_disconnected(state);
         dial_failed(state, Failure::PhoneOutOfRange, effects);
+        super::presence::hands_free_dropped(state, effects);
     }
 }
 

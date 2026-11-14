@@ -3,15 +3,16 @@
 use std::collections::HashMap;
 use std::process::ExitCode;
 
+use desktop_calls_core::clock::MORNING;
 use desktop_calls_core::messages::{self, Failure, NextAction};
-use desktop_calls_core::{AudioLocation, ConnectionState, Phone};
+use desktop_calls_core::{AudioLocation, ConnectionState, Phone, TimeOfDay, Timestamp};
 use glib::MainContext;
 use zbus::fdo::PropertiesProxy;
 use zbus::names::InterfaceName;
 use zbus::{Connection, OwnedVariant};
 
-use crate::control;
 use crate::glib_runtime::GlibRuntime;
+use crate::{clock, control};
 
 const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 
@@ -47,7 +48,9 @@ pub fn status(json: bool) -> ExitCode {
         Ok(status) => {
             // While calls are off the Phone is disconnected by the user's
             // choice, not out of range: that is all the status says.
-            match messages::calls_off_status(status.calls_off.0 == "off") {
+            let (state, until, _) = &status.calls_off;
+            let until = (*until != 0).then(|| clock::local_time(Timestamp(until * 1_000)));
+            match messages::calls_off_status(state == "off", until) {
                 Some(line) => println!("{line}"),
                 None => println!(
                     "{}",
@@ -83,35 +86,77 @@ pub fn connect_phone() -> ExitCode {
     call_app("OpenConnectWindow", &())
 }
 
-/// `desktop-calls calls off` or `calls on`: turns calls off until the
-/// user turns them on, or turns them on.
-pub fn calls(off: bool) -> ExitCode {
+/// `desktop-calls calls off [--for LENGTH | --until HH:MM |
+/// --until-morning]`: turns calls off until the user turns them on, or
+/// until the deadline asked for. The local times become an instant here,
+/// by the Desktop's clock; the app decides the rest.
+pub fn calls_off(length: Option<&str>, until: Option<&str>, until_morning: bool) -> ExitCode {
+    let now = clock::now();
+    let deadline = if let Some(length) = length {
+        let Some(length) = length_ms(length) else {
+            eprintln!("{}", messages::calls_off_for_too_long());
+            return ExitCode::FAILURE;
+        };
+        Some(Timestamp(now.0.saturating_add(length)))
+    } else if let Some(until) = until {
+        let Some(until) = TimeOfDay::parse(until) else {
+            eprintln!("{}", messages::calls_off_until_unreadable());
+            return ExitCode::FAILURE;
+        };
+        Some(clock::next(until, now))
+    } else {
+        until_morning.then(|| clock::next(MORNING, now))
+    };
+    let seconds = deadline.map_or(0, |deadline| deadline.0 / 1_000);
+    let shown = deadline.map(|_| clock::local_time(Timestamp(seconds * 1_000)));
+    turn_calls(
+        "TurnCallsOff",
+        &(seconds,),
+        &messages::calls_turned(true, shown),
+    )
+}
+
+/// `desktop-calls calls on`: turns calls on.
+pub fn calls_on() -> ExitCode {
+    turn_calls("TurnCallsOn", &(), &messages::calls_turned(false, None))
+}
+
+/// The milliseconds `length` names, such as `90m` or `2h`: a whole number
+/// of minutes or hours, from 1 minute to 24 hours.
+fn length_ms(length: &str) -> Option<u64> {
+    let unit = match length.chars().last()? {
+        'm' => 60_000,
+        'h' => 3_600_000,
+        _ => return None,
+    };
+    let count = &length[..length.len() - 1];
+    if count.is_empty() || !count.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let length = count.parse::<u64>().ok()?.checked_mul(unit)?;
+    (1..=24 * 3_600_000).contains(&length).then_some(length)
+}
+
+/// Calls `method` with `body` to turn calls off or on, and prints `said`
+/// once the app took it, or why it didn't.
+fn turn_calls<B>(method: &str, body: &B, said: &str) -> ExitCode
+where
+    B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
+{
     let context = MainContext::default();
     let turned = context.block_on(async {
         let session = connect(GlibRuntime::new(context.clone()))
             .await
             .map_err(Refusal::Failure)?;
-        let reply = if off {
-            session
-                .call_method(
-                    Some(control::BUS_NAME),
-                    control::PATH,
-                    Some(INTERFACE),
-                    "TurnCallsOff",
-                    &(0_u64,),
-                )
-                .await
-        } else {
-            session
-                .call_method(
-                    Some(control::BUS_NAME),
-                    control::PATH,
-                    Some(INTERFACE),
-                    "TurnCallsOn",
-                    &(),
-                )
-                .await
-        };
+        let reply = session
+            .call_method(
+                Some(control::BUS_NAME),
+                control::PATH,
+                Some(INTERFACE),
+                method,
+                body,
+            )
+            .await;
         match reply {
             Ok(_) => Ok(()),
             Err(zbus::Error::MethodError(name, Some(text), _))
@@ -124,7 +169,7 @@ pub fn calls(off: bool) -> ExitCode {
     });
     match turned {
         Ok(()) => {
-            println!("{}", messages::calls_turned(off));
+            println!("{said}");
             ExitCode::SUCCESS
         }
         Err(Refusal::Failure(failure)) => report(failure),

@@ -409,6 +409,7 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         ("6.2", "reconnect_after_resume_ms"),
         ("6.3", "reconnect_after_wireplumber_ms"),
         ("6.4", "reconnect_after_calls_on_ms"),
+        ("6.5", "reconnect_after_deadline_resume_ms"),
     ] {
         let record = step(&result, id);
         assert_eq!(record["result"], "pass", "{record:#}");
@@ -455,6 +456,15 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         "After the restart calls are off",
     ] {
         assert!(says(off, said), "{said}: {off:#}");
+    }
+    // Calls off until a time the Desktop sleeps through: back on at the
+    // resume, not before.
+    let timed = step(&result, "6.5");
+    for said in [
+        "slept through the time",
+        "came back on once the Desktop resumed",
+    ] {
+        assert!(says(timed, said), "{said}: {timed:#}");
     }
 }
 

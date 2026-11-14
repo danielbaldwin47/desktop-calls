@@ -4,6 +4,7 @@ mod bluez;
 mod calls_off;
 mod chosen_phone;
 mod cli;
+mod clock;
 mod contacts;
 mod control;
 mod do_not_disturb;
@@ -79,10 +80,9 @@ enum Command {
         to: AudioTarget,
     },
     /// Turn calls off, so your phone stays disconnected from this computer
-    /// until you turn them on, or turn them on.
+    /// until you turn them on or a time you choose, or turn them on.
     Calls {
-        /// Off or on.
-        #[arg(value_enum)]
+        #[command(subcommand)]
         turn: CallsTurn,
     },
     /// Run the long-running process. The systemd user unit runs this.
@@ -91,10 +91,21 @@ enum Command {
 }
 
 /// What `desktop-calls calls` does.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(clap::Subcommand)]
 enum CallsTurn {
-    /// Turn calls off until you turn them on.
-    Off,
+    /// Turn calls off until you turn them on, or until a time you choose.
+    Off {
+        /// For this long, then on again: minutes or hours, such as 90m or
+        /// 2h, up to 24h.
+        #[arg(long = "for", value_name = "LENGTH", group = "deadline")]
+        length: Option<String>,
+        /// Until this time, then on again: HH:MM on the 24-hour clock.
+        #[arg(long, value_name = "HH:MM", group = "deadline")]
+        until: Option<String>,
+        /// Until tomorrow morning at 07:00, then on again.
+        #[arg(long, group = "deadline")]
+        until_morning: bool,
+    },
     /// Turn calls on.
     On,
 }
@@ -126,7 +137,17 @@ fn main() -> ExitCode {
         Some(Command::Mute) => cli::mute(),
         Some(Command::Connect) => cli::connect_phone(),
         Some(Command::Audio { to }) => cli::audio(to.into()),
-        Some(Command::Calls { turn }) => cli::calls(turn == CallsTurn::Off),
+        Some(Command::Calls {
+            turn:
+                CallsTurn::Off {
+                    length,
+                    until,
+                    until_morning,
+                },
+        }) => cli::calls_off(length.as_deref(), until.as_deref(), until_morning),
+        Some(Command::Calls {
+            turn: CallsTurn::On,
+        }) => cli::calls_on(),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.

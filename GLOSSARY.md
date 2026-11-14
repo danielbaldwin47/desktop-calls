@@ -73,8 +73,16 @@ The search-as-you-type window for starting a Call from a name or number.
 _Avoid_: launcher, call picker
 
 **Call Window**:
-The small window shown during a live Call: timer, mute, keypad, Handoff, hang up, and, with a Call on hold, Swap.
+The small window shown during a Call: who and the timer, the State Line, three Tiles (Mute, Keypad, and To phone or Move here), and Hang up; with a Call on hold, its row with Swap. A Notice above the Tiles says what went wrong, such as lost contact.
 _Avoid_: in-call screen, call UI
+
+**State Line**:
+The Call Window's one line, with an icon, saying where the Call's audio is and whether the microphone is muted.
+_Avoid_: status bar, audio row
+
+**Tile**:
+One of the Call Window's three equal square-ish buttons above Hang up, each with its keycap.
+_Avoid_: action button, chip
 
 **Call Pill**:
 The small strip the Call Window collapses to during a Call, showing the caller, timer, Mute and Hang up.

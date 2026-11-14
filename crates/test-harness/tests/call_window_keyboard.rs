@@ -20,6 +20,8 @@ const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
 const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
+/// A second caller, who rings during the Call.
+const OTHER_NUMBER: &str = "+447700900456";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 
 /// The Hang up button's red, and stock Adwaita's warning colour, which
@@ -73,6 +75,20 @@ fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
 
 fn find(screenshot: &Screenshot, colour: [u8; 3]) -> Option<Region> {
     screenshot.region_where(|pixel| close_to(pixel, colour))
+}
+
+/// Where any amber pixel is, such as the warning colour's text, in the
+/// Call Window's rows above the tiles and inside its border.
+fn amber_above_tiles(screenshot: &Screenshot, hang_up: Region) -> Option<Region> {
+    let area = Region {
+        left: hang_up.left,
+        top: 0.0,
+        right: hang_up.right,
+        bottom: hang_up.top - ROW_GAP - TILE_HEIGHT - 2.0,
+    };
+    screenshot.region_within(area, |[red, green, blue]| {
+        red >= 0x90 && red.saturating_sub(blue) >= 0x60 && green > blue && green < red
+    })
 }
 
 /// Where the app's surfaces are: everything that is neither the black
@@ -142,8 +158,8 @@ fn clicking_mute_mutes_the_microphone_recolours_the_window_and_moves_nothing() {
     harness.simulated_phone().set_microphone_volume(9);
     live_on_desktop(&harness);
     let hang_up = hang_up_button(&harness);
-    let before = app_region(&harness.screenshot("call-window-unmuted-first"))
-        .expect("the Call Window shows");
+    let before_shot = harness.screenshot("call-window-unmuted-first");
+    let before = app_region(&before_shot).expect("the Call Window shows");
     let (x, y) = mute_button_centre(hang_up);
 
     harness.pointer().click(x, y);
@@ -171,6 +187,21 @@ fn clicking_mute_mutes_the_microphone_recolours_the_window_and_moves_nothing() {
         "the Call Window's border isn't in the warning colour: {marked:?}; see {}",
         screenshot.path.display()
     );
+    // The Mute tile is filled with it, just inside its corner.
+    let tile_top = hang_up.top - ROW_GAP - TILE_HEIGHT;
+    assert!(
+        close_to(screenshot.colour_at(hang_up.left + 8.0, tile_top + 8.0), WARNING),
+        "the Mute tile isn't in the warning colour; see {}",
+        screenshot.path.display()
+    );
+    // The state line, above the tiles and inside the border, turns amber;
+    // unmuted, nothing there is.
+    assert!(
+        amber_above_tiles(&screenshot, hang_up).is_some(),
+        "the state line isn't in the warning colour; see {}",
+        screenshot.path.display()
+    );
+    assert_eq!(amber_above_tiles(&before_shot, hang_up), None, "{}", before_shot.path.display());
     // Nothing moved: the window is the size it was, and Hang up is where it
     // was.
     assert_eq!(app_region(&screenshot), Some(before), "{}", screenshot.path.display());
@@ -219,6 +250,30 @@ fn every_action_in_the_call_window_is_reachable_by_the_shortcut_it_shows() {
         shown(state, "keypad").is_none()
     });
 
+    assert_eq!(shown(&state, "handoff-shortcut").as_deref(), Some("A"));
+    harness.keyboard().type_text("a");
+    harness.wait_for_app("A moves the audio to the Phone", DEADLINE, |state| {
+        state.audio_location == "phone" && shown(state, "handoff").as_deref() == Some("Move here")
+    });
+    harness.keyboard().type_text("a");
+    harness.wait_for_app("A brings the audio back here", DEADLINE, |state| {
+        state.audio_location == "desktop" && shown(state, "handoff").as_deref() == Some("To phone")
+    });
+    // And by a click on the tile, the last of the three.
+    let hang_up = hang_up_button(&harness);
+    let tile = (
+        hang_up.right - (hang_up.right - hang_up.left) / 6.0,
+        hang_up.top - ROW_GAP - TILE_HEIGHT / 2.0,
+    );
+    harness.pointer().click(tile.0, tile.1);
+    harness.wait_for_app("clicking To phone moves the audio", DEADLINE, |state| {
+        state.audio_location == "phone" && shown(state, "handoff").as_deref() == Some("Move here")
+    });
+    harness.pointer().click(tile.0, tile.1);
+    harness.wait_for_app("clicking Move here brings it back", DEADLINE, |state| {
+        state.audio_location == "desktop" && shown(state, "handoff").as_deref() == Some("To phone")
+    });
+
     harness.keyboard().press_with_control('h');
     harness.wait_for_app("Ctrl+H hangs up", DEADLINE, |state| state.calls.is_empty());
     harness
@@ -259,15 +314,22 @@ fn typed_and_pasted_tones_reach_the_phone_as_typed() {
     let harness = connected();
     live_on_desktop(&harness);
     focus_call_window(&harness);
-    // The tone entry is there only while the keypad is open; a tone typed
-    // opens it.
+    // The tone entry is there only while the keypad is open; tones pasted
+    // or typed with it closed open it.
     let state = harness.app_state();
     assert_eq!(shown(&state, "tone-entry"), None);
     assert_eq!(shown(&state, "keypad"), None);
 
-    harness.keyboard().type_text("1*#");
-    let pasted = harness.set_clipboard("1234#");
+    let pasted = harness.set_clipboard("1*#");
     harness.keyboard().press_with_control('v');
+    harness.wait_for_app("tones pasted open the keypad", DEADLINE, |state| {
+        shown(state, "tone-entry").is_some() && shown(state, "tones").as_deref() == Some("1*#")
+    });
+    harness.keyboard().type_text("k");
+    harness.wait_for_app("K closes the keypad", DEADLINE, |state| {
+        shown(state, "tone-entry").is_none()
+    });
+    harness.keyboard().type_text("1234#");
 
     // One SendTones a tone: a Pixel takes one tone per AT+VTS
     // (docs/research/2026-11-04-mute-and-keypad.md).
@@ -363,4 +425,35 @@ fn with_the_audio_on_the_phone_mute_is_disabled_and_the_state_line_says_why() {
         });
     let screenshot = harness.screenshot("call-window-mute-unavailable");
     assert_eq!(find(&screenshot, WARNING), None);
+}
+
+/// A Call left alone on hold, as the other caller hung up, offers Resume
+/// in place of the tiles, and S resumes it.
+#[test]
+fn a_lone_call_on_hold_offers_resume_and_s_resumes_it() {
+    let harness = connected();
+    live_on_desktop(&harness);
+    let other = harness.simulated_phone().ring(OTHER_NUMBER);
+    harness.wait_for_app("the second Call waits", DEADLINE, |state| {
+        state.calls.len() == 2 && state.calls[1].state == "waiting"
+    });
+    harness.hold_and_answer().expect("Hold & Answer is passed on");
+    harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
+        state.calls.len() == 2 && state.calls[0].state == "held"
+    });
+    harness.simulated_phone().caller_hangs_up(&other);
+    let state = harness.wait_for_app("the first Call is alone on hold, offered Resume", DEADLINE, |state| {
+        state.calls.len() == 1
+            && state.calls[0].state == "held"
+            && shown(state, "swap").as_deref() == Some("Resume")
+    });
+    assert_eq!(shown(&state, "swap-shortcut").as_deref(), Some("S"));
+    assert_eq!(shown(&state, "mute"), None, "the tiles give way to Resume");
+    focus_call_window(&harness);
+
+    harness.keyboard().type_text("s");
+
+    harness.wait_for_app("S resumes the Call", DEADLINE, |state| {
+        state.calls.len() == 1 && state.calls[0].state == "active"
+    });
 }

@@ -108,7 +108,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .is_some_and(|status| status == "On your phone")
             });
         },
-        // Hang up is without_controls: it would do nothing.
+        // Hang up is dimmed: it would do nothing.
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
     State {
@@ -148,7 +148,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .is_some_and(|status| status == "Call ended")
             });
         },
-        // Hang up is without_controls once the Call has ended.
+        // Hang up is dimmed once the Call has ended.
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
 ];

@@ -517,8 +517,6 @@ pub enum Label {
     CallNotPlaced,
     /// The Call Window's status once the Call is over.
     CallEnded,
-    /// Audio Location: the Desktop.
-    AudioOnDesktop,
     /// Audio Location: the Phone.
     AudioOnPhone,
     /// The Handoff button while the audio is on the Phone.
@@ -623,7 +621,6 @@ pub fn label(label: Label) -> &'static str {
         Label::Ringing => "Ringing…",
         Label::CallNotPlaced => "Call not placed",
         Label::CallEnded => "Call ended",
-        Label::AudioOnDesktop => "Audio on this computer",
         Label::AudioOnPhone => "Audio on phone",
         Label::MoveAudioHere => "Move audio here",
         Label::MoveAudioToPhone => "Move audio to phone",

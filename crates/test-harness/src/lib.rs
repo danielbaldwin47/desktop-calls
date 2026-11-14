@@ -407,6 +407,17 @@ impl Harness {
         );
     }
 
+    /// `tools/install.py --uninstall`, which `just uninstall` and a package's
+    /// removal run, ready to run in the scenario's world. Add an
+    /// environment variable or an argument to change it.
+    #[must_use]
+    pub fn uninstall_command(&self) -> Command {
+        // The system Python, as for the install above.
+        let mut command = self.external_command("/usr/bin/python3");
+        command.arg(INSTALL_SCRIPT).arg("--uninstall");
+        command
+    }
+
     /// Whether the app's control interface is on the session bus now.
     ///
     /// # Panics

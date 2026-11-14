@@ -3,8 +3,19 @@
 `just uninstall` run this; it only places files, and they then tell systemd.
 
 Usage:
-  /usr/bin/python3 tools/install.py BINARY      install BINARY and its files
-  /usr/bin/python3 tools/install.py --uninstall remove them
+  /usr/bin/python3 tools/install.py BINARY            install BINARY and its files
+  /usr/bin/python3 tools/install.py --uninstall       turn calls back on, then remove them
+  /usr/bin/python3 tools/install.py --turn-calls-on   only the first of those
+  /usr/bin/python3 tools/install.py --remove          only the second
+
+Removal first runs the installed `desktop-calls calls on --uninstalling`,
+because BlueZ keeps `Device1.Blocked` after the app is gone: a Phone the app
+blocked for Calls Off is unblocked, and nothing else is (ticket #215). It
+asks the running service, if there is one, so `just uninstall` runs
+`--turn-calls-on` before it stops the service, then `--remove`. A package's
+removal hook must run the same for each user, with `--uninstall`. The step is
+skipped when DESTDIR is set, as a package build stages its files, and a
+failure of it never stops the removal.
 
 It installs, in the user's own directories:
   ~/.local/bin/desktop-calls                                  the binary
@@ -26,6 +37,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -155,16 +167,42 @@ def install(binary: Path) -> None:
         print(f"Installed {staged(path)}")
 
 
-def uninstall() -> None:
+def turn_calls_on() -> None:
+    """Has the installed app turn calls back on, so that no Phone it blocked
+    stays blocked once it is gone. Says what went wrong, and carries on."""
+    if os.environ.get("DESTDIR"):
+        return
+    bin_directory, _ = directories()
+    binary = bin_directory / "desktop-calls"
+    if not binary.exists():
+        return
+    try:
+        # The app prints its own sentence, and its own failure.
+        subprocess.run([binary, "calls", "on", "--uninstalling"], check=False, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(
+            f"Couldn't run {binary} to turn calls back on ({error}). If your phone refuses "
+            "this computer, run `bluetoothctl unblock` with its address.",
+            file=sys.stderr,
+        )
+
+
+def remove() -> None:
     for path in installed_files():
         if staged(path).exists():
             staged(path).unlink()
             print(f"Removed {staged(path)}")
 
 
+def uninstall() -> None:
+    turn_calls_on()
+    remove()
+
+
 def main(arguments: list[str]) -> int:
-    if arguments == ["--uninstall"]:
-        uninstall()
+    actions = {"--uninstall": uninstall, "--turn-calls-on": turn_calls_on, "--remove": remove}
+    if len(arguments) == 1 and arguments[0] in actions:
+        actions[arguments[0]]()
         return 0
     if len(arguments) != 1 or arguments[0].startswith("-"):
         print(__doc__, file=sys.stderr)

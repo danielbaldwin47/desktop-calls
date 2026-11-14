@@ -36,6 +36,7 @@ const GAP: f64 = 12.0;
 
 /// Blocks the serialized Phone commands with a Mute the Phone has received.
 fn slow_mute(harness: &Harness) -> usize {
+    harness.wait_for_app_log("Drew the call-window surface's first frame", DEADLINE); // #282
     let before = microphone_writes(&harness.simulated_phone().wait_for_recorded(
         "the record before Mute",
         DEADLINE,

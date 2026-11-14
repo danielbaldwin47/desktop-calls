@@ -756,7 +756,11 @@ pub(super) fn environment(
     } else {
         path_of("config")
     };
-    vec![
+    let shared_shader_cache = std::env::var(crate::SCENARIO_SHADER_CACHE)
+        .ok()
+        .filter(|cache| !cache.is_empty())
+        .map(|cache| ("MESA_SHADER_CACHE_DIR", cache));
+    [
         ("DBUS_SYSTEM_BUS_ADDRESS", system_bus.to_owned()),
         ("DBUS_SESSION_BUS_ADDRESS", session_bus.to_owned()),
         ("HOME", path_of("home")),
@@ -769,6 +773,9 @@ pub(super) fn environment(
         ("RUST_LOG", "debug".to_owned()),
         ("RUST_BACKTRACE", "1".to_owned()),
     ]
+    .into_iter()
+    .chain(shared_shader_cache)
+    .collect()
 }
 
 /// The Desktop's settings: the text cursor's blinking off, so a still

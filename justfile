@@ -36,10 +36,35 @@ ci-scenarios *args:
 # #47): in the whole run, every scenario's app at once slows each first paint
 # past its target. `just test-file` fails if a file has no ignored scenario
 # left, rather than run nothing.
+#
+# Judged against a Mesa shader cache that a warm-up run has just filled, as
+# on a Desktop that has run the app before, where Mesa keeps its compiled
+# programs between runs (#282). Without it, each scenario's cache is new and
+# empty, and on a machine with no GPU each first frame mostly waits for
+# Mesa's software renderer to compile programs. The same frames with a
+# cold cache are printed first, and not judged.
 # Run the first-frame timing scenarios, one at a time.
 ci-first-frame-timings:
-    just test-file dialer_surface --ignored --test-threads=1
-    just test-file incoming_call_surfaces --ignored --test-threads=1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cache="$PWD/target/first-frame-shader-cache"
+    rm -rf "$cache"
+    mkdir -p "$cache"
+    files=(dialer_surface incoming_call_surfaces)
+    echo "First frames with a cold Mesa shader cache (reported, not judged):"
+    for file in "${files[@]}"; do
+        just test-file "$file" --ignored --test-threads=1 --nocapture 2>&1 \
+            | grep -E "first frame|first Banner|the app took" || true
+    done
+    echo "Warming the shared Mesa shader cache in $cache (not judged)"
+    for file in "${files[@]}"; do
+        SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 \
+            >/dev/null 2>&1 || true
+    done
+    echo "First frames with the warmed cache (judged):"
+    for file in "${files[@]}"; do
+        SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 --nocapture
+    done
 
 # GitHub runs full CI only on pushes to main, so run this before every push.
 # It tests HEAD in CI's image: lint, tests, gallery, scorecard and every

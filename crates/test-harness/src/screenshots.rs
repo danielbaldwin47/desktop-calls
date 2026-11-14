@@ -12,20 +12,21 @@ use crate::screencopy::Recorder;
 use crate::{Region, Screenshot, redraw};
 
 /// The latest frame in the run of frames, starting with `found`, that
-/// satisfy `shown`, up to the first that doesn't. Frames passed over, and
-/// any left in `frames`, are deleted.
+/// satisfy `shown`, up to the first that doesn't. Frames passed over are
+/// deleted. Only the frames already waiting count, at most [`FRAMES_AHEAD`]:
+/// a screen that keeps changing, such as a Call's running timer, would
+/// otherwise keep the recording ahead of a slow `shown` for ever (#282).
 fn latest_shown(
     mut found: Screenshot,
     frames: &mpsc::Receiver<Screenshot>,
     shown: impl Fn(&Screenshot) -> bool,
 ) -> Screenshot {
-    let mut run_ended = false;
-    for frame in frames.try_iter() {
-        if !run_ended && shown(&frame) {
+    for frame in frames.try_iter().take(FRAMES_AHEAD) {
+        if shown(&frame) {
             let _ = fs::remove_file(std::mem::replace(&mut found, frame).path);
         } else {
-            run_ended = true;
             let _ = fs::remove_file(frame.path);
+            break;
         }
     }
     found
@@ -148,7 +149,10 @@ impl Harness {
                 }
             }
             stopper.stop();
-            drop(receiver);
+            // The recording ends at its next frame, so this ends too.
+            for frame in receiver {
+                let _ = fs::remove_file(frame.path);
+            }
             let ended = recording
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -221,5 +225,58 @@ impl Harness {
         if let Err(error) = redraw::wait_for_redraw(on_screen, REDRAW_DEADLINE) {
             panic!("{error}{}", self.timeline.render());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::path::PathBuf;
+    use std::sync::mpsc::TrySendError;
+
+    use super::*;
+
+    fn frame(count: usize) -> Screenshot {
+        Screenshot {
+            path: PathBuf::from(format!("/nonexistent/frame-{count}.ppm")),
+            width: 1,
+            height: 1,
+        }
+    }
+
+    /// A screen that never stops changing, such as a Call's running timer
+    /// judged on a slow runner, keeps the recording ahead of the check. On
+    /// GitHub that held the gallery for 6 h (#282).
+    #[test]
+    fn the_latest_shown_frame_is_chosen_among_the_frames_waiting_even_while_more_keep_coming() {
+        let (sender, frames) = mpsc::sync_channel(FRAMES_AHEAD);
+        for count in 1..=FRAMES_AHEAD {
+            sender.send(frame(count)).expect("the channel has room");
+        }
+        let judged = Cell::new(0_usize);
+        let found = thread::scope(|scope| {
+            scope.spawn(move || {
+                for count in FRAMES_AHEAD + 1.. {
+                    match sender.try_send(frame(count)) {
+                        Ok(()) | Err(TrySendError::Full(_)) => thread::yield_now(),
+                        Err(TrySendError::Disconnected(_)) => break,
+                    }
+                }
+            });
+            let found = latest_shown(frame(0), &frames, |_| {
+                judged.set(judged.get() + 1);
+                // Each check takes long enough for the recording to refill.
+                thread::sleep(Duration::from_millis(5));
+                true
+            });
+            drop(frames);
+            found
+        });
+        assert!(
+            judged.get() <= FRAMES_AHEAD,
+            "judged {} frames",
+            judged.get()
+        );
+        assert_ne!(found.path, frame(0).path);
     }
 }

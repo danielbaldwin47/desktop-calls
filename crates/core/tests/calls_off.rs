@@ -6,8 +6,8 @@
 
 use desktop_calls_core::{
     CallId, CallState, Caller, CallsOffRecord, ConnectFailure, ConnectionState, Effect,
-    IndicatorEntry, IndicatorLook, IndicatorStatus, Input, Phone, PhoneCommand, State, Timer,
-    Timestamp,
+    IndicatorEntry, IndicatorLook, IndicatorStatus, Input, Phone, PhoneCommand, State, SyncFailure,
+    Timer, Timestamp,
     messages::{self, Failure},
     step,
 };
@@ -561,4 +561,22 @@ fn while_calls_are_being_turned_on_turn_calls_off_waits() {
     assert_eq!(effects, []);
     let (state, _) = run(state, [blocked(false)]);
     assert!(!state.calls_off());
+}
+
+#[test]
+fn while_calls_are_off_a_problem_is_listed_but_asks_for_no_attention() {
+    let (state, _) = run(
+        connected(),
+        [
+            Input::ContactsSyncFailed(SyncFailure::Denied),
+            Input::TurnCallsOff,
+            blocked(true),
+        ],
+    );
+    let (state, _) = run(state, dropped());
+    let view = state.indicator(&state.surfaces());
+
+    assert_eq!(view.look, IndicatorLook::Off);
+    assert!(!view.problems.is_empty(), "{view:?}");
+    assert!(!view.needs_attention);
 }

@@ -1,6 +1,6 @@
 //! Group 6's scripts: out of range and back, suspend and resume, a
-//! `WirePlumber` restart while idle, and calls off until turned on. Each times how long the Phone takes to
-//! be connected again, against the polish scorecard's 10 s (#19, #20), from
+//! `WirePlumber` restart while idle, and calls off until turned on. Each
+//! times how long the Phone takes to be connected again, against the polish scorecard's 10 s (#19, #20), from
 //! two lines of the app's own log: the runner's clock and the user's Enter
 //! would add their own delays (#80, #83, #99).
 

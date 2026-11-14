@@ -422,7 +422,6 @@ impl Sitting {
         Ok(report)
     }
 
-    /// The app's log lines from `from_us` until now.
     /// Asks BlueZ, as any program on the Desktop could, to connect the
     /// Phone with `address` (`Device1.Connect`), waiting up to `deadline`
     /// for the answer, and returns what BlueZ said: `Ok` if it connected,
@@ -457,6 +456,7 @@ impl Sitting {
         })
     }
 
+    /// The app's log lines from `from_us` until now.
     pub fn log_since(&self, from_us: u64) -> Vec<LogLine> {
         self.log.lines(from_us, super::results::unix_micros())
     }

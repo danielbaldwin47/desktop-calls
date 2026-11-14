@@ -3,8 +3,9 @@
 //! (ADR-0008).
 //!
 //! Turning calls off keeps a record for the next run, then has BlueZ block
-//! the Phone, which drops it at once and refuses its own connections. BlueZ doesn't refuse a connect from the Desktop to a blocked
-//! Phone: it pages it and fails slowly. So while calls are off, or until the
+//! the Phone, which drops it at once and refuses its own connections.
+//! BlueZ doesn't refuse a connect from the Desktop to a blocked Phone: it
+//! pages it and fails slowly. So while calls are off, or until the
 //! Phone is unblocked again, nothing connects it. Turning calls on unblocks
 //! the Phone, then connects it at once, with the reconnect waits of a Phone
 //! that just came back.

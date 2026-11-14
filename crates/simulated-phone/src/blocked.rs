@@ -126,7 +126,7 @@ fn refuse_connect(
     zbus::block_on(reply.send(system, &message.header()))
 }
 
-/// `Properties.Set` on the Phone's device: `Blocked`, which drops the
+/// `Properties.Set` on the Phone: `Blocked`, which drops the
 /// Phone when set, or `Trusted`, as before. Anything else is read-only.
 fn set(
     world: &SharedWorld,

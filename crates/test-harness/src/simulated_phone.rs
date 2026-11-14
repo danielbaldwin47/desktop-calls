@@ -628,7 +628,7 @@ impl SimulatedPhone<'_> {
             .0
     }
 
-    /// Whether the Phone's device is blocked (`Device1.Blocked`).
+    /// Whether the Phone is blocked (`Device1.Blocked`).
     ///
     /// # Panics
     ///

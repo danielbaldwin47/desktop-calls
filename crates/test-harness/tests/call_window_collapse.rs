@@ -31,11 +31,11 @@ const NUMBER: &str = "+447700900123";
 const SECOND_NUMBER: &str = "+447700900456";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 
-/// The Hang up button's red, the Answer button's green, and the orange that
-/// marks the microphone muted.
+/// The Hang up button's red, the Answer button's green, and stock
+/// Adwaita's warning colour, which marks the microphone muted.
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
-const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
+const WARNING: [u8; 3] = [0xe5, 0xa5, 0x0a];
 
 fn connected() -> Harness {
     let harness = Harness::builder().headless_screen().omarchy_bar().start();
@@ -340,13 +340,17 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
         Some("Unmute")
     );
     assert!(collapsed(&state), "a click on Mute doesn't expand it");
+    // Mute, just left of Hang up, takes the warning colour, and so does
+    // the Call Pill's border.
+    let on_mute = (hang_up.left - 11.0, middle);
     let muted = harness.screenshot_when("call-pill-muted", SCREEN_DEADLINE, |screenshot| {
-        find(screenshot, ORANGE).is_some()
+        close_to(screenshot.colour_at(on_mute.0, on_mute.1), WARNING)
     });
-    let orange = find(&muted, ORANGE).unwrap_or_else(|| panic!("orange is on screen"));
+    let marked = find(&muted, WARNING).unwrap_or_else(|| panic!("the warning colour is on screen"));
     assert!(
-        orange.right < hang_up.left && orange.bottom > hang_up.top,
-        "the orange isn't on Mute beside Hang up: {orange:?}"
+        marked.right > hang_up.right && marked.bottom > hang_up.bottom,
+        "the Call Pill's border isn't in the warning colour: {marked:?}; see {}",
+        muted.path.display()
     );
     harness.simulated_phone().wait_for_recorded(
         "MicrophoneVolume is set to 0",

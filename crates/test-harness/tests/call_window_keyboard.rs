@@ -22,9 +22,10 @@ const HOLD: Duration = Duration::from_millis(300);
 const NUMBER: &str = "+447700900123";
 const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 
-/// The Hang up button's red, and the orange that marks the microphone muted.
+/// The Hang up button's red, and stock Adwaita's warning colour, which
+/// marks the microphone muted.
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
-const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
+const WARNING: [u8; 3] = [0xe5, 0xa5, 0x0a];
 
 /// The space between the Call Window's rows, and round its edge.
 const ROW_GAP: f64 = 8.0;
@@ -151,13 +152,13 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
     );
     assert_eq!(shown(&state, "muted").as_deref(), Some("Microphone muted"));
     assert_eq!(shown(&state, "mute").as_deref(), Some("Unmute"));
-    // Orange on the Mute button, and on a strip below Hang up as wide as
-    // the window.
+    // The warning colour on the Mute button, on a strip below Hang up as
+    // wide as the window, and on the window's border.
     let screenshot = harness.screenshot("call-window-muted");
-    let marked = find(&screenshot, ORANGE).expect("orange is on screen");
+    let marked = find(&screenshot, WARNING).expect("the warning colour is on screen");
     assert!(
         marked.top < y && marked.bottom > hang_up.bottom,
-        "orange marks neither Mute nor a strip below Hang up: {marked:?}"
+        "the warning colour marks neither Mute nor a strip below Hang up: {marked:?}"
     );
     assert!(
         marked.right - marked.left >= hang_up.right - hang_up.left - 2.0,
@@ -175,7 +176,7 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
         !state.muted && shown(state, "muted").is_none()
     });
     let unmuted = harness.screenshot("call-window-unmuted");
-    assert_eq!(find(&unmuted, ORANGE), None, "{}", unmuted.path.display());
+    assert_eq!(find(&unmuted, WARNING), None, "{}", unmuted.path.display());
     harness.simulated_phone().wait_for_recorded(
         "MicrophoneVolume is set back to 9",
         DEADLINE,
@@ -340,5 +341,5 @@ fn with_the_audio_on_the_phone_mute_is_disabled_and_says_why() {
             microphone_volumes_set(recorded).is_empty()
         });
     let screenshot = harness.screenshot("call-window-mute-unavailable");
-    assert_eq!(find(&screenshot, ORANGE), None);
+    assert_eq!(find(&screenshot, WARNING), None);
 }

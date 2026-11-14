@@ -334,7 +334,7 @@ fn focused(state: &AppState, surface: &str) -> bool {
 }
 
 #[test]
-fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one() {
+fn the_banner_has_a_plain_border_until_it_has_the_keyboard_and_the_dialer_with_the_keyboard_an_accent_one() {
     let dark = OmarchyTheme::Dark;
     let (harness, banner) = ringing(
         Harness::builder().theme(dark.mode()).omarchy_theme(dark),
@@ -357,6 +357,15 @@ fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one(
         "the Banner, without the keyboard, has an accent border; see {}",
         screenshot.path.display()
     );
+
+    // The keybinding gives the Banner the keyboard: its border turns accent.
+    harness.activate();
+    harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
+        focused(state, "banner")
+    });
+    let _ = harness.screenshot_when("banner-keyboard-border", DEADLINE, |screenshot| {
+        has_border(screenshot, banner, accent, background)
+    });
 
     let call = harness.app_state().calls[0].id;
     harness.decline(call);

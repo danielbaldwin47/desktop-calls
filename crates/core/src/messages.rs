@@ -13,6 +13,7 @@ use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
+mod banner;
 mod call_pill;
 mod call_window;
 mod calls_off;
@@ -21,6 +22,9 @@ mod problems;
 mod quiet_hours;
 mod setup;
 mod when;
+pub use banner::{
+    FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
+};
 pub use call_pill::{call_pill_tag, call_pill_tooltip, show_call_tooltip};
 pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{
@@ -354,6 +358,10 @@ pub fn failure(failure: Failure) -> Message {
     Message { text, next_action }
 }
 
+/// The Indicator's menu entry that opens the Setup Window, where the
+/// keybinding is added.
+const CONNECT_YOUR_PHONE: &str = "Connect your phone…";
+
 /// The Indicator's status: its menu's first line, and its tooltip without
 /// the Problems.
 #[must_use]
@@ -405,7 +413,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
     match entry {
         IndicatorEntry::Status => indicator_status(&view.status),
         IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
-        IndicatorEntry::ConnectPhone => "Connect your phone…".to_owned(),
+        IndicatorEntry::ConnectPhone => CONNECT_YOUR_PHONE.to_owned(),
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::TurnCallsOff { .. } => calls_off::TURN_CALLS_OFF.to_owned(),
         IndicatorEntry::CallsOffUntilTurnedOn => calls_off::UNTIL_TURNED_ON.to_owned(),
@@ -503,11 +511,8 @@ fn describe(phone: &Phone) -> String {
 /// A fixed piece of text on a surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Label {
-    /// The Incoming Call Banner's heading.
+    /// The Incoming Call Banner's eyebrow.
     IncomingCall,
-    /// The Incoming Call Banner's heading while it has keyboard focus: the
-    /// keys that work.
-    BannerKeys,
     /// The Incoming Call Banner's caller line while a Call that rang with
     /// no number may still get one: not yet "Withheld number", which may
     /// be untrue.
@@ -567,17 +572,8 @@ pub enum Label {
     Dismiss,
     /// The Missed Call notification's click, for desktops that label it.
     ShowInDialer,
-    /// The Incoming Call Banner's heading for a Waiting Call.
+    /// The Incoming Call Banner's eyebrow for a Waiting Call.
     WaitingCall,
-    /// The same heading while the Banner has keyboard focus: the keys that
-    /// work.
-    WaitingCallKeys,
-    /// The same, while the user's own Call is still being placed or another
-    /// is on hold already, so only End & Answer and Decline are offered.
-    WaitingCallEndKeys,
-    /// The same, while the user's only other Call is on hold, so Answer and
-    /// Decline are offered.
-    WaitingCallAnswerKeys,
     /// The Banner's button that holds the live Call and answers the waiting
     /// one.
     HoldAndAnswer,
@@ -619,7 +615,6 @@ pub enum Label {
 pub fn label(label: Label) -> &'static str {
     match label {
         Label::IncomingCall => "Incoming call",
-        Label::BannerKeys => "Press A to answer or D to decline",
         Label::IdentifyingCaller => "Identifying caller…",
         Label::Answer => "Answer",
         Label::Decline => "Decline",
@@ -649,12 +644,7 @@ pub fn label(label: Label) -> &'static str {
         Label::CallBack => "Call back",
         Label::Dismiss => "Dismiss",
         Label::ShowInDialer => "Show in Dialer",
-        Label::WaitingCall => "Waiting Call",
-        Label::WaitingCallKeys => "Press H to Hold & Answer, E to End & Answer, or D to decline",
-        Label::WaitingCallEndKeys => "Press E to End & Answer, or D to decline",
-        Label::WaitingCallAnswerKeys => {
-            "Press A to answer, keeping your other Call on hold, or D to decline"
-        }
+        Label::WaitingCall => "Waiting call",
         Label::HoldAndAnswer => "Hold & Answer",
         Label::EndAndAnswer => "End & Answer",
         Label::Swap => "Swap",

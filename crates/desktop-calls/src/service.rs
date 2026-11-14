@@ -177,6 +177,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let notifier = Notifier::start(&session, input_sender.clone(), publisher.clone());
     // Held until the service stops.
     let _do_not_disturb = DoNotDisturb::follow(input_sender.clone());
+    let _keybinding = keybinding::Follow::start(input_sender.clone());
     let setup_checks = SetupChecks::start(system.clone(), session.clone(), input_sender.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));

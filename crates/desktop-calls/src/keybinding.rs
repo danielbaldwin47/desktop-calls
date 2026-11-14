@@ -8,12 +8,21 @@
 //! (`desktop_calls_core::keybinding`). Nothing is written until the user
 //! confirmed the exact line, and then only if the file still holds what it
 //! held when the line was offered.
+//!
+//! It also follows the config for the Incoming Call Banner, which names the
+//! keybinding actually set ([`Follow`]): read at startup and again on every
+//! change in `$XDG_CONFIG_HOME/hypr`, where Omarchy keeps `bindings.lua` and
+//! the files it usually requires. A required file elsewhere is read with
+//! the rest, but a change to it alone isn't noticed.
 
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use desktop_calls_core::keybinding::required;
 use desktop_calls_core::{ConfigFile, HyprlandConfig, Input, RequiredFile};
+use futures_channel::mpsc::UnboundedSender;
+use gtk::gio::{self, prelude::*};
 
 use crate::logging::EventKind;
 
@@ -38,6 +47,72 @@ impl KeybindingError {
         match self {
             Self::Io(error) => error.to_string(),
             Self::Changed => String::new(),
+        }
+    }
+}
+
+/// Follows the Hyprland config for the Banner for as long as it lives.
+pub struct Follow {
+    /// Dropping the monitor would stop it.
+    _monitor: Option<gio::FileMonitor>,
+}
+
+impl Follow {
+    /// Reports what the Hyprland config holds to `inputs` now, and on every
+    /// change from now on.
+    pub fn start(inputs: UnboundedSender<Input>) -> Self {
+        let Some(home) = config_home() else {
+            // Nowhere to look: no keybinding, which the Banner then says.
+            let _ = inputs.unbounded_send(Input::KeybindingRead(check_in(None, command())));
+            return Self { _monitor: None };
+        };
+        let reads = reader(inputs);
+        // Watching before the first read, so no change slips between them.
+        let monitor = watch(&home.join("hypr"), reads.clone());
+        let _ = reads.send(());
+        Self { _monitor: monitor }
+    }
+}
+
+/// A thread that reads the config and reports it for the Banner, once per
+/// request, or once for several made while it was reading: one thread, in
+/// order, so an older read never lands after a newer one.
+fn reader(inputs: UnboundedSender<Input>) -> mpsc::Sender<()> {
+    let (requests, requested) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        while requested.recv().is_ok() {
+            while requested.try_recv().is_ok() {}
+            if inputs
+                .unbounded_send(Input::KeybindingRead(check()))
+                .is_err()
+            {
+                return;
+            }
+        }
+    });
+    requests
+}
+
+/// Watches `directory`, which need not exist yet, and asks for the config
+/// to be read again on every change there.
+fn watch(directory: &Path, reads: mpsc::Sender<()>) -> Option<gio::FileMonitor> {
+    let monitor = gio::File::for_path(directory)
+        .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE);
+    match monitor {
+        Ok(monitor) => {
+            monitor.connect_changed(move |_, _, _, _| {
+                let _ = reads.send(());
+            });
+            Some(monitor)
+        }
+        Err(error) => {
+            tracing::warn!(
+                event_kind = %EventKind::KeybindingUnwatched,
+                error_kind = "keybinding-unwatched",
+                detail = %error,
+                "Can't watch the Hyprland config; the Banner names the keybinding set at startup"
+            );
+            None
         }
     }
 }

@@ -99,6 +99,9 @@ pub enum EventKind {
     CallWindowChangeFinished,
     DialerQueryTyped,
     DialerQueryShown,
+    /// The Dialer redrew itself, unasked, on the refresh after its first
+    /// frame, so the first keystroke's frame costs no more than later ones.
+    DialerRedrawnAfterShown,
     PhoneCommandSent,
     PhoneCommandFailed,
     PhoneCommandFallback,
@@ -225,6 +228,7 @@ impl EventKind {
             Self::CallWindowChangeFinished => "call-window-change-finished",
             Self::DialerQueryTyped => "dialer-query-typed",
             Self::DialerQueryShown => "dialer-query-shown",
+            Self::DialerRedrawnAfterShown => "dialer-redrawn-after-shown",
             Self::PhoneCommandSent => "phone-command-sent",
             Self::PhoneCommandFailed => "phone-command-failed",
             Self::PhoneCommandFallback => "phone-command-fallback",

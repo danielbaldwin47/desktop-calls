@@ -15,8 +15,11 @@ for Contacts. Pair the phone first, then:
 
 ```sh
 just install    # build, install for this user, and start
-just uninstall  # stop and remove
+just uninstall  # turn calls back on, stop and remove
 ```
+
+Uninstalling turns calls back on: if you turned calls off, your phone is
+unblocked first, so it can connect to this computer again.
 
 `just --list` shows every other recipe. Licensed under the GPL-3.0 (see
 [LICENSE](LICENSE)).

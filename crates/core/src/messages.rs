@@ -17,7 +17,10 @@ mod calls_off;
 mod checks;
 mod problems;
 mod setup;
-pub use calls_off::{calls_off_status, calls_off_until_unknown, calls_turned};
+pub use calls_off::{
+    calls_off_status, calls_off_until_unknown, calls_turned, phone_left_blocked_by_removal,
+    phone_unblocked_for_removal,
+};
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use setup::{SetupWindowText, setup_window};

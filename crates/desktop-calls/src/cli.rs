@@ -13,7 +13,7 @@ use zbus::{Connection, OwnedVariant};
 use crate::control;
 use crate::glib_runtime::GlibRuntime;
 
-const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
+pub(crate) const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 
 /// The state `status` reports, read from the control interface.
 struct Status {

@@ -198,6 +198,12 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
     let state = wait_for_banner(&harness);
     let banner = state.surface("banner").expect("the Banner shows");
     assert_eq!(banner.get("caller").map(String::as_str), Some(FORMATTED));
+    // A number not in Contacts: a # tile, and the meta line says so.
+    assert_eq!(banner.get("initial").map(String::as_str), Some("#"));
+    assert_eq!(
+        banner.get("meta").map(String::as_str),
+        Some("Not in Contacts")
+    );
     assert!(state.ringing);
     assert_eq!(call_window(&state), None);
 }

@@ -107,11 +107,3 @@ pub fn footer_text(parts: &[FooterPart]) -> String {
     }
     text
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_no_keybinding_footer_names_the_indicators_own_entry() {
-        assert!(super::NO_KEYBINDING.ends_with(super::super::CONNECT_YOUR_PHONE));
-    }
-}

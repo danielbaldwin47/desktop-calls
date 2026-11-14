@@ -175,7 +175,7 @@ pub fn bound_keys(config: &HyprlandConfig) -> Option<Vec<String>> {
     })
 }
 
-/// The names `text` requires other files by, in order:`require("x.y")`,
+/// The names `text` requires other files by, in order: `require("x.y")`,
 /// `require "x.y"`, `pcall(require, "x.y")` and `dofile("/a/b.lua")`, outside
 /// comments. The shell finds and reads them.
 #[must_use]

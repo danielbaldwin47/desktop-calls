@@ -124,6 +124,37 @@ fn while_ringing_the_keybinding_focuses_the_banner_and_a_answers_on_the_desktop(
         });
 }
 
+/// Enter on the Banner with the keyboard can only answer: Answer holds the
+/// focus, however the buttons are built.
+#[test]
+fn enter_on_the_banner_with_the_keyboard_answers_and_never_declines() {
+    let (harness, _client) = connected_with_a_focused_window();
+    let (path, call) = ring_until_banner(&harness);
+
+    press_the_keybinding(&harness);
+    harness.wait_for_app("the Banner has keyboard focus", DEADLINE, |state| {
+        focused(state, "banner")
+    });
+    harness.keyboard().press(Key::Return);
+
+    harness.wait_for_app("the Call is live", ROUND_TRIP, |state| {
+        is_live(state, call)
+    });
+    let recorded = harness
+        .simulated_phone()
+        .wait_for_recorded("the Call is answered", DEADLINE, |recorded| {
+            recorded
+                .iter()
+                .any(|recorded| recorded.path == path && recorded.member == "Answer")
+        });
+    assert!(
+        !recorded
+            .iter()
+            .any(|recorded| recorded.path == path && recorded.member == "Hangup"),
+        "{recorded:#?}"
+    );
+}
+
 #[test]
 fn while_ringing_the_keybinding_focuses_the_banner_and_d_declines() {
     let (harness, _client) = connected_with_a_focused_window();

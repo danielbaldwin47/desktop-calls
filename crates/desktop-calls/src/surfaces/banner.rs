@@ -331,8 +331,15 @@ impl Banner {
             set_class(&choice.button, class::TWO_LINE, tall);
         }
         let letters: Vec<&str> = choices.iter().map(|&choice| letter(choice)).collect();
-        if view.focused {
-            content.insert("keycaps".to_owned(), letters.join(", "));
+        // The keycaps the buttons show, read back from the buttons.
+        let shown: Vec<String> = choices
+            .iter()
+            .map(|&choice| &self.choice(choice).keycap)
+            .filter(|keycap| keycap.is_visible())
+            .map(|keycap| keycap.text().to_string())
+            .collect();
+        if !shown.is_empty() {
+            content.insert("keycaps".to_owned(), shown.join(", "));
         }
         if view.waiting.is_some() {
             content.insert(

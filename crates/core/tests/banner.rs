@@ -6,8 +6,8 @@
 use desktop_calls_core::messages::{self, FooterPart};
 use desktop_calls_core::{
     BannerChoice, BannerFooter, BannerView, CallId, CallState, Caller, ConfigFile, Contact,
-    ContactNumber, Contacts, Directory, Input, NumberLabel, Phone, PhoneCommand, State, Timestamp,
-    WaitingOptions, step,
+    ContactNumber, Contacts, Directory, IndicatorEntry, Input, NumberLabel, Phone, PhoneCommand,
+    State, Timestamp, WaitingOptions, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -301,6 +301,13 @@ fn the_footer_names_the_keybinding_set_then_the_letters_that_act() {
     assert_eq!(
         footer(&unbound, &["A", "D"]).as_deref(),
         Some("No keybinding set. Add one in Connect your phone…")
+    );
+    // It names the Indicator's entry in that entry's own words.
+    let indicator = unbound.indicator(&unbound.surfaces());
+    let entry = messages::indicator_entry(&IndicatorEntry::ConnectPhone, &indicator);
+    assert!(
+        footer(&unbound, &["A", "D"]).is_some_and(|footer| footer.ends_with(&entry)),
+        "the footer names {entry:?}"
     );
 }
 

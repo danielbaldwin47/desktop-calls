@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
 use test_harness::{
-    AppState, BAR_COLOUR, BAR_HEIGHT, Bus, Harness, LAYOUT_SIZE, RecordedMethodCall, Region,
+    AppState, BAR_COLOUR, BAR_HEIGHT, Bus, Harness, Key, LAYOUT_SIZE, RecordedMethodCall, Region,
     Screenshot,
 };
 
@@ -417,6 +417,14 @@ fn a_waiting_call_left_to_ring_out_raises_a_missed_call_notification() {
     });
     on_a_call(&harness);
     let (alice_path, _) = alice_waits(&harness);
+    // A Contact: her initial in the tile, the number's label and the number.
+    let shown = harness.wait_for_app("the Banner names Alice", DEADLINE, |state| {
+        banner(state).is_some_and(|banner| banner.get("initial").map(String::as_str) == Some("A"))
+    });
+    assert_eq!(
+        banner(&shown).and_then(|banner| banner.get("meta")).map(String::as_str),
+        Some("mobile · +44 7700 900456")
+    );
     let mut history = vcards::call(CallKind::Missed, Some(ALICE), "20261105T100000");
     history.push_str(&vcards::call(
         CallKind::Received,
@@ -872,8 +880,10 @@ fn with_a_call_on_hold_a_third_call_offers_only_end_and_answer_which_ends_only_t
     ));
     focus_banner_showing(&harness, "E, D");
     harness.keyboard().type_text("ha");
+    // Enter has no Answer to press here, and must not end or decline.
+    harness.keyboard().press(Key::Return);
     harness.simulated_phone().recorded_holds(
-        "neither H nor A asks the Phone anything",
+        "neither H, A nor Enter asks the Phone anything",
         HOLD,
         |recorded| asked(recorded) == before,
     );
@@ -962,6 +972,13 @@ fn with_only_a_held_call_answer_answers_the_waiting_call_and_keeps_the_held_one(
         },
     );
     let carol = state.calls[1].id;
+    assert_eq!(
+        banner(&state)
+            .and_then(|banner| banner.get("answer-consequence"))
+            .map(String::as_str),
+        Some("+44\u{a0}7700\u{a0}900123 stays on hold"),
+        "Answer says Bob stays on hold"
+    );
     assert_eq!(call_window(&state, "swap"), None);
     for refused in [harness.hold_and_answer(), harness.end_and_answer()] {
         let error = refused.expect_err("nothing is live to hold or end");

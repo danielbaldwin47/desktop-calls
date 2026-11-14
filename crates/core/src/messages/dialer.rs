@@ -31,15 +31,19 @@ pub fn dialer_calls_off(until: Option<TimeOfDay>) -> (String, &'static str) {
 
 /// Where the Phone is, at the right of the Dialer's footer: its name while
 /// it is connected, which the footer marks with a live dot, otherwise its
-/// state, and while calls are off, the Indicator's words for it, without
-/// when they come back on: the strip above the rows says that, and with it
-/// the footer's keys and the words wouldn't fit (ticket #279).
+/// state, and while calls are off, the Indicator's words for it. While
+/// `strip_says_off`, the strip above the rows saying calls are off and
+/// until when, the footer leaves out when they come back on: beside the
+/// footer's keys the words wouldn't fit (ticket #279).
 #[must_use]
-pub fn dialer_phone(status: &PhoneStatus) -> String {
+pub fn dialer_phone(status: &PhoneStatus, strip_says_off: bool) -> String {
     match status {
         PhoneStatus::Connected(phone) => phone.name.clone(),
         PhoneStatus::NoPhone => "Not set up".to_owned(),
-        PhoneStatus::CallsOff { .. } => super::calls_off::calls_off(None, false),
+        PhoneStatus::CallsOff { .. } if strip_says_off => super::calls_off::calls_off(None, false),
+        PhoneStatus::CallsOff { until, quiet_hours } => {
+            super::calls_off::calls_off(*until, *quiet_hours)
+        }
         PhoneStatus::NotConnected(_) => "Not connected".to_owned(),
         PhoneStatus::OutOfRange(_) => "Out of range".to_owned(),
         PhoneStatus::ConnectionLost(_) => "Reconnecting…".to_owned(),

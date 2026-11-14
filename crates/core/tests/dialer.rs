@@ -441,37 +441,42 @@ fn the_footer_shows_the_phone_as_the_indicator_does() {
 fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
     use desktop_calls_core::messages::{dialer_key, dialer_phone};
     assert_eq!(
-        dialer_phone(&PhoneStatus::Connected(my_pixel())),
+        dialer_phone(&PhoneStatus::Connected(my_pixel()), false),
         "My Pixel"
     );
     assert_eq!(
-        dialer_phone(&PhoneStatus::OutOfRange(my_pixel())),
+        dialer_phone(&PhoneStatus::OutOfRange(my_pixel()), false),
         "Out of range"
     );
-    assert_eq!(dialer_phone(&PhoneStatus::NoPhone), "Not set up");
+    assert_eq!(dialer_phone(&PhoneStatus::NoPhone, false), "Not set up");
     assert_eq!(
-        dialer_phone(&PhoneStatus::NotConnected(my_pixel())),
+        dialer_phone(&PhoneStatus::NotConnected(my_pixel()), false),
         "Not connected"
     );
     assert_eq!(
-        dialer_phone(&PhoneStatus::ConnectionLost(my_pixel())),
+        dialer_phone(&PhoneStatus::ConnectionLost(my_pixel()), false),
         "Reconnecting…"
     );
-    // Calls off in the Indicator's words, without when they come back on:
-    // the strip above the rows says that (ticket #279).
+    // Calls off in the Indicator's words; while the strip above the rows
+    // says until when, without it (ticket #279).
     let off = PhoneStatus::CallsOff {
         until: None,
         quiet_hours: false,
     };
     assert_eq!(
-        dialer_phone(&off),
+        dialer_phone(&off, false),
         desktop_calls_core::messages::indicator_status(&off.into())
     );
     let until_morning = PhoneStatus::CallsOff {
         until: desktop_calls_core::TimeOfDay::parse("07:00"),
         quiet_hours: true,
     };
-    assert_eq!(dialer_phone(&until_morning), "Calls off");
+    assert_eq!(dialer_phone(&until_morning, true), "Calls off");
+    // While a notice hides the strip, the footer says until when.
+    assert_eq!(
+        dialer_phone(&until_morning, false),
+        "Calls off until 07:00 (quiet hours)"
+    );
     assert_eq!(
         dialer_key(desktop_calls_core::DialerKey::Call),
         (&["Enter"][..], "Call")

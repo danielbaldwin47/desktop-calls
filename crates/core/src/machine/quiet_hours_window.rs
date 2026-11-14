@@ -1,5 +1,6 @@
 //! The Quiet Hours Window (ticket #209): a switch and two times, opened
-//! from the Indicator's Quiet Hours… entry. Each change is saved at once,
+//! from the Indicator's Quiet Hours… entry, `desktop-calls quiet-hours` or
+//! Alt+Q in the Dialer (ticket #279). Each change is saved at once,
 //! as `SetQuietHours` or `ClearQuietHours` would: there is no confirm.
 //!
 //! - Switched off, it keeps the last times for as long as it is open, and
@@ -316,7 +317,10 @@ fn set(state: &mut State, hours: Option<QuietHours>, effects: &mut Vec<Effect>) 
 }
 
 /// Opens the window on the Quiet Hours set, or raises it if it is open.
+/// The Dialer closes, so the window has the keyboard: asked for from the
+/// Dialer (Alt+Q), the Dialer's work is done (ticket #279).
 fn open(state: &mut State) {
+    state.dialer = None;
     let windows = &mut state.quiet_hours_windows;
     windows.openings += 1;
     let opened = windows.openings;

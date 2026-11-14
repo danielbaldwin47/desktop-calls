@@ -157,6 +157,11 @@ pub fn calls_on() -> ExitCode {
     })
 }
 
+/// `desktop-calls quiet-hours`: opens the Quiet Hours Window.
+pub fn quiet_hours_window() -> ExitCode {
+    call_app("OpenQuietHoursWindow", &())
+}
+
 /// `desktop-calls quiet-hours HH:MM-HH:MM | off`: sets Quiet Hours, or
 /// turns them off.
 pub fn quiet_hours(hours: &str) -> ExitCode {

@@ -94,11 +94,12 @@ enum Command {
         uninstalling: bool,
     },
     /// Set Quiet Hours: daily times when calls are off, such as
-    /// 22:00-07:00, which crosses midnight. Or turn them off.
+    /// 22:00-07:00, which crosses midnight. Or turn them off. Without
+    /// either, open the window that sets them.
     QuietHours {
         /// HH:MM-HH:MM on the 24-hour clock, or off.
         #[arg(value_name = "HH:MM-HH:MM|off")]
-        hours: String,
+        hours: Option<String>,
     },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
@@ -178,7 +179,8 @@ fn main() -> ExitCode {
             turn: CallsTurn::On,
             ..
         }) => cli::calls_on(),
-        Some(Command::QuietHours { hours }) => cli::quiet_hours(&hours),
+        Some(Command::QuietHours { hours: Some(hours) }) => cli::quiet_hours(&hours),
+        Some(Command::QuietHours { hours: None }) => cli::quiet_hours_window(),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.

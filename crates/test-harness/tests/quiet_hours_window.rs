@@ -5,7 +5,9 @@
 //! nothing.
 //!
 //! The app runs with a `TZ` putting local time at noon, so the sentence
-//! says "tonight" for Quiet Hours from 22:00 and calls stay on throughout.
+//! says "tonight" for Quiet Hours from 22:00. Hours saved later, such as
+//! 06:15 to 06:00, are under way at noon and turn calls off; the window
+//! works the same either way.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

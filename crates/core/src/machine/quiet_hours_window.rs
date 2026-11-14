@@ -345,13 +345,11 @@ pub(super) fn follow(state: &mut State) {
     let Some(window) = state.quiet_hours_windows.open.as_mut() else {
         return;
     };
+    window.typing = None;
     if let Some(hours) = state.quiet_hours {
         (window.start, window.end) = (hours.start(), hours.end());
         window.kept = (window.start, window.end);
-    } else {
-        window.typing = None;
-        if window.start == window.end {
-            (window.start, window.end) = window.kept;
-        }
+    } else if window.start == window.end {
+        (window.start, window.end) = window.kept;
     }
 }

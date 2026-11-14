@@ -419,6 +419,53 @@ fn switched_off_while_refusing_equal_times_it_shows_the_last_saved_ones_so_switc
 }
 
 #[test]
+fn hours_set_elsewhere_while_digits_are_typed_replace_them() {
+    let (state, _) = run(
+        connected(),
+        [Input::SetQuietHours(hours(time(22, 0), time(7, 0)))],
+    );
+    let (state, _) = typed(open(state), QuietHoursField::Start, "23");
+    let (state, _) = run(
+        state,
+        [Input::SetQuietHours(hours(time(21, 0), time(6, 0)))],
+    );
+    let view = window(&state);
+    assert_eq!(view.typing, None);
+    assert_eq!(messages::quiet_hours_window(&view).start, "21:00");
+}
+
+#[test]
+fn a_start_later_today_before_the_evening_is_today() {
+    // At 10:30, Quiet Hours from 13:00 begin 150 minutes on: today.
+    let afternoon = hours(time(13, 0), time(14, 0));
+    let morning = NOW - 600 * MINUTE;
+    let deadline = |minutes: u64, shown| Deadline {
+        at: Timestamp(morning + minutes * MINUTE),
+        shown,
+    };
+    let (state, _) = run(
+        connected(),
+        [
+            Input::SetQuietHours(afternoon),
+            Input::ClockTicked(WallClock {
+                now: Timestamp(morning),
+                for_an_hour: deadline(60, time(11, 30)),
+                until_morning: deadline(1230, time(7, 0)),
+                quiet_hours: Some(QuietHoursClock {
+                    hours: afternoon,
+                    next_start: deadline(150, time(13, 0)),
+                    next_end: deadline(210, time(14, 0)),
+                }),
+            }),
+        ],
+    );
+    assert_eq!(
+        messages::quiet_hours_window(&window(&open(state))).sentence,
+        "Saved. Calls go off today at 13:00 and come back at 14:00, every day."
+    );
+}
+
+#[test]
 fn asked_for_while_open_it_is_raised_afresh_showing_what_it_showed() {
     let state = open(connected());
     let (state, _) = run(state, [Input::SwitchQuietHours(true)]);

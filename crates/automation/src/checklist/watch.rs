@@ -49,6 +49,8 @@ pub struct AppState {
     pub calls_off: String,
     /// The Unix time in seconds calls come back on, or 0 for none.
     pub calls_off_until: u64,
+    /// A turn-off waits for the last Call to end, while calls are "on".
+    pub calls_off_pending: bool,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -131,7 +133,8 @@ impl AppState {
             "Codec" => (self.codec, self.wideband) = <(String, bool)>::try_from(value)?,
             "Surfaces" => self.surfaces = BTreeMap::try_from(value)?,
             "CallsOff" => {
-                (self.calls_off, self.calls_off_until, _) = <(String, u64, bool)>::try_from(value)?;
+                (self.calls_off, self.calls_off_until, self.calls_off_pending) =
+                    <(String, u64, bool)>::try_from(value)?;
             }
             _ => {}
         }

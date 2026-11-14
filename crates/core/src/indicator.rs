@@ -53,6 +53,10 @@ pub enum IndicatorStatus {
     CallsOff {
         until: Option<TimeOfDay>,
     },
+    /// Calls turn off when the last Call ends. Said instead of the Call's
+    /// other party, which the Call Window shows, but not over a ringing
+    /// Call's caller.
+    CallsOffPending,
     /// Paired, and not yet connected since the Desktop started.
     NotConnected(Phone),
     Connected(Phone),
@@ -101,9 +105,10 @@ pub enum IndicatorEntry {
     /// A Problem, with its explanation beneath.
     Problem(ProblemKind),
     /// Turns calls off, with [`IndicatorEntry::choices`] for how long;
-    /// disabled during a Call, with none. The timed choices end at
-    /// `for_an_hour` and `until_morning`, once the wall clock has been
-    /// read.
+    /// disabled, with none, while calls are being turned on. The timed
+    /// choices end at `for_an_hour` and `until_morning`, once the wall
+    /// clock has been read. During a Call, the turn-off waits for the last
+    /// Call to end.
     TurnCallsOff {
         enabled: bool,
         for_an_hour: Option<Deadline>,
@@ -118,6 +123,8 @@ pub enum IndicatorEntry {
     CallsOffUntilMorning(Deadline),
     /// Turns calls on.
     TurnCallsOn,
+    /// Cancels the turn-off waiting for the last Call to end.
+    KeepCallsOn,
 }
 
 impl IndicatorEntry {
@@ -151,6 +158,7 @@ impl IndicatorEntry {
                 })
             }
             Self::TurnCallsOn => Some(Input::TurnCallsOn),
+            Self::KeepCallsOn => Some(Input::KeepCallsOn),
             Self::Status
             | Self::Separator
             | Self::HangUpOnPhone
@@ -198,15 +206,17 @@ impl IndicatorEntry {
 
 impl State {
     /// The menu's entry that turns calls on or off: on while they are off,
-    /// else off once there is a Phone, disabled during a Call and while
-    /// calls are being turned on.
+    /// keep on while a turn-off waits for the last Call to end, else off
+    /// once there is a Phone, disabled while calls are being turned on.
     fn calls_off_entry(&self, has_phone: bool) -> Option<IndicatorEntry> {
         if self.calls_off() {
             Some(IndicatorEntry::TurnCallsOn)
+        } else if self.calls_off_pending() {
+            Some(IndicatorEntry::KeepCallsOn)
         } else {
             let clock = self.wall_clock();
             has_phone.then(|| IndicatorEntry::TurnCallsOff {
-                enabled: !self.call_keeps_calls_on() && !self.calls_turning_on(),
+                enabled: !self.calls_turning_on(),
                 for_an_hour: clock.map(|clock| clock.for_an_hour),
                 until_morning: clock.map(|clock| clock.until_morning),
             })
@@ -248,7 +258,9 @@ impl State {
             let contact = window.contact.clone();
             (
                 IndicatorLook::InCall,
-                if window.connection_lost {
+                if self.calls_off_pending() {
+                    IndicatorStatus::CallsOffPending
+                } else if window.connection_lost {
                     IndicatorStatus::CallOnPhone { caller, contact }
                 } else {
                     IndicatorStatus::InCall { caller, contact }

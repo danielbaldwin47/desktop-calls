@@ -5,9 +5,8 @@
 //! Indicator shows the Off look and the entries that turn calls off and on.
 
 use desktop_calls_core::{
-    CallId, CallState, Caller, CallsOffRecord, ConnectFailure, ConnectionState, Effect,
-    IndicatorEntry, IndicatorLook, IndicatorStatus, Input, Phone, PhoneCommand, State, SyncFailure,
-    Timer, Timestamp,
+    CallsOffRecord, ConnectFailure, ConnectionState, Effect, IndicatorEntry, IndicatorLook,
+    IndicatorStatus, Input, Phone, PhoneCommand, State, SyncFailure, Timer,
     messages::{self, Failure},
     step,
 };
@@ -228,102 +227,6 @@ fn with_no_phone_set_up_there_is_nothing_to_turn_off() {
         state.refusal(&Input::TurnCallsOff { until: None }),
         Some(Failure::PhoneNotSetUp)
     );
-}
-
-fn ringing(state: State) -> State {
-    run(
-        state,
-        [Input::CallAdded {
-            call: CallId(1),
-            state: CallState::Ringing,
-            caller: Caller::Number("+447700900123".to_owned()),
-            at: Timestamp(1_000),
-        }],
-    )
-    .0
-}
-
-/// The Phone with one Call in `call_state`.
-fn with_call(call_state: CallState) -> State {
-    run(
-        connected(),
-        [Input::CallAdded {
-            call: CallId(1),
-            state: call_state,
-            caller: Caller::Number("+447700900123".to_owned()),
-            at: Timestamp(1_000),
-        }],
-    )
-    .0
-}
-
-/// Turning calls off is refused in `state`, and its entry disabled.
-fn refused_during_a_call(state: State) {
-    let view = state.indicator(&state.surfaces());
-    assert!(
-        view.menu.contains(&IndicatorEntry::TurnCallsOff {
-            enabled: false,
-            for_an_hour: None,
-            until_morning: None,
-        }),
-        "{:?}",
-        view.menu
-    );
-    assert_eq!(
-        state.refusal(&Input::TurnCallsOff { until: None }),
-        Some(Failure::CallsOffDuringCall)
-    );
-    let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
-    assert_eq!(effects, []);
-    assert!(!state.calls_off());
-}
-
-#[test]
-fn turning_calls_off_is_refused_with_a_call_live_held_waiting_or_being_placed() {
-    for call_state in [
-        CallState::Active,
-        CallState::Held,
-        CallState::Waiting,
-        CallState::Dialing,
-        CallState::Alerting,
-    ] {
-        refused_during_a_call(with_call(call_state));
-    }
-    // Dialled, before the Phone has the Call.
-    refused_during_a_call(run(connected(), [Input::Dial("07700900123".to_owned())]).0);
-}
-
-#[test]
-fn turning_calls_off_is_refused_while_a_lost_call_carries_on_on_the_phone() {
-    let (state, _) = run(
-        with_call(CallState::Active),
-        [Input::PhoneDisconnected {
-            address: ADDRESS.to_owned(),
-        }],
-    );
-    refused_during_a_call(state);
-}
-
-#[test]
-fn during_a_call_turn_calls_off_is_disabled_and_refused() {
-    let state = ringing(connected());
-    let view = state.indicator(&state.surfaces());
-    let entry = IndicatorEntry::TurnCallsOff {
-        enabled: false,
-        for_an_hour: None,
-        until_morning: None,
-    };
-
-    assert!(view.menu.contains(&entry));
-    assert!(!entry.enabled());
-    assert_eq!(entry.choices(), []);
-    assert_eq!(
-        state.refusal(&Input::TurnCallsOff { until: None }),
-        Some(Failure::CallsOffDuringCall)
-    );
-    let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
-    assert_eq!(effects, []);
-    assert!(!state.calls_off());
 }
 
 #[test]

@@ -9,6 +9,10 @@ pub(super) const TURN_CALLS_OFF: &str = "Turn calls off";
 pub(super) const UNTIL_TURNED_ON: &str = "Until I turn them on";
 /// The menu entry that turns calls on.
 pub(super) const TURN_CALLS_ON: &str = "Turn calls on";
+/// The menu entry that cancels a turn-off waiting for the last Call.
+pub(super) const KEEP_CALLS_ON: &str = "Keep calls on";
+/// The Indicator's status while a turn-off waits for the last Call.
+pub(super) const PENDING: &str = "Calls turn off when this Call ends";
 /// Calls turned off until a time that has already passed.
 pub(super) const UNTIL_PASSED: &str =
     "That time has already passed, so calls stay on; choose a time ahead.";
@@ -44,6 +48,35 @@ pub fn calls_off_status(off: bool, until: Option<TimeOfDay>) -> Option<String> {
         }
         None => "Calls are off until you turn them on: your phone stays disconnected.".to_owned(),
     })
+}
+
+/// The line `desktop-calls status` adds while a turn-off waits for the
+/// last Call to end: until `until` once off, or until turned on.
+#[must_use]
+pub fn calls_off_pending_status(until: Option<TimeOfDay>) -> String {
+    match until {
+        Some(until) => format!(
+            "Calls turn off when this Call ends, until {until}; if the Call lasts past {until}, they stay on."
+        ),
+        None => "Calls turn off when this Call ends, until you turn them on.".to_owned(),
+    }
+}
+
+/// What `desktop-calls calls off` said during a Call: the turn-off waits
+/// for the last Call to end, and the Call carries on.
+#[must_use]
+pub fn calls_off_waits(until: Option<TimeOfDay>) -> String {
+    format!(
+        "{} Your Call carries on; run desktop-calls calls on to keep calls on.",
+        calls_off_pending_status(until)
+    )
+}
+
+/// What `desktop-calls calls on` said while a turn-off waited for the
+/// last Call to end.
+#[must_use]
+pub fn calls_kept_on() -> &'static str {
+    "Calls stay on: they won't turn off when this Call ends."
 }
 
 /// What `desktop-calls calls off` or `calls on` did. Calls turned off come

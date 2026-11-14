@@ -73,6 +73,10 @@ fn instance_directory() -> Result<PathBuf, Unknown> {
 /// `applyGapsOutJson`). Blocks for as long as Hyprland takes to answer.
 pub fn edge_gap() -> Result<u32, Unknown> {
     let reply = request("j/getoption general:gaps_out")?;
+    // Hyprland's answer, in plain text, for an option it doesn't have.
+    if reply.trim_ascii() == b"no such option" {
+        return Err(Unknown::NoGap);
+    }
     let reply: serde_json::Value = serde_json::from_slice(&reply).map_err(Unknown::Unreadable)?;
     // {"option": "general:gaps_out", "css": "10 10 10 10", "set": true}: the
     // top, right, bottom and left gaps, of which Omarchy takes the first.

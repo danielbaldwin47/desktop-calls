@@ -358,7 +358,7 @@ fn rounding_unknown(unknown: &Unknown) {
 /// Asks Hyprland, off the main thread, for Omarchy's edge gap, and hands it
 /// to the hook given to [`Theme::when_edge_gap_changed`] if it changed. If
 /// Hyprland answers without one, the hook gets `None`; if it doesn't
-/// answer, the last gap stays.
+/// answer, or its answer can't be read, the last gap stays.
 fn reread_edge_gap(shared: Weak<Shared>) {
     glib::MainContext::default().spawn_local(async move {
         let gap = gio::spawn_blocking(hyprland::edge_gap)
@@ -370,11 +370,12 @@ fn reread_edge_gap(shared: Weak<Shared>) {
         let gap = match gap {
             Ok(gap) => Some(i32::try_from(gap).unwrap_or(i32::MAX)),
             // Hyprland answered, without a gap: the fallback applies again.
-            Err(unknown @ (Unknown::NoGap | Unknown::Unreadable(_))) => {
+            Err(unknown @ Unknown::NoGap) => {
                 edge_gap_unknown(&unknown);
                 None
             }
-            // Hyprland didn't answer: the last gap stays.
+            // Hyprland didn't answer, or garbled it: the last gap stays, as
+            // in Omarchy's shell.
             Err(unknown) => {
                 edge_gap_unknown(&unknown);
                 return;

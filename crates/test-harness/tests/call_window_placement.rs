@@ -129,8 +129,8 @@ fn assert_hang_up_stays(
         bottom: LAYOUT_SIZE.1,
     };
     let moved = red_below(&screenshot, near).unwrap_or_else(|| panic!("Hang up left the screen"));
-    // Within a screen pixel: at the scale of 1.6, a window of a new height
-    // can round Hang up's edge to the next pixel.
+    // Within a layout pixel: at the scale of 1.6, a window of a new height
+    // can round Hang up's edge to the next screen pixel.
     let within = |a: f64, b: f64| (a - b).abs() <= 1.0;
     assert!(
         within(moved.left, hang_up.left)
@@ -161,11 +161,15 @@ fn the_call_pill_and_the_expanded_call_window_share_the_bottom_right_corner_at_h
         (width - 20.0 - region.right).abs() <= 2.0 && (height - 20.0 - region.bottom).abs() <= 2.0
     };
     let expanded = harness.screenshot_when("call-window", SCREEN_DEADLINE, |screenshot| {
-        app_region_within(screenshot, bottom_half()).is_some_and(in_corner)
+        app_region_within(screenshot, bottom_half())
+            .is_some_and(|window| in_corner(window) && window.bottom - window.top > 150.0)
     });
     let window = app_region_within(&expanded, bottom_half()).expect("the Call Window shows");
+    // Taller than the Call Pill: the Call Window hadn't yet collapsed.
     assert!(
-        window.right - window.left > 300.0 && window.top > BAR_HEIGHT,
+        window.right - window.left > 300.0
+            && window.bottom - window.top > 150.0
+            && window.top > BAR_HEIGHT,
         "{window:?} in {}",
         expanded.path.display()
     );

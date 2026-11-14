@@ -280,11 +280,13 @@ impl Roles {
         let selection = surface.under(text, SELECTION_PERCENT);
         // libadwaita raises a control by mixing in a tenth of the text.
         let raised = raised.unwrap_or(selection);
-        let backgrounds = [surface, raised, selection];
+        let warning_tint = surface.under(warning, WARNING_TINT_PERCENT);
+        // The muted Call Pill keeps its timer in secondary text on the
+        // warning strip's fill.
+        let backgrounds = [surface, raised, selection, warning_tint];
         let secondary = surface
             .weakest_readable_mix(text, &backgrounds)
             .unwrap_or_else(|| labels.on(&backgrounds));
-        let warning_tint = surface.under(warning, WARNING_TINT_PERCENT);
         let call_label = call_label.unwrap_or_else(|| labels.on(&[answer, end]));
         Self {
             surface,

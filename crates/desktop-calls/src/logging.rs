@@ -92,6 +92,11 @@ pub enum EventKind {
     SurfaceMapped,
     SurfaceShown,
     SurfaceUnmapped,
+    /// The Call Window began to grow out of the Call Pill, or to shrink
+    /// back into it.
+    CallWindowChangeStarted,
+    /// That change is over: the Call Window or the Call Pill shows alone.
+    CallWindowChangeFinished,
     DialerQueryTyped,
     DialerQueryShown,
     PhoneCommandSent,
@@ -208,6 +213,8 @@ impl EventKind {
             Self::SurfaceMapped => "surface-mapped",
             Self::SurfaceShown => "surface-shown",
             Self::SurfaceUnmapped => "surface-unmapped",
+            Self::CallWindowChangeStarted => "call-window-change-started",
+            Self::CallWindowChangeFinished => "call-window-change-finished",
             Self::DialerQueryTyped => "dialer-query-typed",
             Self::DialerQueryShown => "dialer-query-shown",
             Self::PhoneCommandSent => "phone-command-sent",

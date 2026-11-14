@@ -395,7 +395,11 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| dimmed(screenshot, look) && !shows(screenshot, look.green()),
+        shown: |screenshot, look| {
+            dimmed(screenshot, look)
+                && !shows(screenshot, look.green())
+                && shows(screenshot, look.warning())
+        },
     },
     State {
         name: "call-window-calling",

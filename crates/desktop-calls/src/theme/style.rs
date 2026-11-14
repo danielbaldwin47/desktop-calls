@@ -61,7 +61,8 @@ pub(crate) mod class {
     pub(crate) const WARNING_STRIP: &str = "warning-strip";
 }
 
-/// The gaps between things, in pixels. Nothing uses another.
+/// The gaps between things, in pixels: the scale the surfaces #224 to #228
+/// rebuild lay out on.
 #[expect(
     dead_code,
     reason = "the scale the surfaces spec #221 rebuilds lay out on"

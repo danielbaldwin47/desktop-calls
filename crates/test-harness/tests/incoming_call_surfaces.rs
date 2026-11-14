@@ -29,11 +29,8 @@ const FIRST_FRAMES_DEADLINE: Duration = Duration::from_secs(15);
 const NUMBER: &str = "+447700900123";
 const FORMATTED: &str = "+44 7700 900123";
 
-/// How wide the app takes Omarchy's notification-toast column to be when
-/// Hyprland can't say.
-const FALLBACK_TOAST_COLUMN_WIDTH: f64 = 400.0;
-/// How far a surface may sit from what it is placed beside.
-const NEAR: f64 = 24.0;
+/// The standard gap from the screen's edges when Hyprland can't say.
+const FALLBACK_GAP: f64 = 12.0;
 
 /// The Answer button's green and the Decline and Hang up buttons' red.
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
@@ -104,36 +101,41 @@ fn click(harness: &Harness, region: Region) {
     harness.pointer().click(x, y);
 }
 
-fn toast_column(width: f64) -> Region {
-    Region {
-        left: LAYOUT_SIZE.0 - width,
-        top: 0.0,
-        right: LAYOUT_SIZE.0,
-        bottom: LAYOUT_SIZE.1,
-    }
-}
-
 /// Where the app's surfaces are: everything that is neither the black
 /// background nor the bar stand-in.
 fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }
 
-fn assert_clear_of_bar_and_toasts(region: Region) {
-    assert_clear_of_bar_and(region, FALLBACK_TOAST_COLUMN_WIDTH);
-}
-
-fn assert_clear_of_bar_and(region: Region, toast_column_width: f64) {
+/// Asserts that `region` is on the output, below the bar.
+fn assert_clear_of_bar(region: Region) {
     assert!(
         region.left >= 0.0 && region.right <= LAYOUT_SIZE.0,
         "{region:?}"
     );
     assert!(region.bottom <= LAYOUT_SIZE.1, "{region:?}");
     assert!(region.top >= BAR_HEIGHT, "under the bar: {region:?}");
+}
+
+/// Asserts that `region` sits flush in the top-right corner, `gap` from the
+/// screen's right edge and from the bar.
+fn assert_flush_top_right(region: Region, gap: f64, screenshot: &Screenshot) {
+    assert_clear_of_bar(region);
     assert!(
-        !region.intersects(&toast_column(toast_column_width)),
-        "over the toast column: {region:?}"
+        (LAYOUT_SIZE.0 - gap - region.right).abs() <= 2.0
+            && (BAR_HEIGHT + gap - region.top).abs() <= 2.0,
+        "not {gap} px from the top-right corner: {region:?} in {}",
+        screenshot.path.display()
     );
+}
+
+/// Whether the Banner reports itself anchored top right, `margin` from both
+/// edges.
+fn banner_placed(state: &AppState, margin: &str) -> bool {
+    state.surface("banner").is_some_and(|banner| {
+        banner.get("anchor").map(String::as_str) == Some("top-right")
+            && banner.get("margin").map(String::as_str) == Some(margin)
+    })
 }
 
 fn is_live_on_desktop(state: &AppState, call: u32) -> bool {
@@ -221,8 +223,10 @@ fn the_first_banner_shows_without_holding_up_the_main_loop() {
     );
 }
 
+/// Spec #221: the Banner sits flush in the top-right corner, below the bar,
+/// at the standard gap: 12 px without Hyprland to say.
 #[test]
-fn the_banner_sits_inside_the_output_below_the_bar_and_left_of_the_toasts() {
+fn the_banner_sits_flush_in_the_top_right_corner_below_the_bar() {
     let harness = connected_on_screen();
     ring_until_banner(&harness);
 
@@ -230,28 +234,43 @@ fn the_banner_sits_inside_the_output_below_the_bar_and_left_of_the_toasts() {
     let screenshot = harness.screenshot("banner");
     let banner = app_region(&screenshot).expect("the Banner is on screen");
 
-    assert_clear_of_bar_and_toasts(banner);
+    assert_flush_top_right(banner, FALLBACK_GAP, &screenshot);
+    assert!(banner_placed(&harness.app_state(), "12"));
 }
 
+/// The standard gap is Omarchy's edge gap, half of Hyprland's
+/// `general:gaps_out`, read again when Hyprland reloads its configuration.
 #[test]
-fn the_banner_clears_the_toast_column_hyprland_reports() {
+fn the_banner_follows_hyprlands_gap_from_the_edge_and_its_reloads() {
     let harness = connected(
         Harness::builder()
             .headless_screen()
             .omarchy_bar()
-            .hyprland_toast_column(300),
+            .hyprland_gaps_out(30),
     );
     ring_until_banner(&harness);
-
-    find_on_screen(&harness, "banner", GREEN);
-    let screenshot = harness.screenshot("banner");
+    harness.wait_for_app("the Banner sits 15 px in", DEADLINE, |state| {
+        banner_placed(state, "15")
+    });
+    let screenshot = harness.screenshot_when("banner-gap-15", DEADLINE, |screenshot| {
+        app_region(screenshot)
+            .is_some_and(|banner| (LAYOUT_SIZE.0 - 15.0 - banner.right).abs() <= 2.0)
+    });
     let banner = app_region(&screenshot).expect("the Banner is on screen");
+    assert_flush_top_right(banner, 15.0, &screenshot);
 
-    assert_clear_of_bar_and(banner, 300.0);
-    // It sits close beside the column Hyprland reports, not the wider
-    // fallback, and close under the bar, not a fixed margin below it.
-    assert!(banner.right >= LAYOUT_SIZE.0 - 300.0 - NEAR, "{banner:?}");
-    assert!(banner.top <= BAR_HEIGHT + NEAR, "{banner:?}");
+    // An odd gap: half of it rounds up, as in Omarchy's shell.
+    harness.set_hyprland_gaps_out(49);
+
+    harness.wait_for_app("the Banner moves to 25 px in", DEADLINE, |state| {
+        banner_placed(state, "25")
+    });
+    let screenshot = harness.screenshot_when("banner-gap-25", DEADLINE, |screenshot| {
+        app_region(screenshot)
+            .is_some_and(|banner| (LAYOUT_SIZE.0 - 25.0 - banner.right).abs() <= 2.0)
+    });
+    let banner = app_region(&screenshot).expect("the Banner is on screen");
+    assert_flush_top_right(banner, 25.0, &screenshot);
 }
 
 #[test]
@@ -266,8 +285,8 @@ fn the_banner_shows_over_a_fullscreen_window() {
 
     let answer = find_on_screen(&harness, "banner-over-fullscreen", GREEN);
     let decline = find_on_screen(&harness, "banner-over-fullscreen", RED);
-    assert_clear_of_bar_and_toasts(answer);
-    assert_clear_of_bar_and_toasts(decline);
+    assert_clear_of_bar(answer);
+    assert_clear_of_bar(decline);
 }
 
 #[test]

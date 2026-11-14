@@ -1,20 +1,20 @@
 //! The Call Pill: the strip the Call Window collapses to during a Call, in
-//! the bottom-right corner, with the caller, the timer, Mute and Hang up.
+//! the bottom-right corner, with the caller, the timer, Mute and Hang up. It
+//! shares its bottom-right corner with the expanded Call Window.
 //!
 //! It is on the top layer, like the Call Window, and never takes the
 //! keyboard. A click on its body expands the Call Window, which takes the
 //! keyboard as it does for the keybinding; its buttons act directly.
 
 use super::{
-    SharedReport, Surface, Who, class, hang_up_button, report_mute, seconds_since, set_class,
-    status_label,
+    Anchor, SharedReport, Surface, Who, class, hang_up_button, report_mute, seconds_since,
+    set_class, status_label,
 };
-use crate::surfaces::GAP;
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
+use gtk4_layer_shell::{KeyboardMode, Layer};
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -36,8 +36,10 @@ pub(super) struct CallPill {
 
 impl CallPill {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Self {
+        // A live Call's corner, which the expanded Call Window shares.
         let surface = Surface::new(
             "call-pill",
+            Anchor::BottomRight,
             Layer::Top,
             KeyboardMode::None,
             None,
@@ -46,14 +48,6 @@ impl CallPill {
         );
         surface.window.add_css_class("call-pill");
         surface.window.set_default_size(PILL_WIDTH, -1);
-        if gtk4_layer_shell::is_supported() {
-            // The top-right corner is the Banner's and the toasts'.
-            surface.window.set_anchor(Edge::Top, false);
-            surface.window.set_anchor(Edge::Bottom, true);
-            surface.window.set_margin(Edge::Top, 0);
-            surface.window.set_margin(Edge::Bottom, GAP);
-            surface.window.set_margin(Edge::Right, GAP);
-        }
         let caller = gtk::Label::new(None);
         caller.add_css_class("pill-caller");
         caller.set_xalign(0.0);
@@ -190,20 +184,15 @@ impl CallPill {
         }
     }
 
-    /// Adds where the Call Pill sits and how big it is, for the gallery's
-    /// checks: the corner it is anchored to, its gap from both edges, and
-    /// its size in layout pixels.
+    /// Adds how big the Call Pill is, in layout pixels, for the gallery's
+    /// checks. The surface adds the corner it is anchored to and its gap
+    /// from both edges.
     fn report_geometry(&self, content: &mut BTreeMap<String, String>) {
         let window = &self.surface.window;
         let (_, natural_width, _, _) = window.measure(gtk::Orientation::Horizontal, -1);
         let width = natural_width.max(PILL_WIDTH);
         let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, width);
-        for (key, value) in [
-            ("anchor", "bottom-right".to_owned()),
-            ("margin", GAP.to_string()),
-            ("width", width.to_string()),
-            ("height", height.to_string()),
-        ] {
+        for (key, value) in [("width", width.to_string()), ("height", height.to_string())] {
             content.insert(key.to_owned(), value);
         }
     }

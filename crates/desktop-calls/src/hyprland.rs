@@ -1,7 +1,8 @@
 //! What Hyprland says about the Desktop's layout, through its request socket
 //! (what `hyprctl` uses): `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/
-//! .socket.sock`. A client writes one request, such as `j/layers` for
-//! `hyprctl layers -j`, and reads the reply until Hyprland closes the socket.
+//! .socket.sock`. A client writes one request, such as
+//! `j/getoption decoration:rounding` for `hyprctl getoption -j
+//! decoration:rounding`, and reads the reply until Hyprland closes the socket.
 //! Next to it, `.socket2.sock` announces events.
 
 use std::env;
@@ -9,9 +10,6 @@ use std::io::{self, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
-
-/// The layer-shell namespace of Omarchy's notification toasts.
-const TOASTS_NAMESPACE: &str = "omarchy-notifications";
 
 /// How long Hyprland may take to answer. It answers in well under a
 /// millisecond; this only stops a wedged compositor holding a thread.
@@ -24,12 +22,12 @@ pub enum Unknown {
     NotHyprland,
     /// Hyprland didn't answer.
     Unreachable(io::Error),
-    /// The answer wasn't `hyprctl layers -j`'s JSON.
+    /// The answer wasn't `hyprctl getoption -j`'s JSON.
     Unreadable(serde_json::Error),
-    /// Omarchy's notification toasts have no layer.
-    NoToastLayer,
     /// The answer had no `decoration:rounding`.
     NoRounding,
+    /// The answer had no `general:gaps_out`.
+    NoGap,
 }
 
 impl Unknown {
@@ -38,8 +36,8 @@ impl Unknown {
             Self::NotHyprland => "not-hyprland",
             Self::Unreachable(_) => "hyprland-unreachable",
             Self::Unreadable(_) => "hyprland-unreadable",
-            Self::NoToastLayer => "no-toast-layer",
             Self::NoRounding => "no-rounding",
+            Self::NoGap => "no-gap",
         }
     }
 }
@@ -69,27 +67,30 @@ fn instance_directory() -> Result<PathBuf, Unknown> {
     Ok(PathBuf::from(runtime).join("hypr").join(signature))
 }
 
-/// The width, in layout pixels, of Omarchy's notification-toast column: its
-/// widest `omarchy-notifications` layer on any output. Blocks for as long as
-/// Hyprland takes to answer.
-pub fn toast_column_width() -> Result<u32, Unknown> {
-    let layers = request("j/layers")?;
-    let layers: serde_json::Value = serde_json::from_slice(&layers).map_err(Unknown::Unreadable)?;
-    // {"<output>": {"levels": {"<level>": [{"namespace": …, "w": …}, …]}}}
-    layers
-        .as_object()
-        .into_iter()
-        .flat_map(|outputs| outputs.values())
-        .filter_map(|output| output.get("levels")?.as_object())
-        .flat_map(|levels| levels.values())
-        .filter_map(serde_json::Value::as_array)
-        .flatten()
-        .filter(|layer| {
-            layer.get("namespace").and_then(serde_json::Value::as_str) == Some(TOASTS_NAMESPACE)
-        })
-        .filter_map(|layer| u32::try_from(layer.get("w")?.as_u64()?).ok())
-        .max()
-        .ok_or(Unknown::NoToastLayer)
+/// Omarchy's edge gap, in layout pixels: half of Hyprland's
+/// `general:gaps_out`, rounded, as Omarchy's shell computes it for its own
+/// panels and notifications (`/usr/share/omarchy/shell/Commons/Style.qml`,
+/// `applyGapsOutJson`). Blocks for as long as Hyprland takes to answer.
+pub fn edge_gap() -> Result<u32, Unknown> {
+    let reply = request("j/getoption general:gaps_out")?;
+    let reply: serde_json::Value = serde_json::from_slice(&reply).map_err(Unknown::Unreadable)?;
+    // {"option": "general:gaps_out", "css": "10 10 10 10", "set": true}: the
+    // top, right, bottom and left gaps, of which Omarchy takes the first.
+    let gaps_out = reply
+        .get("css")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|css| css.split_whitespace().next()?.parse::<f64>().ok())
+        .or_else(|| reply.get("int")?.as_f64())
+        .filter(|gaps_out| gaps_out.is_finite() && *gaps_out >= 0.0)
+        .ok_or(Unknown::NoGap)?;
+    // Rounded half up, as JavaScript's `Math.round`.
+    let half = (gaps_out / 2.0 + 0.5).floor().min(f64::from(u16::MAX));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "half is a whole number from 0 to u16::MAX"
+    )]
+    Ok(half as u32)
 }
 
 fn request(request: &str) -> Result<Vec<u8>, Unknown> {

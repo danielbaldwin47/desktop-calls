@@ -10,6 +10,9 @@
 //! - Corner radius: Hyprland's `decoration:rounding`, for the surfaces and
 //!   their buttons, as Omarchy's own shell does. It is read again whenever
 //!   Hyprland announces `configreloaded`, which a theme switch also causes.
+//! - Edge gap: Omarchy's, half of Hyprland's `general:gaps_out`, for where
+//!   the surfaces sit; read with the rounding, and handed to the hook given
+//!   to [`Theme::when_edge_gap_changed`].
 //! - Live: a theme switch deletes `current/theme` and moves the new theme
 //!   into its place. A monitor on `current/` sees that, and once it has been
 //!   quiet for [`DEBOUNCE`] the theme is read again and the provider's CSS
@@ -66,6 +69,10 @@ struct Shared {
     current: Option<PathBuf>,
     palette: RefCell<Option<Palette>>,
     rounding: Cell<Option<u32>>,
+    /// Omarchy's edge gap, once Hyprland has said.
+    edge_gap: Cell<Option<i32>>,
+    /// What runs when the edge gap changes.
+    edge_gap_changed: RefCell<Option<EdgeGapChanged>>,
     /// The CSS the provider holds now.
     css: RefCell<String>,
     /// The debounced reread, while one is due.
@@ -77,6 +84,9 @@ struct Shared {
 /// What runs once a theme switch has been applied, given its mode:
 /// `"dark"` or `"light"`, or `None` when there is no Omarchy theme any more.
 type Switched = Box<dyn Fn(Option<&'static str>)>;
+
+/// What runs when Omarchy's edge gap changes, given the new gap.
+type EdgeGapChanged = Box<dyn Fn(i32)>;
 
 impl Theme {
     /// Gives `display` the current look, and follows it from now on.
@@ -93,6 +103,8 @@ impl Theme {
             current,
             palette: RefCell::default(),
             rounding: Cell::default(),
+            edge_gap: Cell::default(),
+            edge_gap_changed: RefCell::default(),
             css: RefCell::default(),
             reread: RefCell::default(),
             switched: RefCell::default(),
@@ -110,11 +122,21 @@ impl Theme {
             .current
             .as_deref()
             .and_then(|current| watch(current, &shared));
-        follow_rounding(&shared);
+        follow_hyprland(&shared);
         Self {
             shared,
             _monitor: monitor,
         }
+    }
+
+    /// Runs `then` with Omarchy's edge gap, in layout pixels, once Hyprland
+    /// has said what it is and each time it changes. Until then, and
+    /// without Hyprland, it is never called.
+    pub fn when_edge_gap_changed(&self, then: impl Fn(i32) + 'static) {
+        if let Some(gap) = self.shared.edge_gap.get() {
+            then(gap);
+        }
+        *self.shared.edge_gap_changed.borrow_mut() = Some(Box::new(then));
     }
 
     /// Runs `then` each time a switch of Omarchy's theme has been applied:
@@ -256,9 +278,11 @@ fn unreadable(error_kind: &str, error: &dyn fmt::Display) {
     );
 }
 
-/// Reads Hyprland's rounding now, and again after each configuration reload.
-fn follow_rounding(shared: &Rc<Shared>) {
+/// Reads Hyprland's rounding and Omarchy's edge gap now, and again after
+/// each configuration reload.
+fn follow_hyprland(shared: &Rc<Shared>) {
     reread_rounding(Rc::downgrade(shared));
+    reread_edge_gap(Rc::downgrade(shared));
     let Ok(socket) = hyprland::event_socket() else {
         return;
     };
@@ -276,6 +300,7 @@ fn follow_rounding(shared: &Rc<Shared>) {
         while let Ok(Some(event)) = events.read_line_utf8_future(glib::Priority::DEFAULT).await {
             if event.starts_with("configreloaded>>") {
                 reread_rounding(shared.clone());
+                reread_edge_gap(shared.clone());
             }
         }
     });
@@ -320,10 +345,61 @@ fn rounding_unknown(unknown: &Unknown) {
             detail = %error,
             "Couldn't read Hyprland's corner rounding"
         ),
-        Unknown::NoToastLayer | Unknown::NoRounding => tracing::warn!(
+        Unknown::NoRounding | Unknown::NoGap => tracing::warn!(
             event_kind = %EventKind::RoundingUnknown,
             error_kind = unknown.as_str(),
             "Hyprland has no corner rounding to follow"
+        ),
+    }
+}
+
+/// Asks Hyprland, off the main thread, for Omarchy's edge gap, and hands it
+/// to the hook given to [`Theme::when_edge_gap_changed`] if it changed. If
+/// Hyprland can't say, the last gap stays.
+fn reread_edge_gap(shared: Weak<Shared>) {
+    glib::MainContext::default().spawn_local(async move {
+        let gap = gio::spawn_blocking(hyprland::edge_gap)
+            .await
+            .unwrap_or(Err(Unknown::NotHyprland));
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        match gap.map(|gap| i32::try_from(gap).unwrap_or(i32::MAX)) {
+            Ok(gap) if shared.edge_gap.get() != Some(gap) => {
+                shared.edge_gap.set(Some(gap));
+                if let Some(changed) = &*shared.edge_gap_changed.borrow() {
+                    changed(gap);
+                }
+            }
+            Ok(_) => {}
+            Err(unknown) => edge_gap_unknown(&unknown),
+        }
+    });
+}
+
+fn edge_gap_unknown(unknown: &Unknown) {
+    match unknown {
+        Unknown::NotHyprland => tracing::debug!(
+            event_kind = %EventKind::EdgeGapUnknown,
+            error_kind = unknown.as_str(),
+            "Not on Hyprland; keeping the stock edge gap"
+        ),
+        Unknown::Unreachable(error) => tracing::warn!(
+            event_kind = %EventKind::EdgeGapUnknown,
+            error_kind = unknown.as_str(),
+            detail = %error,
+            "Hyprland didn't say how far windows sit from the screen's edge"
+        ),
+        Unknown::Unreadable(error) => tracing::warn!(
+            event_kind = %EventKind::EdgeGapUnknown,
+            error_kind = unknown.as_str(),
+            detail = %error,
+            "Couldn't read Hyprland's gap from the screen's edge"
+        ),
+        Unknown::NoRounding | Unknown::NoGap => tracing::warn!(
+            event_kind = %EventKind::EdgeGapUnknown,
+            error_kind = unknown.as_str(),
+            "Hyprland has no gap from the screen's edge to follow"
         ),
     }
 }

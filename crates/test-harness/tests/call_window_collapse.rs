@@ -208,11 +208,25 @@ fn clicking_the_call_pill_or_pressing_the_keybinding_expands_it_with_the_keyboar
         DEADLINE,
         expanded_with_keyboard,
     );
-    // In its usual place, top right, nowhere near the Call Pill's corner.
+    // In place: it shares the Call Pill's bottom-right corner, so the click
+    // brought the controls up under the pointer.
     let window = call_window_on_screen(&harness, "call-window-expanded");
     assert!(
-        window.top < BAR_HEIGHT + 2.0 * GAP + 2.0 && window.bottom < pill_region.top,
-        "the Call Window isn't in its usual place: {window:?}"
+        (window.right - pill_region.right).abs() <= 2.0
+            && (window.bottom - pill_region.bottom).abs() <= 2.0
+            && window.top > BAR_HEIGHT
+            && window.left < pill_region.left + 30.0,
+        "the Call Window didn't open where the Call Pill was ({pill_region:?}): {window:?}"
+    );
+    let state = harness.app_state();
+    let reported = state.surface("call-window").cloned().unwrap_or_default();
+    assert_eq!(
+        (
+            reported.get("anchor").map(String::as_str),
+            reported.get("margin").map(String::as_str)
+        ),
+        (Some("bottom-right"), Some("12")),
+        "{reported:?}"
     );
     // Its shortcuts work: K opens the keypad.
     harness.keyboard().type_text("k");
@@ -390,12 +404,11 @@ fn a_waiting_calls_banner_takes_its_usual_place_while_the_call_pill_shows() {
         find(shot, GREEN).is_some()
     });
     let hold_and_answer = find(&screenshot, GREEN).unwrap_or_else(|| panic!("no Hold & Answer"));
-    // At its usual top margin, with nothing above it: the Call Window it
-    // would stack below is collapsed. The Banner's heading and caller sit
-    // above Hold & Answer.
+    // Flush top right, as always. The Banner's heading and caller sit above
+    // Hold & Answer.
     assert!(
         hold_and_answer.top < BAR_HEIGHT + GAP + 140.0,
-        "the Banner is stacked below a Call Window that isn't there: {hold_and_answer:?} in {}",
+        "the Banner isn't at the top: {hold_and_answer:?} in {}",
         screenshot.path.display()
     );
     let red = find(&screenshot, RED).unwrap_or_else(|| panic!("no Hang up on the Call Pill"));

@@ -2,7 +2,7 @@
 //! their shortcuts.
 
 use super::{
-    HANDOFF_SHORTCUT, HANG_UP_HELD_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT,
+    Anchor, HANDOFF_SHORTCUT, HANG_UP_HELD_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT,
     MUTE_SHORTCUT, SWAP_SHORTCUT, SharedReport, Surface, Who, class, detail_label, keycap,
     seconds_since, set_class,
 };
@@ -60,17 +60,17 @@ pub(super) struct CallWindow {
     /// The once-a-second update of the Call timer, while it runs.
     ticker: RefCell<Option<SourceId>>,
     view: Rc<RefCell<Option<CallWindowView>>>,
-    /// Called whenever the window may have changed height, so the Banner
-    /// stays below it.
-    resized: RefCell<Option<Box<dyn Fn()>>>,
     /// What the window shows as while it is collapsed.
     pill: CallPill,
 }
 
 impl CallWindow {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
+        // Where the Call Pill sits: the window expands from it and collapses
+        // back into it, in place.
         let surface = Surface::new(
             "call-window",
+            Anchor::BottomRight,
             Layer::Top,
             KeyboardMode::OnDemand,
             Some(Input::CollapseCallWindow),
@@ -111,21 +111,24 @@ impl CallWindow {
         let (microphone_muted, mute_unavailable) = mute_notices();
         let (tones, keypad) = keypad();
 
+        // Anchored at the bottom, the window grows upwards. So everything
+        // that comes and goes during a Call (the Held Call, a notice, the
+        // mute notices, the keypad) sits above the controls, and the
+        // controls, the audio row with its Handoff button, Mute and the
+        // keypad toggle, and Hang up never move under the pointer.
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        content.append(&held.row);
         content.append(&heading);
         content.append(&detail);
         content.append(&status);
-        content.append(&audio.row);
-        // Everything that comes and goes sits below Hang up, so Hang up
-        // never moves under the pointer.
-        content.append(&controls);
-        content.append(&hang_up);
-        content.append(&held.row);
         content.append(&notice);
         content.append(&microphone_muted);
         content.append(&mute_unavailable);
         content.append(&tones);
         content.append(&keypad);
+        content.append(&audio.row);
+        content.append(&controls);
+        content.append(&hang_up);
         surface.window.set_child(Some(&content));
         for button in [
             mute.upcast_ref::<gtk::Button>(),
@@ -160,7 +163,6 @@ impl CallWindow {
             writing_tones: Cell::new(false),
             ticker: RefCell::default(),
             view: Rc::default(),
-            resized: RefCell::default(),
             pill: CallPill::new(intents, report),
         });
         window.connect();
@@ -672,9 +674,6 @@ impl CallWindow {
         self.report_tones(&mut content);
         self.held.update(&view, &mut content);
         self.surface.show(content);
-        if let Some(resized) = self.resized.borrow().as_ref() {
-            resized();
-        }
     }
 
     /// Reports the tone entry, the keypad toggle and the keypad while they
@@ -704,11 +703,6 @@ impl CallWindow {
     /// The Call Pill's surface.
     pub(super) fn pill_surface(&self) -> &Surface {
         &self.pill.surface
-    }
-
-    /// Calls `resized` whenever the window may have changed height.
-    pub(super) fn on_resized(&self, resized: impl Fn() + 'static) {
-        *self.resized.borrow_mut() = Some(Box::new(resized));
     }
 
     /// Brings the Handoff button up to date with the Call's audio, `None`
@@ -771,8 +765,8 @@ impl CallWindow {
     /// is `None` with no live Call, and returns Mute's label. While the
     /// Desktop has lost contact with the Call, the tone entry and the keypad
     /// are hidden, and so is the keypad toggle: no tone can be sent. The
-    /// entry and the keypad sit below Hang up. The toggle shares Mute's row,
-    /// above it, so it keeps its place, invisible, and Mute doesn't stretch.
+    /// entry and the keypad sit above the controls. The toggle shares Mute's
+    /// row, so it keeps its place, invisible, and Mute doesn't stretch.
     fn show_controls(&self, mute: Option<Mute>, connection_lost: bool) -> &'static str {
         let live = mute.is_some();
         let mute_text = messages::label(if mute == Some(Mute::On) {

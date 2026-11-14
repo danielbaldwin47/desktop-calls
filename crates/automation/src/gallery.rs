@@ -153,7 +153,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-muted",
-        title: "The Call Window, muted, with the keypad shown and tones sent",
+        title: "The Call Window, muted, with the keypad shown and tones sent: both above the controls, so Hang up stays put",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -261,7 +261,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-waiting-banner",
-        title: "A Waiting Call: the Banner, with Hold & Answer, below the Call Window",
+        title: "A Waiting Call: the Banner, with Hold & Answer, flush top right, and the Call Window flush bottom right",
         still: expanded,
         prepare: as_is,
         reach: |harness| {
@@ -274,7 +274,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-held",
-        title: "The Call Window with two Calls: the answered one live, the first on hold",
+        title: "The Call Window with two Calls: the answered one live, the first on hold in the row above it",
         still: |_| true,
         prepare: as_is,
         reach: held,

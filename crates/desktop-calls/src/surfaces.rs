@@ -6,24 +6,42 @@
 //! counts as shown once the compositor has mapped it) for the control
 //! interface's `Surfaces`.
 //!
+//! Placement has one rule: a surface is centred like a launcher (the
+//! Dialer) or flush in a corner, anchored to its two edges with the standard
+//! gap, Omarchy's own edge gap (half of Hyprland's `general:gaps_out`, read
+//! by [`Theme`], or [`FALLBACK_GAP`]). No surface sits part-way across the
+//! screen to keep clear of another app's. At the top, the gap is measured
+//! from the bar: the compositor keeps a surface out of the bar's exclusive
+//! zone. Each surface reports its `anchor` (`top-right`, `bottom-right` or
+//! `centre`) and, in a corner, its `margin`.
+//!
 //! - The Banner is an overlay surface, so it shows above fullscreen windows.
 //!   It takes keyboard focus only when the keybinding asks; then A answers,
-//!   D declines and Escape gives focus back. It sits top-right, below Omarchy's bar
-//!   (the compositor keeps it out of the bar's exclusive zone) and to the
-//!   left of Omarchy's notification-toast column, as wide as Hyprland says
-//!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
-//!   It is unmapped whenever nothing rings: a mapped overlay surface stops
-//!   Hyprland scanning a fullscreen window out directly. While the Call
-//!   Window shows expanded too, for a Waiting Call, the Banner sits below it.
-//! - The Call Window is on the top layer, so fullscreen windows cover it, in
-//!   the same corner, and takes keyboard focus only when clicked or when the
-//!   keybinding asks; Escape gives it back. Each of its actions has a
-//!   shortcut, shown on its button. Digits, `*` and `#` typed or pasted
-//!   anywhere in it are keypad tones.
+//!   D declines and Escape gives focus back. It sits flush top-right. It is
+//!   unmapped whenever nothing rings: a mapped overlay surface stops
+//!   Hyprland scanning a fullscreen window out directly.
+//! - The Banner may cover Omarchy's top notification card while it rings,
+//!   and that is meant: a ringing Call outranks a notification. Omarchy's
+//!   notification column is an overlay surface that ignores exclusive zones
+//!   and offers no way to reserve room beside it, so nothing can push it
+//!   aside. The Banner is drawn above it, since Hyprland draws one layer's
+//!   surfaces in the order they were mapped and the Banner is mapped afresh
+//!   for each ring (inferred, judged at Real-Phone Checklist step 7.2). Each
+//!   takes only its own clicks, and the card is there once the Banner goes.
+//! - A live Call has one home, the bottom-right corner. The Call Window is on
+//!   the top layer, so fullscreen windows cover it, flush in that corner, and
+//!   takes keyboard focus only when clicked or when the keybinding asks;
+//!   Escape gives it back. Each of its actions has a shortcut, shown on its
+//!   button. Digits, `*` and `#` typed or pasted anywhere in it are keypad
+//!   tones. Anchored at the bottom, it grows upwards: whatever comes and goes
+//!   during a Call sits above its controls, so they and Hang up never move.
+//!   With a Waiting Call, the Banner is top right and the Call Window bottom
+//!   right, so neither covers the other.
 //! - A few seconds after a Call connects, the Call Window collapses to the
-//!   Call Pill, as the Call state machine decides: a strip on the top layer
-//!   in the bottom-right corner, which never takes the keyboard. A click on
-//!   its body, the keybinding or the Indicator expands the Call Window again;
+//!   Call Pill, as the Call state machine decides: a strip on the top layer,
+//!   flush in the same corner, sharing the Call Window's bottom-right
+//!   corner, which never takes the keyboard. A click on its body, the
+//!   keybinding or the Indicator expands the Call Window again, in place;
 //!   Escape on the Call Window collapses it. The Call Window reports the
 //!   pointer, clicks, keys, the keyboard and its keypad for the decision.
 //! - The Dialer is an overlay surface centred in the space the bar leaves,
@@ -50,7 +68,6 @@ use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
 
 use crate::control::{Published, ShownSurfaces};
-use crate::hyprland::{self, Unknown};
 use crate::logging::EventKind;
 use crate::theme::{Theme, class};
 
@@ -68,11 +85,9 @@ use first_frames::FirstFrames;
 use setup_problems::SetupProblems;
 use setup_window::SetupWindow;
 
-/// How wide Omarchy's notification-toast column is taken to be when
-/// Hyprland can't say. Omarchy 4.5's is 394.
-const FALLBACK_TOAST_COLUMN_WIDTH: i32 = 400;
-/// Space between a surface and what it sits next to.
-pub(crate) const GAP: i32 = 12;
+/// The standard gap between a surface and the screen's edges when Hyprland
+/// can't say what Omarchy's is.
+const FALLBACK_GAP: i32 = 12;
 const WIDTH: i32 = 340;
 const DIALER_WIDTH: i32 = 560;
 /// The Dialer's list stays this tall, so the Dialer doesn't jump about as
@@ -181,16 +196,25 @@ impl Surfaces {
         };
         if let Some(theme) = &surfaces.theme {
             theme.when_switched(theme_shown_when_drawn(surfaces.windows()));
+            let placed = surfaces.placed();
+            theme.when_edge_gap_changed(move |gap| {
+                for surface in &placed {
+                    surface.place(gap);
+                }
+            });
         }
-        surfaces.place_beside_toasts();
-        let (banner, call_window) = (
-            surfaces.banner.surface.window.clone(),
-            surfaces.call_window.surface.window.clone(),
-        );
         surfaces
-            .call_window
-            .on_resized(move || stack(&banner, &call_window));
-        surfaces
+    }
+
+    /// What follows the standard gap: each surface's placement.
+    fn placed(&self) -> [Placed; 4] {
+        [
+            &self.banner.surface,
+            &self.call_window.surface,
+            self.call_window.pill_surface(),
+            &self.dialer.surface,
+        ]
+        .map(Surface::placed)
     }
 
     /// Each surface's name and window.
@@ -216,10 +240,6 @@ impl Surfaces {
     /// it follows from is `_published`, so `Surfaces` never runs ahead of
     /// the Calls on the control interface.
     pub fn render(&self, view: &desktop_calls_core::Surfaces, _published: &Published) {
-        if view.banner.is_some() && !self.banner.surface.window.is_visible() {
-            // The toast column may have changed since; the Banner moves if so.
-            self.place_beside_toasts();
-        }
         self.banner.render(view.banner.as_ref());
         self.call_window.render(view.call_window.as_ref());
         self.dialer.render(view.dialer.as_ref());
@@ -234,76 +254,89 @@ impl Surfaces {
             .render(view.setup_problems.as_ref(), view.setup_window.as_ref());
         // The Problems going may take keyboard focus with them.
         self.setup_window.focus_if_lost();
-        stack(
-            &self.banner.surface.window,
-            &self.call_window.surface.window,
-        );
-    }
-
-    /// Asks Hyprland, off the main thread, how wide the toast column is, and
-    /// moves both surfaces to its left.
-    fn place_beside_toasts(&self) {
-        let windows = [
-            self.banner.surface.window.clone(),
-            self.call_window.surface.window.clone(),
-        ];
-        glib::MainContext::default().spawn_local(async move {
-            let width = gtk::gio::spawn_blocking(hyprland::toast_column_width)
-                .await
-                .unwrap_or(Err(Unknown::NotHyprland));
-            let width = match width {
-                Ok(width) => i32::try_from(width).unwrap_or(FALLBACK_TOAST_COLUMN_WIDTH),
-                Err(unknown) => {
-                    toast_column_unknown(&unknown);
-                    FALLBACK_TOAST_COLUMN_WIDTH
-                }
-            };
-            if gtk4_layer_shell::is_supported() {
-                for window in windows {
-                    window.set_margin(Edge::Right, width + GAP);
-                }
-            }
-        });
     }
 }
 
-/// With call waiting the Banner and the Call Window show at once, in the
-/// same corner: the Banner goes below the Call Window, so the Call Window
-/// never moves under the pointer and the Banner never covers it.
-fn stack(banner: &gtk::Window, call_window: &gtk::Window) {
-    if !gtk4_layer_shell::is_supported() {
-        return;
+/// Where a surface sits on the screen.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Anchor {
+    /// Centred in the space the bar leaves, like a launcher.
+    Centre,
+    /// Flush in the top-right corner, with the standard gap.
+    TopRight,
+    /// Flush in the bottom-right corner, with the standard gap.
+    BottomRight,
+}
+
+impl Anchor {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Centre => "centre",
+            Self::TopRight => "top-right",
+            Self::BottomRight => "bottom-right",
+        }
     }
-    let top = if call_window.is_visible() {
-        let (_, height, _, _) = call_window.measure(gtk::Orientation::Vertical, WIDTH);
-        GAP + height + GAP
-    } else {
-        GAP
-    };
-    if banner.margin(Edge::Top) != top {
-        banner.set_margin(Edge::Top, top);
+
+    /// Anchors `window` here, `gap` from the corner's two edges.
+    fn apply(self, window: &gtk::Window, gap: i32) {
+        if !gtk4_layer_shell::is_supported() {
+            return;
+        }
+        let corner: &[Edge] = match self {
+            // Anchored to no edge, the compositor centres it in the space
+            // other surfaces' exclusive zones (the bar's) leave.
+            Self::Centre => &[],
+            Self::TopRight => &[Edge::Top, Edge::Right],
+            Self::BottomRight => &[Edge::Bottom, Edge::Right],
+        };
+        for edge in [Edge::Top, Edge::Right, Edge::Bottom, Edge::Left] {
+            let anchored = corner.contains(&edge);
+            window.set_anchor(edge, anchored);
+            // The default exclusive zone keeps the surface out of the bar's;
+            // the margin is only the gap from it.
+            window.set_margin(edge, if anchored { gap } else { 0 });
+        }
+    }
+
+    /// What a surface reports of where it sits: its anchor and, in a
+    /// corner, its gap from both edges.
+    fn report(self, gap: i32, content: &mut BTreeMap<String, String>) {
+        content.insert("anchor".to_owned(), self.as_str().to_owned());
+        if self != Self::Centre {
+            content.insert("margin".to_owned(), gap.to_string());
+        }
     }
 }
 
-fn toast_column_unknown(unknown: &Unknown) {
-    match unknown {
-        Unknown::NotHyprland | Unknown::NoToastLayer | Unknown::NoRounding => tracing::debug!(
-            event_kind = %EventKind::ToastColumnUnknown,
-            error_kind = unknown.as_str(),
-            "No toast column to keep clear of; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
-        ),
-        Unknown::Unreachable(error) => tracing::warn!(
-            event_kind = %EventKind::ToastColumnUnknown,
-            error_kind = unknown.as_str(),
-            detail = %error,
-            "Hyprland didn't say how wide the toast column is; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
-        ),
-        Unknown::Unreadable(error) => tracing::warn!(
-            event_kind = %EventKind::ToastColumnUnknown,
-            error_kind = unknown.as_str(),
-            detail = %error,
-            "Couldn't read Hyprland's layers; allowing {FALLBACK_TOAST_COLUMN_WIDTH} px"
-        ),
+/// What a surface needs to move to a new standard gap.
+struct Placed {
+    name: &'static str,
+    window: gtk::Window,
+    anchor: Anchor,
+    gap: Rc<Cell<i32>>,
+    content: Rc<RefCell<BTreeMap<String, String>>>,
+    mapped: Rc<Cell<bool>>,
+    report: SharedReport,
+}
+
+impl Placed {
+    /// Moves the surface `gap` from its corner's edges, and reports it.
+    fn place(&self, gap: i32) {
+        if self.gap.replace(gap) == gap {
+            return;
+        }
+        self.anchor.apply(&self.window, gap);
+        if self.mapped.get() {
+            self.report.borrow_mut().set(
+                self.name,
+                Some(reported_placed(
+                    &self.content.borrow(),
+                    &self.window,
+                    self.anchor,
+                    gap,
+                )),
+            );
+        }
     }
 }
 
@@ -311,6 +344,9 @@ fn toast_column_unknown(unknown: &Unknown) {
 struct Surface {
     name: &'static str,
     window: gtk::Window,
+    anchor: Anchor,
+    /// The standard gap it sits at now.
+    gap: Rc<Cell<i32>>,
     content: Rc<RefCell<BTreeMap<String, String>>>,
     mapped: Rc<Cell<bool>>,
     report: SharedReport,
@@ -405,7 +441,7 @@ fn surface_unmapped(name: &str) {
     );
 }
 
-/// What a surface reports: its content, and `focused` while it has keyboard
+/// What a window reports: its content, and `focused` while it has keyboard
 /// focus.
 fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMap<String, String> {
     let mut reported = content.clone();
@@ -415,11 +451,24 @@ fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMa
     reported
 }
 
+/// What a surface reports: as [`reported`], and where it sits.
+fn reported_placed(
+    content: &BTreeMap<String, String>,
+    window: &gtk::Window,
+    anchor: Anchor,
+    gap: i32,
+) -> BTreeMap<String, String> {
+    let mut reported = reported(content, window);
+    anchor.report(gap, &mut reported);
+    reported
+}
+
 impl Surface {
-    /// A surface named `name` in the top-right corner. Escape sends
-    /// `escape`, if the surface takes the keyboard at all.
+    /// A surface named `name`, placed at `anchor`. Escape sends `escape`,
+    /// if the surface takes the keyboard at all.
     fn new(
         name: &'static str,
+        anchor: Anchor,
         layer: Layer,
         keyboard: KeyboardMode,
         escape: Option<Input>,
@@ -436,16 +485,13 @@ impl Surface {
             window.set_namespace(Some(&format!("desktop-calls-{name}")));
             window.set_layer(layer);
             window.set_keyboard_mode(keyboard);
-            window.set_anchor(Edge::Top, true);
-            window.set_anchor(Edge::Right, true);
-            // The default exclusive zone keeps the surface out of the bar's;
-            // the margin is only the gap below it.
-            window.set_margin(Edge::Top, GAP);
-            window.set_margin(Edge::Right, FALLBACK_TOAST_COLUMN_WIDTH + GAP);
         }
+        anchor.apply(&window, FALLBACK_GAP);
         let surface = Self {
             name,
             window,
+            anchor,
+            gap: Rc::new(Cell::new(FALLBACK_GAP)),
             content: Rc::default(),
             mapped: Rc::default(),
             report,
@@ -453,24 +499,32 @@ impl Surface {
             keyboard,
             releasing: Rc::default(),
         };
-        let (content, mapped, report) = (
+        let (content, mapped, report, gap) = (
             surface.content.clone(),
             surface.mapped.clone(),
             surface.report.clone(),
+            surface.gap.clone(),
         );
         surface.window.connect_map(move |window| {
             mapped.set(true);
-            report
-                .borrow_mut()
-                .set(name, Some(reported(&content.borrow(), window)));
+            report.borrow_mut().set(
+                name,
+                Some(reported_placed(
+                    &content.borrow(),
+                    window,
+                    anchor,
+                    gap.get(),
+                )),
+            );
             surface_mapped(name);
             after_next_frame(window, move || surface_shown(name));
         });
-        let (content, mapped, report, releasing) = (
+        let (content, mapped, report, releasing, gap) = (
             surface.content.clone(),
             surface.mapped.clone(),
             surface.report.clone(),
             surface.releasing.clone(),
+            surface.gap.clone(),
         );
         surface.window.connect_is_active_notify(move |window| {
             set_class(window, class::HAS_KEYBOARD, window.is_active());
@@ -478,9 +532,15 @@ impl Surface {
                 window.set_keyboard_mode(keyboard);
             }
             if mapped.get() {
-                report
-                    .borrow_mut()
-                    .set(name, Some(reported(&content.borrow(), window)));
+                report.borrow_mut().set(
+                    name,
+                    Some(reported_placed(
+                        &content.borrow(),
+                        window,
+                        anchor,
+                        gap.get(),
+                    )),
+                );
             }
         });
         if let Some(escape) = escape {
@@ -509,8 +569,26 @@ impl Surface {
         } else if self.mapped.get() && !unchanged {
             self.report.borrow_mut().set(
                 self.name,
-                Some(reported(&self.content.borrow(), &self.window)),
+                Some(reported_placed(
+                    &self.content.borrow(),
+                    &self.window,
+                    self.anchor,
+                    self.gap.get(),
+                )),
             );
+        }
+    }
+
+    /// What moves the surface to a new standard gap.
+    fn placed(&self) -> Placed {
+        Placed {
+            name: self.name,
+            window: self.window.clone(),
+            anchor: self.anchor,
+            gap: self.gap.clone(),
+            content: self.content.clone(),
+            mapped: self.mapped.clone(),
+            report: self.report.clone(),
         }
     }
 

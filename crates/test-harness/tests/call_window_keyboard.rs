@@ -288,6 +288,7 @@ fn clicking_a_keypad_button_sends_its_tone() {
     live_on_desktop(&harness);
     focus_call_window(&harness);
     let before = app_region(&harness.screenshot("keypad-hidden")).expect("the Call Window shows");
+    let hang_up = hang_up_button(&harness);
 
     harness.keyboard().type_text("k");
 
@@ -296,14 +297,14 @@ fn clicking_a_keypad_button_sends_its_tone() {
     });
     // The screenshot waits for the Call Window to finish growing (#53).
     let after = app_region(&harness.screenshot("keypad-shown")).expect("the Call Window shows");
-    assert!(after.bottom > before.bottom, "the keypad isn't drawn");
-    // The keypad is the new last row: 3 buttons across, 4 down, 1 2 3 first.
-    let top = before.bottom - PADDING + ROW_GAP;
-    let (left, right, bottom) = (
-        after.left + PADDING,
-        after.right - PADDING,
-        after.bottom - PADDING,
-    );
+    assert!(after.top < before.top, "the keypad isn't drawn");
+    // Anchored at the bottom, the window grew upwards by the keypad and a
+    // row's gap. The keypad sits just above the audio row, which is two
+    // rows above Hang up: 3 buttons across, 4 down, 1 2 3 first.
+    let height = hang_up.bottom - hang_up.top;
+    let bottom = hang_up.top - 2.0 * (ROW_GAP + height) - ROW_GAP;
+    let top = bottom - (before.top - after.top - ROW_GAP);
+    let (left, right) = (after.left + PADDING, after.right - PADDING);
     harness
         .pointer()
         .click(left + (right - left) / 6.0, top + (bottom - top) / 8.0);

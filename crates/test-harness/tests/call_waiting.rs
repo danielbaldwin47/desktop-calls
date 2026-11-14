@@ -292,12 +292,22 @@ fn a_call_during_a_live_one_waits_with_three_options_and_the_desktop_stays_silen
     );
     assert_eq!(
         shown.get("heading").map(String::as_str),
-        Some("Waiting Call")
+        Some("Waiting call")
     );
     assert_eq!(
         shown.get("caller").map(String::as_str),
         Some("+44 7700 900456")
     );
+    // Each choice says what happens to the Call with Bob.
+    assert_eq!(
+        shown.get("hold-and-answer-consequence").map(String::as_str),
+        Some("+44\u{a0}7700\u{a0}900123 waits on hold")
+    );
+    assert_eq!(
+        shown.get("end-and-answer-consequence").map(String::as_str),
+        Some("Ends the Call with +44\u{a0}7700\u{a0}900123")
+    );
+    assert_eq!(shown.get("decline-consequence"), None);
     assert!(state.surface("call-window").is_some());
     harness.app_holds("the Desktop doesn't ring", HOLD, |state| !state.ringing);
     assert!(
@@ -484,19 +494,16 @@ fn app_region(screenshot: &Screenshot) -> Option<Region> {
 
 /// The keybinding gives the Banner the keyboard; waits until it has it.
 fn focus_banner(harness: &Harness) {
-    focus_banner_saying(
-        harness,
-        "Press H to Hold & Answer, E to End & Answer, or D to decline",
-    );
+    focus_banner_showing(harness, "H, E, D");
 }
 
-/// [`focus_banner`], for a Banner whose heading then says `heading`.
-fn focus_banner_saying(harness: &Harness, heading: &str) {
+/// [`focus_banner`], for a Banner whose buttons then show `keycaps`.
+fn focus_banner_showing(harness: &Harness, keycaps: &str) {
     harness.activate();
     harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
         banner(state).is_some_and(|banner| {
             banner.get("focused").map(String::as_str) == Some("true")
-                && banner.get("heading").map(String::as_str) == Some(heading)
+                && banner.get("keycaps").map(String::as_str) == Some(keycaps)
         })
     });
 }
@@ -863,7 +870,7 @@ fn with_a_call_on_hold_a_third_call_offers_only_end_and_answer_which_ends_only_t
         DEADLINE,
         |_| true,
     ));
-    focus_banner_saying(&harness, "Press E to End & Answer, or D to decline");
+    focus_banner_showing(&harness, "E, D");
     harness.keyboard().type_text("ha");
     harness.simulated_phone().recorded_holds(
         "neither H nor A asks the Phone anything",

@@ -179,3 +179,62 @@ fn a_bindings_file_that_cant_be_read_is_named_and_no_config_says_what_to_bind() 
         }
     );
 }
+
+/// The keys the Banner's footer names: those of the binding that runs
+/// Desktop Calls, whichever keys the user chose (#226).
+#[test]
+fn the_keys_bound_to_desktop_calls_are_the_ones_the_banner_names() {
+    use desktop_calls_core::keybinding::bound_keys;
+    let keys = |text: &str| bound_keys(&config(text));
+    assert_eq!(
+        keys(&format!("{LINE}\n")),
+        Some(vec!["SUPER".to_owned(), "ALT".to_owned(), "C".to_owned()])
+    );
+    // Bound by hand, to other keys, by the command alone.
+    assert_eq!(
+        keys("o.bind(\"CTRL + SHIFT + P\", \"Phone\", \"'/opt/bin/desktop-calls'\")\n"),
+        Some(vec!["CTRL".to_owned(), "SHIFT".to_owned(), "P".to_owned()])
+    );
+    assert_eq!(keys("-- nothing here\n"), None);
+    assert_eq!(
+        keys(&format!("-- {LINE}\n")),
+        None,
+        "a comment binds nothing"
+    );
+    assert_eq!(
+        keys(&format!("{LINE}\no.unbind(\"ALT + SUPER + C\")\n")),
+        None,
+        "unbound again"
+    );
+    assert_eq!(
+        keys(&format!(
+            "{LINE}\no.bind(\"SUPER + ALT + C\", \"Calculator\", \"gnome-calculator\")\n"
+        )),
+        None,
+        "the keys taken over by something else"
+    );
+    assert_eq!(
+        bound_keys(&HyprlandConfig {
+            command: COMMAND.to_owned(),
+            bindings: None,
+        }),
+        None
+    );
+    let required = HyprlandConfig {
+        command: COMMAND.to_owned(),
+        bindings: Some(ConfigFile {
+            path: FILE.to_owned(),
+            text: Some("require(\"hypr.mine\")\n".to_owned()),
+            required: vec![RequiredFile {
+                name: "hypr.mine".to_owned(),
+                path: "/home/user/.config/hypr/mine.lua".to_owned(),
+                text: format!("{LINE}\n"),
+            }],
+        }),
+    };
+    assert_eq!(
+        bound_keys(&required),
+        Some(vec!["SUPER".to_owned(), "ALT".to_owned(), "C".to_owned()]),
+        "bound in a file bindings.lua requires"
+    );
+}

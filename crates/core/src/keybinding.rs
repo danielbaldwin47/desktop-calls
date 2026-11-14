@@ -119,7 +119,63 @@ impl KeybindingCheck {
     }
 }
 
-/// The names `text` requires other files by, in order: `require("x.y")`,
+/// The keys of the binding that runs Desktop Calls once every line has run,
+/// as written, one key each: `SUPER + ALT + C` is `["SUPER", "ALT", "C"]`.
+/// `None` if nothing binds Desktop Calls, or what did was unbound or its
+/// keys taken over by a later line. The Banner names them.
+#[must_use]
+pub fn bound_keys(config: &HyprlandConfig) -> Option<Vec<String>> {
+    let bindings = config.bindings.as_ref()?;
+    let text = bindings.text.as_ref()?;
+    let mut ours: Option<String> = None;
+    let mut read = |code: &str| {
+        let (unbinding, arguments) = if let Some(arguments) = call(code, ".unbind(") {
+            (true, arguments)
+        } else if let Some(arguments) = call(code, ".bind(") {
+            (false, arguments)
+        } else {
+            return;
+        };
+        let Some(keys) = arguments.first().and_then(Option::as_deref) else {
+            return;
+        };
+        let same = ours
+            .as_deref()
+            .is_some_and(|bound| keyset(bound) == keyset(keys));
+        if unbinding {
+            if same {
+                ours = None;
+            }
+            return;
+        }
+        let description = arguments.get(1).and_then(Option::as_deref);
+        let runs = arguments.get(2).and_then(Option::as_deref);
+        if description == Some(DESCRIPTION) || runs.is_some_and(runs_desktop_calls) {
+            ours = Some(keys.to_owned());
+        } else if same {
+            ours = None;
+        }
+    };
+    for line in text.lines() {
+        let in_line = code(line);
+        if let Some(name) = required_by(in_line)
+            && let Some(file) = bindings.required.iter().find(|file| file.name == name)
+        {
+            for required_line in file.text.lines() {
+                read(code(required_line));
+            }
+        }
+        read(in_line);
+    }
+    ours.map(|keys| {
+        keys.split(|character: char| character == '+' || character.is_whitespace())
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
+/// The names `text` requires other files by, in order:`require("x.y")`,
 /// `require "x.y"`, `pcall(require, "x.y")` and `dofile("/a/b.lua")`, outside
 /// comments. The shell finds and reads them.
 #[must_use]

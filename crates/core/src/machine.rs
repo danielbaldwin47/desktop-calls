@@ -53,8 +53,9 @@ pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
 pub use view::{
-    BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase, CallWindowView, DialerView,
-    HeldCall, Mute, RingingCaller, StateLine, Surfaces, WaitingOptions,
+    BannerChoice, BannerFooter, BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase,
+    CallWindowView, DialerView, HeldCall, Mute, OtherCall, RingingCaller, StateLine, Surfaces,
+    WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so
@@ -348,6 +349,10 @@ pub struct State {
     /// The wall clock as the shell last reported it, while the Desktop was
     /// awake.
     clock: Option<WallClock>,
+    /// What the Banner's footer says of the keybinding that runs Desktop
+    /// Calls: its keys, or that none is set; `None` until the Hyprland
+    /// config is read.
+    keybinding: Option<BannerFooter>,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -796,6 +801,12 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         }
         Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
         Input::Activate => activate(&mut state),
+        Input::KeybindingRead(config) => {
+            state.keybinding = Some(
+                crate::keybinding::bound_keys(&config)
+                    .map_or(BannerFooter::NoKeybinding, BannerFooter::Keybinding),
+            );
+        }
         Input::ReleaseFocus => state.focus = Focus::None,
         input @ (Input::CollapseCallWindow
         | Input::ExpandCallWindow

@@ -46,6 +46,63 @@ pub struct BannerView {
     /// What the Banner offers for a Waiting Call in place of Answer, or
     /// `None` for the only Call ringing.
     pub waiting: Option<WaitingOptions>,
+    /// For a Waiting Call, the user's other Call its choices act on: the
+    /// one Hold & Answer holds and End & Answer ends, or, where Answer is
+    /// offered, the one that stays on hold.
+    pub other: Option<OtherCall>,
+    /// What the footer says, once the Hyprland config has been read.
+    pub footer: Option<BannerFooter>,
+}
+
+impl BannerView {
+    /// The choices the Banner offers, in the order the footer names their
+    /// keys.
+    #[must_use]
+    pub fn choices(&self) -> Vec<BannerChoice> {
+        match self.waiting {
+            None | Some(WaitingOptions::Answer) => {
+                vec![BannerChoice::Answer, BannerChoice::Decline]
+            }
+            Some(WaitingOptions::HoldOrEnd) => vec![
+                BannerChoice::HoldAndAnswer,
+                BannerChoice::EndAndAnswer,
+                BannerChoice::Decline,
+            ],
+            Some(WaitingOptions::End) => vec![BannerChoice::EndAndAnswer, BannerChoice::Decline],
+        }
+    }
+}
+
+/// One of the Banner's choices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BannerChoice {
+    Answer,
+    Decline,
+    HoldAndAnswer,
+    EndAndAnswer,
+}
+
+/// The user's other Call, which a Waiting Call's choices act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OtherCall {
+    pub caller: Caller,
+    /// The Contact the other party is, if Contacts say.
+    pub contact: Option<ContactMatch>,
+}
+
+/// What the Banner's footer says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BannerFooter {
+    /// The Banner lacks the keyboard: these keys, as the Hyprland config
+    /// writes them (`["SUPER", "ALT", "C"]`), give it the keyboard, and then
+    /// the choices' keys act.
+    Keybinding(Vec<String>),
+    /// No keybinding runs Desktop Calls, so nothing gives the Banner the
+    /// keyboard: where to add one.
+    NoKeybinding,
+    /// The Banner has the keyboard: Escape gives it back, and the choices'
+    /// keys are on their buttons.
+    GiveKeyboardBack,
 }
 
 /// Who a ringing Call is from, as the Banner and the Indicator both say it.
@@ -335,6 +392,28 @@ impl State {
         }
     }
 
+    /// The Call a Waiting Call's choices act on, given what the Banner
+    /// offers: the one on hold where Answer keeps it there, otherwise the
+    /// live Call, or the one still being placed.
+    fn other_call(&self, options: WaitingOptions) -> Option<OtherCall> {
+        let other = if options == WaitingOptions::Answer {
+            self.calls.iter().find(|call| call.state == CallState::Held)
+        } else {
+            self.calls
+                .iter()
+                .find(|call| call.state == CallState::Active)
+                .or_else(|| {
+                    self.calls
+                        .iter()
+                        .find(|call| matches!(call.state, CallState::Dialing | CallState::Alerting))
+                })
+        }?;
+        Some(OtherCall {
+            caller: other.caller.clone(),
+            contact: self.contact(&other.caller),
+        })
+    }
+
     /// The Call Window with `caller` and no Call in progress: one placed
     /// here on its way, ended, or not placed.
     fn callless_window(
@@ -369,14 +448,24 @@ impl State {
             .iter()
             .filter(|_| !self.calls_out_of_reach())
             .find(|call| call.rings_here())
-            .map(|call| BannerView {
-                call: call.id,
-                caller: self.ringing_caller(call),
-                focused: self.focus == Focus::Banner,
-                waiting: self
+            .map(|call| {
+                let waiting = self
                     .waiting_call()
                     .filter(|waiting| waiting.id == call.id)
-                    .map(|_| self.waiting_options()),
+                    .map(|_| self.waiting_options());
+                let focused = self.focus == Focus::Banner;
+                BannerView {
+                    call: call.id,
+                    caller: self.ringing_caller(call),
+                    focused,
+                    waiting,
+                    other: waiting.and_then(|options| self.other_call(options)),
+                    footer: if focused {
+                        Some(BannerFooter::GiveKeyboardBack)
+                    } else {
+                        self.keybinding.clone()
+                    },
+                }
             });
         // A refusal made beside a Call annotates it; a dial that failed on
         // its own has a Call Window of its own.

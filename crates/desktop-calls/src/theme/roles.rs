@@ -40,6 +40,8 @@ const STOCK_RED: Rgb = Rgb(0xc0, 0x1c, 0x28);
 const SELECTION_PERCENT: u8 = 10;
 /// How much foreground a surface's border takes, over the background.
 const BORDER_PERCENT: u8 = 30;
+/// How much of Answer's green rings the Banner's ringing dot.
+const ANSWER_RING_PERCENT: u8 = 30;
 /// How much of the warning colour a warning strip's fill takes.
 const WARNING_TINT_PERCENT: u8 = 14;
 /// How much text libadwaita mixes into a checked toggle's fill, hovered
@@ -192,6 +194,9 @@ pub(super) struct Roles {
     /// Answer: the green, in the least deeper or paler shade, if need be,
     /// that the call label reads on.
     pub(super) answer: Rgb,
+    /// The ring round the Banner's ringing dot: 30% of Answer's green over
+    /// the surface.
+    pub(super) answer_ring: Rgb,
     /// Decline, Hang up and End: the red, shaded as Answer's green is.
     pub(super) end: Rgb,
     /// One label for both Answer and End, so the pair looks alike: whichever
@@ -288,6 +293,7 @@ impl Roles {
             .weakest_readable_mix(text, &backgrounds)
             .unwrap_or_else(|| labels.on(&backgrounds));
         let call_label = call_label.unwrap_or_else(|| labels.on(&[answer, end]));
+        let answer = under_label(answer, call_label);
         Self {
             surface,
             raised,
@@ -296,7 +302,8 @@ impl Roles {
             border: surface.under(text, BORDER_PERCENT),
             accent,
             accent_label: labels.on(&[accent]),
-            answer: under_label(answer, call_label),
+            answer,
+            answer_ring: surface.under(answer, ANSWER_RING_PERCENT),
             end: under_label(end, call_label),
             call_label,
             missed: labels.readable(end, &[surface, selection]),

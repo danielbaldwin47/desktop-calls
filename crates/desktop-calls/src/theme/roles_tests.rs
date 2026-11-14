@@ -267,3 +267,100 @@ fn keycaps_read_at_full_strength_on_every_control_they_sit_on() {
         );
     }
 }
+
+/// How much text libadwaita 1.10 mixes into a button's fill at rest and
+/// under the pointer, over the surface.
+const ADWAITA_BUTTON_PERCENT: u8 = 10;
+const ADWAITA_HOVER_PERCENT: u8 = 15;
+
+#[test]
+fn a_checked_or_hovered_control_keeps_its_label_and_keycap_at_4_5_to_1() {
+    // A control's label and its keycap are drawn in text (#222), so both
+    // read wherever text reads on the control's fill.
+    for (theme, roles) in every_theme() {
+        assert_reads(
+            theme,
+            "the label and keycap of a control",
+            roles.text,
+            &[
+                ("checked fill", roles.checked),
+                ("checked and hovered fill", roles.checked_hover),
+                ("checked and pressed fill", roles.checked_pressed),
+                (
+                    "libadwaita's hovered fill",
+                    roles.surface.under(roles.text, ADWAITA_HOVER_PERCENT),
+                ),
+            ],
+        );
+    }
+}
+
+#[test]
+fn a_checked_toggle_still_reads_as_checked() {
+    // It carries clearly more text than libadwaita's resting fill, more
+    // even than its hovered one, wherever the floor caps it.
+    for (theme, roles) in every_theme() {
+        let rest = roles.surface.under(roles.text, ADWAITA_BUTTON_PERCENT);
+        let hover = roles.surface.under(roles.text, ADWAITA_HOVER_PERCENT);
+        let step = rest.contrast(hover);
+        let checked = rest.contrast(roles.checked);
+        assert!(
+            checked >= step * step,
+            "{theme}: the checked fill {} is {checked:.2}:1 off the resting {rest}, \
+             under two hover steps ({step:.2}:1 each)",
+            roles.checked
+        );
+    }
+}
+
+#[test]
+fn a_checked_fill_is_libadwaitas_where_its_label_reads_and_less_where_not() {
+    let gallery = Roles::omarchy(&palette(GALLERY_LIGHT));
+    assert_eq!(
+        gallery.checked,
+        gallery.surface.under(gallery.text, 30),
+        "libadwaita's 30%"
+    );
+    let gruvbox = Roles::omarchy(&palette(GRUVBOX));
+    assert_eq!(gruvbox.checked, Rgb(0x53, 0x4e, 0x44), "gruvbox: 25%");
+    assert_eq!(
+        gruvbox.checked_hover, gruvbox.checked,
+        "gruvbox: the floor caps hovered at the checked fill"
+    );
+}
+
+#[test]
+fn a_green_or_red_the_call_label_falls_short_on_takes_the_least_shade_that_reads() {
+    // Measured on #222: each moves only as far as 4.5:1 under the label.
+    let latte = Roles::omarchy(&palette(CATPPUCCIN_LATTE));
+    assert_eq!(
+        latte.call_label,
+        Rgb(0x00, 0x00, 0x00),
+        "black, as neither of latte's own reads"
+    );
+    assert_eq!(
+        latte.end,
+        Rgb(0xd9, 0x33, 0x57),
+        "latte's red #d20f39, 15% paler"
+    );
+    assert_eq!(latte.answer, Rgb(0x40, 0xa0, 0x2b), "latte's own green");
+    let rose_pine = Roles::omarchy(&palette(ROSE_PINE));
+    assert_eq!(
+        rose_pine.end,
+        Rgb(0xab, 0x5e, 0x74),
+        "rose-pine's red #b4637a, 5% deeper"
+    );
+    let gallery = Roles::omarchy(&palette(GALLERY_LIGHT));
+    assert_eq!(
+        gallery.answer,
+        Rgb(0x2c, 0x86, 0x42),
+        "the gallery's green #2f8f46, 6% deeper"
+    );
+    let stock = Roles::stock(false);
+    assert_eq!(
+        stock.answer,
+        Rgb(0x20, 0x86, 0x57),
+        "Adwaita's #26a269, 17% deeper"
+    );
+    assert_eq!(stock.end, Rgb(0xc0, 0x1c, 0x28), "Adwaita's own red");
+}

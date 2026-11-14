@@ -42,6 +42,12 @@ const SELECTION_PERCENT: u8 = 10;
 const BORDER_PERCENT: u8 = 30;
 /// How much of the warning colour a warning strip's fill takes.
 const WARNING_TINT_PERCENT: u8 = 14;
+/// How much text libadwaita mixes into a checked toggle's fill, hovered
+/// and pressed (libadwaita 1.10's `button:checked`). A checked fill takes
+/// no more than its label still reads on at 4.5:1.
+const CHECKED_PERCENT: u8 = 30;
+const CHECKED_HOVER_PERCENT: u8 = 35;
+const CHECKED_PRESSED_PERCENT: u8 = 40;
 
 /// What Desktop Calls takes from an Omarchy theme's `colors.toml`. A colour
 /// the theme lacks, or gives in a form other than `#rrggbb` or `#rgb`,
@@ -189,7 +195,9 @@ pub(super) struct Roles {
     /// Decline, Hang up and End: the red, shaded as Answer's green is.
     pub(super) end: Rgb,
     /// One label for both Answer and End, so the pair looks alike: whichever
-    /// of the theme's light and dark contrasts more on its green and red.
+    /// of the theme's surface and text colours contrasts more on its green
+    /// and red, or white or black where neither reads at 4.5:1 and one of
+    /// those contrasts more. White on stock Adwaita.
     pub(super) call_label: Rgb,
     /// "Missed", and any red text: the red, made readable on the surface
     /// and on a selected row.
@@ -204,6 +212,16 @@ pub(super) struct Roles {
     pub(super) warning_tint: Rgb,
     /// A selected row's fill, under a 3 px accent bar.
     pub(super) selection: Rgb,
+    /// A checked toggle's fill, such as Keypad's: libadwaita's 30% of text
+    /// over the surface, or less where its label and keycap would read
+    /// under 4.5:1.
+    pub(super) checked: Rgb,
+    /// A checked toggle's fill under the pointer: libadwaita's 35%, capped
+    /// as [`Self::checked`] is, so where the cap bites it equals it.
+    pub(super) checked_hover: Rgb,
+    /// A checked toggle's fill while pressed: libadwaita's 40%, capped
+    /// likewise.
+    pub(super) checked_pressed: Rgb,
 }
 
 impl Roles {
@@ -285,8 +303,21 @@ impl Roles {
             warning_text: labels.readable(warning, &[surface, warning_tint]),
             warning_tint,
             selection,
+            checked: fill_under(surface, text, CHECKED_PERCENT),
+            checked_hover: fill_under(surface, text, CHECKED_HOVER_PERCENT),
+            checked_pressed: fill_under(surface, text, CHECKED_PRESSED_PERCENT),
         }
     }
+}
+
+/// Up to `percent` of `label` over `surface`, as much as the label still
+/// reads on at 4.5:1: a control's fill under its own label.
+fn fill_under(surface: Rgb, label: Rgb, percent: u8) -> Rgb {
+    (0..=percent)
+        .rev()
+        .map(|percent| surface.under(label, percent))
+        .find(|fill| label.reads_on(&[*fill]))
+        .unwrap_or(surface)
 }
 
 /// `fill` as a button under `label`: itself if the label reads on it, else

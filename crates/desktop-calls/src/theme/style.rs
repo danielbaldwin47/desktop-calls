@@ -120,6 +120,13 @@ window.desktop-calls-surface.has-keyboard { box-shadow: inset 0 0 0 2px var(--dc
 window.desktop-calls-surface.muted,
 window.desktop-calls-surface.contact-lost { box-shadow: inset 0 0 0 2px var(--dc-warning); }
 
+.desktop-calls-surface button:checked { background-color: var(--dc-checked); }
+.desktop-calls-surface button:checked:hover { background-color: var(--dc-checked-hover); }
+.desktop-calls-surface button:checked:active,
+.desktop-calls-surface button:checked.keyboard-activating {
+    background-color: var(--dc-checked-pressed);
+}
+
 .desktop-calls-surface button.answer { background: var(--dc-answer); color: var(--dc-call-label); }
 .desktop-calls-surface button.decline,
 .desktop-calls-surface button.hang-up { background: var(--dc-end); color: var(--dc-call-label); }
@@ -165,6 +172,9 @@ pub(super) fn css(
         ("warning-text", roles.warning_text),
         ("warning-tint", roles.warning_tint),
         ("selection", roles.selection),
+        ("checked", roles.checked),
+        ("checked-hover", roles.checked_hover),
+        ("checked-pressed", roles.checked_pressed),
     ] {
         let _ = writeln!(css, "  --dc-{variable}: {colour};");
     }
@@ -212,5 +222,28 @@ mod tests {
             !rule(&css, ".type-who.number").contains("font-weight"),
             "a bare number keeps Who's weight, 650"
         );
+    }
+
+    #[test]
+    fn a_checked_toggle_takes_the_checked_fills_not_libadwaitas() {
+        // libadwaita's 30% text fill leaves a checked toggle's label under
+        // 4.5:1 in some themes; the roles cap it (#222).
+        let css = css(&Roles::stock(false), &[], None);
+        for (selector, role) in [
+            (".desktop-calls-surface button:checked", "--dc-checked)"),
+            (
+                ".desktop-calls-surface button:checked:hover",
+                "--dc-checked-hover)",
+            ),
+            (
+                ".desktop-calls-surface button:checked.keyboard-activating",
+                "--dc-checked-pressed)",
+            ),
+        ] {
+            assert!(
+                rule(&css, selector).contains(role),
+                "{selector} takes {role}"
+            );
+        }
     }
 }

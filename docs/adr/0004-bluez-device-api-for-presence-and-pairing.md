@@ -1,5 +1,5 @@
 ---
-status: amended by ADR-0005
+status: amended by ADR-0005 and ADR-0008
 ---
 
 # BlueZ's device API is allowed for presence and pairing, but never for hands-free

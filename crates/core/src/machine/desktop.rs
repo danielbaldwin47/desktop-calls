@@ -193,7 +193,7 @@ pub(super) fn checked(state: &mut State, check: DesktopCheck, effects: &mut Vec<
     // While it is off, nothing is connected: see `wants_phone`.
     if bluetooth_was_off && !state.desktop.bluetooth_off() {
         setup::bluetooth_on(state, effects);
-        presence::bluetooth_on(state, effects);
+        presence::connect_again_at_once(state, effects);
     }
 }
 

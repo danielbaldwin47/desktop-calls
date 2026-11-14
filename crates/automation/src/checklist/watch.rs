@@ -44,6 +44,8 @@ pub struct AppState {
     pub surfaces: BTreeMap<String, BTreeMap<String, String>>,
     /// Every `MissedCall` signal since watching began, oldest first.
     pub missed_calls: Vec<AppMissedCall>,
+    /// "off" while calls are off, else "on".
+    pub calls_off: String,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -123,6 +125,7 @@ impl AppState {
             "Muted" => self.muted = bool::try_from(value)?,
             "Codec" => (self.codec, self.wideband) = <(String, bool)>::try_from(value)?,
             "Surfaces" => self.surfaces = BTreeMap::try_from(value)?,
+            "CallsOff" => self.calls_off = <(String, u64, bool)>::try_from(value)?.0,
             _ => {}
         }
         Ok(())

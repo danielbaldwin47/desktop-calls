@@ -457,6 +457,31 @@ async fn device_path(system: &Connection, address: &str) -> Result<String, Bounc
 }
 
 /// The object path of BlueZ's device with `address`, if it has one.
+/// Blocks (`blocked`) or unblocks the Phone with `address` with BlueZ's
+/// `Device1.Blocked`, for Calls Off (ADR-0008): blocked, BlueZ drops it at
+/// once and refuses its connections.
+///
+/// # Errors
+///
+/// BlueZ has no device for the Phone, or refused.
+pub async fn set_blocked(system: &Connection, address: &str, blocked: bool) -> zbus::Result<()> {
+    let Some(device) = find_device(system, address).await? else {
+        return Err(zbus::Error::Failure(
+            "BlueZ has no device for the Phone".to_owned(),
+        ));
+    };
+    system
+        .call_method(
+            Some(SERVICE),
+            device.as_str(),
+            Some("org.freedesktop.DBus.Properties"),
+            "Set",
+            &(DEVICE, "Blocked", zbus::Variant::from(blocked)),
+        )
+        .await
+        .map(drop)
+}
+
 pub(crate) async fn find_device(
     system: &Connection,
     address: &str,

@@ -93,6 +93,14 @@ trait SimulatedPhone1 {
     fn pairing_requests(&self) -> zbus::Result<Vec<(u32, String)>>;
 
     fn set_hands_free(&self, mode: &str) -> zbus::Result<()>;
+
+    fn page_desktop(&self) -> zbus::Result<bool>;
+
+    #[zbus(property)]
+    fn blocked_calls(&self) -> zbus::Result<(u32, u32)>;
+
+    #[zbus(property)]
+    fn blocked(&self) -> zbus::Result<bool>;
 }
 
 /// One method call the Simulated Phone received.
@@ -570,6 +578,43 @@ impl SimulatedPhone<'_> {
     pub fn most_pbap_sessions_at_once(&self) -> u32 {
         zbus::block_on(async { self.proxy().await?.most_pbap_sessions_at_once().await })
             .expect("read the Simulated Phone's PBAP session count")
+    }
+
+    /// Pages the Desktop and connects, as the Phone does by itself, and
+    /// returns whether the Desktop took the page: not while it has the Phone
+    /// blocked (`Device1.Blocked`), which BlueZ refuses.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    #[must_use]
+    pub fn page_desktop(&self) -> bool {
+        zbus::block_on(async { self.proxy().await?.page_desktop().await })
+            .expect("tell the Simulated Phone to page the Desktop")
+    }
+
+    /// How many `Connect` and `ConnectProfile` calls for the Phone came
+    /// while the Desktop had it blocked.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't answer.
+    #[must_use]
+    pub fn connects_while_blocked(&self) -> u32 {
+        zbus::block_on(async { self.proxy().await?.blocked_calls().await })
+            .expect("read the Simulated Phone's blocked calls")
+            .0
+    }
+
+    /// Whether the Phone's device is blocked (`Device1.Blocked`).
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone doesn't answer.
+    #[must_use]
+    pub fn blocked(&self) -> bool {
+        zbus::block_on(async { self.proxy().await?.blocked().await })
+            .expect("read whether the Simulated Phone is blocked")
     }
 
     /// Makes the Phone report this hands-free microphone gain, as `+VGM`

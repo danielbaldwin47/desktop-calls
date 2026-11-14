@@ -30,6 +30,9 @@ pub struct LogLine {
     /// Where the line says the Call audio is, or was asked to go, if it
     /// says: "desktop" or "phone".
     pub audio_location: Option<String>,
+    /// What BlueZ said, on a line about a failed request, such as
+    /// "br-connection-busy".
+    pub detail: Option<String>,
 }
 
 impl LogLine {
@@ -105,6 +108,7 @@ fn journal_line(text: &str) -> Option<LogLine> {
         surface: value["SURFACE"].as_str().map(str::to_owned),
         connection_state: value["CONNECTION_STATE"].as_str().map(str::to_owned),
         audio_location: value["AUDIO_LOCATION"].as_str().map(str::to_owned),
+        detail: value["DETAIL"].as_str().map(str::to_owned),
     })
 }
 
@@ -125,5 +129,6 @@ fn file_line(text: &str) -> Option<LogLine> {
         surface: value["surface"].as_str().map(str::to_owned),
         connection_state: value["connection_state"].as_str().map(str::to_owned),
         audio_location: value["audio_location"].as_str().map(str::to_owned),
+        detail: value["detail"].as_str().map(str::to_owned),
     })
 }

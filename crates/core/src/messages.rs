@@ -13,9 +13,11 @@ use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
+mod calls_off;
 mod checks;
 mod problems;
 mod setup;
+pub use calls_off::{calls_off_status, calls_off_until_unknown, calls_turned};
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use setup::{SetupWindowText, setup_window};
@@ -113,6 +115,15 @@ pub enum Failure {
     /// Hold & Answer or End & Answer while the only other Call is on hold:
     /// there is no live Call to hold or end.
     NothingToHoldOrEnd,
+    /// A Call placed while calls are off: the Phone isn't connected.
+    CallsOff,
+    /// Calls turned off while a Call rings, is live, held, waiting or being
+    /// placed, until a turn-off can wait for it (ticket #204).
+    CallsOffDuringCall,
+    /// BlueZ didn't block the Phone, so calls are still on.
+    CallsOffFailed,
+    /// BlueZ didn't unblock the Phone, so calls are still off.
+    CallsOnFailed,
 }
 
 impl Failure {
@@ -159,6 +170,10 @@ impl Failure {
             Self::WaitingCallFirst => "waiting-call-first",
             Self::AlreadyHolding => "already-holding",
             Self::NothingToHoldOrEnd => "nothing-to-hold-or-end",
+            Self::CallsOff => "calls-off",
+            Self::CallsOffDuringCall => "calls-off-during-call",
+            Self::CallsOffFailed => "calls-off-failed",
+            Self::CallsOnFailed => "calls-on-failed",
         }
     }
 }
@@ -310,6 +325,22 @@ pub fn failure(failure: Failure) -> Message {
             "Your other Call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
             None,
         ),
+        Failure::CallsOff => (
+            "Calls are off, so your phone isn't connected; turn calls on to call.",
+            Some(NextAction::Command("desktop-calls calls on")),
+        ),
+        Failure::CallsOffDuringCall => (
+            "Calls can't be turned off during a Call; turn them off once it has ended.",
+            None,
+        ),
+        Failure::CallsOffFailed => (
+            "Calls couldn't be turned off: Bluetooth didn't disconnect your phone. Try again.",
+            None,
+        ),
+        Failure::CallsOnFailed => (
+            "Calls couldn't be turned on: Bluetooth didn't let your phone connect again. Try again.",
+            None,
+        ),
     };
     Message { text, next_action }
 }
@@ -320,6 +351,7 @@ pub fn failure(failure: Failure) -> Message {
 pub fn indicator_status(status: &IndicatorStatus) -> String {
     match status {
         IndicatorStatus::NoPhone => "No Phone set up".to_owned(),
+        IndicatorStatus::CallsOff => calls_off::CALLS_OFF.to_owned(),
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
         IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),
@@ -363,6 +395,9 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
         IndicatorEntry::ConnectPhone => "Connect your phone…".to_owned(),
         IndicatorEntry::Separator => String::new(),
+        IndicatorEntry::TurnCallsOff { .. } => calls_off::TURN_CALLS_OFF.to_owned(),
+        IndicatorEntry::CallsOffUntilTurnedOn => calls_off::UNTIL_TURNED_ON.to_owned(),
+        IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),

@@ -153,5 +153,6 @@ fn expected_json(state: &AppState) -> serde_json::Value {
     serde_json::json!({
         "connection_state": state.connection_state,
         "phone": phone,
+        "calls_off": { "state": state.calls_off, "until": 0, "pending": false },
     })
 }

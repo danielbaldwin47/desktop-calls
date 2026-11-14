@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use zbus::{MessageStream, OwnedObjectPath};
 
+use crate::serve::serve;
 use crate::telephony::Signal;
-use crate::{Service, SharedWorld, TelephonyConnection, lock, serve, telephony};
+use crate::{Service, SharedWorld, TelephonyConnection, lock, telephony};
 
 /// How long after the AudioGateway the restarted service registers its
 /// Calls, as on the real Pixel.

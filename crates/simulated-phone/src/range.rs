@@ -25,6 +25,8 @@
 //!   and `org.bluez.Error.AlreadyConnected` never.
 //! - With the quirk `connect-never-answers-once`, the next `Connect` for
 //!   the Phone is never answered and changes nothing (ticket #216).
+//! - A `Connect` for the Phone while it is blocked is answered by
+//!   [`crate::blocked`].
 
 use std::time::{Duration, Instant};
 
@@ -235,6 +237,22 @@ pub fn hands_free_down(world: &mut World) -> zbus::Result<Option<Change>> {
     );
     change.bluez(connected_changed(&device, false));
     Ok(Some(change))
+}
+
+/// Drops the Phone's link while hands-free is down: BlueZ marks it
+/// disconnected, if it was connected.
+pub fn link_down(world: &mut World) -> zbus::Result<Change> {
+    let device = bluez::device_path(&world.phone_address)?;
+    let mut change = Change::default();
+    if world.bluez.set(
+        &device,
+        bluez::DEVICE,
+        "Connected",
+        OwnedVariant::from(false),
+    ) {
+        change.bluez(connected_changed(&device, false));
+    }
+    Ok(change)
 }
 
 /// Connects the Phone without hands-free, as a Phone that doesn't share
@@ -462,6 +480,8 @@ fn connect(
                 "org.bluez.Error.InProgress",
                 "In Progress".to_owned(),
             ))
+        } else if let Some(busy) = crate::blocked::busy(&mut world) {
+            Some(busy)
         } else {
             world.range.connecting = true;
             None

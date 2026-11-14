@@ -148,6 +148,7 @@ fn idle_the_menu_offers_the_status_and_the_dialer() {
             "Open Dialer",
             "Turn calls off",
             "Quiet Hours…",
+            "---",
             "Connect your phone…"
         ]
     );
@@ -163,13 +164,13 @@ fn during_a_call_the_menu_mutes_and_hangs_up_as_the_call_window_does() {
         [
             IN_CALL,
             "Open Dialer",
+            "Mute",
+            "Move audio to phone",
+            "Hang up",
             "Turn calls off",
             "Quiet Hours…",
-            "Connect your phone…",
             "---",
-            "Hang up",
-            "Mute",
-            "Move audio to phone"
+            "Connect your phone…"
         ]
     );
 

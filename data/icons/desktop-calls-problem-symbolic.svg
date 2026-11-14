@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <!-- The Indicator: connected, and a Problem needs fixing. The phone, moved left, with an exclamation mark beside it. -->
-  <path fill="#bebebe" fill-rule="evenodd" d="M3 1h3.5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zM2.6 2.6v9.2h4.3V2.6zM4.75 12.6a0.9 0.9 0 1 0 0.01 0z"/>
-  <path fill="none" stroke="#bebebe" stroke-width="2" stroke-linecap="round" d="M12.6 2.5v6.5"/>
-  <circle fill="#bebebe" cx="12.6" cy="13.2" r="1.25"/>
+  <!-- The Indicator: a Problem needs fixing. The phone, moved left, with a filled badge over its top right corner and a gap around the badge. -->
+  <mask id="gap">
+    <rect width="16" height="16" fill="#fff"/>
+    <circle fill="#000" cx="12" cy="4" r="4.2"/>
+  </mask>
+  <path mask="url(#gap)" fill="#bebebe" fill-rule="evenodd" d="M4 1h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zM3.6 2.6v9.2h4.8V2.6zM6 12.6a0.9 0.9 0 1 0 0.01 0z"/>
+  <circle fill="#bebebe" cx="12" cy="4" r="3"/>
 </svg>

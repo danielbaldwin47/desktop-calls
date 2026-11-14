@@ -1,14 +1,19 @@
-//! The Indicator's states in the gallery, drawn as Omarchy's bar draws
-//! its icon, light and dark, each with its menu as the app publishes it.
-//! The menu is listed as text, a stand-in until the gallery draws it in
-//! Omarchy's menu style (ticket #229).
+//! The Indicator in the gallery, light and dark: its icon in each state,
+//! drawn as Omarchy's bar draws it, and its menu in four states, drawn as
+//! Omarchy's tray draws it from the layout the app publishes. Omarchy's
+//! shell draws the real menu; the gallery runs none, so the menu is a
+//! stand-in, and its caption says so.
 
-use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use test_harness::{Harness, MenuEntry, OmarchyTheme, draw_tray_icon};
+use test_harness::{Builder, Harness, MenuColours, OmarchyTheme, draw_tray_icon, draw_tray_menu};
 
+use super::quiet_hours_window::at_noon;
 use super::{DEADLINE, Look, NUMBER, connect};
+
+/// The Indicator's title, which Omarchy's tray matches a menu's first
+/// entry against.
+const TITLE: &str = "Desktop Calls";
 
 /// One state of the Indicator the gallery shows.
 pub(super) struct IndicatorState {
@@ -16,99 +21,140 @@ pub(super) struct IndicatorState {
     pub(super) name: &'static str,
     /// The caption.
     pub(super) title: &'static str,
+    /// Sets the scenario up before it starts.
+    prepare: fn(Builder) -> Builder,
     /// Brings the scenario into the state.
     reach: fn(&Harness),
     /// What the Indicator's tooltip says once it shows the state.
     tooltip: &'static str,
+    /// For a menu state, the label of the entry whose submenu is open.
+    submenu: Option<&'static str>,
 }
 
 /// The Indicator is drawn in Omarchy's light and dark themes.
 pub(super) const INDICATOR_THEMES: [OmarchyTheme; 2] = [OmarchyTheme::Light, OmarchyTheme::Dark];
 
+/// The scenario's own setup, for a state that needs none.
+fn as_is(builder: Builder) -> Builder {
+    builder
+}
+
+/// A live Call, answered here.
+fn live(harness: &Harness) {
+    connect(harness);
+    let _path = harness.simulated_phone().ring(NUMBER);
+    let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    harness.answer(state.calls.first().map_or(0, |call| call.id));
+    harness.wait_for_app("the Call is live", DEADLINE, |state| {
+        state
+            .calls
+            .first()
+            .is_some_and(|call| call.state == "active")
+    });
+}
+
+/// Contacts not shared: a Problem, with the Phone connected.
+fn problem(harness: &Harness) {
+    harness.simulated_phone().set_contacts_prompt("deny");
+    harness.simulated_phone().connect();
+}
+
+/// Quiet Hours from 22:00 to 07:00, which the app at noon isn't in.
+fn quiet_hours(harness: &Harness) {
+    if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
+        panic!("SetQuietHours: {error:?}");
+    }
+    // The Indicator shows each state before the control interface does.
+    harness.wait_for_app("Quiet Hours are set", DEADLINE, |state| {
+        state.quiet_hours == Some((22 * 60, 7 * 60))
+    });
+}
+
+/// The icon's states.
 pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
     IndicatorState {
         name: "connected",
         title: "The Indicator, the Phone connected",
+        prepare: as_is,
         reach: |harness| harness.simulated_phone().connect(),
         tooltip: "Simulated Pixel connected",
+        submenu: None,
     },
     IndicatorState {
         name: "disconnected",
-        title: "The Indicator, the Phone out of range",
+        title: "The Indicator, the Phone out of range: a dashed outline",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().disconnect();
         },
         tooltip: "Simulated Pixel out of range",
+        submenu: None,
     },
     IndicatorState {
         name: "ringing",
         title: "The Indicator, a Call ringing",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let _path = harness.simulated_phone().ring(NUMBER);
         },
         tooltip: "Call from +44 7700 900123",
+        submenu: None,
     },
     IndicatorState {
         name: "in-call",
         title: "The Indicator, in a Call",
-        reach: |harness| {
-            connect(harness);
-            let _path = harness.simulated_phone().ring(NUMBER);
-            let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
-            harness.answer(state.calls.first().map_or(0, |call| call.id));
-        },
+        prepare: as_is,
+        reach: live,
         tooltip: "In a Call with +44 7700 900123",
+        submenu: None,
     },
     IndicatorState {
         name: "calls-off-pending",
         title: "The Indicator, in a Call, with calls turning off when it ends",
+        prepare: as_is,
         reach: |harness| {
-            connect(harness);
-            let _path = harness.simulated_phone().ring(NUMBER);
-            let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
-            harness.answer(state.calls.first().map_or(0, |call| call.id));
-            harness.wait_for_app("the Call is live", DEADLINE, |state| {
-                state
-                    .calls
-                    .first()
-                    .is_some_and(|call| call.state == "active")
-            });
+            live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
         tooltip: "Calls turn off when this Call ends",
+        submenu: None,
     },
     IndicatorState {
         name: "problem",
-        title: "The Indicator, a Problem: Contacts not shared",
-        reach: |harness| {
-            harness.simulated_phone().set_contacts_prompt("deny");
-            harness.simulated_phone().connect();
-        },
+        title: "The Indicator, a Problem (Contacts not shared): a filled badge",
+        prepare: as_is,
+        reach: problem,
         tooltip: "Simulated Pixel connected · Contacts not shared",
+        submenu: None,
     },
     IndicatorState {
         name: "off",
-        title: "The Indicator, calls off",
+        title: "The Indicator, calls off: a full diagonal",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
         tooltip: "Calls off",
+        submenu: None,
     },
     IndicatorState {
         name: "off-until-morning",
         title: "The Indicator, calls off until tomorrow morning",
+        prepare: as_is,
         reach: |harness| {
             connect(harness);
             let _output = harness.cli(&["calls", "off", "--until-morning"]);
         },
         tooltip: "Calls off until 07:00",
+        submenu: None,
     },
     IndicatorState {
         name: "off-quiet-hours",
         title: "The Indicator, calls off for Quiet Hours",
+        prepare: as_is,
         // Under way at any time but the day's last minute, in whichever
         // time zone the gallery runs.
         reach: |harness| {
@@ -116,49 +162,78 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             let _output = harness.cli(&["quiet-hours", "00:00-23:59"]);
         },
         tooltip: "Calls off until 23:59 (quiet hours)",
+        submenu: None,
     },
 ];
 
-/// Where the menu of the Indicator in `state` is listed.
-pub(super) fn menu_path(state: &IndicatorState, output: &std::path::Path) -> PathBuf {
-    output.join(format!("indicator-{}-menu.txt", state.name))
-}
-
-/// `entries` as text, one line each: a submenu's entries indented under
-/// it, a separator as a rule, and a disabled entry in brackets.
-fn menu_text(entries: &[MenuEntry], depth: usize, text: &mut String) {
-    for entry in entries {
-        let indent = "    ".repeat(depth);
-        let line = if entry.separator {
-            "────────".to_owned()
-        } else if entry.enabled {
-            entry.label.clone()
-        } else {
-            format!("[{}]", entry.label)
-        };
-        let _ = writeln!(text, "{indent}{line}");
-        menu_text(&entry.children, depth + 1, text);
-    }
-}
+/// The menu's states: the stand-in for the menu Omarchy's tray draws.
+pub(super) const MENU_STATES: &[IndicatorState] = &[
+    IndicatorState {
+        name: "menu-calls-on",
+        title: "The Indicator's menu, calls on, with Quiet Hours set",
+        prepare: at_noon,
+        reach: |harness| {
+            connect(harness);
+            quiet_hours(harness);
+        },
+        tooltip: "Simulated Pixel connected",
+        submenu: None,
+    },
+    IndicatorState {
+        name: "menu-turn-off-choices",
+        title: "The Indicator's menu, Turn calls off opened: how long for",
+        prepare: at_noon,
+        reach: connect,
+        tooltip: "Simulated Pixel connected",
+        submenu: Some("Turn calls off"),
+    },
+    IndicatorState {
+        name: "menu-off-problem",
+        title: "The Indicator's menu, calls off, with a Problem (Contacts not shared)",
+        prepare: at_noon,
+        reach: |harness| {
+            problem(harness);
+            harness.wait_for_app("the Problem is reported", DEADLINE, |state| {
+                !state.problems.is_empty()
+            });
+            let _output = harness.cli(&["calls", "off"]);
+        },
+        tooltip: "Calls off · Contacts not shared",
+        submenu: None,
+    },
+    IndicatorState {
+        name: "menu-calls-off-pending",
+        title: "The Indicator's menu, in a Call, with calls turning off when it ends",
+        prepare: at_noon,
+        reach: |harness| {
+            live(harness);
+            let _output = harness.cli(&["calls", "off"]);
+        },
+        tooltip: "Calls turn off when this Call ends",
+        submenu: None,
+    },
+];
 
 /// Where the Indicator in `state` under `theme` is drawn.
 pub(super) fn indicator_path(
     state: &IndicatorState,
     theme: OmarchyTheme,
-    output: &std::path::Path,
+    output: &Path,
 ) -> PathBuf {
     output.join(format!("indicator-{}-{}.png", state.name, theme.as_str()))
 }
 
-/// Brings a scenario under `theme` into `state` and draws the Indicator
-/// as Omarchy's bar shows it, in the theme's background and foreground,
-/// at its `indicator_path`.
+/// Brings a scenario under `theme` into `state` and draws, at its
+/// `indicator_path`, the Indicator as Omarchy shows it: for a menu state
+/// its menu, as the app publishes it, in the theme's colours; otherwise
+/// its icon on a strip of bar.
 pub(super) fn draw_indicator(
     state: &IndicatorState,
     theme: OmarchyTheme,
-    output: &std::path::Path,
+    menu: bool,
+    output: &Path,
 ) -> Result<(), String> {
-    let harness = Look::Omarchy(theme).builder().start();
+    let harness = (state.prepare)(Look::Omarchy(theme).builder()).start();
     (state.reach)(&harness);
     let items = harness.tray().wait_for(
         &format!("the Indicator says {:?}", state.tooltip),
@@ -169,16 +244,21 @@ pub(super) fn draw_indicator(
                 .any(|item| item.tooltip.as_deref() == Some(state.tooltip))
         },
     );
-    let mut menu = String::new();
-    menu_text(&harness.tray().menu(), 0, &mut menu);
-    std::fs::write(menu_path(state, output), menu)
-        .map_err(|error| format!("write the menu of {}: {error}", state.name))?;
     let path = indicator_path(state, theme, output);
-    let item = items.first().ok_or("no tray item")?;
-    draw_tray_icon(
-        item,
-        theme.colour("background"),
-        theme.colour("foreground"),
-        &path,
-    )
+    if menu {
+        let colours = MenuColours {
+            background: theme.colour("background"),
+            foreground: theme.colour("foreground"),
+            separator: theme.colour("accent"),
+        };
+        draw_tray_menu(&harness.tray().menu(), TITLE, state.submenu, colours, &path)
+    } else {
+        let item = items.first().ok_or("no tray item")?;
+        draw_tray_icon(
+            item,
+            theme.colour("background"),
+            theme.colour("foreground"),
+            &path,
+        )
+    }
 }

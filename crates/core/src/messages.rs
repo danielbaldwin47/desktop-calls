@@ -421,7 +421,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::CallsOffUntilMorning(until) => calls_off::until_morning(until.shown),
         IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::KeepCallsOn => calls_off::KEEP_CALLS_ON.to_owned(),
-        IndicatorEntry::QuietHours => quiet_hours::MENU_ENTRY.to_owned(),
+        IndicatorEntry::QuietHours(hours) => quiet_hours::menu_entry(*hours),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),

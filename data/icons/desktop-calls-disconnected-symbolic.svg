@@ -1,5 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <!-- The Indicator: the Phone not connected. The phone, moved left, with a cross beside it. -->
-  <path fill="#bebebe" fill-rule="evenodd" d="M3 1h3.5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zM2.6 2.6v9.2h4.3V2.6zM4.75 12.6a0.9 0.9 0 1 0 0.01 0z"/>
-  <path fill="none" stroke="#bebebe" stroke-width="1.7" stroke-linecap="round" d="M10.6 8.6l4 4M14.6 8.6l-4 4"/>
+  <!-- The Indicator: the Phone not connected (out of range, not yet connected, or none set up). The connected phone's outline, dashed, with nothing inside: there but not here. -->
+  <path fill="none" stroke="#bebebe" stroke-width="1.6" stroke-dasharray="2.4 1.6" d="M8 1.8h1.8a1.4 1.4 0 0 1 1.4 1.4v9.6a1.4 1.4 0 0 1-1.4 1.4H6.2a1.4 1.4 0 0 1-1.4-1.4V3.2a1.4 1.4 0 0 1 1.4-1.4z"/>
 </svg>

@@ -2,8 +2,8 @@
 
 use super::call_window::notice_label;
 use super::{
-    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame, class,
-    has_command_modifier, now, utc_offset_seconds,
+    Anchor, DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame,
+    class, has_command_modifier, now, utc_offset_seconds,
 };
 use crate::logging::EventKind;
 use desktop_calls_core::matching::{DialerRow, DialerRowKind};
@@ -12,7 +12,7 @@ use desktop_calls_core::{CallHistoryKind, Caller, DialerView, Input, Timestamp};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
+use gtk4_layer_shell::{KeyboardMode, Layer};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -40,6 +40,7 @@ impl Dialer {
     pub(super) fn new(intents: &UnboundedSender<Input>, report: SharedReport) -> Rc<Self> {
         let surface = Surface::new(
             "dialer",
+            Anchor::Centre,
             Layer::Overlay,
             KeyboardMode::Exclusive,
             Some(Input::CloseDialer),
@@ -47,14 +48,6 @@ impl Dialer {
             report,
         );
         surface.window.set_default_size(DIALER_WIDTH, -1);
-        if gtk4_layer_shell::is_supported() {
-            // Anchored to no edge, the compositor centres it in the space
-            // other surfaces' exclusive zones (the bar's) leave.
-            for edge in [Edge::Top, Edge::Right] {
-                surface.window.set_anchor(edge, false);
-                surface.window.set_margin(edge, 0);
-            }
-        }
         let entry = gtk::Entry::new();
         entry.add_css_class("dialer-entry");
         entry.set_placeholder_text(Some(messages::label(Label::DialerPlaceholder)));

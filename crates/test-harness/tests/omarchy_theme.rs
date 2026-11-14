@@ -32,8 +32,11 @@ const ADWAITA_LIGHT_WINDOW: [u8; 3] = [0xfa, 0xfa, 0xfb];
 /// The stock Answer button's green.
 const STOCK_GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 
-/// The Banner's corner radius once Hyprland rounds windows.
-const ROUNDING: u32 = 12;
+/// The Banner's corner radius once Hyprland rounds windows: round enough
+/// that [`corner`]'s pixel is clear of the curve's blended edge wherever
+/// the Banner's edges fall between screen pixels. At 12, the Banner's place
+/// flush top right puts that pixel on the blend.
+const ROUNDING: u32 = 20;
 
 fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
     colour

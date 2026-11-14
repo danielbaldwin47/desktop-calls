@@ -169,7 +169,7 @@ pub(super) fn call_pill(sitting: &mut Sitting) -> Result<(), Stop> {
                 .to_owned()
         },
     );
-    let _ = acts_on_call_window(
+    let expanded = acts_on_call_window(
         sitting,
         call,
         Act {
@@ -178,25 +178,42 @@ pub(super) fn call_pill(sitting: &mut Sitting) -> Result<(), Stop> {
             done: expanded_with_keyboard,
             passed: "A click on the Call Pill expanded the Call Window with the keyboard in it.",
         },
-    )? && acts_on_call_window(
-        sitting,
-        call,
-        Act {
-            request: "Press Escape.",
-            demo_action: "escape",
-            done: |state| state.shows("call-pill") && !state.shows("call-window"),
-            passed: "Escape collapsed the Call Window to the Call Pill.",
-        },
-    )? && acts_on_call_window(
-        sitting,
-        call,
-        Act {
-            request: "Press your Desktop Calls keybinding.",
-            demo_action: "keybinding",
-            done: expanded_with_keyboard,
-            passed: "The keybinding expanded the Call Window with the keyboard in it.",
-        },
     )?;
+    if expanded {
+        let in_place = sitting.ask(
+            "Did the Call Window open where the Call Pill was, in the bottom-right corner, with its bottom-right corner where the Call Pill's was?",
+        )?;
+        sitting.check(
+            in_place,
+            if in_place {
+                "The Call Window opened where the Call Pill was, in the bottom-right corner."
+                    .to_owned()
+            } else {
+                "The Call Window didn't open where the Call Pill was.".to_owned()
+            },
+        );
+    }
+    let _ = expanded
+        && acts_on_call_window(
+            sitting,
+            call,
+            Act {
+                request: "Press Escape.",
+                demo_action: "escape",
+                done: |state| state.shows("call-pill") && !state.shows("call-window"),
+                passed: "Escape collapsed the Call Window to the Call Pill.",
+            },
+        )?
+        && acts_on_call_window(
+            sitting,
+            call,
+            Act {
+                request: "Press your Desktop Calls keybinding.",
+                demo_action: "keybinding",
+                done: expanded_with_keyboard,
+                passed: "The keybinding expanded the Call Window with the keyboard in it.",
+            },
+        )?;
     call_ends(sitting, call, "Hang up.", &["hang-up"])?;
     Ok(())
 }

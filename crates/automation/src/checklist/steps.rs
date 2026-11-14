@@ -28,7 +28,7 @@ use incoming::{
     do_not_disturb, keybinding,
 };
 use keyboard_and_look::{
-    banner_beside_a_notification, dialer_first_frame, indicator_in_the_bar, keyboard_only_call,
+    banner_over_a_notification, dialer_first_frame, indicator_in_the_bar, keyboard_only_call,
 };
 use missed_calls::{ring_out, withheld_ring_out};
 use range_and_power::{
@@ -225,7 +225,7 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "3.4",
                 needs: &[HELPER, KEYBINDING],
-                title: "On a real Call, the Call Window collapses to the Call Pill about 5 s after it connects; click the Call Pill to expand it; press Escape to collapse it; press the keybinding to expand it again",
+                title: "On a real Call, the Call Window collapses to the Call Pill about 5 s after it connects; click the Call Pill to expand it where the Call Pill was, in the bottom-right corner; press Escape to collapse it; press the keybinding to expand it again",
                 script: Some(call_pill),
                 lands_with: &[],
             },
@@ -347,8 +347,8 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "7.2",
                 needs: &[HELPER, NOTIFICATIONS],
-                title: "The Banner beside a real notification: neither covers the other",
-                script: Some(banner_beside_a_notification),
+                title: "The Banner flush top right over a real notification: in full above it while it rings, and the notification in view once it goes",
+                script: Some(banner_over_a_notification),
                 lands_with: &[],
             },
             Step {

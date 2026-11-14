@@ -497,6 +497,11 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
         show_deadline(),
     );
     harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
+    // GTK's first frame on a later refresh than the Dialer's first is
+    // costly, which made the first keystroke the slowest: 22 ms against 4 ms
+    // here, and 48.5 ms under CI's load (ticket #249). The Dialer draws that
+    // frame unasked one refresh after it shows, before a person can react.
+    let _ = harness.wait_for_app_log(r#""event_kind":"dialer-redrawn-after-shown""#, DEADLINE);
 
     let mut query = String::new();
     let mut slowest = Duration::ZERO;

@@ -4,8 +4,8 @@
 //! loses the Bluetooth connection mid-Call.
 
 use desktop_calls_core::{
-    CallId, CallState, CallWindowPhase, Caller, ConnectFailure, ConnectionState, Effect, Input,
-    Phone, PhoneCommand, State, Timer, Timestamp,
+    BluetoothPower, CallId, CallState, CallWindowPhase, Caller, ConnectFailure, ConnectionState,
+    DesktopCheck, Effect, Input, Phone, PhoneCommand, State, Timer, Timestamp,
     messages::{Failure, ProblemKind, indicator_tooltip},
     step,
 };
@@ -323,6 +323,78 @@ fn resuming_while_a_connect_is_under_way_connects_again_as_soon_as_it_fails() {
 
     assert_eq!(connects(&effects), 1);
     assert!(reconnect_waits(&effects).is_empty(), "{effects:?}");
+}
+
+fn bluetooth(power: BluetoothPower) -> Input {
+    Input::DesktopChecked(DesktopCheck::Bluetooth(power))
+}
+
+/// Ticket #213: with the Desktop's Bluetooth off nothing can be paged, so
+/// the Phone it dropped is not connected, nor is a connect waited for.
+#[test]
+fn nothing_is_connected_while_the_desktops_bluetooth_is_off() {
+    for off in [BluetoothPower::Off, BluetoothPower::Blocked] {
+        let (state, effects) = run(connected(), [bluetooth(off), hands_free_down(), absent()]);
+
+        assert_eq!(connects(&effects), 0, "{effects:?}");
+        assert!(reconnect_waits(&effects).is_empty(), "{effects:?}");
+        assert_eq!(connects_after_waits(&state, &effects), 0);
+    }
+}
+
+/// Ticket #213: the Phone dropped as Bluetooth goes off, and the Desktop's
+/// connect fails before it hears Bluetooth is off: the wait it started
+/// connects nothing.
+#[test]
+fn a_connect_that_fails_as_bluetooth_goes_off_is_not_tried_again() {
+    let (state, _) = run(connected(), [hands_free_down(), absent()]);
+    let (state, effects) = run(
+        state,
+        [
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::Unreachable,
+            },
+            bluetooth(BluetoothPower::Off),
+        ],
+    );
+
+    assert_eq!(connects_after_waits(&state, &effects), 0);
+}
+
+/// Ticket #213: the Desktop's Bluetooth comes back on with the Phone away:
+/// it is connected at once, and the waits start short again.
+#[test]
+fn bluetooth_back_on_connects_the_phone_at_once_with_short_waits() {
+    let failed = |attempt| Input::ConnectPhoneFailed {
+        attempt,
+        failure: ConnectFailure::Unreachable,
+    };
+    // Away for two failed connects, so the next wait would be 2 s.
+    let (state, effects) = run(connected(), [hands_free_down(), absent(), failed(1)]);
+    let [(timer, _)] = reconnect_waits(&effects)[..] else {
+        panic!("one wait expected: {effects:?}");
+    };
+    let (state, _) = run(
+        state,
+        [
+            Input::TimerFired(timer),
+            failed(2),
+            bluetooth(BluetoothPower::Off),
+        ],
+    );
+
+    let (state, effects) = run(state, [bluetooth(BluetoothPower::On)]);
+    assert_eq!(connects(&effects), 1, "{effects:?}");
+
+    let (_, effects) = run(state, [failed(3)]);
+    assert_eq!(
+        reconnect_waits(&effects)
+            .iter()
+            .map(|(_, after_ms)| *after_ms)
+            .collect::<Vec<_>>(),
+        [1_000]
+    );
 }
 
 #[test]

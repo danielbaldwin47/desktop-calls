@@ -10,7 +10,13 @@
 //!   `Powered` fails with `org.bluez.Error.Blocked`, as BlueZ 5.87's
 //!   `property_set_mode_complete` answers. Either way `StartDiscovery` and
 //!   `Device1.Connect` fail with `org.bluez.Error.NotReady`, as BlueZ does
-//!   while the adapter is down.
+//!   while the adapter is down: `Connect`'s message is
+//!   `"br-connection-adapter-not-powered"`, as the real Desktop logged it
+//!   (ticket #213). A `Connect` paging when the adapter goes down fails the
+//!   same way, which is inferred.
+//! - The adapter going down while the Phone is connected drops the Phone,
+//!   as going out of range does. It stays in range: when the adapter comes
+//!   back on, it connects only when paged.
 //! - `--without-obex`: nobody takes `org.bluez.obex` on the session bus.
 //! - `--bluez-telephony`: the Phone's device has an `org.bluez.Telephony1`
 //!   child, as BlueZ's experimental `hfp` plugin adds once it holds the
@@ -38,7 +44,7 @@ use zbus::{Connection, ObjectPath, OwnedObjectPath, OwnedVariant, interface};
 
 use crate::objects::{Interfaces, MethodCall, ObjectTree, Properties, Reply};
 use crate::telephony::Signal;
-use crate::{Bus, CONTROL_PATH, Control, SharedWorld, World, lock};
+use crate::{Bus, CONTROL_PATH, Control, SharedWorld, TelephonyConnection, World, lock};
 
 const ADAPTER: &str = "org.bluez.Adapter1";
 const ADAPTER_PATH: &str = "/org/bluez/hci0";
@@ -213,10 +219,20 @@ pub fn set_powered(world: &mut World, on: bool) -> (Reply, Vec<Signal>) {
     }
 }
 
+/// The error BlueZ answers `Device1.Connect` with while the adapter is down,
+/// as the real Desktop logged it 84,162 times (ticket #213).
+pub fn adapter_not_powered() -> Reply {
+    Reply::Error("org.bluez.Error.NotReady", ADAPTER_NOT_POWERED.to_owned())
+}
+
+/// The message of [`adapter_not_powered`].
+pub const ADAPTER_NOT_POWERED: &str = "br-connection-adapter-not-powered";
+
 /// The control interface for the Desktop's conditions.
 pub struct SimulatedDesktop {
     pub world: SharedWorld,
     pub system: Connection,
+    pub telephony: TelephonyConnection,
 }
 
 #[interface(interface = "io.github.danielbaldwin47.DesktopCalls.SimulatedDesktop1")]
@@ -234,9 +250,23 @@ impl SimulatedDesktop {
                 )));
             }
         };
-        let signals = set_power(&mut lock(&self.world).bluez, power)?;
+        let (signals, dropped) = {
+            let mut world = lock(&self.world);
+            let signals = set_power(&mut world.bluez, power)?;
+            // The adapter going down takes the Phone's connection with it.
+            let dropped = if power == AdapterPower::On {
+                None
+            } else {
+                world.obex.link_lost();
+                crate::range::hands_free_down(&mut world)?
+            };
+            (signals, dropped)
+        };
         for signal in signals {
             signal.emit(&self.system).await?;
+        }
+        if let Some(change) = dropped {
+            crate::range::emit(&self.system, &self.telephony, change).await?;
         }
         Ok(())
     }
@@ -409,7 +439,7 @@ impl Systemd {
 pub fn serve<'a>(
     builder: zbus::connection::Builder<'a>,
     world: &SharedWorld,
-    system: &Connection,
+    (system, telephony): (&Connection, &TelephonyConnection),
     restart_job: RestartJob,
 ) -> zbus::connection::Builder<'a> {
     builder
@@ -418,6 +448,7 @@ pub fn serve<'a>(
             SimulatedDesktop {
                 world: world.clone(),
                 system: system.clone(),
+                telephony: telephony.clone(),
             },
         )
         .serve_at(SYSTEMD_PATH, Systemd::new(world.clone(), restart_job))

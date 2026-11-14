@@ -240,6 +240,42 @@ fn a_page_answered_already_connected_counts_as_the_phone_present() {
     assert_eq!(failures, Vec::<String>::new());
 }
 
+/// The Desktop's Bluetooth goes off, which drops the Phone: nothing can be
+/// paged until it is back on, so the app asks BlueZ at most once rather
+/// than every few seconds (ticket #213).
+#[test]
+fn with_the_desktops_bluetooth_off_the_phone_is_paged_at_most_once() {
+    let harness = connected();
+    let before = connects(&recorded(&harness));
+
+    harness.set_bluetooth_power("off");
+    harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+
+    let held = harness.simulated_phone().recorded_holds(
+        "at most one Connect with Bluetooth off",
+        RECONNECT_DEADLINE,
+        |recorded| connects(recorded) <= before + 1,
+    );
+    assert!(connects(&held) <= before + 1);
+}
+
+/// The Desktop's Bluetooth comes back on: the Phone, which waits to be
+/// paged, is connected again within 10 s of it coming on (ticket #213).
+/// That the waits start short again is the core's tests' to show.
+#[test]
+fn when_the_desktops_bluetooth_comes_back_on_the_phone_is_connected_within_10_s() {
+    let harness = connected();
+    harness.set_bluetooth_power("off");
+    harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+
+    harness.set_bluetooth_power("on");
+    wait_connected(&harness, RECONNECT_DEADLINE);
+}
+
 /// Scenario 18.
 #[test]
 fn after_resume_the_phone_is_connected_within_10_s() {

@@ -378,7 +378,7 @@ type Ended = (Option<&'static str>, Option<Change>, Option<Change>);
 /// range while the connect finishes: it fails as a page timeout, rather than
 /// bringing back a Phone that has just left (ticket #196). A Phone that
 /// connected by itself meanwhile fails it as connected already (ticket
-/// #212).
+/// #212), and the adapter going down fails it as not powered (ticket #213).
 fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Result<Ended> {
     let mut world = lock(world);
     world.range.connecting = false;
@@ -388,6 +388,9 @@ fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Resu
                 .range
                 .forgot_pairing
                 .then_some("br-connection-key-missing")
+        })
+        .or_else(|| {
+            (!crate::desktop::powered(&world)).then_some(crate::desktop::ADAPTER_NOT_POWERED)
         })
         .or_else(|| (!world.range.reachable).then_some("br-connection-page-timeout"))
         .or_else(|| world.audio_gateway.is_some().then_some(ALREADY_CONNECTED));
@@ -415,7 +418,9 @@ fn connect(
     message: &Message,
 ) -> zbus::Result<()> {
     if !crate::desktop::powered(&lock(world)) {
-        return zbus::block_on(crate::desktop::not_ready().send(system, &message.header()));
+        return zbus::block_on(
+            crate::desktop::adapter_not_powered().send(system, &message.header()),
+        );
     }
     let other = {
         let world = lock(world);
@@ -490,6 +495,7 @@ fn connect(
     }
     zbus::block_on(async {
         let reply = match failure {
+            Some(crate::desktop::ADAPTER_NOT_POWERED) => crate::desktop::adapter_not_powered(),
             Some(failure) => Reply::Error("org.bluez.Error.Failed", failure.to_owned()),
             None => Reply::body(()),
         };

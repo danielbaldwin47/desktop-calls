@@ -349,7 +349,7 @@ def require_mergeable(pr: dict) -> dict:
         raise Refused(
             f"GitHub reports PR #{number} conflicts with origin/{pr['baseRefName']}.\n"
             f"Next: git switch {pr['headRefName']} && git merge origin/{pr['baseRefName']}   "
-            "(resolve, push, then `just merge` again)"
+            f"(resolve and commit, then `just land {number}`)"
         )
     if pr["mergeable"] != "MERGEABLE":
         raise Refused(
@@ -414,8 +414,9 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
         ) from None
     require_checks_passed(pr, wait_minutes)
 
-    # Held until this process exits, which is right after the squash. Waiting
-    # for the checks, above, is done without it: that wait can take minutes.
+    # Held while this function runs (`lane` stays alive to its end), so through
+    # the squash. Waiting for the checks, above, is done without it: that wait
+    # can take minutes.
     lane = None if lane_held else ci_local.take_turn()
     now = pull_request(number)
     require_open(now)

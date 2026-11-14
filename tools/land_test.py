@@ -7,6 +7,7 @@ nothing is run in the image. The git steps run against a throwaway repository.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import os
 import subprocess
@@ -180,6 +181,21 @@ class InARepository(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain"), "", "the aborted merge left the tree clean")
 
 
+class Interrupted(unittest.TestCase):
+    def test_an_interrupt_during_the_merge_aborts_it_and_goes_on_up(self):
+        calls: list[list[str]] = []
+
+        def run(command, **_):
+            calls.append(command)
+            if command[:2] == ["git", "merge"] and "--abort" not in command:
+                raise KeyboardInterrupt
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(land.subprocess, "run", run), self.assertRaises(KeyboardInterrupt):
+            land.update_from_base("main", 42)
+        self.assertEqual(calls[-1], ["git", "merge", "--abort"])
+
+
 class Landing(unittest.TestCase):
     """The order of a landing, with every step stubbed and recorded."""
 
@@ -322,6 +338,46 @@ class TakingTheLane(unittest.TestCase):
         steps, _, error = self.land(refuses)
         self.assertIsInstance(error, merge.Refused)
         self.assertEqual(steps[-1], "release")
+
+
+class HoldingTheLock(unittest.TestCase):
+    """The lock is really held, with the real `take_turn`, from before the
+    first look at main to the end of the landing, and let go after it."""
+
+    def test_another_run_cannot_take_the_lock_while_a_landing_is_inside(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seen: list[str] = []
+
+            def inside(number):
+                other = open(root / "lock", "w")
+                try:
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    seen.append("free")
+                except BlockingIOError:
+                    seen.append("held")
+                finally:
+                    other.close()
+                return 0
+
+            pr = {"number": 42, "state": "OPEN", "isDraft": False, "headRefName": "work", "baseRefName": "main"}
+            with (
+                mock.patch.object(ci_local, "ROOT", root),
+                mock.patch.object(ci_local, "LOCK", root / "lock"),
+                mock.patch.object(ci_local, "CLAIMS", root / "claims"),
+                mock.patch.object(merge, "pull_request", return_value=pr),
+                mock.patch.object(land, "require_here"),
+                mock.patch.object(ci_local, "require_online"),
+                mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
+                mock.patch.object(ci_local, "stop_on_sigterm"),
+                mock.patch.object(ci_local, "worktree", return_value="/work/here"),
+                mock.patch.object(land, "holding_the_lane", inside),
+            ):
+                land.land(42)
+            after = open(root / "lock", "w")
+            self.addCleanup(after.close)
+            fcntl.flock(after, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if still held
+        self.assertEqual(seen, ["held"])
 
 
 class Placing(unittest.TestCase):

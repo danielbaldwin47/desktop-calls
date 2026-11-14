@@ -134,7 +134,12 @@ def level_with_github(branch: str) -> None:
 
 def update_from_base(base: str, number: int) -> None:
     """Merges origin/<base> into HEAD, or aborts and says what to run."""
-    result = subprocess.run(["git", "merge", "--no-edit", f"origin/{base}"], capture_output=True, text=True)
+    try:
+        result = subprocess.run(["git", "merge", "--no-edit", f"origin/{base}"], capture_output=True, text=True)
+    except KeyboardInterrupt:
+        # Ctrl-C or SIGTERM (stop_on_sigterm) mid-merge: don't leave the worktree merging.
+        subprocess.run(["git", "merge", "--abort"], capture_output=True, text=True)
+        raise
     if result.returncode == 0:
         return
     conflicted = git("diff", "--name-only", "--diff-filter=U", allowed=(0, 1)).split()
@@ -288,13 +293,16 @@ def land(number: int) -> int:
     sha = ci_local.require_clean_head()
     ci_local.stop_on_sigterm()
     claim = ci_local.Claim(ci_local.worktree())
+    lane = None
     try:
         claim.take(sha)
-        lane = ci_local.take_turn()  # held until this function returns
+        lane = ci_local.take_turn()  # held until the handle closes, below
         claim.write("running", sha)
         return holding_the_lane(number)
     finally:
         claim.release()
+        if lane:
+            lane.close()
 
 
 def main() -> int:

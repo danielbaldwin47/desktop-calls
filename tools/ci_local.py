@@ -208,13 +208,14 @@ def worktree() -> str:
 
 
 def is_ci_local(pid: int) -> bool:
-    """Whether `pid` is a live ci-local run: a process ID alone may have been
+    """Whether `pid` is a live ci-local run, or a `just land` (tools/land.py),
+    which holds the same claim and lock: a process ID alone may have been
     reused by anything since the run that held it ended."""
     try:
         command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return False
-    return any(argument.endswith(b"ci_local.py") for argument in command.split(b"\0"))
+    return any(argument.endswith((b"ci_local.py", b"land.py")) for argument in command.split(b"\0"))
 
 
 class Claim:
@@ -268,7 +269,7 @@ def cancel(directory: str) -> int:
     """Stops the run started from this worktree, and no other."""
     record = Claim(directory).read()
     if not record:
-        print("No ci-local run is queued or running from this worktree.")
+        print("No ci-local run is queued or running from this worktree.")  # a landing counts as one
         return EXIT_PASSED
     pid = int(record["pid"])
     # SIGTERM takes the run's whole tree down with it (stop_on_sigterm).
@@ -303,7 +304,7 @@ def take_turn() -> object:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print(
-            f"Another ci-local run has the lock{running_elsewhere()}; waiting for it to finish. "
+            f"Another ci-local run (or landing) has the lock{running_elsewhere()}; waiting for it to finish. "
             "This run tests HEAD as it is when its turn comes, so committing while it waits is "
             "fine. To stop it: just ci-local --cancel, in this worktree.",
             flush=True,

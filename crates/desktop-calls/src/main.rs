@@ -87,8 +87,8 @@ enum Command {
         #[arg(value_enum)]
         turn: CallsTurn,
         /// What removing Desktop Calls runs with `on`, while it is still
-        /// installed: unblocks the Phone if Desktop Calls blocked it, and
-        /// never connects it.
+        /// installed: unblocks the Phone if Desktop Calls blocked it,
+        /// through the running service if there is one.
         #[arg(long, hide = true)]
         uninstalling: bool,
     },

@@ -9,9 +9,10 @@
 //!
 //! If the service is running it is asked to turn calls on, so that it
 //! doesn't block the Phone again before it is stopped. Otherwise BlueZ is
-//! asked directly. Either way the Phone isn't connected: the app is going
-//! away. The service is never started for this: a stopped service stays
-//! stopped.
+//! asked directly, and nothing connects the Phone: the app is going away.
+//! (The running service does connect it once unblocked, as it does
+//! whenever calls come on; it is stopped next.) The service is never
+//! started for this: a stopped service stays stopped.
 
 use std::process::ExitCode;
 use std::time::Duration;

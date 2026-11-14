@@ -107,6 +107,17 @@ fn unblocks_asked(harness: &Harness) -> usize {
         .count()
 }
 
+/// How many times the Simulated Phone was asked to `Connect` or
+/// `ConnectProfile`, so far.
+fn connects_asked(harness: &Harness) -> usize {
+    harness
+        .simulated_phone()
+        .recorded_holds("the Phone is asked to connect", Duration::ZERO, |_| true)
+        .iter()
+        .filter(|call| call.member == "Connect" || call.member == "ConnectProfile")
+        .count()
+}
+
 #[test]
 fn uninstalling_with_calls_off_unblocks_the_phone_through_the_running_service() {
     let harness = calls_off();
@@ -134,6 +145,7 @@ fn uninstalling_with_the_service_stopped_unblocks_the_phone_without_starting_it(
     let harness = calls_off();
     harness.stop_service();
     harness.wait_until_app_off_bus();
+    let connects_before = connects_asked(&harness);
 
     let output = harness.uninstall_command().output().expect("run install.py");
 
@@ -141,6 +153,8 @@ fn uninstalling_with_the_service_stopped_unblocks_the_phone_without_starting_it(
     assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
     assert!(!record(&harness).exists(), "the record is gone");
     assert_eq!(files_left(&harness), Vec::<&str>::new());
+    // The app is going away: nothing connects the Phone.
+    assert_eq!(connects_asked(&harness), connects_before);
     assert!(
         !harness.app_on_bus(),
         "the removal started the service it was removing"
@@ -211,6 +225,8 @@ fn uninstalling_without_bluez_finishes_and_names_the_command_to_run_later() {
 
     assert!(output.status.success(), "{}", said(&output));
     assert_eq!(files_left(&harness), Vec::<&str>::new());
+    // Left behind, it would block the Phone again at a later install.
+    assert!(!record(&harness).exists(), "the record is gone");
     assert_eq!(
         said(&output),
         format!(

@@ -123,6 +123,23 @@ fn setup_window_shows(state: &test_harness::AppState, buttons: &str) -> bool {
 }
 
 impl Demo {
+    /// `Device1.Connect` on the Phone with `address`, through the demo's
+    /// system bus, as [`super::Sitting::connect_the_phone`] does on the
+    /// Desktop's.
+    pub fn connect_the_phone(&self, address: &str) -> zbus::Result<()> {
+        let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+        self.harness
+            .try_call_phone_method(
+                Bus::System,
+                "org.bluez",
+                &path,
+                "org.bluez.Device1",
+                "Connect",
+                &(),
+            )
+            .map(drop)
+    }
+
     pub fn new(harness: Harness) -> Self {
         let window = harness.start_test_client();
         window.wait_for("your window has keyboard focus", FOCUS_DEADLINE, |line| {

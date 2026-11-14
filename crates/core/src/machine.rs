@@ -902,6 +902,7 @@ fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
 fn unpair(state: &State) -> (State, Vec<Effect>) {
     let mut effects = vec![Effect::DetachPhone];
     phone_unpaired(state, &mut effects);
+    calls_off::phone_forgotten(state, &mut effects);
     (forget_phone_keeping_desktop(state), effects)
 }
 
@@ -918,7 +919,6 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         paired_phones: state.paired_phones.clone(),
         nearby_phones: state.nearby_phones.clone(),
         desktop: state.desktop.clone(),
-        calls_off: state.calls_off.clone(),
         ..forget_phone(state)
     }
 }

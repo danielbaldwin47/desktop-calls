@@ -29,6 +29,10 @@ const STAYS_OFF: Duration = Duration::from_secs(60);
 /// How long the restarted app may take to find the Phone and show its
 /// state.
 const APP_SETTLES: Duration = Duration::from_secs(10);
+/// How long the runner waits for BlueZ to answer a `Connect` on the blocked
+/// Phone: on the Pixel it gave no answer within 25 s (the probe note of
+/// 2026-11-13).
+const BLOCKED_CONNECT_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The first line after `from_us` that `wanted` accepts, read from the
 /// app's log for up to [`LOG_DEADLINE`]: the app logs a change just after
@@ -259,7 +263,36 @@ pub(super) fn calls_off_until_turned_on(sitting: &mut Sitting) -> Result<(), Sto
             "The app asked BlueZ to connect the Phone {connects_while_off} times while calls were off."
         ),
     );
+    blocked_connect(sitting);
     turned_on_and_connected(sitting, on_us)
+}
+
+/// 6.4's middle: the runner itself asks BlueZ once to connect the blocked
+/// Phone, as nothing in the app may, and records BlueZ's answer: what a
+/// stray `Connect` would meet while calls are off (spec #198 left it
+/// unobserved). It doesn't pass or fail the step.
+fn blocked_connect(sitting: &mut Sitting) {
+    let address = sitting.now().phone_address;
+    sitting.say(
+        &format!(
+            "The runner now asks BlueZ once to connect the blocked Pixel, to record its answer. This can take up to {}.",
+            seconds(BLOCKED_CONNECT_DEADLINE)
+        ),
+        &[],
+    );
+    let started = std::time::Instant::now();
+    let answer = sitting.connect_the_phone(&address, BLOCKED_CONNECT_DEADLINE);
+    let took = started.elapsed();
+    let said = match &answer {
+        Ok(()) => "connected".to_owned(),
+        Err(error) => error.clone(),
+    };
+    sitting.measure("blocked_connect_answer", said.clone());
+    sitting.measure("blocked_connect_ms", millis(took));
+    sitting.observed(format!(
+        "BlueZ answered a Connect on the blocked Phone after {}: {said}.",
+        seconds(took)
+    ));
 }
 
 /// 6.4's middle: the Pixel's Bluetooth goes off and on, and the Phone

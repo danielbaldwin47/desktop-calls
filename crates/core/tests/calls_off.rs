@@ -229,6 +229,64 @@ fn ringing(state: State) -> State {
     .0
 }
 
+/// The Phone with one Call in `call_state`.
+fn with_call(call_state: CallState) -> State {
+    run(
+        connected(),
+        [Input::CallAdded {
+            call: CallId(1),
+            state: call_state,
+            caller: Caller::Number("+447700900123".to_owned()),
+            at: Timestamp(1_000),
+        }],
+    )
+    .0
+}
+
+/// Turning calls off is refused in `state`, and its entry disabled.
+fn refused_during_a_call(state: State) {
+    let view = state.indicator(&state.surfaces());
+    assert!(
+        view.menu
+            .contains(&IndicatorEntry::TurnCallsOff { enabled: false }),
+        "{:?}",
+        view.menu
+    );
+    assert_eq!(
+        state.refusal(&Input::TurnCallsOff),
+        Some(Failure::CallsOffDuringCall)
+    );
+    let (state, effects) = run(state, [Input::TurnCallsOff]);
+    assert_eq!(effects, []);
+    assert!(!state.calls_off());
+}
+
+#[test]
+fn turning_calls_off_is_refused_with_a_call_live_held_waiting_or_being_placed() {
+    for call_state in [
+        CallState::Active,
+        CallState::Held,
+        CallState::Waiting,
+        CallState::Dialing,
+        CallState::Alerting,
+    ] {
+        refused_during_a_call(with_call(call_state));
+    }
+    // Dialled, before the Phone has the Call.
+    refused_during_a_call(run(connected(), [Input::Dial("07700900123".to_owned())]).0);
+}
+
+#[test]
+fn turning_calls_off_is_refused_while_a_lost_call_carries_on_on_the_phone() {
+    let (state, _) = run(
+        with_call(CallState::Active),
+        [Input::PhoneDisconnected {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+    refused_during_a_call(state);
+}
+
 #[test]
 fn during_a_call_turn_calls_off_is_disabled_and_refused() {
     let state = ringing(connected());
@@ -411,4 +469,96 @@ fn a_phone_that_bluez_wont_unblock_leaves_calls_off_and_says_so() {
     );
     assert!(effects.contains(&Effect::KeepCallsOff(Some(record_off()))));
     assert_eq!(connects(&effects), Vec::<&Effect>::new());
+}
+
+#[test]
+fn unpairing_the_phone_while_calls_are_off_turns_them_on_and_unblocks_it() {
+    let (state, effects) = run(
+        off(),
+        [Input::PhoneUnpaired {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+
+    assert!(!state.calls_off());
+    assert!(effects.contains(&Effect::KeepCallsOff(None)), "{effects:?}");
+    assert!(effects.contains(&block_phone(false)), "{effects:?}");
+    // BlueZ has forgotten it, so unblocking fails: calls stay on.
+    let (state, effects) = run(
+        state,
+        [Input::PhoneBlockFailed {
+            address: ADDRESS.to_owned(),
+            blocked: false,
+        }],
+    );
+    assert!(!state.calls_off());
+    assert_eq!(effects, []);
+    // The next Phone paired is followed as on a Desktop that never turned
+    // calls off.
+    let other = || {
+        [
+            Input::PhonePaired(Phone {
+                name: "Other".to_owned(),
+                address: "11:22:33:44:55:66".to_owned(),
+            }),
+            Input::PhoneAbsent {
+                address: "11:22:33:44:55:66".to_owned(),
+            },
+            Input::PairedPhonesListed,
+        ]
+    };
+    let (after, effects) = run(state, other());
+    let (fresh, fresh_effects) = run(State::default(), other());
+    assert_eq!(effects, fresh_effects);
+    assert!(!connects(&effects).is_empty(), "{effects:?}");
+    assert_eq!(
+        after.indicator(&after.surfaces()),
+        fresh.indicator(&fresh.surfaces())
+    );
+}
+
+#[test]
+fn calls_kept_off_stay_off_when_blocking_the_phone_again_fails_at_startup() {
+    let (state, effects) = run(
+        State::default(),
+        [
+            Input::CallsOffKept(record_off()),
+            Input::PhoneBlockFailed {
+                address: ADDRESS.to_owned(),
+                blocked: true,
+            },
+            paired(),
+            Input::PhonePresent {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PairedPhonesListed,
+        ],
+    );
+
+    assert!(state.calls_off());
+    assert!(
+        !effects.contains(&Effect::KeepCallsOff(None)),
+        "{effects:?}"
+    );
+    assert_eq!(connects(&effects), Vec::<&Effect>::new());
+    // Turning on still works from there.
+    let (_, effects) = run(state, [Input::TurnCallsOn]);
+    assert!(effects.contains(&block_phone(false)), "{effects:?}");
+}
+
+#[test]
+fn while_calls_are_being_turned_on_turn_calls_off_waits() {
+    let (state, _) = run(off(), [Input::TurnCallsOn]);
+    let view = state.indicator(&state.surfaces());
+
+    assert!(
+        view.menu
+            .contains(&IndicatorEntry::TurnCallsOff { enabled: false }),
+        "{:?}",
+        view.menu
+    );
+    let (state, effects) = run(state, [Input::TurnCallsOff]);
+    assert_eq!(effects, []);
+    let (state, _) = run(state, [blocked(false)]);
+    assert!(!state.calls_off());
 }

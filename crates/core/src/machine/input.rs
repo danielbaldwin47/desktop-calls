@@ -499,8 +499,8 @@ pub enum Effect {
     /// Keep `record` of Calls Off for the next run, replacing what was
     /// kept; with `None`, keep nothing.
     KeepCallsOff(Option<CallsOffRecord>),
-    /// Have BlueZ block (`blocked`) or unblock the Phone with this address
-    /// (`Device1.Blocked`). Ends in [`Input::PhoneBlocked`] or
+    /// Have BlueZ block (`blocked`) or unblock the Phone with this address.
+    /// Ends in [`Input::PhoneBlocked`] or
     /// [`Input::PhoneBlockFailed`].
     BlockPhone { address: String, blocked: bool },
 }

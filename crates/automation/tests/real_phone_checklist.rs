@@ -443,6 +443,12 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         off["measurements"]["connects_while_calls_off"], 0,
         "{off:#}"
     );
+    // The runner's own Connect on the blocked Phone, and BlueZ's answer.
+    assert_eq!(
+        off["measurements"]["blocked_connect_answer"],
+        "org.bluez.Error.Failed: br-connection-profile-unavailable",
+        "{off:#}"
+    );
     for said in [
         "stayed disconnected",
         "read that calls are off",

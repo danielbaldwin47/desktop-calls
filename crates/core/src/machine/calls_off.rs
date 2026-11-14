@@ -3,8 +3,7 @@
 //! (ADR-0008).
 //!
 //! Turning calls off keeps a record for the next run, then has BlueZ block
-//! the Phone (`Device1.Blocked`), which drops it at once and refuses its own
-//! connections. BlueZ doesn't refuse a connect from the Desktop to a blocked
+//! the Phone, which drops it at once and refuses its own connections. BlueZ doesn't refuse a connect from the Desktop to a blocked
 //! Phone: it pages it and fails slowly. So while calls are off, or until the
 //! Phone is unblocked again, nothing connects it. Turning calls on unblocks
 //! the Phone, then connects it at once, with the reconnect waits of a Phone
@@ -23,6 +22,11 @@ pub(super) enum CallsOff {
     /// Off until the user turns them on: the Desktop has blocked, or is
     /// blocking, the Phone with `address`.
     Off { address: String },
+    /// Off, as an earlier run kept it: the Desktop is blocking the Phone
+    /// with `address` again, in case it was unblocked meanwhile. If that
+    /// fails, calls stay off: the Phone may well still be blocked, and a
+    /// connect would only hang.
+    Reblocking { address: String },
     /// Turning on: the Desktop is unblocking the Phone with `address`, and
     /// connects it once that is done.
     TurningOn { address: String },
@@ -44,7 +48,15 @@ impl State {
     /// until the user turns them on.
     #[must_use]
     pub fn calls_off(&self) -> bool {
-        matches!(self.calls_off, CallsOff::Off { .. })
+        matches!(
+            self.calls_off,
+            CallsOff::Off { .. } | CallsOff::Reblocking { .. }
+        )
+    }
+
+    /// Whether calls are being turned on: the Phone isn't unblocked yet.
+    pub(crate) fn calls_turning_on(&self) -> bool {
+        matches!(self.calls_off, CallsOff::TurningOn { .. })
     }
 
     /// Whether calls are on and the Phone isn't blocked by the Desktop, so
@@ -99,7 +111,7 @@ fn kept(state: &mut State, record: CallsOffRecord, effects: &mut Vec<Effect>) {
     match record {
         CallsOffRecord::Off { address } => {
             block(&address, true, effects);
-            state.calls_off = CallsOff::Off { address };
+            state.calls_off = CallsOff::Reblocking { address };
         }
         CallsOffRecord::TurningOn { address } => {
             block(&address, false, effects);
@@ -109,9 +121,10 @@ fn kept(state: &mut State, record: CallsOffRecord, effects: &mut Vec<Effect>) {
 }
 
 /// The user turned calls off: the record is kept first, then the Phone is
-/// blocked, which drops it.
+/// blocked, which drops it. While calls are being turned on it waits: the
+/// unblock is already on its way.
 fn turn_off(state: &mut State, effects: &mut Vec<Effect>) {
-    if state.calls_off_refusal().is_some() || state.calls_off() {
+    if state.calls_off_refusal().is_some() || !state.calls_on() {
         return;
     }
     let Some(phone) = &state.phone else {
@@ -128,7 +141,7 @@ fn turn_off(state: &mut State, effects: &mut Vec<Effect>) {
 /// The user turned calls on: the record says so first, then the Phone is
 /// unblocked, and connected once it is.
 fn turn_on(state: &mut State, effects: &mut Vec<Effect>) {
-    let CallsOff::Off { address } = &state.calls_off else {
+    let (CallsOff::Off { address } | CallsOff::Reblocking { address }) = &state.calls_off else {
         return;
     };
     let address = address.clone();
@@ -142,7 +155,15 @@ fn turn_on(state: &mut State, effects: &mut Vec<Effect>) {
 /// BlueZ blocked or unblocked the Phone as asked. Once unblocked for
 /// calls on, the record goes and the Phone is connected at once.
 fn blocked_as_asked(state: &mut State, address: &str, blocked: bool, effects: &mut Vec<Effect>) {
-    if blocked || !turning_on(state, address) {
+    if blocked {
+        if matches!(&state.calls_off, CallsOff::Reblocking { address: off } if off == address) {
+            state.calls_off = CallsOff::Off {
+                address: address.to_owned(),
+            };
+        }
+        return;
+    }
+    if !turning_on(state, address) {
         return;
     }
     state.calls_off = CallsOff::On;
@@ -151,9 +172,16 @@ fn blocked_as_asked(state: &mut State, address: &str, blocked: bool, effects: &m
 }
 
 /// BlueZ couldn't block or unblock the Phone. Calls stay as they were
-/// before the user asked, and the user is told.
+/// before the user asked, and the user is told. Calls an earlier run kept
+/// off stay off.
 fn block_failed(state: &mut State, address: &str, blocked: bool, effects: &mut Vec<Effect>) {
-    if blocked {
+    if blocked
+        && matches!(&state.calls_off, CallsOff::Reblocking { address: off } if off == address)
+    {
+        state.calls_off = CallsOff::Off {
+            address: address.to_owned(),
+        };
+    } else if blocked {
         let off_for = matches!(&state.calls_off, CallsOff::Off { address: off } if off == address);
         if !off_for {
             return;
@@ -171,6 +199,20 @@ fn block_failed(state: &mut State, address: &str, blocked: bool, effects: &mut V
         };
         effects.push(Effect::ReportError(Failure::CallsOnFailed));
     }
+}
+
+/// The Desktop stops following the Phone, unpaired or switched away from
+/// in the Setup Window: calls are on again, so the next Phone can connect,
+/// and the Phone the Desktop blocked is unblocked, if BlueZ still has it.
+pub(super) fn phone_forgotten(state: &State, effects: &mut Vec<Effect>) {
+    let (CallsOff::Off { address }
+    | CallsOff::Reblocking { address }
+    | CallsOff::TurningOn { address }) = &state.calls_off
+    else {
+        return;
+    };
+    effects.push(Effect::KeepCallsOff(None));
+    block(address, false, effects);
 }
 
 fn turning_on(state: &State, address: &str) -> bool {

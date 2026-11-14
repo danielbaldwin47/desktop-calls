@@ -45,16 +45,18 @@ pub fn status(json: bool) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(status) => {
-            println!(
-                "{}",
-                messages::status(
-                    &status.connection_state,
-                    status.phone.as_ref(),
-                    status.hands_free_lost
-                )
-            );
-            if let Some(line) = messages::calls_off_status(status.calls_off.0 == "off") {
-                println!("{line}");
+            // While calls are off the Phone is disconnected by the user's
+            // choice, not out of range: that is all the status says.
+            match messages::calls_off_status(status.calls_off.0 == "off") {
+                Some(line) => println!("{line}"),
+                None => println!(
+                    "{}",
+                    messages::status(
+                        &status.connection_state,
+                        status.phone.as_ref(),
+                        status.hands_free_lost
+                    )
+                ),
             }
             ExitCode::SUCCESS
         }

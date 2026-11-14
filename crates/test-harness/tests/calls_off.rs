@@ -9,9 +9,9 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use test_harness::{AppState, Harness, TrayItem};
+use test_harness::{AppEvent, AppState, Bus, Harness, TrayItem};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -72,6 +72,17 @@ fn record(harness: &Harness) -> PathBuf {
     harness
         .directory()
         .join("state/desktop-calls/calls-off.json")
+}
+
+/// How long the Phone took to connect once calls were turned on, by the
+/// app's own log: from it unblocking the Phone to it logging the Phone
+/// connected (the polish scorecard's way, tickets #80 and #83).
+fn reconnect_took(harness: &Harness) -> Duration {
+    harness.app_took(
+        &AppEvent::kind("calls-turned-on"),
+        &AppEvent::kind("connection-state-changed").with("connection_state", "connected"),
+        RECONNECT_DEADLINE,
+    )
 }
 
 fn cli_ok(harness: &Harness, arguments: &[&str]) -> String {
@@ -138,21 +149,18 @@ fn calls_on_from_the_cli_connects_the_phone_within_10_s_and_clears_the_record() 
         "Calls are off: your phone stays disconnected until you turn calls on.\n"
     );
     wait_off(&harness);
-    let status = cli_ok(&harness, &["status"]);
-    assert!(
-        status.ends_with(
-            "Calls are off until you turn them on: your phone stays disconnected.\n"
-        ),
-        "{status}"
+    // Not "out of range": the Phone is away by the user's choice.
+    assert_eq!(
+        cli_ok(&harness, &["status"]),
+        "Calls are off until you turn them on: your phone stays disconnected.\n"
     );
 
-    let asked = Instant::now();
     let said = cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
-    let took = asked.elapsed();
+    let took = reconnect_took(&harness);
 
     assert_eq!(said, "Calls are on: connecting your phone.\n");
-    assert!(took <= RECONNECT_DEADLINE, "connected after {took:?}");
+    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after unblocking");
     assert!(!harness.simulated_phone().blocked());
     assert!(!record(&harness).exists(), "the record is cleared");
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
@@ -169,12 +177,11 @@ fn calls_on_connects_within_10_s_when_the_first_connect_fails_busy() {
     cli_ok(&harness, &["calls", "off"]);
     wait_off(&harness);
 
-    let asked = Instant::now();
     cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
-    let took = asked.elapsed();
+    let took = reconnect_took(&harness);
 
-    assert!(took <= RECONNECT_DEADLINE, "connected after {took:?}");
+    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after unblocking");
     harness.wait_for_app_log("br-connection-busy", DEADLINE);
 }
 
@@ -224,6 +231,60 @@ fn a_turn_on_a_killed_app_left_halfway_is_finished_at_the_next_start() {
     wait_connected(&harness, RECONNECT_DEADLINE);
     assert!(!harness.simulated_phone().blocked());
     assert!(!record(&harness).exists(), "the record is cleared");
+}
+
+#[test]
+fn a_turn_off_a_killed_app_left_halfway_is_finished_at_the_next_start() {
+    let mut harness = connected();
+    let address = harness
+        .app_state()
+        .phone
+        .map(|phone| phone.address)
+        .expect("a Phone");
+
+    // Killed after keeping "off" and before blocking the Phone.
+    harness.kill_app_by_hand();
+    fs::write(
+        record(&harness),
+        format!(r#"{{"version":1,"state":"off","address":"{address}"}}"#),
+    )
+    .expect("write the record");
+    assert!(!harness.simulated_phone().blocked());
+    harness.start_app_by_hand();
+
+    wait_off(&harness);
+    assert!(harness.simulated_phone().blocked(), "the Phone is blocked");
+    stays_off(&harness, STAYS_OFF);
+    assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
+}
+
+#[test]
+fn unpairing_the_phone_while_calls_are_off_turns_them_on() {
+    let harness = connected();
+    let address = harness
+        .app_state()
+        .phone
+        .map(|phone| phone.address)
+        .expect("a Phone");
+    cli_ok(&harness, &["calls", "off"]);
+    wait_off(&harness);
+
+    let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+    let path = zbus::ObjectPath::try_from(path.as_str()).expect("a device path");
+    harness.call_phone_method(
+        Bus::System,
+        "org.bluez",
+        "/org/bluez/hci0",
+        "org.bluez.Adapter1",
+        "RemoveDevice",
+        &(path,),
+    );
+
+    harness.wait_for_app("calls on, with no Phone", DEADLINE, |state| {
+        state.calls_off == "on" && state.phone.is_none()
+    });
+    assert!(!record(&harness).exists(), "the record is cleared");
+    indicator_says(&harness, "No Phone set up");
 }
 
 #[test]

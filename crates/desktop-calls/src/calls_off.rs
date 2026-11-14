@@ -139,14 +139,15 @@ pub fn block(system: Connection, inputs: UnboundedSender<Input>, address: String
                 Input::PhoneBlocked { address, blocked }
             }
             Err(error) => {
-                tracing::warn!(
-                    event_kind = %EventKind::PhoneBlockFailed,
-                    phone_address = %address,
-                    blocked,
-                    error_kind = "bluez-refused",
-                    detail = %error,
-                    "BlueZ didn't block or unblock the Phone"
-                );
+                if error == bluez::BlockError::PhoneNotFound {
+                    tracing::warn!(
+                        event_kind = %EventKind::PhoneBlockFailed,
+                        phone_address = %address,
+                        blocked,
+                        error_kind = error.as_str(),
+                        "BlueZ has no device for the Phone to block or unblock"
+                    );
+                }
                 Input::PhoneBlockFailed { address, blocked }
             }
         };

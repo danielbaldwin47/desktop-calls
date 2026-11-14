@@ -169,13 +169,14 @@ impl IndicatorEntry {
 
 impl State {
     /// The menu's entry that turns calls on or off: on while they are off,
-    /// else off once there is a Phone, disabled during a Call.
+    /// else off once there is a Phone, disabled during a Call and while
+    /// calls are being turned on.
     fn calls_off_entry(&self, has_phone: bool) -> Option<IndicatorEntry> {
         if self.calls_off() {
             Some(IndicatorEntry::TurnCallsOn)
         } else {
             has_phone.then(|| IndicatorEntry::TurnCallsOff {
-                enabled: !self.call_keeps_calls_on(),
+                enabled: !self.call_keeps_calls_on() && !self.calls_turning_on(),
             })
         }
     }

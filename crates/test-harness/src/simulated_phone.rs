@@ -149,12 +149,34 @@ impl Harness {
     where
         B: zbus::export::serde::Serialize + zbus::DynamicType,
     {
+        self.try_call_phone_method(bus, service, path, interface, member, body)
+            .unwrap_or_else(|error| panic!("{interface}.{member} on {service} {path}: {error}"))
+    }
+
+    /// Calls a method on the Phone's side of one of the private buses, as
+    /// [`Harness::call_phone_method`] does, and returns the reply or the
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// The call failed, or the reply is an error.
+    pub fn try_call_phone_method<B>(
+        &self,
+        bus: Bus,
+        service: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body: &B,
+    ) -> zbus::Result<zbus::Message>
+    where
+        B: zbus::export::serde::Serialize + zbus::DynamicType,
+    {
         let connection = match bus {
             Bus::System => &self.system,
             Bus::Session => &self.session,
         };
         zbus::block_on(connection.call_method(Some(service), path, Some(interface), member, body))
-            .unwrap_or_else(|error| panic!("{interface}.{member} on {service} {path}: {error}"))
     }
 }
 

@@ -332,7 +332,7 @@ impl Banner {
         let shown: Vec<String> = choices
             .iter()
             .map(|&choice| &self.choice(choice).keycap)
-            .filter(|keycap| keycap.is_visible())
+            .filter(|keycap| keycap.get_visible())
             .map(|keycap| keycap.text().to_string())
             .collect();
         if !shown.is_empty() {
@@ -386,7 +386,8 @@ impl Banner {
             self.meta.set_text(messages::label(Label::NotInContacts));
             self.meta.set_visible(true);
         }
-        if self.meta.is_visible() {
+        // Its own flag: `is_visible` is false until the window is shown.
+        if self.meta.get_visible() {
             content.insert("meta".to_owned(), self.meta.text().to_string());
         }
         let initial = messages::banner_initial(&view.caller);

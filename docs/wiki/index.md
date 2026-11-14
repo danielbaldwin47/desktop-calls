@@ -4,31 +4,31 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## People and preferences
 
-- [user-preferences](user-preferences.md): how the user wants work done and reported, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters (updated 2026-11-13).
+- [user-preferences](user-preferences.md): how the user wants work done and reported, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done (updated 2026-11-14).
 
 ## Decisions
 
-- [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope (added 2026-11-13).
+- [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope; where the five criteria stood on 2026-11-14 (added 2026-11-13; updated 2026-11-14).
 
-- [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb.
+- [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb, with the audit of 2026-11-14 against the Simulated Phone (updated 2026-11-14).
 
-- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, built behaviour as implementers shipped it, and the 2026-11-13 decisions on the Call Pill (spec #197) and Calls Off with Quiet Hours (spec #198), dated (updated 2026-11-13).
+- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, built behaviour as implementers shipped it, the 2026-11-13 decisions on the Call Pill (spec #197) and Calls Off with Quiet Hours (spec #198), and what the merged PRs built of them and of the UI pass, dated (updated 2026-11-14).
 
 ## Environment
 
 - [telephony-api-quirks](telephony-api-quirks.md): known PipeWire Telephony and PBAP misbehaviour to simulate and work around, and BlueZ behaviour seen on the real Pixel (blocked devices, profile drops, `Connect` errors) (updated 2026-11-13).
 
-- [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated (updated 2026-11-13).
+- [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated, including the disk filling on 2026-11-14 (updated 2026-11-14).
 
-- [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) and how it copes with load (#167), the load flakes by cause (#168 to #172, #180, #185), the rule that stand-ins are as strict as the real service (#166), the GitHub CI red from #182 and its fix in #211, and the Real-Phone Checklist, dated (added 2026-11-05; updated 2026-11-13).
+- [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) and how it copes with load (#167), the load flakes by cause (#168 to #172, #180, #185), the rule that stand-ins are as strict as the real service (#166), the GitHub CI red from #182 and its fix in #211, GitHub's CI red or cancelled again on 2026-11-14, and the Real-Phone Checklist, dated (added 2026-11-05; updated 2026-11-14).
 
 ## Process
 
-- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-13 evening, the real Call's log, main's CI green again and the Call Pill and Calls Off specs in flight).
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-14, the Call Pill, Calls Off and the UI pass merged, GitHub's CI on main red again and the disk filling).
 
-- [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions and the Sonnet implementer trial (2026-11-05).
+- [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05) and the disk filling (2026-11-14).
 
-- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze, the local-CI merge rules, PR-only docs, the #154 triage, merging from behind main, owned PRs, the concept review before specs and probes before building (updated 2026-11-13).
+- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze, the local-CI merge rules, PR-only docs, the #154 triage, merging from behind main, owned PRs, the concept review before specs, probes before building, and clearing build caches (updated 2026-11-14).
 
 - [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).
 

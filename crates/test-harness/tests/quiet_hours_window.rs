@@ -115,7 +115,9 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     wait_for_hours(&harness, Some((minutes(22, 0), minutes(7, 0))));
 
     // The menu shows the times as a hint.
-    harness.tray().click("Quiet Hours…  22:00–07:00");
+    harness
+        .tray()
+        .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
     let state = wait_for_window(
         &harness,
         &[

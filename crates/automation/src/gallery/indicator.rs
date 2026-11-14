@@ -6,7 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use test_harness::{Builder, Harness, MenuColours, OmarchyTheme, draw_tray_icon, draw_tray_menu};
+use test_harness::{
+    Builder, Harness, MenuColours, MenuEntry, OmarchyTheme, draw_tray_icon, draw_tray_menu,
+};
 
 use super::quiet_hours_window::at_noon;
 use super::{DEADLINE, Look, NUMBER, connect};
@@ -64,11 +66,17 @@ fn quiet_hours(harness: &Harness) {
     if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
         panic!("SetQuietHours: {error:?}");
     }
-    // The Indicator shows each state before the control interface does.
-    harness.wait_for_app("Quiet Hours are set", DEADLINE, |state| {
-        state.quiet_hours == Some((22 * 60, 7 * 60))
-    });
+    // The control interface shows each state before the Indicator does, so
+    // wait on the menu itself.
+    harness
+        .tray()
+        .wait_for_menu("the menu shows the Quiet Hours", DEADLINE, |menu| {
+            MenuEntry::find(menu, QUIET_HOURS_ENTRY).is_some()
+        });
 }
+
+/// The Quiet Hours entry, with the times `quiet_hours` sets as its hint.
+const QUIET_HOURS_ENTRY: &str = "Quiet Hours…  22:00–07:00";
 
 /// The icon's states.
 pub(super) const INDICATOR_STATES: &[IndicatorState] = &[

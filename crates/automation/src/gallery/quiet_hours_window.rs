@@ -35,7 +35,9 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
                 panic!("SetQuietHours: {error:?}");
             }
-            harness.tray().click("Quiet Hours…  22:00–07:00");
+            harness
+                .tray()
+                .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
             wait_for(harness, &[("switch", "on"), ("focus", "switch")]);
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start"), ("start", "22:00")]);
@@ -52,7 +54,9 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
                 panic!("SetQuietHours: {error:?}");
             }
-            harness.tray().click("Quiet Hours…  22:00–07:00");
+            harness
+                .tray()
+                .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
             wait_for(harness, &[("switch", "on"), ("focus", "switch")]);
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start")]);

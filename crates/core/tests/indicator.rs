@@ -308,6 +308,12 @@ fn the_menu_keeps_one_order_in_every_state() {
         assert_eq!(menu.first(), Some(&IndicatorEntry::Status), "{menu:?}");
         assert_eq!(menu.get(1), Some(&IndicatorEntry::OpenDialer), "{menu:?}");
         assert!(menu.contains(&IndicatorEntry::ConnectPhone), "{menu:?}");
+        assert!(menu.contains(&IndicatorEntry::Separator), "{menu:?}");
+        assert!(
+            menu.iter()
+                .any(|entry| matches!(entry, IndicatorEntry::QuietHours(_))),
+            "{menu:?}"
+        );
         seen.extend(menu);
     }
     // The states between them have every kind of entry.

@@ -205,6 +205,8 @@ fn the_dialer_command_shows_the_dialer_centred_with_focus_listing_the_call_histo
     assert!(row(1).contains("Alice Smith"), "{:?}", dialer(&state));
     assert!(row(2).contains("José Smith"), "{:?}", dialer(&state));
     assert!(!row(1).contains("Missed") && !row(2).contains("Missed"));
+    assert_eq!(shown(&state, "anchor"), Some("centre"));
+    assert_eq!(shown(&state, "margin"), None);
 
     let screenshot = harness.screenshot_when("dialer", SCREEN_DEADLINE, |screenshot| {
         app_region(screenshot).is_some_and(|region| region.right - region.left > 300.0)

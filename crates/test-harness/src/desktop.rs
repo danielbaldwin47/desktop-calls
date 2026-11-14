@@ -83,7 +83,33 @@ impl Harness {
         self.hyprland
             .as_ref()
             .expect("this needs Hyprland: start with Harness::builder().hyprland_rounding(…)")
-            .set_rounding(rounding);
+            .reconfigure(|config| config.rounding = rounding);
+    }
+
+    /// Changes Hyprland's `general:gaps_out`, on every side, and announces
+    /// the reload, as Hyprland does when its configuration is reloaded.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no Hyprland stand-in.
+    pub fn set_hyprland_gaps_out(&self, gaps_out: u32) {
+        self.hyprland
+            .as_ref()
+            .expect("this needs Hyprland: start with Harness::builder().hyprland_gaps_out(…)")
+            .reconfigure(|config| config.gaps_out = Some(gaps_out));
+    }
+
+    /// Takes `general:gaps_out` out of Hyprland's answers, so it answers
+    /// "no such option", and announces the reload.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no Hyprland stand-in.
+    pub fn unset_hyprland_gaps_out(&self) {
+        self.hyprland
+            .as_ref()
+            .expect("this needs Hyprland: start with Harness::builder().hyprland_gaps_out(…)")
+            .reconfigure(|config| config.gaps_out = None);
     }
 
     /// Types on the screen's synthetic keyboard, into whatever has focus.

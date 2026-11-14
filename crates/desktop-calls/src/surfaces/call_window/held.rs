@@ -77,11 +77,13 @@ impl HeldRow {
         waiting_first.set_xalign(0.0);
         waiting_first.set_wrap(true);
         waiting_first.set_max_width_chars(36);
+        // At the top of the Call Window, above the live Call, so the live
+        // Call's controls stay put as it comes and goes.
         let row = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        row.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         row.append(&caller_line);
         row.append(&buttons);
         row.append(&waiting_first);
+        row.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         row.set_visible(false);
         for button in [&swap, &hang_up] {
             button.set_focus_on_click(false);

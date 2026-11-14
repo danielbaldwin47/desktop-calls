@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
-use test_harness::{AppState, BAR_COLOUR, Bus, Harness, RecordedMethodCall, Region, Screenshot};
+use test_harness::{
+    AppState, BAR_COLOUR, BAR_HEIGHT, Bus, Harness, LAYOUT_SIZE, RecordedMethodCall, Region,
+    Screenshot,
+};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -28,6 +31,8 @@ const ALICE: &str = "+447700900456";
 /// buttons' red.
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
+/// The standard gap from the screen's edges, without Hyprland to say.
+const GAP: f64 = 12.0;
 
 /// Blocks the serialized Phone commands with a Mute the Phone has received.
 fn slow_mute(harness: &Harness) -> usize {
@@ -496,10 +501,10 @@ fn focus_banner_saying(harness: &Harness, heading: &str) {
     });
 }
 
-/// The ticket's stacking decision: the Banner shows below the Call Window,
-/// which stays where it was.
+/// Spec #221's placement: with a Waiting Call, the Banner is flush top right
+/// and the Call Window stays flush bottom right, neither over the other.
 #[test]
-fn the_waiting_calls_banner_shows_below_the_call_window_which_stays_put() {
+fn the_waiting_calls_banner_shows_top_right_and_the_call_window_stays_put_bottom_right() {
     let harness = connected_on_screen();
     on_a_call(&harness);
     let alone = harness.screenshot_when("call-window", SCREEN_DEADLINE, |screenshot| {
@@ -513,16 +518,43 @@ fn the_waiting_calls_banner_shows_below_the_call_window_which_stays_put() {
     let both = harness.screenshot_when("call-waiting-banner", SCREEN_DEADLINE, |screenshot| {
         find(screenshot, GREEN).is_some()
     });
-    let hold_and_answer = find(&both, GREEN).expect("Hold & Answer is on screen");
+    let (width, height) = LAYOUT_SIZE;
+    let half = |top: f64, bottom: f64| Region {
+        left: 0.0,
+        top,
+        right: width,
+        bottom,
+    };
+    let is_app = |pixel: [u8; 3]| pixel != [0, 0, 0] && pixel != BAR_COLOUR;
+    let banner = both
+        .region_within(half(0.0, height / 2.0), is_app)
+        .expect("the Banner is on screen");
+    let moved = both
+        .region_within(half(height / 2.0, height), is_app)
+        .expect("the Call Window is on screen");
     assert!(
-        hold_and_answer.top > window.bottom,
-        "the Banner's Hold & Answer {hold_and_answer:?} overlaps the Call Window {window:?}"
+        (width - GAP - banner.right).abs() <= 2.0 && (BAR_HEIGHT + GAP - banner.top).abs() <= 2.0,
+        "the Banner isn't flush top right: {banner:?} in {}",
+        both.path.display()
     );
-    let red = find(&both, RED).expect("Hang up is on screen");
+    // The Call Window alone was found on the whole screen, so `window` is
+    // all of it, wherever it reached.
     assert!(
-        (red.top - hang_up.top).abs() < 1.0,
-        "Hang up moved from {hang_up:?} to {red:?}"
+        !banner.intersects(&window),
+        "the Banner {banner:?} overlaps the Call Window {window:?}"
     );
+    let same = |a: f64, b: f64| (a - b).abs() < 1.0;
+    assert!(
+        same(moved.left, window.left)
+            && same(moved.top, window.top)
+            && same(moved.right, window.right)
+            && same(moved.bottom, window.bottom),
+        "the Call Window moved or changed size, from {window:?} to {moved:?}"
+    );
+    let red = both
+        .region_within(half(height / 2.0, height), |pixel| close_to(pixel, RED))
+        .expect("Hang up is on screen");
+    assert_eq!(red, hang_up, "Hang up moved");
 }
 
 /// Polish scorecard item 7: Hold & Answer, Swap and Hang up for the held

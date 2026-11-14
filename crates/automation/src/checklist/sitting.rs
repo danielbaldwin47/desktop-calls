@@ -354,9 +354,13 @@ impl Sitting {
         }
     }
 
-    /// Shows a desktop notification, as any app could.
+    /// Shows a desktop notification, as any app could, that stays until the
+    /// user dismisses it: critical urgency, which Omarchy shows with no time
+    /// limit, where a normal card goes after 8 s, before a step's questions
+    /// are done.
     pub fn notify(&self, summary: &str, body: &str) -> zbus::Result<()> {
-        let hints: std::collections::HashMap<&str, Variant<'_>> = std::collections::HashMap::new();
+        let hints: std::collections::HashMap<&str, Variant<'_>> =
+            std::collections::HashMap::from([("urgency", Variant::from(2_u8))]);
         zbus::block_on(self.bus.call_method(
             Some("org.freedesktop.Notifications"),
             "/org/freedesktop/Notifications",

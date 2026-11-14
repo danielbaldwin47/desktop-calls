@@ -537,13 +537,19 @@ fn the_waiting_calls_banner_shows_top_right_and_the_call_window_stays_put_bottom
         "the Banner isn't flush top right: {banner:?} in {}",
         both.path.display()
     );
+    // The Call Window alone was found on the whole screen, so `window` is
+    // all of it, wherever it reached.
     assert!(
-        !banner.intersects(&moved),
-        "the Banner {banner:?} overlaps the Call Window {moved:?}"
+        !banner.intersects(&window),
+        "the Banner {banner:?} overlaps the Call Window {window:?}"
     );
+    let same = |a: f64, b: f64| (a - b).abs() < 1.0;
     assert!(
-        (moved.right - window.right).abs() < 1.0 && (moved.bottom - window.bottom).abs() < 1.0,
-        "the Call Window moved from {window:?} to {moved:?}"
+        same(moved.left, window.left)
+            && same(moved.top, window.top)
+            && same(moved.right, window.right)
+            && same(moved.bottom, window.bottom),
+        "the Call Window moved or changed size, from {window:?} to {moved:?}"
     );
     let red = both
         .region_within(half(height / 2.0, height), |pixel| close_to(pixel, RED))

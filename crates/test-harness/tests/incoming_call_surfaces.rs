@@ -271,6 +271,36 @@ fn the_banner_follows_hyprlands_gap_from_the_edge_and_its_reloads() {
     });
     let banner = app_region(&screenshot).expect("the Banner is on screen");
     assert_flush_top_right(banner, 25.0, &screenshot);
+
+    // A reload that drops the gap: the fallback applies again.
+    harness.unset_hyprland_gaps_out();
+
+    harness.wait_for_app("the Banner moves back to 12 px in", DEADLINE, |state| {
+        banner_placed(state, "12")
+    });
+}
+
+/// A Hyprland whose answers have no `general:gaps_out` leaves the Banner at
+/// the fallback gap, as no Hyprland at all does.
+#[test]
+fn the_banner_sits_at_the_fallback_gap_when_hyprland_has_none() {
+    let harness = connected(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .hyprland_rounding(0),
+    );
+    ring_until_banner(&harness);
+    let state = harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+        state.surface("banner").is_some()
+    });
+    assert!(banner_placed(&state, "12"), "{:?}", state.surface("banner"));
+    let screenshot = harness.screenshot_when("banner-fallback-gap", DEADLINE, |screenshot| {
+        app_region(screenshot)
+            .is_some_and(|banner| (LAYOUT_SIZE.0 - FALLBACK_GAP - banner.right).abs() <= 2.0)
+    });
+    let banner = app_region(&screenshot).expect("the Banner is on screen");
+    assert_flush_top_right(banner, FALLBACK_GAP, &screenshot);
 }
 
 #[test]

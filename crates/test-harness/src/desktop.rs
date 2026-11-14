@@ -99,6 +99,19 @@ impl Harness {
             .reconfigure(|config| config.gaps_out = Some(gaps_out));
     }
 
+    /// Takes `general:gaps_out` out of Hyprland's answers, so it answers
+    /// "no such option", and announces the reload.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no Hyprland stand-in.
+    pub fn unset_hyprland_gaps_out(&self) {
+        self.hyprland
+            .as_ref()
+            .expect("this needs Hyprland: start with Harness::builder().hyprland_gaps_out(…)")
+            .reconfigure(|config| config.gaps_out = None);
+    }
+
     /// Types on the screen's synthetic keyboard, into whatever has focus.
     ///
     /// # Panics

@@ -276,6 +276,10 @@ pub(super) fn banner_over_a_notification(sitting: &mut Sitting) -> Result<(), St
             "The notification wasn't in view once the Banner went.".to_owned()
         },
     );
+    sitting.say(
+        "Dismiss the sample notification: it stays until you do.",
+        &[],
+    );
     Ok(())
 }
 

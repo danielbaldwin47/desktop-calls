@@ -199,7 +199,7 @@ impl Surfaces {
             let placed = surfaces.placed();
             theme.when_edge_gap_changed(move |gap| {
                 for surface in &placed {
-                    surface.place(gap);
+                    surface.place(gap.unwrap_or(FALLBACK_GAP));
                 }
             });
         }

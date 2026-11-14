@@ -86,7 +86,7 @@ struct Shared {
 type Switched = Box<dyn Fn(Option<&'static str>)>;
 
 /// What runs when Omarchy's edge gap changes, given the new gap.
-type EdgeGapChanged = Box<dyn Fn(i32)>;
+type EdgeGapChanged = Box<dyn Fn(Option<i32>)>;
 
 impl Theme {
     /// Gives `display` the current look, and follows it from now on.
@@ -130,11 +130,13 @@ impl Theme {
     }
 
     /// Runs `then` with Omarchy's edge gap, in layout pixels, once Hyprland
-    /// has said what it is and each time it changes. Until then, and
-    /// without Hyprland, it is never called.
-    pub fn when_edge_gap_changed(&self, then: impl Fn(i32) + 'static) {
+    /// has said what it is and each time it changes; with `None` when
+    /// Hyprland answers without one after it had one, so the caller's
+    /// fallback applies again. Until Hyprland has said, and without
+    /// Hyprland, it is never called.
+    pub fn when_edge_gap_changed(&self, then: impl Fn(Option<i32>) + 'static) {
         if let Some(gap) = self.shared.edge_gap.get() {
-            then(gap);
+            then(Some(gap));
         }
         *self.shared.edge_gap_changed.borrow_mut() = Some(Box::new(then));
     }
@@ -355,7 +357,8 @@ fn rounding_unknown(unknown: &Unknown) {
 
 /// Asks Hyprland, off the main thread, for Omarchy's edge gap, and hands it
 /// to the hook given to [`Theme::when_edge_gap_changed`] if it changed. If
-/// Hyprland can't say, the last gap stays.
+/// Hyprland answers without one, the hook gets `None`; if it doesn't
+/// answer, the last gap stays.
 fn reread_edge_gap(shared: Weak<Shared>) {
     glib::MainContext::default().spawn_local(async move {
         let gap = gio::spawn_blocking(hyprland::edge_gap)
@@ -364,15 +367,24 @@ fn reread_edge_gap(shared: Weak<Shared>) {
         let Some(shared) = shared.upgrade() else {
             return;
         };
-        match gap.map(|gap| i32::try_from(gap).unwrap_or(i32::MAX)) {
-            Ok(gap) if shared.edge_gap.get() != Some(gap) => {
-                shared.edge_gap.set(Some(gap));
-                if let Some(changed) = &*shared.edge_gap_changed.borrow() {
-                    changed(gap);
-                }
+        let gap = match gap {
+            Ok(gap) => Some(i32::try_from(gap).unwrap_or(i32::MAX)),
+            // Hyprland answered, without a gap: the fallback applies again.
+            Err(unknown @ (Unknown::NoGap | Unknown::Unreadable(_))) => {
+                edge_gap_unknown(&unknown);
+                None
             }
-            Ok(_) => {}
-            Err(unknown) => edge_gap_unknown(&unknown),
+            // Hyprland didn't answer: the last gap stays.
+            Err(unknown) => {
+                edge_gap_unknown(&unknown);
+                return;
+            }
+        };
+        if shared.edge_gap.get() != gap {
+            shared.edge_gap.set(gap);
+            if let Some(changed) = &*shared.edge_gap_changed.borrow() {
+                changed(gap);
+            }
         }
     });
 }

@@ -453,6 +453,7 @@ fn quiet_hours_beginning_during_a_call_wait_for_it_to_end() {
             address: ADDRESS.to_owned(),
             until: Some(end_after(START)),
             quiet_hours: true,
+            exception: false,
         })]
     );
 

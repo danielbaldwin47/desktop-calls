@@ -238,17 +238,6 @@ fn with_no_phone_set_up_there_is_nothing_to_turn_off() {
 }
 
 #[test]
-fn a_call_placed_while_calls_are_off_is_refused_saying_so() {
-    let (_, effects) = run(off(), [Input::Dial("07700900123".to_owned())]);
-
-    assert!(
-        effects.contains(&Effect::ReportError(Failure::CallsOff)),
-        "{effects:?}"
-    );
-    assert_eq!(connects(&effects), Vec::<&Effect>::new());
-}
-
-#[test]
 fn turning_calls_on_unblocks_then_connects_at_once_and_clears_the_record() {
     let (state, effects) = run(off(), [Input::TurnCallsOn]);
 

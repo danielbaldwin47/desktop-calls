@@ -178,7 +178,7 @@ impl CallWindow {
             StateLine::Calling | StateLine::Ringing => Some(Icon::Outgoing),
             StateLine::OnThisComputer { .. } => Some(Icon::Computer),
             StateLine::Muted => Some(Icon::MicrophoneMuted),
-            StateLine::OnYourPhone => Some(Icon::Phone),
+            StateLine::ConnectingToPhone | StateLine::OnYourPhone => Some(Icon::Phone),
             StateLine::OnHold => Some(Icon::OnHold),
             StateLine::Ended { .. } => None,
         };

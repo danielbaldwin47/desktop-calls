@@ -27,6 +27,13 @@
 //! way, until they end. Calls turned on, or kept on, during Quiet Hours
 //! stay on until they next begin; a timed break that ends inside them
 //! stays off until they end.
+//!
+//! A Call placed from the Dialer while calls are off is an exception for
+//! that one Call (ticket #206). The Phone is unblocked and connected, and
+//! the Call placed once it connects, while a turn-off waits, as for a live
+//! Call, to put calls back off for whatever remains of the state they were
+//! in. Hang up first, or no connection in time, ends the Call, so calls go
+//! back off at once.
 
 use super::input::{Effect, Input, Timer};
 use super::presence::connect_again_at_once;
@@ -47,12 +54,14 @@ pub(super) enum CallsOff {
     /// with `address`. `after_restart` while an earlier run kept it and the
     /// Phone hasn't listed a Call again yet: a Call still ringing then
     /// isn't recorded, so it waits as long as the earlier run's Calls may
-    /// take to show again.
+    /// take to show again. `exception` while it puts calls back off after
+    /// a Call placed while they were off.
     Pending {
         address: String,
         until: Option<Deadline>,
         after_restart: bool,
         quiet_hours: bool,
+        exception: bool,
     },
     /// Off until `until`, or until the user turns them on: the Desktop has
     /// blocked, or is blocking, the Phone with `address`.
@@ -72,11 +81,14 @@ pub(super) enum CallsOff {
     },
     /// Turning on: the Desktop is unblocking the Phone with `address`, and
     /// connects it once that is done. If BlueZ won't, calls stay off as
-    /// they were: until `until`, or until turned on.
+    /// they were: until `until`, or until turned on. With `exception`, only
+    /// for a Call placed while calls are off: once unblocked, a turn-off
+    /// waits for it to end.
     TurningOn {
         address: String,
         until: Option<Deadline>,
         quiet_hours: bool,
+        exception: bool,
     },
 }
 
@@ -103,10 +115,13 @@ pub enum CallsOffRecord {
     /// Calls are on, and go off until `until`, or until the user turns them
     /// on, for the Phone with `address` once no Call is left. Nothing is
     /// blocked yet. `quiet_hours` while Quiet Hours turn them off.
+    /// `exception` while it puts calls back off after a Call placed while
+    /// they were off.
     Pending {
         address: String,
         until: Option<Deadline>,
         quiet_hours: bool,
+        exception: bool,
     },
     /// Calls are on through Quiet Hours the user turned them on, or kept
     /// them on, in: until `until`, when those next begin. Nothing is
@@ -148,7 +163,30 @@ impl State {
     /// until then.
     #[must_use]
     pub fn calls_off_pending(&self) -> bool {
-        matches!(self.calls_off, CallsOff::Pending { .. })
+        matches!(
+            self.calls_off,
+            CallsOff::Pending { .. }
+                | CallsOff::TurningOn {
+                    exception: true,
+                    ..
+                }
+        )
+    }
+
+    /// Whether calls go back off when the last Call ends because a Call was
+    /// placed while they were off: the exception for that one Call.
+    #[must_use]
+    pub fn calls_off_exception(&self) -> bool {
+        matches!(
+            self.calls_off,
+            CallsOff::Pending {
+                exception: true,
+                ..
+            } | CallsOff::TurningOn {
+                exception: true,
+                ..
+            }
+        )
     }
 
     /// Whether a turn-off asked for now waits for the last Call to end.
@@ -164,7 +202,12 @@ impl State {
         match &self.calls_off {
             CallsOff::Off { until, .. }
             | CallsOff::Reblocking { until, .. }
-            | CallsOff::Pending { until, .. } => *until,
+            | CallsOff::Pending { until, .. }
+            | CallsOff::TurningOn {
+                until,
+                exception: true,
+                ..
+            } => *until,
             CallsOff::On | CallsOff::TurningOn { .. } => None,
         }
     }
@@ -258,10 +301,7 @@ pub(super) fn calls_off_input(state: &mut State, input: Input, effects: &mut Vec
 /// turn-off waits: during Quiet Hours, calls then stay on until those next
 /// begin (spec #198).
 fn keep_on_through_quiet_hours(state: &mut State) {
-    let off_or_waiting = matches!(
-        state.calls_off,
-        CallsOff::Off { .. } | CallsOff::Reblocking { .. } | CallsOff::Pending { .. }
-    );
+    let off_or_waiting = state.calls_off() || state.calls_off_pending();
     if !off_or_waiting {
         return;
     }
@@ -306,12 +346,14 @@ fn kept(state: &mut State, record: CallsOffRecord, effects: &mut Vec<Effect>) {
                 address,
                 until: None,
                 quiet_hours: false,
+                exception: false,
             };
         }
         CallsOffRecord::Pending {
             address,
             until,
             quiet_hours,
+            exception,
         } => {
             if until.is_some_and(|until| state.passed(until.at)) {
                 effects.push(Effect::KeepCallsOff(None));
@@ -332,6 +374,7 @@ fn kept(state: &mut State, record: CallsOffRecord, effects: &mut Vec<Effect>) {
                 until,
                 after_restart: true,
                 quiet_hours,
+                exception,
             };
         }
         CallsOffRecord::KeptOn { until } => state.kept_on_until = Some(until),
@@ -348,13 +391,31 @@ pub(super) fn earlier_run_over(state: &mut State) {
 
 /// The user chose Keep calls on: the turn-off waiting for the last Call to
 /// end is cancelled.
+/// While the Phone is still being unblocked for a Call placed while calls
+/// were off, calls then stay on.
 fn keep_on(state: &mut State, effects: &mut Vec<Effect>) {
-    if let CallsOff::Pending { address, .. } = &state.calls_off {
-        effects.push(Effect::KeepCallsOff(state.calls_on_record()));
-        effects.push(Effect::CallsKeptOn {
-            address: address.clone(),
-        });
-        state.calls_off = CallsOff::On;
+    let kept_on_until = state.kept_on_until;
+    match &mut state.calls_off {
+        CallsOff::Pending { address, .. } => {
+            let address = address.clone();
+            state.calls_off = CallsOff::On;
+            effects.push(Effect::KeepCallsOff(state.calls_on_record()));
+            effects.push(Effect::CallsKeptOn { address });
+        }
+        CallsOff::TurningOn {
+            address,
+            exception: exception @ true,
+            ..
+        } => {
+            *exception = false;
+            let address = address.clone();
+            effects.push(Effect::KeepCallsOff(Some(CallsOffRecord::TurningOn {
+                address: address.clone(),
+                kept_on_until,
+            })));
+            effects.push(Effect::CallsKeptOn { address });
+        }
+        _ => {}
     }
 }
 
@@ -366,6 +427,7 @@ pub(super) fn apply_pending(state: &mut State, effects: &mut Vec<Effect>) {
         until,
         after_restart,
         quiet_hours,
+        ..
     } = &mut state.calls_off
     else {
         return;
@@ -486,7 +548,14 @@ pub(super) fn turn_off(
             address,
             until: old,
             quiet_hours: old_quiet,
+            exception,
             ..
+        }
+        | CallsOff::TurningOn {
+            address,
+            until: old,
+            quiet_hours: old_quiet,
+            exception: exception @ true,
         } => {
             if *old != until || *old_quiet != quiet_hours {
                 (*old, *old_quiet) = (until, quiet_hours);
@@ -494,6 +563,7 @@ pub(super) fn turn_off(
                     address: address.clone(),
                     until,
                     quiet_hours,
+                    exception: *exception,
                 })));
                 read_clock_at(until, effects);
             }
@@ -515,6 +585,7 @@ pub(super) fn turn_off(
         address: address.clone(),
         until,
         quiet_hours,
+        exception: false,
     })));
     effects.push(Effect::CallsOffPending {
         address: address.clone(),
@@ -525,6 +596,44 @@ pub(super) fn turn_off(
         until,
         after_restart: false,
         quiet_hours,
+        exception: false,
+    };
+}
+
+/// A Call is placed while calls are off: an exception for that one Call.
+/// A turn-off for what remains of the state calls were in is kept first,
+/// then the Phone is unblocked, and connected once it is. Calls stay off
+/// as far as the user chose: they didn't ask to turn them on.
+pub(super) fn except_for_call(state: &mut State, effects: &mut Vec<Effect>) {
+    let (CallsOff::Off {
+        address,
+        until,
+        quiet_hours,
+    }
+    | CallsOff::Reblocking {
+        address,
+        until,
+        quiet_hours,
+    }) = &state.calls_off
+    else {
+        return;
+    };
+    let (address, until, quiet_hours) = (address.clone(), *until, *quiet_hours);
+    effects.push(Effect::KeepCallsOff(Some(CallsOffRecord::Pending {
+        address: address.clone(),
+        until,
+        quiet_hours,
+        exception: true,
+    })));
+    effects.push(Effect::CallPlacedWhileCallsOff {
+        address: address.clone(),
+    });
+    block(&address, false, effects);
+    state.calls_off = CallsOff::TurningOn {
+        address,
+        until,
+        quiet_hours,
+        exception: true,
     };
 }
 
@@ -577,6 +686,7 @@ pub(super) fn turn_on(state: &mut State, effects: &mut Vec<Effect>) {
         address,
         until,
         quiet_hours,
+        exception: false,
     };
 }
 
@@ -599,12 +709,37 @@ fn blocked_as_asked(state: &mut State, address: &str, blocked: bool, effects: &m
         reblocked(state, address);
         return;
     }
-    if !turning_on(state, address) {
+    let CallsOff::TurningOn {
+        address: turning,
+        until,
+        quiet_hours,
+        exception,
+    } = &state.calls_off
+    else {
+        return;
+    };
+    if turning != address {
         return;
     }
-    state.calls_off = CallsOff::On;
-    effects.push(Effect::KeepCallsOff(state.calls_on_record()));
-    connect_again_at_once(state, effects);
+    if !*exception {
+        state.calls_off = CallsOff::On;
+        effects.push(Effect::KeepCallsOff(state.calls_on_record()));
+        connect_again_at_once(state, effects);
+        return;
+    }
+    // For a Call placed while calls were off: the turn-off kept waits for
+    // it. Hung up already, nothing is connected, and calls go back off.
+    state.calls_off = CallsOff::Pending {
+        address: turning.clone(),
+        until: *until,
+        after_restart: false,
+        quiet_hours: *quiet_hours,
+        exception: true,
+    };
+    if state.call_keeps_calls_on() {
+        connect_again_at_once(state, effects);
+        super::dialling::wait_for_phone(state, effects);
+    }
 }
 
 /// Calls an earlier run kept off are off, with the Phone blocked again or
@@ -658,10 +793,11 @@ fn block_failed(state: &mut State, address: &str, blocked: bool, effects: &mut V
         address: turning,
         until,
         quiet_hours,
+        exception,
     } = &state.calls_off
         && turning == address
     {
-        let (until, quiet_hours) = (*until, *quiet_hours);
+        let (until, quiet_hours, exception) = (*until, *quiet_hours, *exception);
         state.kept_on_until = None;
         effects.push(Effect::KeepCallsOff(Some(CallsOffRecord::Off {
             address: address.to_owned(),
@@ -673,7 +809,12 @@ fn block_failed(state: &mut State, address: &str, blocked: bool, effects: &mut V
             until,
             quiet_hours,
         };
-        effects.push(Effect::ReportError(Failure::CallsOnFailed));
+        if exception {
+            // The Call placed meanwhile isn't: its Call Window says why.
+            super::dialling::dial_failed(state, Failure::CallsOnFailed, effects);
+        } else {
+            effects.push(Effect::ReportError(Failure::CallsOnFailed));
+        }
     }
 }
 
@@ -696,10 +837,6 @@ pub(super) fn phone_forgotten(state: &State, effects: &mut Vec<Effect>) {
     };
     effects.push(Effect::KeepCallsOff(state.calls_on_record()));
     block(address, false, effects);
-}
-
-fn turning_on(state: &State, address: &str) -> bool {
-    matches!(&state.calls_off, CallsOff::TurningOn { address: turning, .. } if turning == address)
 }
 
 fn block(address: &str, blocked: bool, effects: &mut Vec<Effect>) {

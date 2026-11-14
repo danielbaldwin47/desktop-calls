@@ -13,6 +13,9 @@ pub(super) const TURN_CALLS_ON: &str = "Turn calls on";
 pub(super) const KEEP_CALLS_ON: &str = "Keep calls on";
 /// The Indicator's status while a turn-off waits for the last Call.
 pub(super) const PENDING: &str = "Calls turn off when this Call ends";
+/// The Indicator's status during a Call placed while calls were off: they
+/// go off again once it ends (ticket #206).
+pub(super) const AGAIN: &str = "Calls off again when this Call ends";
 /// Calls turned off until a time that has already passed.
 pub(super) const UNTIL_PASSED: &str =
     "That time has already passed, so calls stay on; choose a time ahead.";

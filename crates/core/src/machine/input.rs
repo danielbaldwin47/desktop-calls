@@ -416,6 +416,9 @@ pub enum Timer {
     DismissDial(u32),
     /// Give up on the Phone reporting the Call of this dial attempt.
     DialTimedOut(u32),
+    /// Give up on the Phone, unblocked for the Call of this dial attempt
+    /// placed while calls were off, connecting.
+    PhoneForDial(u32),
     /// The audio hasn't come here within the limit for this Handoff.
     HandoffTimedOut(u32),
     /// A second has passed since the Phone carried out `Activate()` for
@@ -556,4 +559,8 @@ pub enum Effect {
     /// The turn-off waiting for the last Call to end, for the Phone with
     /// this address, was cancelled: calls stay on. For the log.
     CallsKeptOn { address: String },
+    /// A Call was placed while calls were off, so the Phone with this
+    /// address is unblocked for it; calls go off again once it ends. For
+    /// the log.
+    CallPlacedWhileCallsOff { address: String },
 }

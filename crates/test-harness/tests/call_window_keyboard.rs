@@ -376,10 +376,14 @@ fn tones_typed_straight_after_k_leave_the_keypad_open() {
     let typed = harness.wait_for_app("the keypad shows the tones", DEADLINE, |state| {
         shown(state, "keypad").is_some() && shown(state, "tones").as_deref() == Some("123#")
     });
-    let timer = shown(&typed, "timer");
-    // The timer's next tick is a second on, well past the click.
-    let ticked = harness.wait_for_app("the timer ticks", DEADLINE, |state| {
-        shown(state, "timer").is_some() && shown(state, "timer") != timer
+    // The timer ticks each second, on a beat of its own: its second tick
+    // after the tones is at least a second after K, well past the click.
+    let ticks = |state: &AppState| shown(state, "timer");
+    let first = harness.wait_for_app("the timer ticks", DEADLINE, |state| {
+        ticks(state).is_some() && ticks(state) != ticks(&typed)
+    });
+    let ticked = harness.wait_for_app("the timer ticks again", DEADLINE, |state| {
+        ticks(state).is_some() && ticks(state) != ticks(&first)
     });
     assert_eq!(
         (shown(&ticked, "keypad"), shown(&ticked, "tones")),

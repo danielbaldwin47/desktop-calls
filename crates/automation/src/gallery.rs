@@ -137,7 +137,7 @@ const STATES: &[State] = &[
         still: |state| {
             state.surface("call-window").is_some_and(|window| {
                 window.contains_key("keypad")
-                    && window.get("tones").is_some_and(|tones| tones == "123#")
+                    && window.get("tones").map(String::as_str) == Some("123#")
             })
         },
         prepare: as_is,

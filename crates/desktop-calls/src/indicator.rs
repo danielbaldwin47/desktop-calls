@@ -449,6 +449,7 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
                 IndicatorEntry::TurnCallsOn => 9,
                 // Clear of the separators', which count up from 10.
                 IndicatorEntry::KeepCallsOn => 950,
+                IndicatorEntry::QuietHours => 951,
                 choice @ (IndicatorEntry::CallsOffUntilTurnedOn
                 | IndicatorEntry::CallsOffForAnHour(_)
                 | IndicatorEntry::CallsOffUntilMorning(_)) => choice_id(choice),

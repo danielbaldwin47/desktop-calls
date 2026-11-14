@@ -1,5 +1,6 @@
 //! The Desktop surfaces: the Incoming Call Banner, the Call Window and the
-//! Dialer, as GTK4 and libadwaita windows on the layer shell.
+//! Dialer, as GTK4 and libadwaita windows on the layer shell, and the Setup
+//! Window and the Quiet Hours Window, as ordinary windows.
 //!
 //! They render what the Call state machine says to show, send the user's
 //! clicks back as intents, and report what is actually on screen (a surface
@@ -50,6 +51,9 @@
 //!   row; Escape closes it.
 //! - Escape only ever gives keyboard focus back, collapses the Call Window
 //!   or closes the Dialer. It never ends or declines a Call.
+//! - The Setup Window and the Quiet Hours Window are ordinary windows, not
+//!   on the layer shell: tasks the user works through, which tile, take
+//!   focus when they open and can be moved aside. Escape closes either.
 //! - Each surface reports `focused` while it has keyboard focus, as the
 //!   compositor says.
 //! - No output is chosen, so the compositor puts each on the focused output.
@@ -76,6 +80,7 @@ mod call_window;
 mod dialer;
 mod first_frames;
 mod icons;
+mod quiet_hours_window;
 mod setup_problems;
 mod setup_window;
 
@@ -83,6 +88,7 @@ use banner::Banner;
 use call_window::CallWindow;
 use dialer::Dialer;
 use first_frames::FirstFrames;
+use quiet_hours_window::QuietHoursWindow;
 use setup_problems::SetupProblems;
 use setup_window::SetupWindow;
 
@@ -139,6 +145,7 @@ pub struct Surfaces {
     dialer: Rc<Dialer>,
     setup_window: Rc<SetupWindow>,
     setup_problems: Rc<SetupProblems>,
+    quiet_hours_window: Rc<QuietHoursWindow>,
     first_frames: FirstFrames,
     theme: Option<Theme>,
 }
@@ -187,11 +194,13 @@ impl Surfaces {
         let setup_window = SetupWindow::new(intents, report.clone());
         let setup_problems = SetupProblems::new(intents, report.clone());
         setup_window.put_on_top(&setup_problems.widget);
+        let quiet_hours_window = QuietHoursWindow::new(intents, report.clone());
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),
             call_window: CallWindow::new(intents, report),
             setup_window,
             setup_problems,
+            quiet_hours_window,
             first_frames: FirstFrames::new(dialer.surface.window.clone()),
             dialer,
             theme,
@@ -256,6 +265,8 @@ impl Surfaces {
             .render(view.setup_problems.as_ref(), view.setup_window.as_ref());
         // The Problems going may take keyboard focus with them.
         self.setup_window.focus_if_lost();
+        self.quiet_hours_window
+            .render(view.quiet_hours_window.as_ref());
     }
 }
 

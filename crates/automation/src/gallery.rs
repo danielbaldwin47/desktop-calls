@@ -23,6 +23,7 @@ mod call_pill;
 mod indicator;
 mod look;
 mod page;
+mod quiet_hours_window;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
@@ -31,6 +32,7 @@ use indicator::{
 };
 use look::{LOOKS, Look};
 use page::index_html;
+use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -854,7 +856,11 @@ pub fn run(options: &Options) -> ExitCode {
 
 /// Every state the gallery shows, in order.
 fn all_states() -> impl Iterator<Item = &'static State> {
-    STATES.iter().chain(BANNER_STATES).chain(CALL_PILL_STATES)
+    STATES
+        .iter()
+        .chain(BANNER_STATES)
+        .chain(CALL_PILL_STATES)
+        .chain(QUIET_HOURS_WINDOW_STATES)
 }
 
 /// Renders each of `shots` into `output`, several at a time: `workers`, or

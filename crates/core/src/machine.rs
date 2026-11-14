@@ -24,6 +24,7 @@ mod missed_calls;
 mod phone;
 mod presence;
 mod quiet_hours;
+mod quiet_hours_window;
 mod setup;
 mod view;
 
@@ -49,6 +50,10 @@ pub use input::{
 use missed_calls::missed_call_input;
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
 use presence::{Presence, forget_phone, hang_up_undelivered, presence_input};
+use quiet_hours_window::QuietHoursWindows;
+pub use quiet_hours_window::{
+    QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView,
+};
 use setup::Setup;
 pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
@@ -359,6 +364,8 @@ pub struct State {
     /// While calls are on through Quiet Hours the user turned them on in:
     /// when those Quiet Hours next begin.
     kept_on_until: Option<Deadline>,
+    /// The open Quiet Hours Window.
+    quiet_hours_windows: QuietHoursWindows,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -875,6 +882,15 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         input @ (Input::QuietHoursKept(_) | Input::SetQuietHours(_) | Input::ClearQuietHours) => {
             quiet_hours::quiet_hours_input(&mut state, &input, &mut effects);
         }
+        input @ (Input::OpenQuietHoursWindow
+        | Input::CloseQuietHoursWindow
+        | Input::SwitchQuietHours(_)
+        | Input::QuietHoursStep { .. }
+        | Input::QuietHoursDigit { .. }
+        | Input::QuietHoursErase(_)
+        | Input::QuietHoursFieldLeft(_)) => {
+            quiet_hours_window::quiet_hours_window_input(&mut state, &input, &mut effects);
+        }
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
@@ -952,6 +968,7 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         clock: state.clock,
         quiet_hours: state.quiet_hours,
         kept_on_until: state.kept_on_until,
+        quiet_hours_windows: state.quiet_hours_windows.clone(),
         keybinding: state.keybinding.clone(),
         ..forget_phone(state)
     }

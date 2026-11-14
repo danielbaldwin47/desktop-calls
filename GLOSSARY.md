@@ -96,6 +96,10 @@ _Avoid_: tray icon, status icon
 The guided window that pairs the Phone with the Desktop and walks through granting access to Contacts and Call History.
 _Avoid_: first-run wizard, onboarding, "Connect your phone" window
 
+**Quiet Hours Window**:
+The small window, opened from the Indicator's menu, where the user turns Quiet Hours on or off and sets their start and end.
+_Avoid_: settings window, preferences, schedule dialog
+
 **Problem**:
 Something wrong on the Desktop or Phone that keeps Calls, Contacts or Call History from working, which the user can put right; shown in the Setup Window, the Indicator's menu and `Problems`.
 _Avoid_: error, issue

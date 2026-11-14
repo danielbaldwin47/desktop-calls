@@ -18,6 +18,11 @@
 //!   forgotten the pairing fails it for want of the link key:
 //!   `"br-connection-key-missing"`, which is inferred from BlueZ's error
 //!   table, not seen.
+//! - `Connect` to a Phone that is connected already, or that connects by
+//!   itself while the `Connect` is under way, fails with
+//!   `org.bluez.Error.Failed` `"br-connection-already-connected"`: the real
+//!   Desktop logged that 15 times from 2026-11-08 to 11-13 (ticket #212),
+//!   and `org.bluez.Error.AlreadyConnected` never.
 
 use std::time::{Duration, Instant};
 
@@ -35,6 +40,8 @@ const CONNECT_TIME: Duration = Duration::from_millis(600);
 /// How long a Phone that forgot the pairing takes to fail the connect.
 const KEY_MISSING_TIME: Duration = Duration::from_millis(300);
 const PAGE_POLL: Duration = Duration::from_millis(20);
+/// BlueZ's answer to a `Connect` on a Phone that is connected already.
+const ALREADY_CONNECTED: &str = "br-connection-already-connected";
 
 /// Whether the Phone is in range, and what it carries on while it isn't.
 #[derive(Default)]
@@ -144,7 +151,13 @@ pub fn hands_free_up(world: &mut World) -> zbus::Result<Option<Change>> {
         OwnedVariant::from(true),
     );
     let mut change = Change::default();
-    change.bluez(connected_changed(&device, true));
+    if !world
+        .behaviour
+        .quirks
+        .contains(&telephony::Quirk::ConnectedUnannounced)
+    {
+        change.bluez(connected_changed(&device, true));
+    }
     if let Some(battery) = world.range.battery.take() {
         let copy = copy_properties(&battery);
         bluez::restore_battery(&mut world.bluez, &device, battery);
@@ -363,7 +376,9 @@ type Ended = (Option<&'static str>, Option<Change>, Option<Change>);
 /// link key is checked as the link comes up, so that connect fails too, and
 /// never brings the Phone back (ticket #171). Nor can the Phone going out of
 /// range while the connect finishes: it fails as a page timeout, rather than
-/// bringing back a Phone that has just left (ticket #196).
+/// bringing back a Phone that has just left (ticket #196). A Phone that
+/// connected by itself meanwhile fails it as connected already (ticket
+/// #212).
 fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Result<Ended> {
     let mut world = lock(world);
     world.range.connecting = false;
@@ -374,7 +389,8 @@ fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Resu
                 .forgot_pairing
                 .then_some("br-connection-key-missing")
         })
-        .or_else(|| (!world.range.reachable).then_some("br-connection-page-timeout"));
+        .or_else(|| (!world.range.reachable).then_some("br-connection-page-timeout"))
+        .or_else(|| world.audio_gateway.is_some().then_some(ALREADY_CONNECTED));
     if failure.is_some() {
         return Ok((failure, None, None));
     }
@@ -431,8 +447,8 @@ fn connect(
             Some(Reply::unknown_method(call))
         } else if world.audio_gateway.is_some() {
             Some(Reply::Error(
-                "org.bluez.Error.AlreadyConnected",
-                "Already Connected".to_owned(),
+                "org.bluez.Error.Failed",
+                ALREADY_CONNECTED.to_owned(),
             ))
         } else if world.range.connecting {
             Some(Reply::Error(

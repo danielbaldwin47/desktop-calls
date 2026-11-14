@@ -427,3 +427,158 @@ fn once_a_call_ended_while_collapsed_has_gone_the_indicator_opens_the_dialer() {
         state.surface("dialer").is_some()
     });
 }
+
+/// Ticket #201: a notice expands the collapsed Call Window by itself, so a
+/// failure is never hidden in a strip.
+#[test]
+fn a_notice_expands_the_collapsed_call_window() {
+    let harness = connected();
+    live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    harness
+        .simulated_phone()
+        .enable_quirk("disconnect-profile-refused");
+
+    harness
+        .move_audio("phone")
+        .unwrap_or_else(|error| panic!("MoveAudio(\"phone\") was refused: {error:?}"));
+
+    let state = harness.wait_for_app("the notice expands the Call Window", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.contains_key("notice"))
+    });
+    assert_eq!(pill(&state), None);
+    // Whether the window, mapped again, gets the keyboard is the
+    // compositor's choice: sway hands it over when nothing else has it. The
+    // core doesn't ask for it (core tests).
+}
+
+/// Ticket #201: answered on the Phone, the Call Pill says the audio is on the
+/// Phone, and Mute is unavailable.
+#[test]
+fn with_the_audio_on_the_phone_the_call_pill_says_so_and_mute_is_unavailable() {
+    let harness = connected();
+    let path = harness.simulated_phone().ring(NUMBER);
+    harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+        state.surface("banner").is_some()
+    });
+    harness.simulated_phone().answer_on_phone(&path);
+
+    let state = wait_until_collapsed(&harness);
+
+    let Some(pill) = pill(&state) else {
+        panic!("the Call Pill shows");
+    };
+    assert_eq!(
+        pill.get("audio-location").map(String::as_str),
+        Some("Audio on phone")
+    );
+    assert!(pill.contains_key("mute-unavailable"), "{pill:?}");
+}
+
+/// Ticket #201: a ringing Waiting Call leaves the Call Window collapsed, as
+/// the Banner shows it; Hold & Answer expands it, by itself, with the Call
+/// on hold in view. Collapsed again by hand, the Call Pill says 1 on hold.
+#[test]
+fn hold_and_answer_expands_the_call_pill_and_collapsed_again_it_says_one_on_hold() {
+    let harness = connected();
+    live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    let _path = harness.simulated_phone().ring(SECOND_NUMBER);
+    harness.wait_for_app("the Banner offers Hold & Answer", DEADLINE, |state| {
+        state
+            .surface("banner")
+            .is_some_and(|banner| banner.contains_key("options"))
+    });
+    harness.app_holds(
+        "the Call Window stays collapsed while the Waiting Call rings",
+        Duration::from_millis(500),
+        collapsed,
+    );
+
+    harness
+        .hold_and_answer()
+        .unwrap_or_else(|error| panic!("Hold & Answer: {error:?}"));
+
+    harness.wait_for_app(
+        "Hold & Answer expands the Call Window with the Call on hold",
+        DEADLINE,
+        |state| {
+            pill(state).is_none()
+                && state
+                    .surface("call-window")
+                    .is_some_and(|window| window.keys().any(|key| key.starts_with("held")))
+        },
+    );
+    // Whether the window, mapped again, gets the keyboard is the
+    // compositor's choice: sway hands it over when nothing else has it. The
+    // core doesn't ask for it (core tests).
+    harness.activate();
+    harness.wait_for_app("the keybinding gives it the keyboard", DEADLINE, expanded_with_keyboard);
+    harness.keyboard().press(Key::Escape);
+    let state = harness.wait_for_app("Escape collapses it", DEADLINE, collapsed);
+    assert_eq!(
+        pill(&state).and_then(|pill| pill.get("held")).map(String::as_str),
+        Some("1 on hold")
+    );
+}
+
+/// Ticket #201: End & Answer expands the collapsed Call Window for the new
+/// Call, which collapses 5 s later under the usual rule.
+#[test]
+fn end_and_answer_expands_the_call_pill_for_the_new_call_which_collapses_again() {
+    let harness = connected();
+    live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    let _path = harness.simulated_phone().ring(SECOND_NUMBER);
+    harness.wait_for_app("the Banner offers End & Answer", DEADLINE, |state| {
+        state
+            .surface("banner")
+            .is_some_and(|banner| banner.contains_key("options"))
+    });
+
+    harness
+        .end_and_answer()
+        .unwrap_or_else(|error| panic!("End & Answer: {error:?}"));
+
+    harness.wait_for_app(
+        "End & Answer expands the Call Window for the new Call",
+        DEADLINE,
+        |state| {
+            pill(state).is_none()
+                && state.calls.len() == 1
+                && state.calls[0].state == "active"
+                && state.surface("call-window").is_some()
+        },
+    );
+    // Whether the window, mapped again, gets the keyboard is the
+    // compositor's choice: sway hands it over when nothing else has it. The
+    // core doesn't ask for it (core tests).
+    let state = wait_until_collapsed(&harness);
+    assert_eq!(
+        pill(&state).and_then(|pill| pill.get("caller")).map(String::as_str),
+        Some("+44 7700 900456")
+    );
+}
+
+/// Ticket #201: a Call ended while collapsed shows Call ended on the Call
+/// Pill, for as long as the Call Window would, and then goes.
+#[test]
+fn a_call_ended_while_collapsed_says_call_ended_on_the_call_pill_then_goes() {
+    let harness = connected();
+    let call = live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+
+    harness.hang_up(call);
+
+    harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
+        pill(state)
+            .and_then(|pill| pill.get("status"))
+            .is_some_and(|status| status == "Call ended")
+    });
+    harness.wait_for_app("the Call Pill goes", DEADLINE, |state| {
+        pill(state).is_none() && state.surface("call-window").is_none()
+    });
+}
+

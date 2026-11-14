@@ -39,10 +39,6 @@ pub(crate) mod class {
     /// colour at full strength, so it reads at 4.5:1 like any text.
     pub(crate) const KEYCAP: &str = "type-keycap";
     /// One row of keycaps with what each does, at a surface's foot.
-    #[expect(
-        dead_code,
-        reason = "for the surfaces spec #221 rebuilds; the CSS is in place"
-    )]
     pub(crate) const FOOTER_LINE: &str = "footer-line";
     /// On a surface: it has the keyboard, so its border takes the accent.
     pub(crate) const HAS_KEYBOARD: &str = "has-keyboard";

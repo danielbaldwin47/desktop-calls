@@ -56,6 +56,7 @@ pub(super) fn quiet_hours_input(state: &mut State, input: &Input, effects: &mut 
         state.quiet_hours = hours;
         effects.push(Effect::KeepQuietHours(hours));
     }
+    super::quiet_hours_window::follow(state);
 }
 
 /// After every input: calls follow the Quiet Hours, as the clock last read

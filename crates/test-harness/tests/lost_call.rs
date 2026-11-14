@@ -241,6 +241,7 @@ fn assert_lost_menu(menu: &[MenuEntry], status: &str) {
             status,
             "Open Dialer",
             "Turn calls off",
+            "Quiet Hours…",
             "Connect your phone…",
             "---",
             HANG_UP_ON_PHONE
@@ -342,6 +343,7 @@ fn with_hands_free_lost_the_indicator_says_what_the_call_window_says() {
             "Connection to My Pixel lost",
             "Open Dialer",
             "Turn calls off",
+            "Quiet Hours…",
             "Connect your phone…"
         ]
     );

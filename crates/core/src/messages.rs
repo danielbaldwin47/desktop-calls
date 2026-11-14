@@ -18,6 +18,7 @@ mod call_window;
 mod calls_off;
 mod checks;
 mod problems;
+mod quiet_hours;
 mod setup;
 mod when;
 pub use call_pill::{call_pill_tag, call_pill_tooltip, show_call_tooltip};
@@ -30,6 +31,7 @@ pub use calls_off::{
 };
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
+pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{SetupWindowText, setup_window};
 pub use when::when;
 
@@ -411,6 +413,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::CallsOffUntilMorning(until) => calls_off::until_morning(until.shown),
         IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::KeepCallsOn => calls_off::KEEP_CALLS_ON.to_owned(),
+        IndicatorEntry::QuietHours => quiet_hours::MENU_ENTRY.to_owned(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),

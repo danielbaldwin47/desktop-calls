@@ -123,17 +123,21 @@ pub fn calls_off(length: Option<&str>, until: Option<&str>, until_morning: bool)
 }
 
 /// `desktop-calls calls on`: turns calls on, or keeps them on while a
-/// turn-off waits for the last Call to end.
+/// turn-off waits for the last Call to end. It always sends `TurnCallsOn`,
+/// which does both, so a Call ending between the status read and the
+/// request still leaves calls on; the status only picks what is said.
 pub fn calls_on() -> ExitCode {
     let context = MainContext::default();
     let pending = context
         .block_on(read_status(GlibRuntime::new(context.clone())))
         .is_ok_and(|status| status.calls_off.2);
-    if pending {
-        turn_calls("KeepCallsOn", &(), |_| messages::calls_kept_on().to_owned())
-    } else {
-        turn_calls("TurnCallsOn", &(), |_| messages::calls_turned(false, None))
-    }
+    turn_calls("TurnCallsOn", &(), move |_| {
+        if pending {
+            messages::calls_kept_on().to_owned()
+        } else {
+            messages::calls_turned(false, None)
+        }
+    })
 }
 
 /// The milliseconds `length` names, such as `90m` or `2h`: a whole number

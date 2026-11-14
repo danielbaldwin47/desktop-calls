@@ -16,7 +16,8 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-/// How wide the Call Pill is: about a third of the Call Window less.
+/// The narrowest the Call Pill is. A caller written out in full makes it
+/// wider, about 330 px for an international number.
 const PILL_WIDTH: i32 = 280;
 
 /// The Call Pill.

@@ -411,7 +411,8 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     // The keybinding gives the Call Window the keyboard, which keeps it
     // expanded past the 5 s after which it would collapse to the Call Pill,
     // so its notice can be read.
-    let _ = harness.cli(&[]);
+    let keybinding = harness.cli(&[]);
+    assert!(keybinding.status.success(), "{keybinding:?}");
     harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
         state
             .surface("call-window")

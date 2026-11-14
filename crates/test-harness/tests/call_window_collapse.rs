@@ -266,7 +266,8 @@ fn clicking_the_indicator_expands_the_collapsed_call_window() {
 }
 
 #[test]
-fn the_pointer_and_the_keyboard_keep_it_expanded_and_it_collapses_five_seconds_after_both_leave() {
+fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_the_keyboard_until_escape()
+ {
     let harness = connected();
     live_on_desktop(&harness);
     let window = call_window_on_screen(&harness, "call-window");
@@ -279,8 +280,19 @@ fn the_pointer_and_the_keyboard_keep_it_expanded_and_it_collapses_five_seconds_a
         |state| state.surface("call-window").is_some() && pill(state).is_none(),
     );
 
-    // A click there gives it the keyboard, which keeps it expanded once the
-    // pointer has gone.
+    // Once the pointer leaves, it collapses 5 s later.
+    harness.pointer().move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
+    harness.app_holds(
+        "the Call Window stays expanded for a moment after the pointer leaves",
+        Duration::from_secs(4),
+        |state| state.surface("call-window").is_some() && pill(state).is_none(),
+    );
+    wait_until_collapsed(&harness);
+    harness.activate();
+    harness.wait_for_app("the keybinding expands it", DEADLINE, expanded_with_keyboard);
+
+    // A click on the window keeps the keyboard there, which keeps it
+    // expanded with the pointer gone.
     harness.pointer().click(window.left + 6.0, window.top + 6.0);
     harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
         state

@@ -14,6 +14,7 @@ use crate::missed::MissedCalls;
 mod audio;
 mod call_waiting;
 mod calls;
+mod collapse;
 mod desktop;
 mod dialling;
 mod input;
@@ -33,6 +34,7 @@ use calls::{
     answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
     send_tones, timer_fired,
 };
+use collapse::{CallWindowForm, follow_call_window, form_input};
 use desktop::DesktopChecks;
 pub use desktop::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, SetupProblemsView};
 use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
@@ -332,6 +334,9 @@ pub struct State {
     awaiting_number: Vec<CallId>,
     /// What the setup checks found of the Desktop.
     desktop: DesktopChecks,
+    /// Whether the Call Window is collapsed to the Call Pill, and what keeps
+    /// it expanded.
+    form: CallWindowForm,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -688,6 +693,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     }
     setup::follow_connection(&mut state, &mut effects);
     setup::follow_contacts(&mut state, &mut effects);
+    follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
     (state, effects)
 }
 
@@ -769,6 +775,13 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
         Input::Activate => activate(&mut state),
         Input::ReleaseFocus => state.focus = Focus::None,
+        input @ (Input::CollapseCallWindow
+        | Input::ExpandCallWindow
+        | Input::IndicatorActivated
+        | Input::PointerOverCallWindow(_)
+        | Input::CallWindowKeyboard(_)
+        | Input::CallWindowUsed
+        | Input::KeypadShown(_)) => form_input(&mut state, &input),
         input @ (Input::OpenDialer { .. }
         | Input::DialerQuery(_)
         | Input::DialerMove(_)

@@ -217,18 +217,22 @@ fn every_action_in_the_call_window_is_reachable_by_the_shortcut_it_shows() {
 }
 
 #[test]
-fn escape_leaves_the_call_live() {
+fn escape_collapses_the_call_window_and_leaves_the_call_live() {
     let harness = connected();
     live_on_desktop(&harness);
     focus_call_window(&harness);
 
     harness.keyboard().press(Key::Escape);
 
+    harness.wait_for_app("Escape collapses the Call Window", DEADLINE, |state| {
+        state.surface("call-pill").is_some()
+    });
     harness.app_holds(
-        "the Call stays live with the Call Window open",
+        "the Call stays live on the Call Pill",
         Duration::from_secs(2),
         |state| {
-            state.calls.iter().any(|call| call.state == "active") && call_window(state).is_some()
+            state.calls.iter().any(|call| call.state == "active")
+                && state.surface("call-pill").is_some()
         },
     );
     harness

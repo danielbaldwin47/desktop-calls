@@ -76,6 +76,10 @@ _Avoid_: launcher, call picker
 The small window shown during a live Call: timer, mute, keypad, Handoff, hang up, and, with a Call on hold, Swap.
 _Avoid_: in-call screen, call UI
 
+**Call Pill**:
+The small strip the Call Window collapses to during a Call, showing the caller, timer, Mute and Hang up.
+_Avoid_: mini window, bubble, picture-in-picture
+
 **Indicator**:
 The icon in the Desktop's top bar that shows whether the Phone is connected or in a Call.
 _Avoid_: tray icon, status icon

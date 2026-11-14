@@ -14,18 +14,24 @@
 //!   its `omarchy-notifications` layer is, or [`FALLBACK_TOAST_COLUMN_WIDTH`].
 //!   It is unmapped whenever nothing rings: a mapped overlay surface stops
 //!   Hyprland scanning a fullscreen window out directly. While the Call
-//!   Window shows too, for a Waiting Call, the Banner sits below it.
+//!   Window shows expanded too, for a Waiting Call, the Banner sits below it.
 //! - The Call Window is on the top layer, so fullscreen windows cover it, in
 //!   the same corner, and takes keyboard focus only when clicked or when the
 //!   keybinding asks; Escape gives it back. Each of its actions has a
 //!   shortcut, shown on its button. Digits, `*` and `#` typed or pasted
 //!   anywhere in it are keypad tones.
+//! - A few seconds after a Call connects, the Call Window collapses to the
+//!   Call Pill, as the Call state machine decides: a strip on the top layer
+//!   in the bottom-right corner, which never takes the keyboard. A click on
+//!   its body, the keybinding or the Indicator expands the Call Window again;
+//!   Escape on the Call Window collapses it. The Call Window reports the
+//!   pointer, clicks, keys, the keyboard and its keypad for the decision.
 //! - The Dialer is an overlay surface centred in the space the bar leaves,
 //!   like a launcher, with the keyboard to itself while open. Typing searches;
 //!   Up and Down move the selection; Enter or a click Calls the selected
 //!   row; Escape closes it.
-//! - Escape only ever gives keyboard focus back, or closes the Dialer. It
-//!   never ends or declines a Call.
+//! - Escape only ever gives keyboard focus back, collapses the Call Window
+//!   or closes the Dialer. It never ends or declines a Call.
 //! - Each surface reports `focused` while it has keyboard focus, as the
 //!   compositor says.
 //! - No output is chosen, so the compositor puts each on the focused output.
@@ -66,7 +72,7 @@ use setup_window::SetupWindow;
 /// Hyprland can't say. Omarchy 4.5's is 394.
 const FALLBACK_TOAST_COLUMN_WIDTH: i32 = 400;
 /// Space between a surface and what it sits next to.
-const GAP: i32 = 12;
+pub(crate) const GAP: i32 = 12;
 const WIDTH: i32 = 340;
 const DIALER_WIDTH: i32 = 560;
 /// The Dialer's list stays this tall, so the Dialer doesn't jump about as
@@ -108,6 +114,10 @@ const CSS: &str = "
 .desktop-calls-surface .dialer-entry { font-size: 1.2em; }
 .desktop-calls-surface .dialer-row { padding: 6px 8px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
+.desktop-calls-surface.call-pill { padding: 6px 8px; }
+.desktop-calls-surface.call-pill button { padding: 4px 8px; min-height: 0; }
+.desktop-calls-surface .pill-caller { font-weight: bold; }
+.desktop-calls-surface.call-pill .numeric { font-size: 0.9em; }
 .desktop-calls-surface .hd {
     font-size: 0.8em; font-weight: bold; padding: 0 6px;
     border: 1px solid currentColor; border-radius: 4px;
@@ -193,10 +203,11 @@ impl Surfaces {
     }
 
     /// Each surface's name and window.
-    fn windows(&self) -> [(&'static str, gtk::Window); 3] {
+    fn windows(&self) -> [(&'static str, gtk::Window); 4] {
         [
             &self.banner.surface,
             &self.call_window.surface,
+            self.call_window.pill_surface(),
             &self.dialer.surface,
         ]
         .map(|surface| (surface.name, surface.window.clone()))
@@ -369,7 +380,7 @@ fn surface_shown(name: &str) {
 /// the new theme (ticket #99). A hidden surface draws nothing, so it logs
 /// nothing.
 fn theme_shown_when_drawn(
-    surfaces: [(&'static str, gtk::Window); 3],
+    surfaces: [(&'static str, gtk::Window); 4],
 ) -> impl Fn(Option<&'static str>) + 'static {
     move |mode| {
         for &(name, ref window) in &surfaces {
@@ -415,12 +426,12 @@ fn reported(content: &BTreeMap<String, String>, window: &gtk::Window) -> BTreeMa
 
 impl Surface {
     /// A surface named `name` in the top-right corner. Escape sends
-    /// `escape`.
+    /// `escape`, if the surface takes the keyboard at all.
     fn new(
         name: &'static str,
         layer: Layer,
         keyboard: KeyboardMode,
-        escape: Input,
+        escape: Option<Input>,
         intents: &UnboundedSender<Input>,
         report: SharedReport,
     ) -> Self {
@@ -480,7 +491,9 @@ impl Surface {
                     .set(name, Some(reported(&content.borrow(), window)));
             }
         });
-        surface.on_escape(escape, intents);
+        if let Some(escape) = escape {
+            surface.on_escape(escape, intents);
+        }
         let (mapped, report) = (surface.mapped.clone(), surface.report.clone());
         surface.window.connect_unmap(move |_| {
             mapped.set(false);

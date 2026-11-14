@@ -6,12 +6,13 @@
 //! the runner's clock and the user's Enter would add their own delays (#80,
 //! #83, #99).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::{LOG_DEADLINE, connection_logged, logged_since, millis, no_call_left, unix_micros_at};
 use crate::checklist::app_log::LogLine;
 use crate::checklist::results::unix_micros;
-use crate::checklist::sitting::{Sitting, Stop, seconds};
+use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
+use crate::checklist::watch::AppState;
 
 /// The scorecard's reconnect target (`docs/wiki/polish-scorecard.md`).
 const RECONNECT_TARGET: Duration = Duration::from_secs(10);
@@ -33,6 +34,14 @@ const STAYS_OFF: Duration = Duration::from_secs(60);
 const QUIET_HOURS_BEGIN: Duration = Duration::from_secs(240);
 /// How long the Pixel may take to disconnect once calls go off.
 const DISCONNECTS: Duration = Duration::from_secs(15);
+/// How far after Quiet Hours were set, at least, a turn-off counts as their
+/// beginning rather than the setting: 6.6 asks for them a minute ahead.
+const QUIET_HOURS_LEAD_US: u64 = 5_000_000;
+/// How long before the app logs calls turned off its log may show the
+/// Pixel disconnected: BlueZ drops the link as the block lands.
+const DISCONNECT_LOG_ORDER_US: u64 = 1_000_000;
+/// How often the runner says it is still waiting, during a long wait.
+const PROGRESS: Duration = Duration::from_secs(20);
 /// The longest Quiet Hours 6.6 asks for, plus a minute's grace: from the
 /// start to the end two minutes later.
 const QUIET_HOURS_LAST: Duration = Duration::from_secs(180);
@@ -522,23 +531,50 @@ pub(super) fn quiet_hours_soon(sitting: &mut Sitting) -> Result<(), Stop> {
         "In a terminal, run `desktop-calls quiet-hours HH:MM-HH:MM`, starting one minute from now and ending three minutes from now.",
         &["quiet-hours-soon"],
     );
-    let off = sitting.wait_for(
-        "Quiet Hours beginning and the Pixel disconnecting",
+    let checked = quiet_hours_begin_and_end(sitting, from_us);
+    if matches!(checked, Err(Stop::Quit)) {
+        return checked;
+    }
+    // Quiet Hours repeat every day: whatever happened, they are turned off
+    // before the step ends, so they don't disconnect the Pixel tomorrow.
+    quiet_hours_off(sitting)?;
+    checked
+}
+
+/// 6.6's middle: calls go off when the Quiet Hours begin, not when they
+/// are set, and the Pixel disconnects; calls come back on when they end,
+/// and the Pixel connects again within the scorecard's 10 s. Every time
+/// is the app's own, from its log.
+fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), Stop> {
+    let off = wait_saying(
+        sitting,
+        "Quiet Hours beginning",
         QUIET_HOURS_BEGIN,
+        "Calls are still on: the Quiet Hours haven't begun yet.",
         |state| state.calls_off == "off" && state.calls_off_until != 0,
     )?;
     let until_us = off.state.calls_off_until.saturating_mul(1_000_000);
-    let set = logged(sitting, from_us, |line| {
+    let Some(set) = logged(sitting, from_us, |line| {
         line.event_kind == "quiet-hours-set"
-    })?;
-    let Some(set) = set else {
+    })?
+    else {
         sitting.check(
             false,
             "The app logged no quiet-hours-set line: the command didn't reach it.".to_owned(),
         );
         return Ok(());
     };
-    let began_later = unix_micros_at(off.at) > set.at_us + 5_000_000;
+    let Some(turned_off) = logged(sitting, set.at_us, |line| {
+        line.event_kind == "calls-turned-off"
+    })?
+    else {
+        sitting.check(
+            false,
+            "The app logged no calls-turned-off line: it didn't block the Pixel.".to_owned(),
+        );
+        return Ok(());
+    };
+    let began_later = turned_off.at_us >= set.at_us + QUIET_HOURS_LEAD_US;
     sitting.check(
         began_later,
         if began_later {
@@ -550,7 +586,7 @@ pub(super) fn quiet_hours_soon(sitting: &mut Sitting) -> Result<(), Stop> {
     );
     let disconnected = logged_since(
         sitting,
-        set.at_us,
+        turned_off.at_us.saturating_sub(DISCONNECT_LOG_ORDER_US),
         DISCONNECTS,
         connection_logged(|state| state == "disconnected"),
         |_| false,
@@ -566,19 +602,7 @@ pub(super) fn quiet_hours_soon(sitting: &mut Sitting) -> Result<(), Stop> {
             )
         },
     );
-    let left = Duration::from_micros(until_us.saturating_sub(unix_micros()));
-    sitting.observed(format!(
-        "Calls are off for Quiet Hours, until {} from now.",
-        seconds(left)
-    ));
-    let Some(ended) = logged_since(
-        sitting,
-        from_us,
-        left.min(QUIET_HOURS_LAST) + LOG_DEADLINE,
-        |line| line.event_kind == "calls-off-deadline-passed",
-        |_| false,
-    )?
-    else {
+    let Some(ended) = deadline_passed_logged(sitting, from_us, until_us)? else {
         sitting.check(
             false,
             "The app logged no calls-off-deadline-passed line: calls didn't come back on when the Quiet Hours ended."
@@ -600,8 +624,64 @@ pub(super) fn quiet_hours_soon(sitting: &mut Sitting) -> Result<(), Stop> {
         ended.at_us,
         "reconnect_after_quiet_hours_ms",
         "the Quiet Hours ending",
-    )?;
-    quiet_hours_off(sitting)
+    )
+}
+
+/// Waits up to `deadline` for a state `condition` accepts, saying `still`
+/// every [`PROGRESS`] meanwhile, so the user sees the runner is waiting
+/// on purpose.
+fn wait_saying(
+    sitting: &mut Sitting,
+    description: &str,
+    deadline: Duration,
+    still: &str,
+    condition: impl Fn(&AppState) -> bool,
+) -> Result<Seen, Stop> {
+    let end = Instant::now() + deadline;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match sitting.wait_for(description, left.min(PROGRESS), &condition) {
+            Err(Stop::TimedOut(_)) if !left.is_zero() && left > PROGRESS => {
+                sitting.say(still, &[]);
+            }
+            seen => return seen,
+        }
+    }
+}
+
+/// The app's `calls-off-deadline-passed` line after `from_us`, waited for
+/// until a little after `until_us`, saying how long is left every
+/// [`PROGRESS`] meanwhile.
+fn deadline_passed_logged(
+    sitting: &mut Sitting,
+    from_us: u64,
+    until_us: u64,
+) -> Result<Option<LogLine>, Stop> {
+    let end = Instant::now() + QUIET_HOURS_LAST + LOG_DEADLINE;
+    loop {
+        let to_end = Duration::from_micros(until_us.saturating_sub(unix_micros()));
+        let left = end.saturating_duration_since(Instant::now());
+        let wait = (to_end + LOG_DEADLINE).min(PROGRESS).min(left);
+        let ended = logged_since(
+            sitting,
+            from_us,
+            wait,
+            |line| line.event_kind == "calls-off-deadline-passed",
+            |_| false,
+        )?;
+        if ended.is_some() || wait == left || to_end.is_zero() {
+            return Ok(ended);
+        }
+        sitting.say(
+            &format!(
+                "Calls are off for Quiet Hours, for {} more.",
+                seconds(Duration::from_micros(
+                    until_us.saturating_sub(unix_micros())
+                ))
+            ),
+            &[],
+        );
+    }
 }
 
 /// 6.6's end: Quiet Hours turned off from the CLI.

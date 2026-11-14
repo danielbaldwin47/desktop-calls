@@ -58,6 +58,9 @@ async fn turn_calls_on(runtime: &GlibRuntime) -> ExitCode {
         return ExitCode::SUCCESS;
     };
     if service_turned_calls_on(runtime).await {
+        // During Quiet Hours the service keeps a "kept-on" record, which
+        // blocks nothing but would outlive the app.
+        calls_off::save(None);
         println!("{}", messages::phone_unblocked_for_removal());
         return ExitCode::SUCCESS;
     }

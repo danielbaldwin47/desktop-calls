@@ -21,8 +21,9 @@ const DEADLINE: Duration = Duration::from_secs(5);
 /// #198, the polish scorecard's 10 s).
 const RECONNECT_DEADLINE: Duration = Duration::from_secs(10);
 /// How far ahead of the start of a scenario its Quiet Hours edge is: time
-/// for the app to start, connect the Phone and take the Quiet Hours.
-const EDGE_AHEAD: u64 = 12;
+/// for the app to start, connect the Phone and take the Quiet Hours, with
+/// room for a loaded CI runner.
+const EDGE_AHEAD: u64 = 25;
 const PHONE_NAME: &str = "My Pixel";
 const DAY: u64 = 86_400;
 
@@ -83,11 +84,16 @@ fn wait_off_until(harness: &Harness, until: u64) -> AppState {
     )
 }
 
-/// Waits, by the wall clock, until `instant` has passed.
-fn wait_until_past(instant: u64) {
-    while now() <= instant {
-        std::thread::sleep(Duration::from_millis(100));
-    }
+/// When, in Unix microseconds by the app's own clock, it logged each event of
+/// `kind`, in order.
+fn logged_at(harness: &Harness, kind: &str) -> Vec<u64> {
+    harness
+        .app_log()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["event_kind"] == kind)
+        .filter_map(|event| event["timestamp_us"].as_u64())
+        .collect()
 }
 
 fn record(harness: &Harness) -> PathBuf {
@@ -154,8 +160,12 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
     harness.wait_for_app("calls go off as Quiet Hours begin", left + DEADLINE, |state| {
         state.calls_off == "off"
     });
-    assert!(now() >= start, "calls went off before Quiet Hours began");
     wait_off_until(&harness, end);
+    let blocked = logged_at(&harness, "calls-turned-off");
+    assert!(
+        blocked.len() == 1 && blocked[0] >= start * 1_000_000,
+        "the app blocked the Phone at {blocked:?}, before Quiet Hours began at {start}"
+    );
     let item = indicator_says(&harness, "Calls off until 06:00 (quiet hours)");
     assert_eq!(item.status.as_deref(), Some("Active"), "no attention asked");
     let kept = record_text(&harness);
@@ -181,7 +191,11 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
 
     let left = Duration::from_secs(end.saturating_sub(now()));
     wait_connected(&harness, left + RECONNECT_DEADLINE);
-    assert!(now() >= end, "calls came back on before Quiet Hours ended");
+    let ended = logged_at(&harness, "calls-off-deadline-passed");
+    assert!(
+        ended.len() == 1 && ended[0] >= end * 1_000_000,
+        "the app turned calls on at {ended:?}, before Quiet Hours ended at {end}"
+    );
     let took = harness.app_took(
         &AppEvent::kind("calls-off-deadline-passed"),
         &AppEvent::kind("connection-state-changed").with("connection_state", "connected"),
@@ -225,11 +239,20 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
 
     // A break by hand replaces Quiet Hours; ending inside them, it stays
     // off until they end.
+    let turned_on = logged_at(&harness, "calls-turned-on").len();
     let until = now() + 3;
     harness.turn_calls_off(until).expect("calls turn off");
     wait_off_until(&harness, until);
-    wait_until_past(until);
-    wait_off_until(&harness, end);
+    harness.wait_for_app(
+        "calls stay off until Quiet Hours end",
+        Duration::from_secs(3) + DEADLINE,
+        |state| state.calls_off == "off" && state.calls_off_until == end,
+    );
+    assert_eq!(
+        logged_at(&harness, "calls-turned-on").len(),
+        turned_on,
+        "the Phone was unblocked as the break ended inside Quiet Hours"
+    );
     indicator_says(&harness, "Calls off until 07:00 (quiet hours)");
     assert!(harness.simulated_phone().blocked());
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
@@ -237,7 +260,8 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
 
 #[test]
 fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
-    let mut harness = harness_in(&time_zone_reading(12, 0, now()));
+    let noon = now();
+    let mut harness = harness_in(&time_zone_reading(12, 0, noon));
 
     let said = cli_ok(&harness, &["quiet-hours", "22:00-06:30"]);
     assert_eq!(
@@ -262,6 +286,9 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
             "Connected to My Pixel ({address}).\nQuiet Hours: calls are off every day from 22:00 to 06:30.\n"
         )
     );
+    let json: serde_json::Value =
+        serde_json::from_str(&cli_ok(&harness, &["status", "--json"])).expect("status --json");
+    assert_eq!(json["quiet_hours"], "22:00-06:30");
     assert_eq!(harness.app_state().calls_off, "on", "outside Quiet Hours");
 
     harness.restart_app();
@@ -274,6 +301,8 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
         said,
         "Calls are off until 06:30: your phone stays disconnected, and connects again then.\n"
     );
+    // 06:30 is 18 and a half hours after noon.
+    wait_off_until(&harness, noon + 18 * 3_600 + 1_800);
     cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
 

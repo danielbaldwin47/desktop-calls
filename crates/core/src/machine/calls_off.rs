@@ -291,7 +291,7 @@ pub(super) fn calls_off_input(state: &mut State, input: Input, effects: &mut Vec
             calls_turned::confirm(state, turned, effects);
         }
         Input::KeepCallsOn => {
-            let turned = state.calls_turned_on();
+            let turned = state.calls_kept_on();
             keep_on_through_quiet_hours(state);
             keep_on(state, effects);
             calls_turned::confirm(state, turned, effects);

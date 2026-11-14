@@ -13,6 +13,10 @@ use super::input::Effect;
 use crate::clock::Deadline;
 use crate::connection::ConnectionState;
 
+/// How far from an hour on a turn-off's end may be and still be "for 1
+/// hour", in milliseconds.
+const FOR_AN_HOUR_TOLERANCE_MS: u64 = 90_000;
+
 /// What the user turned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallsTurned {
@@ -48,20 +52,41 @@ impl State {
         match &self.calls_off {
             CallsOff::Off { until, .. } => Some(CallsTurned::Off {
                 until: *until,
-                for_an_hour: until.is_some() && *until == self.clock.map(|clock| clock.for_an_hour),
+                for_an_hour: self.is_for_an_hour(*until),
             }),
             CallsOff::Pending { until, .. } => Some(CallsTurned::OffAfterCall { until: *until }),
             _ => None,
         }
     }
 
-    /// What the user's turn-on, or Keep calls on, turns if asked now:
-    /// something only while calls are off or a turn-off waits. The Phone
-    /// reconnects unless it is connected already.
+    /// Whether `until` is the Indicator's "For 1 hour", or the command
+    /// line's `--for 1h`: an hour on from the wall clock as last read. The
+    /// clock is read on the minute and the command line rounds down to the
+    /// second, so a minute and a half either way is the same choice.
+    fn is_for_an_hour(&self, until: Option<Deadline>) -> bool {
+        let (Some(until), Some(clock)) = (until, self.clock) else {
+            return false;
+        };
+        until.at.0.abs_diff(clock.for_an_hour.at.0) <= FOR_AN_HOUR_TOLERANCE_MS
+    }
+
+    /// What the user's turn-on turns if asked now: something only while
+    /// calls are off or a turn-off waits. The Phone reconnects unless it is
+    /// connected already.
     pub(super) fn calls_turned_on(&self) -> Option<CallsTurned> {
-        (self.calls_off() || self.calls_off_pending()).then(|| CallsTurned::On {
+        (self.calls_off() || self.calls_off_pending()).then(|| self.on())
+    }
+
+    /// What the user's Keep calls on turns if asked now: something only
+    /// while a turn-off waits. While calls are off it does nothing.
+    pub(super) fn calls_kept_on(&self) -> Option<CallsTurned> {
+        self.calls_off_pending().then(|| self.on())
+    }
+
+    fn on(&self) -> CallsTurned {
+        CallsTurned::On {
             reconnecting: *self.connection_state() != ConnectionState::Connected,
-        })
+        }
     }
 }
 

@@ -345,6 +345,11 @@ fn asks_that_change_nothing_say_nothing() {
     let (_, effects) = run(connected(), [Input::TurnCallsOn, Input::KeepCallsOn]);
     assert!(notices(&effects).is_empty(), "{effects:?}");
 
+    // Keep calls on does nothing while calls are off, as while on.
+    let (state, effects) = run(off(None), [Input::KeepCallsOn]);
+    assert!(state.calls_off(), "calls stay off");
+    assert!(notices(&effects).is_empty(), "{effects:?}");
+
     // A time that has passed is refused.
     let passed = Deadline {
         at: Timestamp(NOW - MINUTE),
@@ -459,4 +464,28 @@ fn a_call_placed_from_the_dialer_while_calls_are_off_says_nothing_going_or_retur
         state.calls_off() || state.calls_off_pending(),
         "calls go back off: {state:?}"
     );
+}
+
+#[test]
+fn an_hour_asked_for_by_the_command_line_or_just_after_a_clock_tick_is_still_for_1_hour() {
+    // The command line's `--for 1h`: now by its own clock, to the second.
+    let by_cli = Deadline {
+        at: Timestamp(NOW + 60 * MINUTE + 17_000),
+        shown: time(21, 30),
+    };
+    // A menu entry built before the clock ticked a minute on.
+    let before_tick = Deadline {
+        at: Timestamp(NOW + 60 * MINUTE),
+        shown: time(21, 30),
+    };
+    for until in [by_cli, before_tick] {
+        let (_, effects) = run(
+            connected_with(vec![clock(1)]),
+            [Input::TurnCallsOff { until: Some(until) }],
+        );
+
+        let (text, _) = said(&effects);
+
+        assert_eq!(text.summary, "Calls off for 1 hour (until 21:30)");
+    }
 }

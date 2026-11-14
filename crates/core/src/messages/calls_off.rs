@@ -33,3 +33,19 @@ pub fn calls_turned(off: bool) -> &'static str {
 pub fn calls_off_until_unknown() -> &'static str {
     "Calls can only be turned off until you turn them on (0) for now."
 }
+
+/// What removing Desktop Calls says once it has unblocked the Phone it had
+/// blocked for Calls Off.
+#[must_use]
+pub fn phone_unblocked_for_removal() -> &'static str {
+    "Calls are on again: your phone is unblocked."
+}
+
+/// What removing Desktop Calls says when BlueZ didn't unblock the Phone it
+/// had blocked for Calls Off: the command that does, for later.
+#[must_use]
+pub fn phone_left_blocked_by_removal(address: &str) -> String {
+    format!(
+        "Bluetooth didn't unblock your phone: once it is running, run `bluetoothctl unblock {address}` to let it connect to this computer again."
+    )
+}

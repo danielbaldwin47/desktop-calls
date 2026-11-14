@@ -33,6 +33,11 @@ fn file() -> Option<PathBuf> {
     Some(logging::state_directory()?.join("calls-off.json"))
 }
 
+/// Whether a record is kept now, readable or not.
+pub fn is_kept() -> bool {
+    file().is_some_and(|path| path.exists())
+}
+
 /// What an earlier run kept, if anything, and the file can be read.
 pub fn load() -> Option<CallsOffRecord> {
     let path = file()?;

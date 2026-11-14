@@ -205,7 +205,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     let control = desktop::serve(
         zbus::connection::Builder::session(),
         &world,
-        &system,
+        (&system, &telephony),
         arguments.desktop.restart_job(),
     )
     .serve_at(

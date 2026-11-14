@@ -19,7 +19,7 @@
 
 use super::State;
 use super::input::{Effect, Timer};
-use super::setup;
+use super::{presence, setup};
 use crate::messages::ProblemKind;
 
 /// How often Problems that can't be followed as they change are checked
@@ -190,8 +190,10 @@ pub(super) fn checked(state: &mut State, check: DesktopCheck, effects: &mut Vec<
             after_ms: CHECK_AGAIN_MS,
         });
     }
+    // While it is off, nothing is connected: see `wants_phone`.
     if bluetooth_was_off && !state.desktop.bluetooth_off() {
         setup::bluetooth_on(state, effects);
+        presence::bluetooth_on(state, effects);
     }
 }
 

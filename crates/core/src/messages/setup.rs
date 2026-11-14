@@ -7,7 +7,9 @@ use crate::keybinding::KeybindingCheck;
 use crate::machine::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
-use crate::messages::{ProblemKind, copy_command_label, fix_label};
+use crate::messages::{
+    ProblemKind, SetupCallsOffText, copy_command_label, fix_label, setup_calls_off,
+};
 use std::ops::Range;
 
 /// The keys that work, each as its keycaps and what pressing it does, for
@@ -38,6 +40,9 @@ pub struct SetupWindowText {
     pub notice: Option<&'static str>,
     /// What the list says while no Phone is nearby, while choosing.
     pub empty_list: Option<&'static str>,
+    /// The card that says calls are off, with its Turn calls on button,
+    /// while they are.
+    pub calls_off: Option<SetupCallsOffText>,
     /// The buttons, the default one first.
     pub buttons: Vec<&'static str>,
     /// The keys that work now, shown at the foot.
@@ -65,24 +70,19 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         tip: None,
         notice: view.notice.map(notice),
         empty_list: None,
+        calls_off: view
+            .calls_off
+            .map(|off| setup_calls_off(off.until, off.quiet_hours)),
         buttons: Vec::new(),
         keys: Vec::new(),
     };
     let (heading, instructions, buttons): Page =
         match &view.step {
             SetupStep::Choose { .. } => {
-                text.empty_list = Some("Looking for phones nearby…");
-                (
-                    "Connect your phone".to_owned(),
-                    vec![
-                        "On your phone: open Settings, then Connected devices.".to_owned(),
-                        "On your phone: tap Pair new device, and keep that screen open.".to_owned(),
-                        format!(
-                            "Choose your phone below, or on your phone tap {desktop} when it shows."
-                        ),
-                    ],
-                    vec!["Cancel"],
-                )
+                // Nothing to look for while pairing waits for calls.
+                let waits = view.calls_off.is_some_and(|off| off.blocks_step);
+                text.empty_list = (!waits).then_some("Looking for phones nearby…");
+                choose(&desktop)
             }
             SetupStep::Pairing { phone } => (
                 format!("Pairing with {}…", phone.name),
@@ -141,7 +141,11 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
                 home,
             ),
         };
-    text.keys = keys(&view.step, &buttons, view.problem_has_focus);
+    let turns_on = text
+        .calls_off
+        .as_ref()
+        .filter(|_| view.calls_off.is_some_and(|off| off.blocks_step));
+    text.keys = keys(&view.step, &buttons, view.problem_has_focus, turns_on);
     text.heading = heading;
     text.instructions = instructions;
     text.buttons = buttons;
@@ -151,12 +155,34 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
 /// A page's heading, instructions and buttons, the default one first.
 type Page = (String, Vec<String>, Vec<&'static str>);
 
+/// The page that lists the Phones nearby to choose from.
+fn choose(desktop: &str) -> Page {
+    (
+        "Connect your phone".to_owned(),
+        vec![
+            "On your phone: open Settings, then Connected devices.".to_owned(),
+            "On your phone: tap Pair new device, and keep that screen open.".to_owned(),
+            format!("Choose your phone below, or on your phone tap {desktop} when it shows."),
+        ],
+        vec!["Cancel"],
+    )
+}
+
 /// The keys that work now, for the foot of the window: the Problem's button
-/// when it has the keyboard, otherwise the step's.
-fn keys(step: &SetupStep, buttons: &[&'static str], problem: Option<ProblemKind>) -> Keys {
+/// when it has the keyboard, otherwise the step's. While calls are off and
+/// the step waits for them, Turn calls on has the keyboard.
+fn keys(
+    step: &SetupStep,
+    buttons: &[&'static str],
+    problem: Option<ProblemKind>,
+    turns_on: Option<&SetupCallsOffText>,
+) -> Keys {
     const ENTER: &[&str] = &["Enter"];
     const CLOSE: (&[&str], &str) = (&["Esc"], "Close");
     const NEXT: (&[&str], &str) = (&["Tab"], "Next button");
+    if let Some(off) = turns_on {
+        return vec![(ENTER, off.button), NEXT, CLOSE];
+    }
     if let Some(problem) = problem {
         let does = fix_label(problem).unwrap_or_else(copy_command_label);
         return vec![(ENTER, does), NEXT, CLOSE];

@@ -513,6 +513,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         desktop_name: Some("desktop".to_owned()),
         notice: None,
         opened: 1,
+        calls_off: None,
         problem_has_focus: None,
     };
     let choose = messages::setup_window(
@@ -579,6 +580,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
         desktop_name: Some("desktop".to_owned()),
         notice: None,
         opened: 1,
+        calls_off: None,
         problem_has_focus: None,
     };
     let off = messages::setup_window(

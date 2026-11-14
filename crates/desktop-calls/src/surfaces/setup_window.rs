@@ -7,12 +7,17 @@
 //! listed has focus, the arrow keys move between Phones and Enter chooses.
 //! Escape or closing the window cancels. A footer line shows the keys that
 //! work now. While a Problem blocks the step, its card sits under the
-//! heading (`setup_problems`) and the step's words are dimmed.
+//! heading (`setup_problems`) and the step's words are dimmed. While calls
+//! are off, the Calls Off card (`setup_calls_off`) sits first under the
+//! heading, with Turn calls on: while choosing a Phone it has the keyboard,
+//! the step's words are dimmed and no Phone is listed.
 //!
 //! It reports `setup-window` with `step`, `heading`, `instructions`,
 //! `buttons` and `progress` (one per line), `phones` (names, one per line),
 //! `summary`, `code`, `countdown`, `line`, `tip`, `notice`, `keys`,
-//! `dimmed` (while a Problem blocks the step), `desktop` and `focused`, and
+//! `dimmed` (while a Problem or calls being off blocks the step),
+//! `calls-off` (its heading), `calls-off-text`, `calls-off-button`,
+//! `desktop` and `focused`, and
 //! logs when each step and the first Phone listed reached the screen, timed
 //! from the window opening.
 //!
@@ -33,6 +38,7 @@ use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
 
+use super::setup_calls_off::CallsOffCard;
 use super::setup_problems::notice_card;
 use super::{
     SharedReport, after_next_frame, class, footer, reported, set_class, surface_mapped,
@@ -65,6 +71,12 @@ const CSS: &str = "
 .desktop-calls-setup button.accent {
     background: var(--dc-accent); color: var(--dc-accent-label);
 }
+/* Calls are off: a card in the Problem card's shape, on a neutral tint
+   with a neutral edge, since a choice isn't a fault. */
+.desktop-calls-setup .notice.calls-off {
+    background: var(--dc-selection); border-left-color: var(--dc-secondary);
+}
+.desktop-calls-setup .notice.calls-off .notice-icon { color: var(--dc-secondary); }
 /* The steps a Problem blocks: in secondary text, the weakest that still
    reads at 4.5:1, not faded. */
 .desktop-calls-setup .setup-dimmed, .desktop-calls-setup .setup-dimmed label {
@@ -88,6 +100,10 @@ pub(super) struct SetupWindow {
     tip: gtk::Label,
     notice: gtk::Box,
     notice_text: gtk::Label,
+    /// Says calls are off, with Turn calls on.
+    calls_off: CallsOffCard,
+    /// Turn calls on has the keyboard, as shown last.
+    calls_off_focus: Cell<bool>,
     /// Said while no Phone is listed.
     empty: gtk::Label,
     list: gtk::ListBox,
@@ -160,6 +176,7 @@ impl SetupWindow {
         tip.set_wrap(true);
         tip.set_max_width_chars(50);
         let (notice, notice_text) = notice_card();
+        let calls_off = CallsOffCard::new(intents);
         // Plain dimmed words, not a field that looks like an input.
         let empty = gtk::Label::new(None);
         empty.add_css_class("dim-label");
@@ -176,6 +193,7 @@ impl SetupWindow {
         let layout = gtk::Box::new(gtk::Orientation::Vertical, space::L);
         for widget in [
             heading.upcast_ref::<gtk::Widget>(),
+            calls_off.widget.upcast_ref(),
             summary.upcast_ref(),
             instructions.upcast_ref(),
             code.upcast_ref(),
@@ -203,6 +221,8 @@ impl SetupWindow {
             tip,
             notice,
             notice_text,
+            calls_off,
+            calls_off_focus: Cell::default(),
             empty,
             list,
             buttons,
@@ -297,11 +317,11 @@ impl SetupWindow {
         });
     }
 
-    /// Puts `widget` under the heading, above the step: where a Problem
-    /// that blocks the step is read first.
+    /// Puts `widget` under the Calls Off card, above the step: where a
+    /// Problem that blocks the step is read.
     pub(super) fn put_on_top(&self, widget: &impl IsA<gtk::Widget>) {
         if let Some(layout) = self.window.child().and_downcast::<gtk::Box>() {
-            layout.insert_child_after(widget, Some(&self.heading));
+            layout.insert_child_after(widget, Some(&self.calls_off.widget));
             self.top.replace(Some(widget.clone().upcast()));
         }
     }
@@ -397,8 +417,10 @@ impl SetupWindow {
         self.summary
             .set_text(text.summary.as_deref().unwrap_or_default());
         self.summary.set_visible(text.summary.is_some());
-        // A Problem that stops the step: its words in secondary text.
-        let dimmed = view.problem_has_focus.is_some();
+        // Calls being off, or a Problem, stop the step: its words in
+        // secondary text.
+        let waits_for_calls = view.calls_off.is_some_and(|off| off.blocks_step);
+        let dimmed = view.problem_has_focus.is_some() || waits_for_calls;
         for widget in [
             self.summary.upcast_ref::<gtk::Widget>(),
             self.instructions.upcast_ref(),
@@ -420,6 +442,9 @@ impl SetupWindow {
         self.tip.set_visible(text.tip.is_some());
         self.notice_text.set_text(text.notice.unwrap_or_default());
         self.notice.set_visible(text.notice.is_some());
+        self.calls_off
+            .show(text.calls_off.as_ref(), waits_for_calls);
+        let took_keyboard = self.calls_off_focus.replace(waits_for_calls);
         footer::show(&self.footer, &text.keys);
         self.footer.set_visible(!text.keys.is_empty());
         let phones = match &view.step {
@@ -442,7 +467,7 @@ impl SetupWindow {
                 .borrow_mut()
                 .set(NAME, Some(reported(&self.content.borrow(), &self.window)));
         }
-        if new_step || new_buttons {
+        if new_step || new_buttons || waits_for_calls != took_keyboard {
             self.focus_default();
         }
         if new_step {
@@ -550,6 +575,11 @@ impl SetupWindow {
     /// Keyboard focus on the first Phone while choosing, otherwise on the
     /// step's default button.
     fn focus_default(&self) {
+        // Turn calls on, while pairing waits for calls to be on.
+        if self.calls_off_focus.get() {
+            self.calls_off.button.grab_focus();
+            return;
+        }
         if self.step.get() == Some("choose") {
             if let Some(row) = self.list.selected_row() {
                 row.grab_focus();
@@ -721,7 +751,12 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     if let Some(notice) = text.notice {
         content.insert("notice".to_owned(), notice.to_owned());
     }
-    if view.problem_has_focus.is_some() {
+    if let Some(card) = &text.calls_off {
+        content.insert("calls-off".to_owned(), card.heading.to_owned());
+        content.insert("calls-off-text".to_owned(), card.text.clone());
+        content.insert("calls-off-button".to_owned(), card.button.to_owned());
+    }
+    if view.problem_has_focus.is_some() || view.calls_off.is_some_and(|off| off.blocks_step) {
         content.insert("dimmed".to_owned(), "true".to_owned());
     }
     if let Some(desktop) = &view.desktop_name {

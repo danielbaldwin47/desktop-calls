@@ -26,6 +26,7 @@ mod presence;
 mod quiet_hours;
 mod quiet_hours_window;
 mod setup;
+mod setup_calls_off;
 mod view;
 
 use audio::{
@@ -58,6 +59,7 @@ use setup::Setup;
 pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
+pub use setup_calls_off::SetupCallsOff;
 pub use view::{
     BannerChoice, BannerFooter, BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase,
     CallWindowView, DialerCallsOff, DialerKey, DialerView, HeldCall, Mute, OtherCall,

@@ -30,6 +30,35 @@ pub(super) fn calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> String {
     }
 }
 
+/// The card the Setup Window shows while calls are off (ticket #207): the
+/// Problem card's shape, said as a choice rather than a fault.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetupCallsOffText {
+    pub heading: &'static str,
+    pub text: String,
+    /// The button that turns calls on.
+    pub button: &'static str,
+}
+
+/// What the Setup Window says while calls are off until `until`, or until
+/// the user turns them on; `quiet_hours` while Quiet Hours turned them off.
+#[must_use]
+pub fn setup_calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> SetupCallsOffText {
+    let waits = "Pairing and switching phones wait until calls are on.";
+    let text = match (until, quiet_hours) {
+        (Some(until), true) => {
+            format!("Quiet hours keep your phone disconnected until {until}. {waits}")
+        }
+        (Some(until), false) => format!("Your phone stays disconnected until {until}. {waits}"),
+        (None, _) => format!("Your phone stays disconnected until you turn calls on. {waits}"),
+    };
+    SetupCallsOffText {
+        heading: "Calls are off",
+        text,
+        button: TURN_CALLS_ON,
+    }
+}
+
 /// What `desktop-calls quiet-hours` said once Quiet Hours were set.
 #[must_use]
 pub fn quiet_hours_set(hours: QuietHours) -> String {

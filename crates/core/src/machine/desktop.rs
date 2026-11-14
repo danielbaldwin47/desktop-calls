@@ -162,7 +162,10 @@ impl State {
     /// step is dimmed. Only while choosing a Phone, and only for what stops
     /// pairing: later steps keep Enter for themselves.
     pub(super) fn problem_blocks_step(&self) -> bool {
+        // While calls are off the button that turns them on has the
+        // keyboard: turning calls on comes first (ticket #207).
         self.desktop.bluetooth_off()
+            && !self.pairing_waits_for_calls()
             && self
                 .setup
                 .as_ref()

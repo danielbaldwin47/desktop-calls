@@ -31,7 +31,7 @@ const HOLD: Duration = Duration::from_millis(300);
 const NUMBER: &str = "+447700900123";
 
 /// The Answer button's green.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 
 /// A connected Phone, and the test client open with keyboard focus, as the
 /// user's own window would be.

@@ -3,7 +3,8 @@
 
 use super::{
     HANDOFF_SHORTCUT, HANG_UP_HELD_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT,
-    MUTE_SHORTCUT, SWAP_SHORTCUT, SharedReport, Surface, Who, detail_label, seconds_since,
+    MUTE_SHORTCUT, SWAP_SHORTCUT, SharedReport, Surface, Who, class, detail_label, keycap,
+    seconds_since, set_class,
 };
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
@@ -79,7 +80,7 @@ impl CallWindow {
         let (heading, caller, hd) = heading();
         let detail = detail_label();
         let status = gtk::Label::new(None);
-        status.add_css_class("numeric");
+        status.add_css_class(class::TIMER);
         status.set_xalign(0.0);
         let mut shortcuts = BTreeMap::new();
         let audio = AudioRow::new();
@@ -436,7 +437,7 @@ fn hang_up_button(surface: &Surface, intents: &UnboundedSender<Input>) -> gtk::B
 /// caller and HD.
 fn heading() -> (gtk::Box, gtk::Label, gtk::Label) {
     let caller = gtk::Label::new(None);
-    caller.add_css_class("caller");
+    caller.add_css_class(class::WHO);
     caller.set_xalign(0.0);
     let hd = gtk::Label::new(Some(messages::label(Label::Hd)));
     hd.add_css_class("hd");
@@ -474,7 +475,7 @@ fn keypad() -> (gtk::Entry, gtk::Grid) {
 /// Mute is disabled, both hidden.
 fn mute_notices() -> (gtk::Label, gtk::Label) {
     let microphone_muted = gtk::Label::new(Some(messages::label(Label::MicrophoneMuted)));
-    microphone_muted.add_css_class("microphone-muted");
+    microphone_muted.add_css_class(class::WARNING_STRIP);
     microphone_muted.set_visible(false);
     let mute_unavailable = gtk::Label::new(Some(messages::failure(Failure::MuteUnavailable).text));
     mute_unavailable.add_css_class("dim-label");
@@ -513,11 +514,7 @@ fn hint(text: &gtk::Label) -> Option<gtk::Widget> {
 /// Puts `text` and `accelerator`'s label on `button`, and returns the label
 /// as shown.
 fn show_shortcut(button: &impl IsA<gtk::Button>, text: &gtk::Label, accelerator: &str) -> String {
-    let shown = gtk::accelerator_parse(accelerator)
-        .map(|(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string())
-        .unwrap_or_default();
-    let shortcut = gtk::Label::new(Some(&shown));
-    shortcut.add_css_class("shortcut");
+    let (shortcut, shown) = keycap(accelerator);
     let label = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     label.set_halign(gtk::Align::Center);
     label.append(text);
@@ -581,7 +578,7 @@ impl CallWindow {
             return;
         }
         let who = Who::of(&view.caller, view.contact.as_ref());
-        self.caller.set_text(&who.caller);
+        who.show(&self.caller);
         who.show_detail(&self.detail);
         let (status, wideband, mute) = match view.phase {
             CallWindowPhase::Live {
@@ -600,6 +597,7 @@ impl CallWindow {
             ),
         };
         self.status.set_text(&status);
+        set_class(&self.status, class::WORDS, mute.is_none());
         let audio_location = view.audio.map(|audio| {
             messages::label(match audio.location {
                 AudioLocation::Desktop => Label::AudioOnDesktop,
@@ -631,6 +629,12 @@ impl CallWindow {
         // why, without Mute's hint beside it.
         let mute = mute.filter(|_| !view.connection_lost);
         let mute_text = self.show_controls(mute, view.connection_lost);
+        set_class(&self.surface.window, class::MUTED, mute == Some(Mute::On));
+        set_class(
+            &self.surface.window,
+            class::CONTACT_LOST,
+            view.connection_lost,
+        );
 
         let mut content = BTreeMap::from([("status".to_owned(), status)]);
         if let Some(call) = view.call {
@@ -779,11 +783,7 @@ impl CallWindow {
         self.mute_label.set_text(mute_text);
         self.mute
             .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
-        if mute == Some(Mute::On) {
-            self.mute.add_css_class("muted");
-        } else {
-            self.mute.remove_css_class("muted");
-        }
+        set_class(&self.mute, class::MUTED, mute == Some(Mute::On));
         self.microphone_muted.set_visible(mute == Some(Mute::On));
         self.mute_unavailable
             .set_visible(mute == Some(Mute::Unavailable));

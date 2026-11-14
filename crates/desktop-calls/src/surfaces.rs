@@ -52,7 +52,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
 use crate::control::{Published, ShownSurfaces};
 use crate::hyprland::{self, Unknown};
 use crate::logging::EventKind;
-use crate::theme::Theme;
+use crate::theme::{Theme, class};
 
 mod banner;
 mod call_window;
@@ -99,28 +99,19 @@ const KEYPAD: [[&str; 3]; 4] = [
     ["*", "0", "#"],
 ];
 
-/// The surfaces' layout, and the orange that marks the microphone muted,
-/// unlike any green or red. The rest of their colours and their corners come
-/// from [`Theme`].
+/// The surfaces' layout. Their colours, type, borders and corners come from
+/// [`Theme`] and its classes ([`class`]).
 const CSS: &str = "
 .desktop-calls-surface { padding: 16px; }
-.desktop-calls-surface .microphone-muted {
-    background: #e66100; color: #ffffff; font-weight: bold;
-    padding: 8px; border-radius: 6px;
-}
-.desktop-calls-surface button.mute.muted { background: #e66100; color: #ffffff; }
-.desktop-calls-surface .shortcut { font-size: 0.85em; opacity: 0.75; }
-.desktop-calls-surface .caller { font-size: 1.4em; font-weight: bold; }
 .desktop-calls-surface .dialer-entry { font-size: 1.2em; }
 .desktop-calls-surface .dialer-row { padding: 6px 8px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
 .desktop-calls-surface.call-pill { padding: 6px 8px; }
 .desktop-calls-surface.call-pill button { padding: 4px 8px; min-height: 0; }
 .desktop-calls-surface .pill-caller { font-weight: bold; }
-.desktop-calls-surface.call-pill .numeric { font-size: 0.9em; }
 .desktop-calls-surface .hd {
     font-size: 0.8em; font-weight: bold; padding: 0 6px;
-    border: 1px solid currentColor; border-radius: 4px;
+    border: 1px solid currentColor;
 }
 ";
 
@@ -482,6 +473,7 @@ impl Surface {
             surface.releasing.clone(),
         );
         surface.window.connect_is_active_notify(move |window| {
+            set_class(window, class::HAS_KEYBOARD, window.is_active());
             if !window.is_active() && releasing.replace(false) && gtk4_layer_shell::is_supported() {
                 window.set_keyboard_mode(keyboard);
             }
@@ -599,12 +591,15 @@ impl Surface {
 struct Who {
     caller: String,
     detail: Option<(String, String)>,
+    /// Whether `caller` is a bare number, not a name.
+    bare_number: bool,
 }
 
 impl Who {
     fn of(caller: &Caller, contact: Option<&ContactMatch>) -> Self {
         let named = contact.filter(|contact| !contact.name.trim().is_empty());
         Self {
+            bare_number: named.is_none() && matches!(caller, Caller::Number(_)),
             caller: messages::caller_name(caller, named),
             detail: named.map(|contact| {
                 (
@@ -613,6 +608,12 @@ impl Who {
                 )
             }),
         }
+    }
+
+    /// Shows who on `label`: a bare number in monospace.
+    fn show(&self, label: &gtk::Label) {
+        label.set_text(&self.caller);
+        set_class(label, class::NUMBER, self.bare_number);
     }
 
     /// Shows the detail line on `label`, or hides it.
@@ -635,9 +636,29 @@ impl Who {
     }
 }
 
+/// Adds `class` to `widget`, or takes it away.
+fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        widget.add_css_class(class);
+    } else {
+        widget.remove_css_class(class);
+    }
+}
+
+/// A label showing `accelerator` (GTK's form, such as `<Control>m`) as a
+/// keycap, and the key as shown.
+fn keycap(accelerator: &str) -> (gtk::Label, String) {
+    let shown = gtk::accelerator_parse(accelerator)
+        .map(|(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string())
+        .unwrap_or_default();
+    let label = gtk::Label::new(Some(&shown));
+    label.add_css_class(class::KEYCAP);
+    (label, shown)
+}
+
 fn detail_label() -> gtk::Label {
     let label = gtk::Label::new(None);
-    label.add_css_class("dim-label");
+    label.add_css_class(class::META);
     label.set_xalign(0.0);
     label.set_visible(false);
     label

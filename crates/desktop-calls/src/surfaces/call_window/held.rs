@@ -120,7 +120,7 @@ impl HeldRow {
         self.caller_line.set_visible(view.held.is_some());
         if let Some(held) = &view.held {
             let who = Who::of(&held.caller, held.contact.as_ref());
-            self.caller.set_text(&who.caller);
+            who.show(&self.caller);
             content.insert("held-call".to_owned(), held.call.to_string());
             content.insert("held-caller".to_owned(), who.caller);
         }

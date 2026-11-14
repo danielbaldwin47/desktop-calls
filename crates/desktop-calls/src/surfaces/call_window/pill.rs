@@ -5,7 +5,10 @@
 //! keyboard. A click on its body expands the Call Window, which takes the
 //! keyboard as it does for the keybinding; its buttons act directly.
 
-use super::{SharedReport, Surface, Who, hang_up_button, report_mute, seconds_since, status_label};
+use super::{
+    SharedReport, Surface, Who, class, hang_up_button, report_mute, seconds_since, set_class,
+    status_label,
+};
 use crate::surfaces::GAP;
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute};
@@ -59,8 +62,7 @@ impl CallPill {
         caller.set_width_chars(15);
         caller.set_max_width_chars(15);
         let status = gtk::Label::new(None);
-        status.add_css_class("numeric");
-        status.add_css_class("dim-label");
+        status.add_css_class(class::TIMER);
         status.set_xalign(0.0);
         // The caller over the timer, so the strip stays narrow and one row
         // of controls high.
@@ -102,6 +104,7 @@ impl CallPill {
         self.surface.call.set(view.call);
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
+        set_class(&self.caller, class::NUMBER, who.bare_number);
         let (status, mute) = match view.phase {
             // Its timer would mislead: the Desktop can't tell whether the
             // Call still goes on.
@@ -122,6 +125,8 @@ impl CallPill {
         if view.held.is_some() {
             line.push(messages::label(Label::OneOnHold).to_owned());
         }
+        // Monospace only for a time on its own.
+        set_class(&self.status, class::WORDS, mute.is_none() || line.len() > 1);
         self.status.set_text(&line.join(" · "));
         let mute_text = messages::label(if mute == Some(Mute::On) {
             Label::Unmute
@@ -130,11 +135,13 @@ impl CallPill {
         });
         self.mute.set_label(mute_text);
         self.muted.set(mute == Some(Mute::On));
-        if self.muted.get() {
-            self.mute.add_css_class("muted");
-        } else {
-            self.mute.remove_css_class("muted");
-        }
+        set_class(&self.mute, class::MUTED, self.muted.get());
+        set_class(&self.surface.window, class::MUTED, self.muted.get());
+        set_class(
+            &self.surface.window,
+            class::CONTACT_LOST,
+            view.connection_lost,
+        );
         self.mute
             .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
         self.hang_up.set_sensitive(

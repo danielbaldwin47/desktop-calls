@@ -36,7 +36,7 @@ const FALLBACK_TOAST_COLUMN_WIDTH: f64 = 400.0;
 const NEAR: f64 = 24.0;
 
 /// The Answer button's green and the Decline and Hang up buttons' red.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 
 fn connected_on_screen() -> Harness {

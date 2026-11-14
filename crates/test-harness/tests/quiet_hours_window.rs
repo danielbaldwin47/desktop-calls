@@ -209,6 +209,23 @@ fn with_keys_alone_each_change_is_saved_at_once_and_kept_across_a_restart() {
     let state = wait_for_window(&harness, &[("start", "06:15")]);
     assert_eq!(field(&state, "notice"), None);
 
+    // Equal again, then switched off: the last saved times come back, so
+    // switching on saves them and the switch shows on.
+    harness.keyboard().press(Key::Down);
+    wait_for_window(&harness, &[("notice", "Start and end must differ")]);
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_window(&harness, &[("focus", "switch")]);
+    harness.keyboard().type_text(" ");
+    wait_for_hours(&harness, None);
+    let state = wait_for_window(
+        &harness,
+        &[("switch", "off"), ("start", "06:15"), ("end", "06:00")],
+    );
+    assert_eq!(field(&state, "notice"), None);
+    harness.keyboard().type_text(" ");
+    wait_for_hours(&harness, Some((minutes(6, 15), minutes(6, 0))));
+    wait_for_window(&harness, &[("switch", "on")]);
+
     harness.restart_app();
     let state = wait_for_hours(&harness, Some((minutes(6, 15), minutes(6, 0))));
     assert!(window(&state).is_none(), "the window opens only when asked");

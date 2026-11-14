@@ -118,7 +118,7 @@ fn typed(state: State, field: QuietHoursField, digits: &str) -> (State, Vec<Effe
 }
 
 #[test]
-fn the_menu_has_one_quiet_hours_entry_whether_calls_are_on_off_or_pending() {
+fn the_menu_has_one_quiet_hours_entry_whether_calls_are_on_or_off_or_no_phone_is_paired() {
     let on = connected();
     let (off, _) = run(on.clone(), [Input::TurnCallsOff { until: None }]);
     let no_phone = State::default();
@@ -394,6 +394,44 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     assert_eq!(
         messages::quiet_hours_window(&window(&open(state))).sentence,
         "Saved. Calls go off tomorrow at 08:00 and come back at 09:00, every day."
+    );
+}
+
+#[test]
+fn switched_off_while_refusing_equal_times_it_shows_the_last_saved_ones_so_switching_on_saves_them()
+{
+    let (state, _) = run(
+        connected(),
+        [Input::SetQuietHours(hours(time(22, 0), time(7, 0)))],
+    );
+    let (state, _) = typed(open(state), QuietHoursField::End, "2200");
+    assert!(window(&state).refused);
+
+    let (state, effects) = run(state, [Input::SwitchQuietHours(false)]);
+    assert_eq!(saved(&effects), [None]);
+    let view = window(&state);
+    assert_eq!((view.start, view.end), (time(22, 0), time(7, 0)));
+    assert!(!view.refused);
+
+    let (state, effects) = run(state, [Input::SwitchQuietHours(true)]);
+    assert_eq!(saved(&effects), [Some(hours(time(22, 0), time(7, 0)))]);
+    assert!(window(&state).on);
+}
+
+#[test]
+fn asked_for_while_open_it_is_raised_afresh_showing_what_it_showed() {
+    let state = open(connected());
+    let (state, _) = run(state, [Input::SwitchQuietHours(true)]);
+    let before = window(&state);
+    let state = open(state);
+    let after = window(&state);
+    assert_ne!(after.opened, before.opened, "the shell raises it");
+    assert_eq!(
+        QuietHoursWindowView {
+            opened: before.opened,
+            ..after
+        },
+        before
     );
 }
 

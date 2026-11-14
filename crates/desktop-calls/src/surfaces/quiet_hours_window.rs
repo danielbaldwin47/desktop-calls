@@ -364,6 +364,9 @@ impl QuietHoursWindow {
             return;
         };
         let opening = self.opened.replace(Some(view.opened)) != Some(view.opened);
+        // The switch the user flipped shows what was saved, even when that
+        // changed nothing.
+        self.show_switch(view.on);
         if !opening && self.shown.borrow().as_ref() == Some(view) {
             return;
         }
@@ -381,10 +384,6 @@ impl QuietHoursWindow {
     fn show(&self, view: &QuietHoursWindowView, text: &QuietHoursWindowText) {
         self.window.set_title(Some(text.title));
         self.heading.set_text(text.heading);
-        self.rendering.set(true);
-        self.switch.set_active(view.on);
-        self.switch.set_state(view.on);
-        self.rendering.set(false);
         self.switch
             .update_property(&[gtk::accessible::Property::Label(text.switch)]);
         self.from.set_text(text.from);
@@ -404,6 +403,15 @@ impl QuietHoursWindow {
         if *self.shown_keys.borrow() != text.keys {
             self.show_keys(&text.keys);
             self.shown_keys.replace(text.keys.clone());
+        }
+    }
+
+    fn show_switch(&self, on: bool) {
+        if self.switch.is_active() != on || self.switch.state() != on {
+            self.rendering.set(true);
+            self.switch.set_active(on);
+            self.switch.set_state(on);
+            self.rendering.set(false);
         }
     }
 

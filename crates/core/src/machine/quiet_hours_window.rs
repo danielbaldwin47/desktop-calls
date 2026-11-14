@@ -50,6 +50,11 @@ struct Window {
     end: TimeOfDay,
     /// Digits typed into a field, not yet saved as its time.
     typing: Option<(QuietHoursField, String)>,
+    /// The last times that could be saved, shown again when Quiet Hours
+    /// are switched off while the times shown are the same: switched off,
+    /// the times can't be changed, so equal ones could never be switched
+    /// on.
+    kept: (TimeOfDay, TimeOfDay),
 }
 
 /// What the Quiet Hours Window shows.
@@ -329,16 +334,24 @@ fn open(state: &mut State) {
         start,
         end,
         typing: None,
+        kept: (start, end),
     });
 }
 
-/// Quiet Hours were set, from the window or elsewhere: the open window
-/// shows them.
+/// Quiet Hours were set or cleared, from the window or elsewhere: the open
+/// window shows the hours set, or once cleared the last times that could
+/// be saved, if those shown can't.
 pub(super) fn follow(state: &mut State) {
-    if let (Some(window), Some(hours)) =
-        (state.quiet_hours_windows.open.as_mut(), state.quiet_hours)
-    {
-        window.start = hours.start();
-        window.end = hours.end();
+    let Some(window) = state.quiet_hours_windows.open.as_mut() else {
+        return;
+    };
+    if let Some(hours) = state.quiet_hours {
+        (window.start, window.end) = (hours.start(), hours.end());
+        window.kept = (window.start, window.end);
+    } else {
+        window.typing = None;
+        if window.start == window.end {
+            (window.start, window.end) = window.kept;
+        }
     }
 }

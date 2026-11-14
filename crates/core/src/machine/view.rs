@@ -197,12 +197,14 @@ pub struct CallWindowView {
     pub collapsed: bool,
     /// A turn-off waits for the Call to end, so calls go off after it: the
     /// Call Window and the Call Pill tag themselves "Calls off after"
-    /// (ticket #230). Not once the Call is over, and not while a Call that
-    /// was never placed is shown.
+    /// (ticket #230). Not on a window whose Call is over, or was never
+    /// placed.
     pub calls_off_after: bool,
 }
 
-/// The one tag the Call Pill shows beside the caller, where one applies.
+/// The one state tag the Call Pill shows beside the caller, where one
+/// applies. "Calls off after" is a second tag beside it, on its own flag
+/// (`CallWindowView::calls_off_after`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallPillTag {
     /// The microphone is muted: the other party can't hear the user.
@@ -483,6 +485,8 @@ impl State {
             waiting_first: false,
             connection_lost: false,
             collapsed: self.form.collapsed(),
+            // Hanging up a Call placed during the exception puts calls back
+            // off a step later, so the Ended window must not say otherwise.
             calls_off_after: self.calls_off_pending()
                 && !matches!(phase, CallWindowPhase::Ended | CallWindowPhase::NotPlaced),
         }

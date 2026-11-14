@@ -85,7 +85,7 @@ One of the Call Window's three equal square-ish buttons above Hang up, each with
 _Avoid_: action button, chip
 
 **Call Pill**:
-The small strip the Call Window collapses to during a Call, showing the caller, the timer, Mute and Hang up, and at most one tag (Muted, On phone or 1 on hold). Once the Call has ended, or contact with it is lost, it is quiet: only the caller and what happened, without Mute and Hang up.
+The small strip the Call Window collapses to during a Call, showing the caller, the timer, Mute and Hang up, and tags beside the caller: one of Muted, On phone or 1 on hold, and Calls off after while a turn-off waits for the Call to end. Once the Call has ended, or contact with it is lost, it is quiet: only the caller and what happened, without Mute and Hang up.
 _Avoid_: mini window, bubble, picture-in-picture
 
 **Indicator**:

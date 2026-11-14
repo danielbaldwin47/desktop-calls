@@ -4,8 +4,8 @@
 use desktop_calls_core::matching::DialerRowKind;
 use desktop_calls_core::{
     CallHistory, CallHistoryEntry, CallHistoryKind, CallId, CallState, Caller, Contact,
-    ContactNumber, Contacts, DialerView, Directory, Effect, Input, NumberLabel, Phone,
-    PhoneCommand, State, Timestamp, messages::Failure, step,
+    ContactNumber, Contacts, DialerView, Directory, Effect, IndicatorStatus, Input, NumberLabel,
+    Phone, PhoneCommand, PhoneStatus, State, Timestamp, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -71,6 +71,11 @@ fn synced() -> Input {
         contacts: Contacts::new(directory),
         call_history,
     }
+}
+
+/// Paired, and not yet connected.
+fn paired() -> State {
+    run(State::default(), [Input::PhonePaired(my_pixel())]).0
 }
 
 fn connected() -> State {
@@ -344,4 +349,127 @@ fn a_new_sync_while_open_updates_the_rows() {
     );
 
     assert_eq!(selected_name(&dialer(&state)), "Zed Jones");
+}
+
+#[test]
+fn the_footer_names_only_the_keys_that_work_now() {
+    use desktop_calls_core::DialerKey::{Call, Close, Move};
+    // The Call History: Enter Calls, and Up and Down move.
+    assert_eq!(dialer(&open(connected(), "")).keys, [Call, Move, Close]);
+    // One match: nothing to move to.
+    assert_eq!(dialer(&open(connected(), "alice")).keys, [Call, Close]);
+    // Nothing matches and nothing can be dialled: only Escape does anything.
+    assert_eq!(dialer(&open(connected(), "zed")).keys, [Close]);
+}
+
+fn my_pixel() -> Phone {
+    Phone {
+        name: "My Pixel".to_owned(),
+        address: ADDRESS.to_owned(),
+    }
+}
+
+#[test]
+fn the_footer_shows_the_phone_as_the_indicator_does() {
+    for (state, expected, indicator) in [
+        (
+            connected(),
+            PhoneStatus::Connected(my_pixel()),
+            IndicatorStatus::Connected(my_pixel()),
+        ),
+        (
+            goes_out_of_range(connected()),
+            PhoneStatus::OutOfRange(my_pixel()),
+            IndicatorStatus::OutOfRange(my_pixel()),
+        ),
+        (
+            State::default(),
+            PhoneStatus::NoPhone,
+            IndicatorStatus::NoPhone,
+        ),
+        (
+            paired(),
+            PhoneStatus::NotConnected(my_pixel()),
+            IndicatorStatus::NotConnected(my_pixel()),
+        ),
+        (
+            run(connected(), [Input::TurnCallsOff { until: None }]).0,
+            PhoneStatus::CallsOff {
+                until: None,
+                quiet_hours: false,
+            },
+            IndicatorStatus::CallsOff {
+                until: None,
+                quiet_hours: false,
+            },
+        ),
+    ] {
+        let state = open(state, "");
+        let surfaces = state.surfaces();
+        let phone = surfaces.dialer.as_ref().map(|view| view.phone.clone());
+        assert_eq!(phone, Some(expected));
+        assert_eq!(
+            state.indicator(&surfaces).status,
+            indicator,
+            "the Indicator says the same"
+        );
+    }
+}
+
+#[test]
+fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
+    use desktop_calls_core::messages::{dialer_key, dialer_phone};
+    assert_eq!(
+        dialer_phone(&PhoneStatus::Connected(my_pixel())),
+        "My Pixel"
+    );
+    assert_eq!(
+        dialer_phone(&PhoneStatus::OutOfRange(my_pixel())),
+        "Out of range"
+    );
+    assert_eq!(dialer_phone(&PhoneStatus::NoPhone), "Not set up");
+    assert_eq!(
+        dialer_phone(&PhoneStatus::NotConnected(my_pixel())),
+        "Not connected"
+    );
+    assert_eq!(
+        dialer_phone(&PhoneStatus::ConnectionLost(my_pixel())),
+        "Reconnecting…"
+    );
+    // Calls off in the Indicator's words, with when they come back on.
+    let off = PhoneStatus::CallsOff {
+        until: None,
+        quiet_hours: false,
+    };
+    assert_eq!(
+        dialer_phone(&off),
+        desktop_calls_core::messages::indicator_status(&off.into())
+    );
+    assert_eq!(
+        dialer_key(desktop_calls_core::DialerKey::Call),
+        (&["Enter"][..], "Call")
+    );
+}
+
+/// The Phone in `state` drops its connection and goes out of range.
+fn goes_out_of_range(state: State) -> State {
+    run(
+        state,
+        [
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+        ],
+    )
+    .0
+}
+
+#[test]
+fn the_footer_follows_the_phone_going_out_of_range_while_open() {
+    let state = goes_out_of_range(open(connected(), ""));
+
+    assert_eq!(dialer(&state).phone, PhoneStatus::OutOfRange(my_pixel()));
 }

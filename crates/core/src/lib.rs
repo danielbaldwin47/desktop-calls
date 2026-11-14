@@ -30,16 +30,16 @@ pub use contacts::{
     ContactsState, NumberLabel, SyncFailure, SyncProgress, Unavailable,
 };
 pub use earlier_run::{EarlierCall, EarlierRun};
-pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView};
+pub use indicator::{IndicatorEntry, IndicatorLook, IndicatorStatus, IndicatorView, PhoneStatus};
 pub use keybinding::{ConfigFile, HyprlandConfig, KeybindingCheck, RequiredFile};
 pub use machine::{
     BannerChoice, BannerFooter, BannerView, BluetoothPower, CallAudio, CallPillLead, CallPillTag,
     CallWindowPhase, CallWindowView, CallsOffRecord, ConnectFailure, ContactsOutcome, DesktopCheck,
-    DesktopFix, DialProgress, DialerView, Effect, FixFailure, HeldCall, Input, KeybindingStage,
-    Mute, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem, QuietHoursDay,
-    QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts, RingingCaller,
-    SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State, StateLine, Surfaces, Timer,
-    WaitingOptions, keypad_tones, step,
+    DesktopFix, DialProgress, DialerKey, DialerView, Effect, FixFailure, HeldCall, Input,
+    KeybindingStage, Mute, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
+    QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts,
+    RingingCaller, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State, StateLine,
+    Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

@@ -5,6 +5,7 @@ use super::quiet_hours_window::QuietHoursWindowView;
 use super::setup::SetupWindowView;
 use super::{Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
+use crate::indicator::PhoneStatus;
 use crate::matching::{ContactMatch, DialerRow};
 use crate::messages::Failure;
 
@@ -32,10 +33,26 @@ pub struct DialerView {
     /// Why Enter can't Call the selected row, or why what is typed can't be
     /// dialled.
     pub notice: Option<Failure>,
+    /// The keys the footer shows, in order: only those that do something
+    /// now.
+    pub keys: Vec<DialerKey>,
+    /// Where the Phone is, as the footer shows it at the right.
+    pub phone: PhoneStatus,
     /// Different each time the Dialer opens, so the shell knows to put
     /// `query` in the Dialer's text entry afresh, and leave it alone while
     /// the user types.
     pub opened: u32,
+}
+
+/// A key the Dialer's footer shows, with what it does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialerKey {
+    /// Enter Calls the selected row.
+    Call,
+    /// Up and Down move the selection.
+    Move,
+    /// Escape closes the Dialer.
+    Close,
 }
 
 /// The Incoming Call Banner's content.
@@ -587,12 +604,22 @@ impl State {
     }
 
     fn dialer_view(&self) -> Option<DialerView> {
-        self.dialer.as_ref().map(|dialer| DialerView {
-            query: dialer.query.clone(),
-            rows: dialer.rows.clone(),
-            selected: (!dialer.rows.is_empty()).then_some(dialer.selected),
-            notice: dialer.notice,
-            opened: dialer.opened,
+        self.dialer.as_ref().map(|dialer| {
+            let selected = (!dialer.rows.is_empty()).then_some(dialer.selected);
+            let keys = [
+                selected.map(|_| DialerKey::Call),
+                (dialer.rows.len() > 1).then_some(DialerKey::Move),
+                Some(DialerKey::Close),
+            ];
+            DialerView {
+                query: dialer.query.clone(),
+                rows: dialer.rows.clone(),
+                selected,
+                notice: dialer.notice,
+                keys: keys.into_iter().flatten().collect(),
+                phone: self.phone_status(),
+                opened: dialer.opened,
+            }
         })
     }
 }

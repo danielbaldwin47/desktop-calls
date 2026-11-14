@@ -5,8 +5,8 @@
 //! place.
 
 use super::super::{HANG_UP_HELD_SHORTCUT, SWAP_SHORTCUT, Who, class, keycap};
-use super::icons::{Icon, IconView};
 use super::show_shortcut;
+use super::{Icon, IconView};
 use crate::theme::space;
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{CallId, CallWindowPhase, CallWindowView, Input};

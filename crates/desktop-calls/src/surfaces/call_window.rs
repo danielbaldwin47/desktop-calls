@@ -32,13 +32,12 @@ use std::time::Duration;
 
 mod change;
 mod held;
-mod icons;
 mod pill;
 mod render;
 
+use super::icons::{Icon, IconView};
 use change::{CHANGE_MS, Change, SMALLEST_CONTENT};
 use held::HeldRow;
-use icons::{Icon, IconView};
 use pill::CallPill;
 
 /// Each shortcut as the window shows it, by the action's report key, with
@@ -672,16 +671,6 @@ fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
     line.append(&caller);
     line.append(&timer);
     (line, caller, timer)
-}
-
-/// Why a Call placed here failed or was refused, hidden.
-pub(super) fn notice_label() -> gtk::Label {
-    let notice = gtk::Label::new(None);
-    notice.set_xalign(0.0);
-    notice.set_wrap(true);
-    notice.set_max_width_chars(36);
-    notice.set_visible(false);
-    notice
 }
 
 /// The tone entry, and the keypad's buttons, hidden until the keypad opens.

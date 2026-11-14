@@ -75,6 +75,15 @@ pub(crate) mod class {
     pub(crate) const STATE_LINE: &str = "state-line";
     /// A notice on the warning tint, its icon in warning text.
     pub(crate) const NOTICE: &str = "notice";
+    /// With [`NOTICE`]: the notice runs the surface's full width as a strip
+    /// under its top row, square, with a rule beneath.
+    pub(crate) const STRIP: &str = "strip";
+    /// A surface's search row: an icon in secondary text beside a borderless
+    /// entry in 17, with a rule beneath.
+    pub(crate) const SEARCH_ROW: &str = "search-row";
+    /// A dot, 8 across, in the answer colour: the Phone is connected, or the
+    /// Call is live.
+    pub(crate) const LIVE_DOT: &str = "live-dot";
     /// A row above a rule: the Held Call's.
     pub(crate) const HELD_ROW: &str = "held-row";
     /// A timer struck through and in secondary text: it stopped counting.
@@ -141,6 +150,9 @@ const STATIC: &str = r#"
 .footer-line > box { border-spacing: 6px; }
 .footer-line.run { border-spacing: 5px; padding-top: 0; border-top: none; }
 .footer-line.run > box { border-spacing: 2px; }
+.footer-line > box.keys { border-spacing: 16px; }
+.footer-line .keys > box { border-spacing: 6px; }
+.footer-line .keycaps { border-spacing: 2px; }
 .ringing-dot {
     min-width: 8px; min-height: 8px; border-radius: 4px; margin: 0 2px;
     background: var(--dc-answer); box-shadow: 0 0 0 3px var(--dc-answer-ring);
@@ -208,6 +220,19 @@ window.desktop-calls-surface.contact-lost { box-shadow: inset 0 0 0 2px var(--dc
 .notice { padding: 10px 12px; background: var(--dc-warning-tint); font-size: 12.5px; }
 .notice .notice-icon { color: var(--dc-warning-text); }
 .notice .notice-heading { font-weight: 600; }
+/* The Dialer's strip and search row run edge to edge inside its 2 px
+   padding, which keeps them clear of the border: 14 + 2 lines their
+   content up 16 from the edge. */
+.desktop-calls-surface .notice.strip {
+    padding: 9px 14px; border-radius: 0; border-bottom: 1px solid var(--dc-border);
+}
+.search-row { padding: 0 14px; min-height: 52px; border-bottom: 1px solid var(--dc-border); }
+.search-row .search-icon { color: var(--dc-secondary); }
+.desktop-calls-surface .search-row entry {
+    font-size: 17px; background: none; box-shadow: none; outline-style: none;
+    padding: 0; min-height: 48px;
+}
+.search-row entry > text > placeholder { color: var(--dc-secondary); opacity: 1; }
 .held-row { padding-bottom: 12px; border-bottom: 1px solid var(--dc-border); }
 .held-caller { font-weight: 600; }
 .held-row .dim-label { font-size: 12.5px; }

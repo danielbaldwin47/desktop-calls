@@ -233,6 +233,11 @@ fn without_omarchy_the_roles_are_stock_adwaitas() {
     assert_eq!(light.surface, Rgb(0xfa, 0xfa, 0xfb));
     assert_eq!(light.accent, Rgb(0x35, 0x84, 0xe4));
     assert_eq!(light.call_label, Rgb(0xff, 0xff, 0xff));
+    assert_eq!(
+        light.answer,
+        Rgb(0x20, 0x86, 0x57),
+        "Adwaita's green, deepened"
+    );
     assert_eq!(Roles::stock(true).surface, Rgb(0x22, 0x22, 0x26));
 }
 

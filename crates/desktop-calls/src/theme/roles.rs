@@ -31,8 +31,9 @@ const STOCK_DARK: Stock = Stock {
 };
 
 /// The Answer button's green and the Decline and Hang up buttons' red, with
-/// white labels, as on a phone, when there is no Omarchy theme.
-const STOCK_GREEN: Rgb = Rgb(0x26, 0xa2, 0x69);
+/// white labels, as on a phone, when there is no Omarchy theme. The green is
+/// Adwaita's `#26a269` deepened until white reads on it at 4.5:1.
+const STOCK_GREEN: Rgb = Rgb(0x20, 0x86, 0x57);
 const STOCK_RED: Rgb = Rgb(0xc0, 0x1c, 0x28);
 
 /// How much foreground a selected row's fill takes, over the background.

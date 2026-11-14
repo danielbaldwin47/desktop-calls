@@ -6,7 +6,7 @@ use test_harness::{Builder, Harness, OmarchyTheme, Theme};
 /// The stock Answer button's green, the stock Decline and Hang up buttons'
 /// red, and stock Adwaita's warning colour, light and dark, which marks the
 /// microphone muted without Omarchy, and stock Adwaita's accent.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 const STOCK_WARNING_LIGHT: [u8; 3] = [0xe5, 0xa5, 0x0a];
 const STOCK_WARNING_DARK: [u8; 3] = [0xcd, 0x93, 0x09];

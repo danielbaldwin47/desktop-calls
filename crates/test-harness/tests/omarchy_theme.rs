@@ -30,7 +30,7 @@ const NUMBER: &str = "+447700900123";
 /// Stock Adwaita's light window background (libadwaita 1.10).
 const ADWAITA_LIGHT_WINDOW: [u8; 3] = [0xfa, 0xfa, 0xfb];
 /// The stock Answer button's green.
-const STOCK_GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const STOCK_GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 
 /// The Banner's corner radius once Hyprland rounds windows.
 const ROUNDING: u32 = 12;

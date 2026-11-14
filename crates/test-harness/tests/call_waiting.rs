@@ -26,7 +26,7 @@ const ALICE: &str = "+447700900456";
 
 /// The Answer and Hold & Answer buttons' green, and the Decline and Hang up
 /// buttons' red.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 
 /// Blocks the serialized Phone commands with a Mute the Phone has received.

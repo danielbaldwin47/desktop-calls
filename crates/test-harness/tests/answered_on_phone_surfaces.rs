@@ -28,7 +28,7 @@ const KEEP_UP_DEADLINE: Duration = Duration::from_millis(200);
 const NUMBER: &str = "+447700900123";
 
 /// The Answer button's green.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 
 fn connected_on_screen() -> Harness {
     let harness = Harness::builder().headless_screen().omarchy_bar().start();

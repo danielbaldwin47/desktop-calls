@@ -34,7 +34,7 @@ const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 /// The Hang up button's red, the Answer button's green, and stock
 /// Adwaita's warning colour, which marks the microphone muted.
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const WARNING: [u8; 3] = [0xe5, 0xa5, 0x0a];
 
 fn connected() -> Harness {

@@ -365,6 +365,41 @@ fn typed_and_pasted_tones_reach_the_phone_as_typed() {
 }
 
 #[test]
+fn tones_typed_straight_after_k_leave_the_keypad_open() {
+    // K presses the Keypad tile as a key does, and the tile's click lands
+    // a moment later. A tone typed before it opened the keypad, and that
+    // late click then closed it again, about 250 ms on (#267).
+    let harness = connected();
+    live_on_desktop(&harness);
+    focus_call_window(&harness);
+    harness.keyboard().type_text("k123#");
+    let typed = harness.wait_for_app("the keypad shows the tones", DEADLINE, |state| {
+        shown(state, "keypad").is_some() && shown(state, "tones").as_deref() == Some("123#")
+    });
+    // The timer ticks each second, on a beat of its own: its second tick
+    // after the tones is at least a second after K, well past the click.
+    let ticks = |state: &AppState| shown(state, "timer");
+    let first = harness.wait_for_app("the timer ticks", DEADLINE, |state| {
+        ticks(state).is_some() && ticks(state) != ticks(&typed)
+    });
+    let ticked = harness.wait_for_app("the timer ticks again", DEADLINE, |state| {
+        ticks(state).is_some() && ticks(state) != ticks(&first)
+    });
+    assert_eq!(
+        (shown(&ticked, "keypad"), shown(&ticked, "tones")),
+        (Some("shown".to_owned()), Some("123#".to_owned())),
+        "the keypad closed by itself after the tones were typed"
+    );
+    let recorded =
+        harness
+            .simulated_phone()
+            .wait_for_recorded("four tones are sent", DEADLINE, |recorded| {
+                tones_sent(recorded).len() >= 4
+            });
+    assert_eq!(tones_sent(&recorded), ["1", "2", "3", "#"]);
+}
+
+#[test]
 fn clicking_a_keypad_button_sends_its_tone() {
     let harness = connected();
     live_on_desktop(&harness);

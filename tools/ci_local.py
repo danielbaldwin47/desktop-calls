@@ -814,6 +814,32 @@ def stop_on_sigterm() -> None:
     signal.signal(signal.SIGTERM, handler)
 
 
+def run_and_post(
+    sha: str, jobs: list[str], every_job: bool, full: bool, rebuild: bool, log: Log
+) -> int:
+    """Runs `jobs` on `sha` and, if every job was meant to run, posts the
+    result. The caller holds the lock and has made `sha` HEAD: `just ci-local`
+    does, and so does `just land` (tools/land.py), which runs this on the
+    merge it made."""
+    docs_only = False
+    if every_job and not full and is_docs_only(sha, log):
+        docs_only, jobs = True, ["lint"]
+        log.line("Docs only: lint alone, as GitHub CI skips the test jobs for such a change.")
+    build_image(log, rebuild)
+    started = time.monotonic()
+    failed, tmp = run_jobs(log, sha, jobs)
+    seconds = time.monotonic() - started
+    log.line(f"== total: {seconds:.0f} s")
+    if failed:
+        log.line(f"Failed scenarios' directories are in {tmp}")
+    else:
+        remove_tree(tmp)
+    if not every_job:
+        log.line("Only some jobs ran, so no status was posted.")
+        return EXIT_FAILED if failed else EXIT_PASSED
+    return settle(sha, failed, seconds, log, docs_only)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run CI's jobs here, and post 'CI passed' on HEAD if they pass"
@@ -829,7 +855,6 @@ def main() -> int:
     args = parser.parse_args()
     jobs = args.jobs or list(JOBS)
     every_job = not args.jobs or set(args.jobs) == set(JOBS)
-    docs_only = False
     claim = None
     try:
         if args.cancel:
@@ -851,22 +876,7 @@ def main() -> int:
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
         claim.write("running", sha)
-        if every_job and not args.full and is_docs_only(sha, log):
-            docs_only, jobs = True, ["lint"]
-            log.line("Docs only: lint alone, as GitHub CI skips the test jobs for such a change.")
-        build_image(log, args.rebuild_image)
-        started = time.monotonic()
-        failed, tmp = run_jobs(log, sha, jobs)
-        seconds = time.monotonic() - started
-        log.line(f"== total: {seconds:.0f} s")
-        if failed:
-            log.line(f"Failed scenarios' directories are in {tmp}")
-        else:
-            remove_tree(tmp)
-        if not every_job:
-            log.line("Only some jobs ran, so no status was posted.")
-            return EXIT_FAILED if failed else EXIT_PASSED
-        return settle(sha, failed, seconds, log, docs_only)
+        return run_and_post(sha, jobs, every_job, args.full, args.rebuild_image, log)
     except Refused as refusal:
         print(refusal, file=sys.stderr)
         return EXIT_REFUSED

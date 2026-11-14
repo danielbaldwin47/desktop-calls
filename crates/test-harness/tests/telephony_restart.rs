@@ -1,8 +1,8 @@
 //! Scenario 19: the Telephony service restarts, as it does when
 //! `WirePlumber` restarts, while idle and mid-Call. The service leaves the bus
 //! and comes back under a new owner with the same objects at the same paths,
-//! as on the real Pixel (`docs/wiki/telephony-api-quirks.md`). The real
-//! restart is Real-Phone Checklist group 6.
+//! as on the real Pixel (the wiki's page on the Telephony API quirks). The
+//! real restart is Real-Phone Checklist group 6.
 
 use std::collections::BTreeMap;
 use std::time::Duration;

@@ -9,7 +9,11 @@ Usage (through just):
 Branch protection requires the status "CI passed" on a PR's head, which `just
 ci-local` posts after a green local run (ticket #158); GitHub doesn't run
 full CI on a PR. This is the only way to merge, and it checks more than
-protection does. It refuses unless all of these hold, in this order:
+protection does. For a PR that main has moved past, use `just land 42`
+(tools/land.py, ticket #247): it brings the branch up to date, tests the
+result and merges, holding the CI lane's lock, so nothing lands in between.
+This tool takes the same lock for its final recheck and squash, so the two
+can't race. It refuses unless all of these hold, in this order:
 
   1. The PR is open.
   2. The PR head already contains the tip of origin/<base>, so the CI that
@@ -32,9 +36,9 @@ protection does. It refuses unless all of these hold, in this order:
   6. No Real-Phone Checklist step at the head lands with a closed ticket, or
      with one the PR closes (tools/checklist_tickets.py, ticket #120).
 
-When the head lacks commits on <base>, the refusal prints the one command
-that brings the branch up to date: merge origin/<base> locally, then `just
-ci-local` (one run, on the merge commit). It never calls `gh pr update-branch`.
+When the head lacks commits on <base>, the refusal names `just land`, which
+merges origin/<base> into the branch and tests that merge commit (one run)
+before it merges. It never calls `gh pr update-branch`.
 
 Then it squash-merges the head it checked (`--match-head-commit`) and
 deletes the PR's branch on GitHub. Local branches and worktrees are left
@@ -56,6 +60,7 @@ import time
 
 import changes
 import checklist_tickets
+import ci_local
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 
@@ -180,33 +185,29 @@ def checkout_of(branch: str) -> str | None:
 
 
 def bring_up_to_date(pr: dict) -> str:
-    """The `Next:` text for a head that lacks commits on the base: merge the
-    base into the branch here, then `just ci-local`, which tests that merge
-    commit, pushes it (a fast-forward, so never a force) and posts "CI passed"
-    on it, so one run covers it (ticket #181). `gh pr update-branch` would
-    make the merge commit on GitHub, where no "CI passed" is ever posted on
-    it.
-
-    The branch is first fast-forwarded to its copy on GitHub, since a merge
-    onto a stale local branch is not a fast-forward of the pushed one. If
-    another worktree has the branch checked out, `git switch` would refuse,
-    so the command runs there instead."""
+    """The `Next:` text for a head that lacks commits on the base: `just land`
+    merges the base into the branch, runs CI on that merge commit, pushes it
+    (a fast-forward, so never a force), posts "CI passed" on it and merges,
+    holding the CI lane's lock throughout, so main can't move in between
+    (ticket #247). It runs in the worktree that has the branch checked out.
+    `gh pr update-branch` would make the merge commit on GitHub, where no "CI
+    passed" is ever posted on it."""
     number, base, branch = pr["number"], pr["baseRefName"], pr["headRefName"]
     where = checkout_of(branch)
     here = git("rev-parse", "--show-toplevel").strip()
     if where is None:
-        start = f"git fetch origin && git switch {branch}"
+        start = f"git fetch origin && git switch {branch} && "
     elif where == here:
-        start = "git fetch origin"
+        start = ""
     else:
-        start = f"cd {where} && git fetch origin"
+        start = f"cd {where} && "
     return (
-        f"Next: {start} && git merge --ff-only origin/{branch} "
-        f"&& git merge --no-edit origin/{base} && just ci-local   (then `just merge {number}`)\n"
-        "On a conflict: resolve it, commit, then `just ci-local`.\n"
-        "Merge, don't rebase: a rebased branch is not a fast-forward of the one on "
-        "GitHub, and `just ci-local` doesn't force-push. Not `gh pr update-branch`: "
-        'its merge commit has no "CI passed".'
+        f"Next: {start}just land {number}\n"
+        f"It merges origin/{base} into the branch, runs CI on the result, posts \"CI passed\" and "
+        "merges, holding the CI lane so nothing lands in between. On a conflict it stops and "
+        "says what to run.\n"
+        "Never rebase a pushed branch, and not `gh pr update-branch`: its merge commit has no "
+        '"CI passed".'
     )
 
 
@@ -395,7 +396,11 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
         )
 
 
-def merge(number: int, wait_minutes: float) -> int:
+def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
+    """Squash-merges PR `number` if every condition holds. `lane_held` says the
+    caller (`just land`) already holds the CI lane's lock. Otherwise the final
+    recheck and the squash take it, so they can't fall between another
+    landing's merge of main and its squash."""
     pr = pull_request(number)
     require_open(pr)
     allowed = require_contains_base(pr)
@@ -409,6 +414,9 @@ def merge(number: int, wait_minutes: float) -> int:
         ) from None
     require_checks_passed(pr, wait_minutes)
 
+    # Held until this process exits, which is right after the squash. Waiting
+    # for the checks, above, is done without it: that wait can take minutes.
+    lane = None if lane_held else ci_local.take_turn()
     now = pull_request(number)
     require_open(now)
     if now["headRefOid"] != pr["headRefOid"]:

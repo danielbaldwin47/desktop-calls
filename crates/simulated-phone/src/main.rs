@@ -318,7 +318,7 @@ impl Control {
         (world.blocking.connects, world.blocking.pages_refused)
     }
 
-    /// Whether the Phone's device is blocked (`Device1.Blocked`).
+    /// Whether the Phone is blocked (`Device1.Blocked`).
     #[zbus(property)]
     fn blocked(&self) -> bool {
         blocked::blocked(&lock(&self.world))

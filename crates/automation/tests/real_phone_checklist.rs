@@ -412,7 +412,8 @@ fn group_5_records_where_the_audio_goes_with_the_earbuds_connected() {
 }
 
 #[test]
-fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_and_calls_on() {
+fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_calls_on_and_quiet_hours()
+ {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["6"], results.path());
     runner.play(|_| "y".to_owned());
@@ -424,6 +425,7 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         ("6.3", "reconnect_after_wireplumber_ms"),
         ("6.4", "reconnect_after_calls_on_ms"),
         ("6.5", "reconnect_after_deadline_resume_ms"),
+        ("6.6", "reconnect_after_quiet_hours_ms"),
     ] {
         let record = step(&result, id);
         assert_eq!(record["result"], "pass", "{record:#}");
@@ -479,6 +481,16 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         "came back on once the Desktop resumed",
     ] {
         assert!(says(timed, said), "{said}: {timed:#}");
+    }
+    // Quiet Hours: off when they begin, not when set; on when they end.
+    let quiet = step(&result, "6.6");
+    for said in [
+        "went off when the Quiet Hours began",
+        "disconnected when the Quiet Hours began",
+        "came back on when the Quiet Hours ended",
+        "Quiet Hours are off",
+    ] {
+        assert!(says(quiet, said), "{said}: {quiet:#}");
     }
 }
 

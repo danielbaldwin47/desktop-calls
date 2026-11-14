@@ -4,7 +4,7 @@
 use super::calls_off::CallsOffRecord;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
-use crate::clock::{Deadline, WallClock};
+use crate::clock::{Deadline, QuietHours, WallClock};
 use crate::connection::Phone;
 use crate::contacts::{CallHistory, Contacts, SyncFailure, SyncProgress};
 use crate::earlier_run::EarlierRun;
@@ -217,6 +217,14 @@ pub enum Input {
     /// The user chose Keep calls on: a turn-off waiting for the last Call
     /// to end is cancelled.
     KeepCallsOn,
+    /// The Quiet Hours the user set, as kept from an earlier run, at
+    /// startup and before the wall clock is first reported.
+    QuietHoursKept(QuietHours),
+    /// The user set Quiet Hours, from the command line or the control
+    /// interface.
+    SetQuietHours(QuietHours),
+    /// The user turned Quiet Hours off.
+    ClearQuietHours,
     /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
     /// as [`Effect::BlockPhone`] asked.
     PhoneBlocked { address: String, blocked: bool },
@@ -519,6 +527,10 @@ pub enum Effect {
     /// Report [`Input::ClockTicked`] again at this instant, by the wall
     /// clock, besides on the minute.
     ReadClockAt(Timestamp),
+    /// Keep these Quiet Hours for the next run, or with `None` none, and
+    /// report when they next begin and end with every
+    /// [`Input::ClockTicked`], starting at once.
+    KeepQuietHours(Option<QuietHours>),
     /// The deadline of calls off for the Phone with this address passed:
     /// calls come back on. For the log.
     CallsOffDeadlinePassed { address: String },

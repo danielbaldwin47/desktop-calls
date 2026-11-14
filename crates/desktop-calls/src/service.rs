@@ -38,7 +38,7 @@ use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{
     bluez, calls_off, chosen_phone, clock, contacts, earlier_run, keybinding, logind, pairing,
-    phone_link,
+    phone_link, quiet_hours,
 };
 
 /// Why the service could not run.
@@ -149,9 +149,17 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     if let Some(address) = chosen_phone::load() {
         let _ = input_sender.unbounded_send(Input::ChosenPhoneKept { address });
     }
+    // Before the clock is first read, so it reads them too.
+    let quiet_hours = quiet_hours::load();
+    if let Some(hours) = quiet_hours {
+        let _ = input_sender.unbounded_send(Input::QuietHoursKept(hours));
+    }
     // Before Calls Off is picked up, so a deadline that passed while the
     // app was stopped is seen to have passed.
-    let _ = input_sender.unbounded_send(Input::ClockTicked(clock::wall_clock(clock::now())));
+    let _ = input_sender.unbounded_send(Input::ClockTicked(clock::wall_clock(
+        clock::now(),
+        quiet_hours,
+    )));
     if let Some(record) = calls_off::load() {
         let _ = input_sender.unbounded_send(Input::CallsOffKept(record));
     }
@@ -174,7 +182,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
     let (clock_sender, clock_wakes) = unbounded();
-    context.spawn_local(clock::run(clock_wakes, input_sender.clone()));
+    context.spawn_local(clock::run(clock_wakes, input_sender.clone(), quiet_hours));
     context.spawn_local(watch_sleep(
         system.clone(),
         input_sender.clone(),
@@ -369,6 +377,10 @@ impl Shell {
                 Effect::KeepCallsOff(record) => calls_off::save(record.as_ref()),
                 Effect::ReadClockAt(at) => {
                     let _ = self.clock.unbounded_send(clock::Wake::At(at));
+                }
+                Effect::KeepQuietHours(hours) => {
+                    quiet_hours::save(hours);
+                    let _ = self.clock.unbounded_send(clock::Wake::QuietHours(hours));
                 }
                 Effect::CallsOffDeadlinePassed { address } => calls_off::deadline_passed(&address),
                 Effect::CallsOffPending { address } => calls_off::pending(&address),

@@ -19,6 +19,7 @@ mod notifications;
 mod object_manager;
 mod pairing;
 mod phone_link;
+mod quiet_hours;
 mod ringer;
 mod service;
 mod setup_checks;
@@ -91,6 +92,13 @@ enum Command {
         /// through the running service if there is one.
         #[arg(long, hide = true, global = true)]
         uninstalling: bool,
+    },
+    /// Set Quiet Hours: daily times when calls are off, such as
+    /// 22:00-07:00, which crosses midnight. Or turn them off.
+    QuietHours {
+        /// HH:MM-HH:MM on the 24-hour clock, or off.
+        #[arg(value_name = "HH:MM-HH:MM|off")]
+        hours: String,
     },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
@@ -170,6 +178,7 @@ fn main() -> ExitCode {
             turn: CallsTurn::On,
             ..
         }) => cli::calls_on(),
+        Some(Command::QuietHours { hours }) => cli::quiet_hours(&hours),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.

@@ -61,6 +61,9 @@ pub struct AppState {
     /// `CallsOff`'s pending flag: a turn-off waits for the last Call to
     /// end, while calls are `"on"`.
     pub calls_off_pending: bool,
+    /// `QuietHours`: their start and end in minutes after midnight, while
+    /// they are set.
+    pub quiet_hours: Option<(u16, u16)>,
 }
 
 /// The app's `ContactsState`: how far Contacts and Call History are synced.
@@ -212,6 +215,8 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         .collect();
     let (calls_off, calls_off_until, calls_off_pending) =
         <(String, u64, bool)>::try_from(property("CallsOff")?)?;
+    let (quiet_hours_set, quiet_start, quiet_end) =
+        <(bool, u16, u16)>::try_from(property("QuietHours")?)?;
     Ok(AppState {
         connection_state,
         phone: (!address.is_empty()).then_some(PhoneIdentity { name, address }),
@@ -234,6 +239,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         calls_off,
         calls_off_until,
         calls_off_pending,
+        quiet_hours: quiet_hours_set.then_some((quiet_start, quiet_end)),
     })
 }
 

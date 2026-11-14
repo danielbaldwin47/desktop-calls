@@ -25,6 +25,8 @@ The app keeps its own record, `$XDG_STATE_HOME/desktop-calls/calls-off.json`, wr
 - an "on" record that names an address, left by a run stopped halfway, unblocks it;
 - a Phone blocked with no record is the user's own setting, and the app never touches it.
 
+Amended by ticket #205 (Quiet Hours): one record outlives the unblock. Calls turned on, or kept on, during Quiet Hours stay on until the Quiet Hours next begin, and that choice must survive a restart. So the app keeps a `"kept-on"` record, with that instant as `until` and no address, while the Phone is unblocked; it blocks nothing, and is removed once the Quiet Hours begin or end, or are turned off. An "on" record left halfway carries the same `until` when it was turned on during Quiet Hours, and an "off" or pending record begun by Quiet Hours says so with `"quiet_hours": true`.
+
 This **amends [ADR-0004](0004-bluez-device-api-for-presence-and-pairing.md)**, which allows BlueZ's `Device1` for presence and pairing only, and ADR-0005's hands-free bounce. Desktop Calls may now also write `Device1.Blocked`, for this one purpose. Everything else in ADR-0004 stands: Desktop Calls still never registers a Bluetooth profile and never speaks AT commands, and nobody edits the WirePlumber drop-in.
 
 ## Considered options

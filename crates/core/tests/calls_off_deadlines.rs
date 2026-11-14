@@ -59,6 +59,7 @@ fn clock(minutes: u64) -> Input {
             shown: time(21, 30),
         },
         until_morning: morning(),
+        quiet_hours: None,
     })
 }
 
@@ -130,12 +131,14 @@ fn record_off(until: Deadline) -> CallsOffRecord {
     CallsOffRecord::Off {
         address: ADDRESS.to_owned(),
         until: Some(until),
+        quiet_hours: false,
     }
 }
 
 fn record_turning_on() -> CallsOffRecord {
     CallsOffRecord::TurningOn {
         address: ADDRESS.to_owned(),
+        kept_on_until: None,
     }
 }
 
@@ -236,7 +239,8 @@ fn turning_calls_off_for_an_hour_keeps_the_deadline_and_asks_for_the_clock_then(
     assert_eq!(
         state.indicator(&state.surfaces()).status,
         IndicatorStatus::CallsOff {
-            until: Some(time(21, 30))
+            until: Some(time(21, 30)),
+            quiet_hours: false,
         }
     );
 }

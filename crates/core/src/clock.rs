@@ -54,12 +54,91 @@ pub struct Deadline {
 
 /// The wall clock now, and the deadlines of the timed choices under Turn
 /// calls off, as the shell's clock adapter read them: [`FOR_AN_HOUR_MS`]
-/// from `now`, and the next [`MORNING`].
+/// from `now`, and the next [`MORNING`]. With Quiet Hours set, when they
+/// next begin and end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WallClock {
     pub now: Timestamp,
     pub for_an_hour: Deadline,
     pub until_morning: Deadline,
+    pub quiet_hours: Option<QuietHoursClock>,
+}
+
+/// Quiet Hours: the daily times, set by the user, during which calls are
+/// off. A start later than the end crosses midnight; the two are never
+/// equal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QuietHours {
+    start: TimeOfDay,
+    end: TimeOfDay,
+}
+
+impl QuietHours {
+    /// From `start` to `end`; `None` if they are the same time, which
+    /// would be no time or the whole day.
+    #[must_use]
+    pub fn new(start: TimeOfDay, end: TimeOfDay) -> Option<Self> {
+        (start != end).then_some(Self { start, end })
+    }
+
+    /// The Quiet Hours `HH:MM-HH:MM` names, such as `"22:00-07:00"`.
+    /// `None` for anything else.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (start, end) = text.trim().split_once('-')?;
+        Self::new(TimeOfDay::parse(start)?, TimeOfDay::parse(end)?)
+    }
+
+    #[must_use]
+    pub fn start(&self) -> TimeOfDay {
+        self.start
+    }
+
+    #[must_use]
+    pub fn end(&self) -> TimeOfDay {
+        self.end
+    }
+}
+
+impl fmt::Display for QuietHours {
+    /// `HH:MM-HH:MM`, as the configuration file and the command line have
+    /// it.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.start, self.end)
+    }
+}
+
+impl TimeOfDay {
+    /// The time `minutes` after midnight; `None` from 24:00 on.
+    #[must_use]
+    pub fn from_minutes(minutes: u16) -> Option<Self> {
+        let hour = u8::try_from(minutes / 60).ok()?;
+        let minute = u8::try_from(minutes % 60).ok()?;
+        (hour < 24).then_some(Self { hour, minute })
+    }
+
+    /// Minutes after midnight.
+    #[must_use]
+    pub fn minutes(&self) -> u16 {
+        u16::from(self.hour) * 60 + u16::from(self.minute)
+    }
+}
+
+/// When `hours` next begin and next end, as the shell's clock read them.
+/// While they are under way, they end before they next begin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuietHoursClock {
+    pub hours: QuietHours,
+    pub next_start: Deadline,
+    pub next_end: Deadline,
+}
+
+impl QuietHoursClock {
+    /// Whether the Quiet Hours are under way.
+    #[must_use]
+    pub fn under_way(&self) -> bool {
+        self.next_end.at < self.next_start.at
+    }
 }
 
 /// How long "For 1 hour" turns calls off for, in milliseconds.

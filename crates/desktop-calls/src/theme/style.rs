@@ -73,6 +73,12 @@ pub(crate) mod class {
     /// The Call Window's state line: 12.5, in secondary text; with
     /// [`MUTED`], in warning text.
     pub(crate) const STATE_LINE: &str = "state-line";
+    /// A tag beside who a Call is with, on the Call Window's top line and on
+    /// the Call Pill: monospace 11/500, in secondary text.
+    pub(crate) const TAG: &str = "tag";
+    /// With [`TAG`]: "Calls off after", which stays in secondary text even
+    /// on a muted Call Pill.
+    pub(crate) const CALLS_OFF: &str = "calls-off";
     /// A notice on the warning tint, its icon in warning text.
     pub(crate) const NOTICE: &str = "notice";
     /// With [`NOTICE`]: the notice runs the surface's full width as a strip
@@ -248,12 +254,15 @@ entry.tones {
 }
 
 .pill-caller { font-size: 13.5px; font-weight: 600; }
-.pill-tag {
+.tag {
     font-family: monospace; font-size: 11px; font-weight: 500; color: var(--dc-secondary);
 }
 .pill-state { color: var(--dc-secondary); }
 .pill-state.muted,
-window.call-pill.muted .pill-tag { color: var(--dc-warning-text); font-weight: 600; }
+window.call-pill.muted .tag { color: var(--dc-warning-text); font-weight: 600; }
+/* Only the Muted tag takes the warning colour; "Calls off after" stays as
+   quiet as every other tag. */
+window.call-pill.muted .tag.calls-off { color: var(--dc-secondary); font-weight: 500; }
 .live-dot {
     min-width: 8px; min-height: 8px; border-radius: 4px; background: var(--dc-answer);
 }

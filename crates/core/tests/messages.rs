@@ -312,6 +312,7 @@ fn the_call_pill_says_its_tags_and_tooltips_in_sentence_case() {
     assert_eq!(messages::call_pill_tag(CallPillTag::Muted), "Muted");
     assert_eq!(messages::call_pill_tag(CallPillTag::OnPhone), "On phone");
     assert_eq!(messages::call_pill_tag(CallPillTag::OneOnHold), "1 on hold");
+    assert_eq!(messages::calls_off_after_tag(), "Calls off after");
     assert_eq!(
         messages::call_pill_tooltip(Label::HangUp, "Ctrl+H"),
         "Hang up · Ctrl+H"

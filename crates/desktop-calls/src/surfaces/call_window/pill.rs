@@ -19,7 +19,8 @@ use super::{
 };
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{
-    AudioLocation, CallPillLead, CallWindowPhase, CallWindowView, Input, Mute, StateLine,
+    AudioLocation, CallPillLead, CallPillTag, CallWindowPhase, CallWindowView, Input, Mute,
+    StateLine,
 };
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
@@ -48,6 +49,8 @@ pub(super) struct CallPill {
     pointer: Rc<Pointer>,
     caller: gtk::Label,
     tag: gtk::Label,
+    /// "Calls off after", beside the tag, while a turn-off waits.
+    calls_off: gtk::Label,
     status: gtk::Label,
     divider: gtk::Separator,
     mute: gtk::Button,
@@ -87,7 +90,8 @@ impl CallPill {
         caller.set_width_chars(4);
         caller.set_max_width_chars(4);
         let tag = gtk::Label::new(None);
-        tag.add_css_class("pill-tag");
+        tag.add_css_class(class::TAG);
+        let calls_off = calls_off_tag();
         let status = gtk::Label::new(None);
         status.add_css_class(class::TIMER);
         status.set_xalign(1.0);
@@ -98,6 +102,7 @@ impl CallPill {
             lead.upcast_ref::<gtk::Widget>(),
             caller.upcast_ref(),
             tag.upcast_ref(),
+            calls_off.upcast_ref(),
             status.upcast_ref(),
         ] {
             part.set_valign(gtk::Align::Center);
@@ -143,6 +148,7 @@ impl CallPill {
             pointer,
             caller,
             tag,
+            calls_off,
             status,
             divider,
             mute,
@@ -172,10 +178,7 @@ impl CallPill {
         // Monospace only for a time on its own.
         set_class(&self.status, class::WORDS, mute.is_none());
         self.status.set_text(&status);
-        let tag = view.call_pill_tag();
-        self.tag
-            .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
-        self.tag.set_visible(tag.is_some());
+        let tag = self.show_tags(view);
         let audio_on_phone = !view.connection_lost
             && view
                 .audio
@@ -236,9 +239,7 @@ impl CallPill {
             );
             content.insert("mute-tooltip".to_owned(), mute_tooltip);
         }
-        if let Some(tag) = tag {
-            content.insert("tag".to_owned(), messages::call_pill_tag(tag).to_owned());
-        }
+        report_tags(tag, view.calls_off_after, &mut content);
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
@@ -260,6 +261,16 @@ impl CallPill {
         } else {
             self.surface.report_ahead(content);
         }
+    }
+
+    /// Shows the tags beside the caller, and returns the state tag.
+    fn show_tags(&self, view: &CallWindowView) -> Option<CallPillTag> {
+        let tag = view.call_pill_tag();
+        self.tag
+            .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
+        self.tag.set_visible(tag.is_some());
+        self.calls_off.set_visible(view.calls_off_after);
+        tag
     }
 
     /// Shows what leads the strip at rest, or nothing once it is quiet.
@@ -328,6 +339,33 @@ fn status(view: &CallWindowView) -> String {
         }
         phase => messages::label(status_label(&phase)).to_owned(),
     }
+}
+
+/// Adds the tags the Call Pill shows to `content`.
+fn report_tags(
+    tag: Option<CallPillTag>,
+    calls_off_after: bool,
+    content: &mut BTreeMap<String, String>,
+) {
+    if let Some(tag) = tag {
+        content.insert("tag".to_owned(), messages::call_pill_tag(tag).to_owned());
+    }
+    if calls_off_after {
+        content.insert(
+            "calls-off-after".to_owned(),
+            messages::calls_off_after_tag().to_owned(),
+        );
+    }
+}
+
+/// The "Calls off after" tag, hidden until a turn-off waits for the Call.
+/// The Call Window's top line has the same one.
+pub(super) fn calls_off_tag() -> gtk::Label {
+    let tag = gtk::Label::new(Some(messages::calls_off_after_tag()));
+    tag.add_css_class(class::TAG);
+    tag.add_css_class(class::CALLS_OFF);
+    tag.set_visible(false);
+    tag
 }
 
 /// The strip's lead, 16 px square: the live dot, the state icon, or the

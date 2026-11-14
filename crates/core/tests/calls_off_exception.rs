@@ -616,3 +616,51 @@ fn quiet_hours_that_ended_during_the_call_leave_calls_on() {
     assert!(!state.calls_off());
     assert!(!effects.contains(&block_phone(true)), "{effects:?}");
 }
+
+/// Ticket #230: whether the Call Window carries the "Calls off after" tag.
+fn calls_off_after(state: &State) -> bool {
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    window.calls_off_after
+}
+
+#[test]
+fn the_call_window_says_calls_off_after_from_connecting_to_the_phone_to_the_end_of_the_call() {
+    let connecting = entered(None);
+    let Some(window) = connecting.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    assert_eq!(window.state_line, Some(StateLine::ConnectingToPhone));
+    assert!(window.calls_off_after, "tagged while the Phone connects");
+
+    let placed = placed(None);
+    let Some(window) = placed.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    assert_eq!(window.state_line, Some(StateLine::Calling));
+    assert!(
+        window.calls_off_after,
+        "tagged through the Call's own states"
+    );
+
+    let (ended_state, _) = run(placed, [ended(5)]);
+    assert!(
+        !calls_off_after(&ended_state),
+        "the Call ended: no tag on its Ended window"
+    );
+}
+
+#[test]
+fn keep_calls_on_takes_the_tag_away_during_the_exception() {
+    let (state, _) = run(entered(None), [Input::KeepCallsOn]);
+
+    assert!(!calls_off_after(&state));
+}
+
+#[test]
+fn hanging_up_before_the_phone_connects_leaves_no_tag_on_the_ended_window() {
+    let (state, _) = run(entered(None), [Input::CancelDial]);
+
+    assert!(!calls_off_after(&state));
+}

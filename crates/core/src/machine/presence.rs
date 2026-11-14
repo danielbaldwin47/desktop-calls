@@ -86,7 +86,8 @@ impl State {
 
     /// Whether the Phone is present, and hands-free didn't come back after
     /// a Handoff to the Phone: not out of range, though not connected.
-    pub(crate) fn hands_free_lost(&self) -> bool {
+    #[must_use]
+    pub fn hands_free_lost(&self) -> bool {
         self.presence.reach == Reach::HandsFreeLost
     }
 }
@@ -187,6 +188,21 @@ pub(super) fn hands_free_lost(state: &mut State, effects: &mut Vec<Effect>) {
     }
     state.presence.reach = Reach::HandsFreeLost;
     state.presence.reconnect.failures = 1;
+    if !state.presence.reconnect.connecting {
+        connect_later(state, effects);
+    }
+}
+
+/// Hands-free dropped by itself, or for another app, with the Phone still
+/// present: the Desktop connects hands-free again after the first wait,
+/// unless it comes back by itself first, as after a `WirePlumber` restart
+/// (ticket #216). A Phone going away drops hands-free first; BlueZ
+/// reporting it absent then connects it at once instead.
+pub(super) fn hands_free_dropped(state: &mut State, effects: &mut Vec<Effect>) {
+    if state.presence.reach != Reach::Present {
+        return;
+    }
+    state.presence.reach = Reach::HandsFreeLost;
     if !state.presence.reconnect.connecting {
         connect_later(state, effects);
     }

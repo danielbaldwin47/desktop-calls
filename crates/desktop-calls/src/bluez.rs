@@ -12,10 +12,12 @@
 //! listed what it knows at startup. Pairing itself is `pairing.rs`.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use desktop_calls_core::{ConnectFailure, Input, Phone};
 use futures_channel::mpsc::{UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
+use futures_util::future::{Either, select};
 use zbus::fdo::ObjectManagerProxy;
 use zbus::{Connection, OwnedVariant};
 
@@ -28,6 +30,12 @@ const DEVICE: &str = "org.bluez.Device1";
 
 /// The Hands-Free Audio Gateway profile: the Phone's side of hands-free.
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
+/// How long `Connect` or `ConnectProfile` may go unanswered before it
+/// counts as failed, so one BlueZ never answers can't stall reconnecting
+/// for good (ticket #216). Past BlueZ's 5.12 s page timeout, with room for
+/// the profiles; short enough that a Phone back in range just after it
+/// left is connected within 10 s. Chosen, not measured.
+const CONNECT_DEADLINE: Duration = Duration::from_secs(7);
 
 /// Reports paired Phones to `inputs` until the connection closes, and
 /// whether each has a Bluetooth connection to the Desktop.
@@ -274,9 +282,14 @@ pub async fn connect_phone(
         phone_address = %address,
         "Asking BlueZ to connect the Phone"
     );
-    let failure = match system
-        .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Connect", &())
-        .await
+    let failure = match within_deadline(system.call_method(
+        Some(SERVICE),
+        device.as_str(),
+        Some(DEVICE),
+        "Connect",
+        &(),
+    ))
+    .await
     {
         Ok(_) => return Ok(Connected::AsAsked),
         Err(zbus::Error::MethodError(name, message, _)) => {
@@ -405,15 +418,14 @@ pub async fn connect_hands_free(system: &Connection, address: &str) -> Result<()
 /// `device`. `AlreadyConnected` and `InProgress` count as connected: the
 /// Phone connected hands-free itself, first.
 async fn connect_profile(system: &Connection, device: &str) -> zbus::Result<()> {
-    match system
-        .call_method(
-            Some(SERVICE),
-            device,
-            Some(DEVICE),
-            "ConnectProfile",
-            &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
-        )
-        .await
+    match within_deadline(system.call_method(
+        Some(SERVICE),
+        device,
+        Some(DEVICE),
+        "ConnectProfile",
+        &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
+    ))
+    .await
     {
         Ok(_) => Ok(()),
         Err(zbus::Error::MethodError(name, _, _))
@@ -513,4 +525,21 @@ fn paired_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
         .or_else(|| text("Name"))
         .unwrap_or_else(|| address.clone());
     Some(Phone { name, address })
+}
+
+/// `call`'s answer, or a failure once [`CONNECT_DEADLINE`] passes without
+/// one. A late answer is dropped.
+async fn within_deadline<T>(call: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
+    match select(
+        Box::pin(call),
+        Box::pin(glib::timeout_future(CONNECT_DEADLINE)),
+    )
+    .await
+    {
+        Either::Left((answer, _)) => answer,
+        Either::Right(_) => Err(zbus::Error::Failure(format!(
+            "BlueZ didn't answer within {} s",
+            CONNECT_DEADLINE.as_secs()
+        ))),
+    }
 }

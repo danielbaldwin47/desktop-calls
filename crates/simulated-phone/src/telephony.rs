@@ -183,6 +183,10 @@ pub enum Quirk {
     /// "away" while BlueZ has it connected, as the real Desktop's was while
     /// it paged a connected Phone every 45 s (ticket #212, cause unknown).
     ConnectedUnannounced,
+    /// The next `Device1.Connect` for the Phone is never answered, and
+    /// changes nothing: as the real Desktop's app seemed to wait on one for
+    /// good (ticket #216, inferred).
+    ConnectNeverAnswersOnce,
 }
 
 /// How long [`Quirk::SlowServiceLevel`] takes to bring hands-free up.
@@ -225,6 +229,7 @@ impl Quirk {
             "slow-service-level" => Some(Self::SlowServiceLevel),
             "calls-listed-late" => Some(Self::CallsListedLate),
             "connected-unannounced" => Some(Self::ConnectedUnannounced),
+            "connect-never-answers-once" => Some(Self::ConnectNeverAnswersOnce),
             _ => None,
         }
     }

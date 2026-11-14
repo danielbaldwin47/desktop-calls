@@ -435,6 +435,16 @@ pub fn status(connection_state: &ConnectionState, phone: Option<&Phone>) -> Stri
     }
 }
 
+/// The sentence for a Phone in range and connected to the Desktop, without
+/// hands-free, which the Desktop is connecting again (ticket #216).
+#[must_use]
+pub fn hands_free_lost_status(phone: &Phone) -> String {
+    format!(
+        "{} is connected, but not for Calls: connecting it again.",
+        describe(phone)
+    )
+}
+
 fn describe(phone: &Phone) -> String {
     format!("{} ({})", phone.name, phone.address)
 }

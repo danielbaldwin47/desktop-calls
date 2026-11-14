@@ -371,7 +371,8 @@ fn bluetooth_back_on_connects_the_phone_at_once_with_short_waits() {
         failure: ConnectFailure::Unreachable,
     };
     // Away for two failed connects, so the next wait would be 2 s.
-    let (state, effects) = run(connected(), [hands_free_down(), absent(), failed(1)]);
+    let (state, _) = run(connected(), [hands_free_down(), absent()]);
+    let (state, effects) = run(state, [failed(1)]);
     let [(timer, _)] = reconnect_waits(&effects)[..] else {
         panic!("one wait expected: {effects:?}");
     };

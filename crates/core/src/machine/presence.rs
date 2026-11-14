@@ -66,13 +66,14 @@ struct Reconnect {
 
 impl State {
     /// Whether the Desktop should be connecting the Phone: it is paired,
-    /// away or without hands-free, the Desktop is awake, and the Phone still
-    /// has it paired.
+    /// away or without hands-free, the Desktop is awake with its Bluetooth
+    /// on, and the Phone still has it paired.
     fn wants_phone(&self) -> bool {
         let presence = &self.presence;
         self.phone.is_some()
             && presence.reach != Reach::Present
             && !presence.suspended
+            && !self.desktop.bluetooth_off()
             && !presence.pairing_lost
     }
 
@@ -469,6 +470,13 @@ fn suspending(state: &mut State) {
 /// waits of before.
 fn resumed(state: &mut State, effects: &mut Vec<Effect>) {
     state.presence.suspended = false;
+    state.presence.reconnect.failures = 0;
+    connect_now(state, effects);
+}
+
+/// The Desktop's Bluetooth came back on: the Phone is connected again at
+/// once, without the waits of before.
+pub(super) fn bluetooth_on(state: &mut State, effects: &mut Vec<Effect>) {
     state.presence.reconnect.failures = 0;
     connect_now(state, effects);
 }

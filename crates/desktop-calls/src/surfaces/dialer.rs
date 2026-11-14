@@ -28,8 +28,10 @@ pub(super) struct Dialer {
     search: gtk::DrawingArea,
     list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,
-    /// The notice strip under the search row, and its words.
+    /// The notice strip under the search row, its icon, and its words: why
+    /// Enter can't Call, or that calls are off and Enter calls anyway.
     notice: gtk::Box,
+    notice_icon: IconView,
     notice_text: gtk::Label,
     footer: Footer,
     /// Set while the Dialer writes the query into `entry`, so the write
@@ -69,7 +71,7 @@ impl Dialer {
         search_row.add_css_class(class::SEARCH_ROW);
         search_row.append(&search.area);
         search_row.append(&entry);
-        let (notice, notice_text) = notice_strip();
+        let (notice, notice_icon, notice_text) = notice_strip();
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
         list.set_focusable(false);
@@ -95,6 +97,7 @@ impl Dialer {
             list,
             scrolled,
             notice,
+            notice_icon,
             notice_text,
             footer,
             writing: Cell::new(false),
@@ -196,8 +199,24 @@ impl Dialer {
             self.scroll_to(&row);
         }
         let notice = view.notice.map(|failure| messages::failure(failure).text);
-        self.notice_text.set_text(notice.unwrap_or_default());
-        self.notice.set_visible(notice.is_some());
+        // Why Enter can't Call comes first; otherwise, while calls are off,
+        // that Enter calls anyway.
+        let calls_off = view
+            .calls_off
+            .map(|off| messages::dialer_calls_off(off.until));
+        if let Some(notice) = notice {
+            self.notice_icon.set(Icon::Warning);
+            self.notice_text.set_text(notice);
+        } else if let Some((off, enter)) = &calls_off {
+            self.notice_icon.set(Icon::Moon);
+            self.notice_text.set_markup(&format!(
+                "<b>{}</b> {}",
+                glib::markup_escape_text(off),
+                glib::markup_escape_text(enter)
+            ));
+        }
+        self.notice
+            .set_visible(notice.is_some() || calls_off.is_some());
 
         let mut content = BTreeMap::from([
             ("query".to_owned(), view.query.clone()),
@@ -208,6 +227,9 @@ impl Dialer {
         }
         if let Some(notice) = notice {
             content.insert("notice".to_owned(), notice.to_owned());
+        }
+        if let Some((off, enter)) = calls_off {
+            content.insert("calls-off".to_owned(), format!("{off} {enter}"));
         }
         self.footer.show(&view.keys, &view.phone, &mut content);
         let (now, offset) = (now(), utc_offset_seconds());
@@ -333,8 +355,8 @@ fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRow
     messages::dialer_row(row, when.as_deref())
 }
 
-/// The notice strip, hidden: the warning icon beside the notice's words.
-fn notice_strip() -> (gtk::Box, gtk::Label) {
+/// The notice strip, hidden: an icon beside the notice's words.
+fn notice_strip() -> (gtk::Box, IconView, gtk::Label) {
     let icon = IconView::new(Icon::Warning);
     icon.area.add_css_class("notice-icon");
     icon.area.set_valign(gtk::Align::Start);
@@ -348,7 +370,7 @@ fn notice_strip() -> (gtk::Box, gtk::Label) {
     strip.append(&icon.area);
     strip.append(&text);
     strip.set_visible(false);
-    (strip, text)
+    (strip, icon, text)
 }
 
 /// The footer line: each key that works now with what it does, and at the

@@ -492,6 +492,23 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
     ] {
         assert!(says(quiet, said), "{said}: {quiet:#}");
     }
+    // A Call placed from the Dialer while calls are off: the Phone connects
+    // for it, and disconnects again once it ends, calls still off.
+    let anyway = step(&result, "6.7");
+    assert_eq!(anyway["result"], "pass", "{anyway:#}");
+    assert!(
+        anyway["measurements"]["disconnected_again_ms"]
+            .as_u64()
+            .is_some_and(|ms| ms <= 10_000),
+        "{anyway:#}"
+    );
+    for said in [
+        "The Call went to the Test Number",
+        "The Pixel connected and the Call to the Test Number was placed, with calls going off again after it",
+        "the app says calls are off",
+    ] {
+        assert!(says(anyway, said), "{said}: {anyway:#}");
+    }
 }
 
 /// What the runner listed under "Before you start", in order.

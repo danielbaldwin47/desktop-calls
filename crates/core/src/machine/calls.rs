@@ -120,6 +120,7 @@ pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Eff
                 dial_failed(state, Failure::DialFailed, effects);
             }
         }
+        Timer::PhoneForDial(attempt) => super::dialling::phone_not_back(state, attempt, effects),
         Timer::HandoffTimedOut(handoff) => {
             if state
                 .moving_audio

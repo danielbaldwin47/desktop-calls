@@ -134,7 +134,12 @@ const STATES: &[State] = &[
     State {
         name: "call-window-keypad",
         title: "The Call Window with the keypad open and tones sent: the tone entry and the keypad above the tiles, so Hang up stays put",
-        still: |_| true,
+        still: |state| {
+            state.surface("call-window").is_some_and(|window| {
+                window.contains_key("keypad")
+                    && window.get("tones").map(String::as_str) == Some("123#")
+            })
+        },
         prepare: as_is,
         reach: |harness| {
             live_here(harness);
@@ -377,6 +382,26 @@ const STATES: &[State] = &[
                 state
                     .surface("dialer")
                     .is_some_and(|dialer| dialer.contains_key("notice"))
+            });
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
+        name: "dialer-calls-off",
+        title: "The Dialer while calls are off until 07:00: the strip says Enter calls anyway, and the footer's Enter reads Call anyway",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+            harness.wait_for_app("calls are off", DEADLINE, |state| {
+                state.calls_off == "off" && state.connection_state == "disconnected"
+            });
+            open_dialer(harness, "smith");
+            harness.wait_for_app("the Dialer says calls are off", DEADLINE, |state| {
+                state
+                    .surface("dialer")
+                    .is_some_and(|dialer| dialer.contains_key("calls-off"))
             });
         },
         shown: |screenshot, _| shows_dialer(screenshot),

@@ -2,15 +2,19 @@
 
 use super::input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
 use super::{
-    CALL_ENDED_MS, DIAL_TIMEOUT_MS, Dialer, Dialling, Focus, HungUpDial, NOTICE_MS, Notice, State,
+    CALL_ENDED_MS, DIAL_TIMEOUT_MS, Dialer, Dialling, Focus, HungUpDial, NOTICE_MS, Notice,
+    PHONE_FOR_DIAL_MS, State,
 };
 use crate::call::{Call, CallId, Caller, Request};
+use crate::connection::ConnectionState;
 use crate::matching::{self, DialerRow};
 use crate::messages::Failure;
 
 /// Places a Call to `text`, a number or a `tel:` link, unless it can't be
 /// dialled or placed now. A Call placed here has its audio on the Desktop,
-/// so the Phone may bring the audio here before it dials.
+/// so the Phone may bring the audio here before it dials. While calls are
+/// off it is an exception for this one Call: the Phone is unblocked and
+/// connected, and the Call placed once it is (ticket #206).
 pub(super) fn dial(state: &mut State, text: &str, effects: &mut Vec<Effect>) {
     state.dial_attempts += 1;
     let attempt = state.dial_attempts;
@@ -28,24 +32,86 @@ pub(super) fn dial(state: &mut State, text: &str, effects: &mut Vec<Effect>) {
     state.ended = None;
     state.notice = None;
     state.hung_up_dial = None;
+    let waiting_for_phone = state.calls_off();
     state.dialling = Some(Dialling {
         number: number.clone(),
         attempt,
         cancelled: false,
+        waiting_for_phone,
     });
+    effects.push(Effect::DialProgress(DialProgress::Asked(attempt)));
+    if waiting_for_phone {
+        super::calls_off::except_for_call(state, effects);
+    } else {
+        ask_phone_to_dial(number, attempt, effects);
+    }
+}
+
+fn ask_phone_to_dial(number: String, attempt: u32, effects: &mut Vec<Effect>) {
     effects.push(Effect::Phone(PhoneCommand::AllowAudioOnDesktop));
     effects.push(Effect::Phone(PhoneCommand::Dial(number)));
-    effects.push(Effect::DialProgress(DialProgress::Asked(attempt)));
     effects.push(Effect::StartTimer {
         timer: Timer::DialTimedOut(attempt),
         after_ms: DIAL_TIMEOUT_MS,
     });
 }
 
+/// The Phone, unblocked for a Call placed while calls were off, is being
+/// connected: if it isn't connected in time, the Call isn't placed.
+pub(super) fn wait_for_phone(state: &State, effects: &mut Vec<Effect>) {
+    if let Some(dialling) = state
+        .dialling
+        .as_ref()
+        .filter(|dialling| dialling.waiting_for_phone)
+    {
+        effects.push(Effect::StartTimer {
+            timer: Timer::PhoneForDial(dialling.attempt),
+            after_ms: PHONE_FOR_DIAL_MS,
+        });
+    }
+}
+
+/// After every input: a Call waiting for the Phone is placed as soon as the
+/// Phone is connected.
+pub(super) fn place_once_connected(state: &mut State, effects: &mut Vec<Effect>) {
+    if state.connection != ConnectionState::Connected || !state.calls_on() {
+        return;
+    }
+    let Some(dialling) = state
+        .dialling
+        .as_mut()
+        .filter(|dialling| dialling.waiting_for_phone)
+    else {
+        return;
+    };
+    dialling.waiting_for_phone = false;
+    ask_phone_to_dial(dialling.number.clone(), dialling.attempt, effects);
+}
+
+/// The Phone hasn't connected in time for the Call of dial attempt
+/// `attempt`, placed while calls were off: it isn't placed, as for a Phone
+/// out of range.
+pub(super) fn phone_not_back(state: &mut State, attempt: u32, effects: &mut Vec<Effect>) {
+    if state
+        .dialling
+        .as_ref()
+        .is_some_and(|dialling| dialling.waiting_for_phone && dialling.attempt == attempt)
+    {
+        dial_failed(state, Failure::PhoneOutOfRange, effects);
+    }
+}
+
 /// The first outgoing Call after a dial is the one dialled: it takes the
 /// dialled number if the Phone withholds it, and is hung up at once if the
 /// user hung up first.
 pub(super) fn adopt_dialled(state: &mut State, call: &mut Call, effects: &mut Vec<Effect>) {
+    if state
+        .dialling
+        .as_ref()
+        .is_none_or(|dialling| dialling.waiting_for_phone)
+    {
+        return;
+    }
     let Some(dialling) = state.dialling.take() else {
         return;
     };
@@ -62,6 +128,7 @@ pub(super) fn adopt_dialled(state: &mut State, call: &mut Call, effects: &mut Ve
 
 /// The user hung up the Call they placed before the Phone reported it: the
 /// Call Window says "Call ended", and the Call is hung up when it appears.
+/// One still waiting for the Phone to connect is never placed.
 pub(super) fn cancel_dial(state: &mut State, effects: &mut Vec<Effect>) {
     let Some(dialling) = state
         .dialling
@@ -72,10 +139,15 @@ pub(super) fn cancel_dial(state: &mut State, effects: &mut Vec<Effect>) {
     };
     dialling.cancelled = true;
     let attempt = dialling.attempt;
-    state.hung_up_dial = Some(HungUpDial {
-        attempt,
-        caller: Caller::Number(dialling.number.clone()),
-    });
+    let caller = Caller::Number(dialling.number.clone());
+    if dialling.waiting_for_phone {
+        state.dialling = None;
+        effects.push(Effect::DialProgress(DialProgress::NotPlaced(
+            attempt,
+            Failure::DialFailed,
+        )));
+    }
+    state.hung_up_dial = Some(HungUpDial { attempt, caller });
     effects.push(Effect::StartTimer {
         timer: Timer::DismissDial(attempt),
         after_ms: CALL_ENDED_MS,
@@ -117,7 +189,8 @@ pub(super) fn dial_failed(state: &mut State, failure: Failure, effects: &mut Vec
         let caller = Caller::Number(dialling.number);
         notify(state, failure, dialling.attempt, Some(caller), effects);
     }
-    if !state.has_desktop_audio() {
+    // A Call that waited for the Phone never asked it for the audio.
+    if !dialling.waiting_for_phone && !state.has_desktop_audio() {
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
     }
 }

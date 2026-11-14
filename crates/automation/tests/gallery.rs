@@ -35,6 +35,7 @@ const STATES: &[&str] = &[
     "dialer-call-history",
     "dialer-results",
     "dialer-not-connected",
+    "dialer-calls-off",
     "quiet-hours-window-off",
     "quiet-hours-window-on",
     "quiet-hours-window-refused",

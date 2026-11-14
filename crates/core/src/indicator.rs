@@ -60,6 +60,9 @@ pub enum IndicatorStatus {
     /// other party, which the Call Window shows, but not over a ringing
     /// Call's caller.
     CallsOffPending,
+    /// Calls go off again when the last Call ends: one was placed while
+    /// they were off. Said where `CallsOffPending` would be.
+    CallsOffAgain,
     /// Paired, and not yet connected since the Desktop started.
     NotConnected(Phone),
     Connected(Phone),
@@ -317,7 +320,9 @@ impl State {
             let contact = window.contact.clone();
             (
                 IndicatorLook::InCall,
-                if self.calls_off_pending() {
+                if self.calls_off_exception() {
+                    IndicatorStatus::CallsOffAgain
+                } else if self.calls_off_pending() {
                     IndicatorStatus::CallsOffPending
                 } else if window.connection_lost {
                     IndicatorStatus::CallOnPhone { caller, contact }

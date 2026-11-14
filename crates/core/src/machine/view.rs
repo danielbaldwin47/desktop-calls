@@ -5,6 +5,7 @@ use super::quiet_hours_window::QuietHoursWindowView;
 use super::setup::SetupWindowView;
 use super::{Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
+use crate::clock::TimeOfDay;
 use crate::indicator::PhoneStatus;
 use crate::matching::{ContactMatch, DialerRow};
 use crate::messages::Failure;
@@ -36,6 +37,10 @@ pub struct DialerView {
     /// The keys the footer shows, in order: only those that do something
     /// now.
     pub keys: Vec<DialerKey>,
+    /// While calls are off: Enter calls anyway, and calls go off again
+    /// after (ticket #206). Not while `notice` says why Enter can't Call:
+    /// the strip shows that instead.
+    pub calls_off: Option<DialerCallsOff>,
     /// Where the Phone is, as the footer shows it at the right.
     pub phone: PhoneStatus,
     /// Different each time the Dialer opens, so the shell knows to put
@@ -44,11 +49,20 @@ pub struct DialerView {
     pub opened: u32,
 }
 
+/// What the Dialer says while calls are off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DialerCallsOff {
+    /// When they end, if they end at a time.
+    pub until: Option<TimeOfDay>,
+}
+
 /// A key the Dialer's footer shows, with what it does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialerKey {
     /// Enter Calls the selected row.
     Call,
+    /// Enter Calls the selected row although calls are off.
+    CallAnyway,
     /// Up and Down move the selection.
     Move,
     /// Escape closes the Dialer.
@@ -326,6 +340,9 @@ pub enum CallWindowPhase {
 pub enum StateLine {
     /// Answered here, and not yet connected.
     Connecting,
+    /// Placed here while calls were off, waiting for the Phone to connect
+    /// before it is dialled.
+    ConnectingToPhone,
     /// Placed here, and the other end isn't ringing yet.
     Calling,
     /// Placed here, and ringing at the other end.
@@ -508,12 +525,20 @@ impl State {
                     .dialling
                     .as_ref()
                     .filter(|dialling| !dialling.cancelled)?;
-                Some(self.callless_window(
+                let window = self.callless_window(
                     None,
                     Caller::Number(dialling.number.clone()),
                     CallWindowPhase::Calling,
                     notice,
-                ))
+                );
+                Some(if dialling.waiting_for_phone {
+                    CallWindowView {
+                        state_line: Some(StateLine::ConnectingToPhone),
+                        ..window
+                    }
+                } else {
+                    window
+                })
             })
             .or_else(|| {
                 self.hung_up_dial.as_ref().map(|hung_up| {
@@ -606,8 +631,16 @@ impl State {
     fn dialer_view(&self) -> Option<DialerView> {
         self.dialer.as_ref().map(|dialer| {
             let selected = (!dialer.rows.is_empty()).then_some(dialer.selected);
+            let calls_off = self.calls_off().then(|| DialerCallsOff {
+                until: self.calls_off_until().map(|until| until.shown),
+            });
+            let call = if calls_off.is_some() {
+                DialerKey::CallAnyway
+            } else {
+                DialerKey::Call
+            };
             let keys = [
-                selected.map(|_| DialerKey::Call),
+                selected.map(|_| call),
                 (dialer.rows.len() > 1).then_some(DialerKey::Move),
                 Some(DialerKey::Close),
             ];
@@ -617,6 +650,8 @@ impl State {
                 selected,
                 notice: dialer.notice,
                 keys: keys.into_iter().flatten().collect(),
+                // Why Enter can't Call takes the strip first.
+                calls_off: calls_off.filter(|_| dialer.notice.is_none()),
                 phone: self.phone_status(),
                 opened: dialer.opened,
             }

@@ -35,8 +35,8 @@ pub use keybinding::{ConfigFile, HyprlandConfig, KeybindingCheck, RequiredFile};
 pub use machine::{
     BannerChoice, BannerFooter, BannerView, BluetoothPower, CallAudio, CallPillLead, CallPillTag,
     CallWindowPhase, CallWindowView, CallsOffRecord, ConnectFailure, ContactsOutcome, DesktopCheck,
-    DesktopFix, DialProgress, DialerKey, DialerView, Effect, FixFailure, HeldCall, Input,
-    KeybindingStage, Mute, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
+    DesktopFix, DialProgress, DialerCallsOff, DialerKey, DialerView, Effect, FixFailure, HeldCall,
+    Input, KeybindingStage, Mute, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts,
     RingingCaller, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State, StateLine,
     Surfaces, Timer, WaitingOptions, keypad_tones, step,

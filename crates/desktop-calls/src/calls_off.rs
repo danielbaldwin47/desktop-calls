@@ -107,6 +107,16 @@ pub fn pending(address: &str) {
     );
 }
 
+/// Logs that a Call was placed while calls were off, so the Phone with
+/// `address` is unblocked for it, and calls go off again once it ends.
+pub fn placed_while_off(address: &str) {
+    tracing::info!(
+        event_kind = %EventKind::CallPlacedWhileCallsOff,
+        phone_address = %address,
+        "Calls off: a Call placed anyway; calls go off again once it ends"
+    );
+}
+
 /// Logs that the turn-off waiting for the last Call to end was cancelled.
 pub fn kept_on(address: &str) {
     tracing::info!(
@@ -173,6 +183,14 @@ fn write(record: &CallsOffRecord) -> io::Result<bool> {
     }
     if quiet_hours {
         document["quiet_hours"] = json!(true);
+    }
+    // A turn-off waiting for a Call placed while calls were off; a build
+    // without the field reads it as any other waiting turn-off.
+    if let CallsOffRecord::Pending {
+        exception: true, ..
+    } = record
+    {
+        document["exception"] = json!(true);
     }
     writer.write_all(&serde_json::to_vec(&document).map_err(io::Error::other)?)?;
     writer.sync_all()?;
@@ -247,6 +265,7 @@ fn parts(record: &CallsOffRecord) -> (&'static str, Option<&str>, Option<u64>, b
             address,
             until,
             quiet_hours,
+            ..
         } => (
             "pending",
             Some(address),
@@ -285,10 +304,11 @@ fn from_json(document: &Value) -> Option<CallsOffRecord> {
         return None;
     }
     let address = address.to_owned();
-    let quiet_hours = match document.get("quiet_hours") {
-        None => false,
-        Some(quiet_hours) => quiet_hours.as_bool()?,
+    let flag = |name: &str| match document.get(name) {
+        None => Some(false),
+        Some(flag) => flag.as_bool(),
     };
+    let quiet_hours = flag("quiet_hours")?;
     match state {
         "off" => Some(CallsOffRecord::Off {
             address,
@@ -303,6 +323,7 @@ fn from_json(document: &Value) -> Option<CallsOffRecord> {
             address,
             until,
             quiet_hours,
+            exception: flag("exception")?,
         }),
         _ => None,
     }

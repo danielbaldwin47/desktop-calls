@@ -8,11 +8,18 @@
 //! [`COLLAPSE_MS`] after the last of those clears. Escape collapses it at
 //! once; a click on the Call Pill, the keybinding or a click on the Indicator
 //! expands it with the keyboard.
+//!
+//! While collapsed, it expands by itself, without taking the keyboard, when
+//! the Desktop loses contact with the Call, a notice appears, a Call goes on
+//! hold or a new Call connects: each needs the user to see the Call Window.
+//! A Waiting Call ringing doesn't expand it, as the Banner shows that, and
+//! nor does a Problem.
 
 use super::dialling::open_dialer;
 use super::input::{Effect, Input, Timer};
 use super::view::{CallWindowPhase, CallWindowView};
 use super::{Focus, State};
+use crate::CallId;
 
 /// How long after a Call connects, or after the user stops using the Call
 /// Window, it collapses by itself.
@@ -43,6 +50,50 @@ pub(super) struct CallWindowForm {
     pending: Option<u32>,
     /// How many collapse timers have started.
     timers: u32,
+    /// What the Call Window showed after the last step, compared after the
+    /// next to see whether something arose that expands it by itself; `None`
+    /// before it shows.
+    shown: Option<Shown>,
+}
+
+/// What the Call Window shows that expands it by itself when it arises
+/// while it is collapsed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Shown {
+    /// The last Call the Call Window showed connected, live.
+    live_call: Option<CallId>,
+    /// The Desktop has lost contact with the Call.
+    connection_lost: bool,
+    /// A notice shows.
+    notice: bool,
+    /// A Call is on hold.
+    held: bool,
+}
+
+impl Shown {
+    fn of(window: &CallWindowView, before: Option<Self>) -> Self {
+        let live = matches!(window.phase, CallWindowPhase::Live { .. });
+        Self {
+            live_call: if live {
+                window.call
+            } else {
+                before.and_then(|before| before.live_call)
+            },
+            connection_lost: window.connection_lost,
+            notice: window.notice.is_some(),
+            held: window.held.is_some() || matches!(window.phase, CallWindowPhase::OnHold { .. }),
+        }
+    }
+
+    /// Whether `self`, shown after `before`, needs the user to see the Call
+    /// Window: lost contact, a notice or a Call on hold arose, or another
+    /// Call connected.
+    fn needs_seeing_after(self, before: Self) -> bool {
+        (self.connection_lost && !before.connection_lost)
+            || (self.notice && !before.notice)
+            || (self.held && !before.held)
+            || (before.live_call.is_some() && self.live_call != before.live_call)
+    }
 }
 
 impl CallWindowForm {
@@ -162,6 +213,13 @@ pub(super) fn follow_call_window(
         };
         return;
     };
+    let before = state.form.shown;
+    let shown = Shown::of(window, before);
+    state.form.shown = Some(shown);
+    if state.form.collapsed && before.is_some_and(|before| shown.needs_seeing_after(before)) {
+        // Expanded by itself, it leaves the keyboard where it is.
+        state.form.collapsed = false;
+    }
     if state.form.collapsed || in_use(state, window) {
         state.form.pending = None;
         return;

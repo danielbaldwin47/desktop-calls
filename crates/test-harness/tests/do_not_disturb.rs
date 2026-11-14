@@ -2,7 +2,9 @@
 //! `~/.local/state/omarchy/notifications/quiet.json`, at startup and live,
 //! and reads it as off wherever Omarchy would, or without Omarchy. Under Do
 //! Not Disturb the Incoming Call Banner still shows but the Desktop doesn't
-//! ring, and a Missed Call is still notified, for Omarchy to file away.
+//! ring, and a Missed Call is still notified, for Omarchy to file away. The
+//! confirmation of calls turned off by hand is silenced too, and being
+//! transient, isn't filed.
 
 use std::time::{Duration, SystemTime};
 
@@ -234,4 +236,28 @@ fn without_omarchy_do_not_disturb_is_off_until_omarchy_turns_it_on() {
     // turned on.
     harness.set_do_not_disturb(true);
     wait_for_do_not_disturb(&harness, true, APPEAR_DEADLINE);
+}
+
+#[test]
+fn the_confirmation_of_calls_turned_off_is_silenced_under_do_not_disturb_and_not_filed() {
+    let harness = connected(Harness::builder().do_not_disturb());
+    wait_for_do_not_disturb(&harness, true, DEADLINE);
+
+    let output = harness.cli(&["calls", "off"]);
+    assert!(output.status.success(), "{output:?}");
+
+    let notification = harness.notifications().wait_for(
+        "the confirmation that calls are off",
+        NOTIFY_DEADLINE,
+        |notification| notification.app_name == "Desktop Calls",
+    );
+    assert_eq!(notification.summary, "Calls off");
+    // Omarchy keeps it off the screen, and with the transient hint doesn't
+    // file it to notification history either.
+    assert!(notification.silenced, "{notification:?}");
+    assert_eq!(
+        notification.hints.get("transient").map(String::as_str),
+        Some("true"),
+        "{notification:?}"
+    );
 }

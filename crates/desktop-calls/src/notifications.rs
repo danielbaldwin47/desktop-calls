@@ -1,4 +1,5 @@
-//! Missed Call notifications, through the desktop's notification server
+//! Missed Call notifications, and the confirmation that the user turned
+//! calls off or on by hand, through the desktop's notification server
 //! (`org.freedesktop.Notifications`).
 //!
 //! Each caller has one notification: a later Missed Call from the same
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{CallId, Caller, Input, MissedCallNotice};
+use desktop_calls_core::{CallId, Caller, CallsTurned, CallsTurnedNotice, Input, MissedCallNotice};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use glib::MainContext;
@@ -33,10 +34,22 @@ const ICON: &str = "call-missed-symbolic";
 const DESKTOP_ENTRY: &str = "io.github.danielbaldwin47.DesktopCalls";
 /// The notification specification's category for a Missed Call.
 const CATEGORY: &str = "call.unanswered";
-/// Normal urgency: a Missed Call follows Do Not Disturb.
+/// Normal urgency: a Missed Call, and the confirmation of calls turned off
+/// or on, follow Do Not Disturb.
 const URGENCY_NORMAL: u8 = 1;
 /// Let the notification server choose how long the notification shows.
 const SERVER_TIMEOUT: i32 = -1;
+
+/// Omarchy's hint for a glyph in the notification's icon slot: a Nerd Font
+/// phone with a diagonal through it (`md-phone_off`) for calls off, a phone
+/// with a tick (`md-phone_check`) for calls on.
+const GLYPH_HINT: &str = "omarchy-glyph";
+const GLYPH_CALLS_OFF: &str = "\u{f0def}";
+const GLYPH_CALLS_ON: &str = "\u{f11a9}";
+/// The hint that keeps a notification out of Omarchy's history, also once
+/// Do Not Disturb has silenced it: it only says something that has already
+/// happened.
+const TRANSIENT_HINT: &str = "transient";
 
 /// The action keys.
 const DEFAULT: &str = "default";
@@ -53,6 +66,7 @@ type Shown = Rc<RefCell<HashMap<CallId, u32>>>;
 /// Shows Missed Call notifications, and reports what the user does with
 /// them.
 pub struct Notifier {
+    session: Connection,
     notices: UnboundedSender<(MissedCallNotice, Published)>,
 }
 
@@ -71,7 +85,32 @@ impl Notifier {
         let context = MainContext::default();
         context.spawn_local(follow(session.clone(), shown.clone(), inputs));
         context.spawn_local(show_all(session.clone(), queued, shown, publisher));
-        Self { notices }
+        Self {
+            session: session.clone(),
+            notices,
+        }
+    }
+
+    /// Shows the confirmation that the user turned calls off or on by
+    /// hand: one transient notification, which Do Not Disturb silences
+    /// like any other. Never waits on the notification server.
+    pub fn confirm_calls_turned(&self, notice: CallsTurnedNotice) {
+        let session = self.session.clone();
+        MainContext::default().spawn_local(async move {
+            match show_calls_turned(&session, &notice).await {
+                Ok(_) => tracing::info!(
+                    event_kind = %EventKind::CallsTurnedConfirmed,
+                    "Confirmed calls turned by hand: {:?}",
+                    notice.turned
+                ),
+                Err(error) => tracing::warn!(
+                    event_kind = %EventKind::NotificationFailed,
+                    error_kind = "notify-failed",
+                    detail = %error,
+                    "Couldn't show the confirmation of calls turned off or on"
+                ),
+            }
+        });
     }
 
     /// Shows `notice`, replacing its caller's notification if still shown.
@@ -153,6 +192,39 @@ async fn show(session: &Connection, notice: &MissedCallNotice, replaces: u32) ->
                 text.summary.as_str(),
                 text.body.as_str(),
                 actions,
+                hints,
+                SERVER_TIMEOUT,
+            ),
+        )
+        .await?;
+    reply.body().deserialize()
+}
+
+async fn show_calls_turned(session: &Connection, notice: &CallsTurnedNotice) -> zbus::Result<u32> {
+    let text = messages::calls_turned_notice(notice);
+    let glyph = match notice.turned {
+        CallsTurned::On { .. } => GLYPH_CALLS_ON,
+        CallsTurned::Off { .. } | CallsTurned::OffAfterCall { .. } => GLYPH_CALLS_OFF,
+    };
+    let hints = HashMap::from([
+        (GLYPH_HINT, Variant::from(glyph)),
+        (TRANSIENT_HINT, Variant::from(true)),
+        ("desktop-entry", Variant::from(DESKTOP_ENTRY)),
+        ("urgency", Variant::from(URGENCY_NORMAL)),
+    ]);
+    let reply = session
+        .call_method(
+            Some(NAME),
+            PATH,
+            Some(NAME),
+            "Notify",
+            &(
+                APP_NAME,
+                0_u32,
+                "",
+                text.summary.as_str(),
+                text.body.as_str(),
+                Vec::<&str>::new(),
                 hints,
                 SERVER_TIMEOUT,
             ),

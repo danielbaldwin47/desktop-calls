@@ -5,9 +5,9 @@
 //! and a waiting turn-off is kept for the next run.
 
 use desktop_calls_core::{
-    CallId, CallState, Caller, CallsOffRecord, Deadline, Effect, IndicatorEntry, IndicatorLook,
-    IndicatorStatus, Input, Phone, PhoneCommand, State, TimeOfDay, Timer, Timestamp, WallClock,
-    messages, step,
+    CallId, CallState, Caller, CallsOffRecord, CallsTurned, CallsTurnedNotice, Deadline, Effect,
+    IndicatorEntry, IndicatorLook, IndicatorStatus, Input, Phone, PhoneCommand, State, TimeOfDay,
+    Timer, Timestamp, WallClock, messages, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -102,6 +102,14 @@ fn ended() -> Input {
     }
 }
 
+/// The confirmation of what the user turned (ticket #231), for the Phone.
+fn calls_turned(turned: CallsTurned) -> Effect {
+    Effect::NotifyCallsTurned(CallsTurnedNotice {
+        phone: "My Pixel".to_owned(),
+        turned,
+    })
+}
+
 fn block_phone(blocked: bool) -> Effect {
     Effect::BlockPhone {
         address: ADDRESS.to_owned(),
@@ -162,7 +170,8 @@ fn waits_for_the_call(state: State, end: &[Input]) {
             Effect::KeepCallsOff(Some(record_pending(None))),
             Effect::CallsOffPending {
                 address: ADDRESS.to_owned()
-            }
+            },
+            calls_turned(CallsTurned::OffAfterCall { until: None }),
         ]
     );
 
@@ -303,7 +312,10 @@ fn keep_calls_on_cancels_the_waiting_turn_off() {
             Effect::KeepCallsOff(None),
             Effect::CallsKeptOn {
                 address: ADDRESS.to_owned()
-            }
+            },
+            calls_turned(CallsTurned::On {
+                reconnecting: false
+            }),
         ]
     );
     assert!(!state.calls_off_pending());
@@ -377,7 +389,13 @@ fn turning_calls_off_again_while_waiting_replaces_the_choice() {
         }],
     );
     let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
-    assert_eq!(effects, [Effect::KeepCallsOff(Some(record_pending(None)))]);
+    assert_eq!(
+        effects,
+        [
+            Effect::KeepCallsOff(Some(record_pending(None))),
+            calls_turned(CallsTurned::OffAfterCall { until: None }),
+        ]
+    );
 
     let (state, _) = run(state, [clock(60), ended()]);
     assert!(state.calls_off());

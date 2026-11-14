@@ -337,3 +337,62 @@ fn set_quiet_hours_refuses_a_time_past_23_59() {
     assert!(refused.message.starts_with("Give Quiet Hours as HH:MM-HH:MM"), "{refused:?}");
     assert_eq!(harness.app_state().quiet_hours, None);
 }
+
+/// What the app notified, in order: summaries only.
+fn summaries(harness: &Harness) -> Vec<String> {
+    harness
+        .notifications()
+        .received()
+        .into_iter()
+        .filter(|notification| notification.app_name == "Desktop Calls")
+        .map(|notification| notification.summary)
+        .collect()
+}
+
+#[test]
+fn quiet_hours_beginning_sends_no_confirmation() {
+    let start = now() + EDGE_AHEAD;
+    let harness = harness_in(&time_zone_reading(23, 59, start));
+    harness
+        .set_quiet_hours(minutes(23, 59), minutes(6, 0))
+        .expect("Quiet Hours set");
+    assert!(now() < start, "the setup took too long to test the start");
+
+    let left = Duration::from_secs(start.saturating_sub(now()));
+    harness.wait_for_app("calls go off as Quiet Hours begin", left + DEADLINE, |state| {
+        state.calls_off == "off"
+    });
+    wait_off_until(&harness, start + 6 * 3_600 + 60);
+
+    // A notification comes in the step that causes it, in order: one more
+    // by hand, and nothing came before it.
+    cli_ok(&harness, &["calls", "on"]);
+    harness.notifications().wait_for(
+        "the confirmation of calls turned on by hand",
+        DEADLINE,
+        |notification| notification.app_name == "Desktop Calls",
+    );
+    assert_eq!(summaries(&harness), ["Calls on"]);
+}
+
+#[test]
+fn quiet_hours_ending_sends_no_confirmation() {
+    let end = now() + EDGE_AHEAD;
+    let harness = harness_in(&time_zone_reading(0, 0, end));
+    harness
+        .set_quiet_hours(minutes(23, 0), minutes(0, 0))
+        .expect("Quiet Hours set");
+    wait_off_until(&harness, end);
+    assert!(now() < end, "the setup took too long to test the end");
+
+    let left = Duration::from_secs(end.saturating_sub(now()));
+    wait_connected(&harness, left + RECONNECT_DEADLINE);
+
+    cli_ok(&harness, &["calls", "off"]);
+    harness.notifications().wait_for(
+        "the confirmation of calls turned off by hand",
+        DEADLINE,
+        |notification| notification.app_name == "Desktop Calls",
+    );
+    assert_eq!(summaries(&harness), ["Calls off"]);
+}

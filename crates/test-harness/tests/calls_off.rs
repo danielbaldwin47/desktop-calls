@@ -5,13 +5,14 @@
 //! is blocked. Turning calls on connects it within 10 s, even when the
 //! first `Connect` fails busy. A record a killed app left halfway is put
 //! right at the next start, and a Phone blocked with no record is left
-//! alone. During a Call, see `calls_off_pending.rs`.
+//! alone. During a Call, see `calls_off_pending.rs`. Turning calls off or on
+//! by hand also raises one transient notification (ticket #231).
 
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use test_harness::{AppEvent, AppState, Bus, Harness, TrayItem};
+use test_harness::{AppEvent, AppState, Bus, Harness, MenuEntry, Notification, TrayItem};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -65,6 +66,13 @@ fn indicator_says(harness: &Harness, tooltip: &str) -> TrayItem {
         },
     );
     items.into_iter().next().unwrap_or_else(|| unreachable!())
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|error| panic!("the clock is before 1970: {error}"))
+        .as_secs()
 }
 
 fn record(harness: &Harness) -> PathBuf {
@@ -278,4 +286,179 @@ fn a_phone_blocked_with_no_record_is_left_blocked() {
         state.calls_off == "on"
     });
     assert!(harness.simulated_phone().blocked(), "the Phone is still blocked");
+}
+
+/// What the app notified, in order: its summary, body and what it
+/// carried, apart from Missed Calls.
+fn confirmations(harness: &Harness) -> Vec<Notification> {
+    harness
+        .notifications()
+        .received()
+        .into_iter()
+        .filter(|notification| notification.app_name == "Desktop Calls")
+        .collect()
+}
+
+fn summaries(harness: &Harness) -> Vec<String> {
+    confirmations(harness)
+        .into_iter()
+        .map(|notification| notification.summary)
+        .collect()
+}
+
+/// The label of the entry in `menu`, here or in a submenu, that starts
+/// with `start`.
+fn label_starting(menu: &[MenuEntry], start: &str) -> Option<String> {
+    menu.iter().find_map(|entry| {
+        if entry.label.starts_with(start) {
+            Some(entry.label.clone())
+        } else {
+            label_starting(&entry.children, start)
+        }
+    })
+}
+
+/// Waits for the confirmation with `summary`, and checks what every
+/// confirmation carries: the transient hint, a glyph for Omarchy's icon
+/// slot, the Desktop's app name and no actions.
+fn confirmation(harness: &Harness, summary: &str) -> Notification {
+    let notification = harness.notifications().wait_for(
+        &format!("the confirmation {summary:?}"),
+        DEADLINE,
+        |notification| notification.summary == summary,
+    );
+    assert_eq!(notification.app_name, "Desktop Calls");
+    assert!(
+        notification.hints.get("transient").is_some_and(|value| value == "true"),
+        "marked transient, so Omarchy doesn't keep it in history: {notification:?}"
+    );
+    assert!(
+        notification.hints.contains_key("omarchy-glyph"),
+        "a glyph for the icon slot: {notification:?}"
+    );
+    assert!(notification.actions.is_empty(), "{notification:?}");
+    assert!(!notification.silenced, "{notification:?}");
+    notification
+}
+
+#[test]
+fn turning_calls_off_from_the_indicator_and_on_from_the_cli_each_send_one_transient_notification() {
+    let harness = connected();
+
+    harness.tray().click("Until I turn them on");
+
+    wait_off(&harness);
+    let off = confirmation(&harness, "Calls off");
+    assert_eq!(
+        off.body,
+        "My Pixel is disconnected. Turn calls on from the bar."
+    );
+
+    cli_ok(&harness, &["calls", "on"]);
+
+    wait_connected(&harness, RECONNECT_DEADLINE);
+    let on = confirmation(&harness, "Calls on");
+    assert_eq!(on.body, "My Pixel will reconnect.");
+    assert_ne!(
+        off.hints.get("omarchy-glyph"),
+        on.hints.get("omarchy-glyph"),
+        "calls off and calls on have glyphs of their own"
+    );
+    // Once the Phone has reconnected, nothing else came: one each.
+    assert_eq!(summaries(&harness), ["Calls off", "Calls on"]);
+}
+
+#[test]
+fn turning_calls_off_from_the_cli_and_on_from_the_indicator_confirm_too() {
+    let harness = connected();
+
+    cli_ok(&harness, &["calls", "off"]);
+    wait_off(&harness);
+    confirmation(&harness, "Calls off");
+    harness.tray().click_when_shown("Turn calls on", DEADLINE);
+
+    wait_connected(&harness, RECONNECT_DEADLINE);
+    confirmation(&harness, "Calls on");
+    assert_eq!(summaries(&harness), ["Calls off", "Calls on"]);
+}
+
+#[test]
+fn turning_calls_off_for_an_hour_gives_the_end_time_the_menu_showed() {
+    let harness = connected();
+    let menu = harness.tray().wait_for_menu(
+        "the menu offers the timed choices",
+        DEADLINE,
+        |menu| label_starting(menu, "For 1 hour").is_some(),
+    );
+    let label = label_starting(&menu, "For 1 hour").expect("a For 1 hour choice");
+    // "For 1 hour (until 21:30)".
+    let until = label
+        .strip_prefix("For 1 hour (until ")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .expect("the end time")
+        .to_owned();
+
+    harness.tray().click(&label);
+
+    wait_off(&harness);
+    let notification = confirmation(&harness, &format!("Calls off for 1 hour (until {until})"));
+    assert_eq!(
+        notification.body,
+        "My Pixel is disconnected. Turn calls on from the bar."
+    );
+}
+
+#[test]
+fn turning_calls_off_until_a_time_from_the_control_interface_says_when() {
+    let harness = connected();
+    let until = now() + 3_600;
+
+    harness.turn_calls_off(until).expect("calls turn off");
+
+    wait_off(&harness);
+    let summaries = summaries(&harness);
+    assert_eq!(summaries.len(), 1, "{summaries:?}");
+    // "Calls off until 21:30": the time of day in the Desktop's time zone.
+    let shown = summaries[0].strip_prefix("Calls off until ").unwrap_or_default();
+    assert!(
+        shown.len() == 5 && shown.as_bytes()[2] == b':',
+        "no end time in {summaries:?}"
+    );
+}
+
+#[test]
+fn a_timed_break_ending_turns_calls_on_with_no_notification() {
+    let harness = connected();
+    let until = now() + 3;
+    harness.turn_calls_off(until).expect("calls turn off");
+    wait_off(&harness);
+
+    wait_connected(&harness, Duration::from_secs(3) + RECONNECT_DEADLINE);
+    // A notification is raised in the step that causes it, in order: one
+    // more by hand, and nothing came between.
+    cli_ok(&harness, &["calls", "off"]);
+    wait_off(&harness);
+    confirmation(&harness, "Calls off");
+
+    let summaries = summaries(&harness);
+    assert_eq!(summaries.len(), 2, "{summaries:?}");
+    assert!(summaries[0].starts_with("Calls off until "), "{summaries:?}");
+    assert_eq!(summaries[1], "Calls off");
+}
+
+#[test]
+fn a_turn_off_that_changes_nothing_sends_no_notification() {
+    let harness = connected();
+    cli_ok(&harness, &["calls", "on"]);
+    cli_ok(&harness, &["calls", "off"]);
+    wait_off(&harness);
+    confirmation(&harness, "Calls off");
+
+    // The same choice again is not a change.
+    cli_ok(&harness, &["calls", "off"]);
+    cli_ok(&harness, &["calls", "on"]);
+    wait_connected(&harness, RECONNECT_DEADLINE);
+    confirmation(&harness, "Calls on");
+
+    assert_eq!(summaries(&harness), ["Calls off", "Calls on"]);
 }

@@ -195,6 +195,9 @@ fn a_phone_connected_unheard_between_pages_is_not_paged() {
     // The first page fails; the next is due 1 s later.
     harness.wait_for_app_log("br-connection-page-timeout", RECONNECT_DEADLINE);
     let paged = connects(&recorded(&harness));
+    // Had the next page begun, it would end as connected already, and this
+    // would test the other path.
+    assert_eq!(paged, 1, "the second page began before the Phone connected");
 
     phone.connect();
     wait_connected(&harness, DEADLINE);

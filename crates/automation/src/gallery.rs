@@ -67,6 +67,9 @@ const PHONE_NAME: &str = "My Pixel";
 
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
+/// A caller with a long number, in the London range Ofcom keeps for drama
+/// (020 7946 0xxx): "+44 20 7946 0123", 16 characters.
+const LONG_NUMBER: &str = "+442079460123";
 /// The caller of a Waiting Call.
 const SECOND_NUMBER: &str = "+447700900456";
 /// A third caller, while the first Call is on hold and the second live.
@@ -666,7 +669,13 @@ fn connect(harness: &Harness) {
 
 /// Rings the Phone, waits for the Banner and returns the Call's id.
 fn ring(harness: &Harness) -> u32 {
-    let _path = harness.simulated_phone().ring(NUMBER);
+    ring_from(harness, NUMBER)
+}
+
+/// Rings the Phone from `number`, waits for the Banner and returns the
+/// Call's id.
+fn ring_from(harness: &Harness, number: &str) -> u32 {
+    let _path = harness.simulated_phone().ring(number);
     let state = harness.wait_for_app("the Banner shows", DEADLINE, |state| {
         state.surface("banner").is_some()
     });
@@ -675,7 +684,13 @@ fn ring(harness: &Harness) -> u32 {
 
 /// Rings the Phone, answers here and waits until the Call is live.
 fn on_a_call(harness: &Harness) {
-    let call = ring(harness);
+    on_a_call_from(harness, NUMBER);
+}
+
+/// Rings the Phone from `number`, answers here and waits until the Call is
+/// live.
+fn on_a_call_from(harness: &Harness, number: &str) {
+    let call = ring_from(harness, number);
     harness.answer(call);
     harness.wait_for_app("the Call is live", DEADLINE, |state| {
         state

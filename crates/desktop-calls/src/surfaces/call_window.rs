@@ -58,6 +58,8 @@ pub(super) struct CallWindow {
     timer: gtk::Label,
     /// The number's label and the number, or "Not in Contacts".
     meta: gtk::Label,
+    /// The line under who: the meta and the "Calls off after" tag.
+    detail_line: gtk::Box,
     state: StateRow,
     notice: Notice,
     /// Where keypad tones are typed or pasted, and which shows those sent;
@@ -171,8 +173,8 @@ impl CallWindow {
             intents,
             report.clone(),
         );
-        let (top, caller, calls_off, timer) = top_line();
-        let meta = detail_label();
+        let (top, caller, timer) = top_line();
+        let (detail_line, meta, calls_off) = detail_line();
         let mut shortcuts = BTreeMap::new();
         let (tiles, mute, keypad_shown, handoff) = tiles(&mut shortcuts);
 
@@ -199,7 +201,7 @@ impl CallWindow {
 
         let who = gtk::Box::new(gtk::Orientation::Vertical, 2);
         who.append(&top);
-        who.append(&meta);
+        who.append(&detail_line);
         let content = gtk::Box::new(gtk::Orientation::Vertical, space::M);
         content.append(&held.row);
         content.append(&who);
@@ -231,6 +233,7 @@ impl CallWindow {
             calls_off,
             timer,
             meta,
+            detail_line,
             state,
             notice,
             tones,
@@ -666,9 +669,10 @@ fn tiles(
     (tiles, mute, keypad_shown, handoff)
 }
 
-/// The top line: who, the "Calls off after" tag while a turn-off waits, and
-/// the timer at the right. Returns the line, who, the tag and the timer.
-fn top_line() -> (gtk::Box, gtk::Label, gtk::Label, gtk::Label) {
+/// The top line: who, and the timer at the right. Returns the line, who and
+/// the timer. Who has the line to itself, so no tag ever cuts a number
+/// short.
+fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
     let caller = gtk::Label::new(None);
     caller.add_css_class(class::WHO);
     caller.set_xalign(0.0);
@@ -679,13 +683,26 @@ fn top_line() -> (gtk::Box, gtk::Label, gtk::Label, gtk::Label) {
     timer.add_css_class(class::TIMER);
     timer.set_xalign(1.0);
     timer.set_valign(gtk::Align::BaselineFill);
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+    line.append(&caller);
+    line.append(&timer);
+    (line, caller, timer)
+}
+
+/// The line under who: the meta, and at the right, under the timer, the
+/// "Calls off after" tag while a turn-off waits. Returns the line, the meta
+/// and the tag; the line shows only while one of them does.
+fn detail_line() -> (gtk::Box, gtk::Label, gtk::Label) {
+    let meta = detail_label();
+    meta.set_hexpand(true);
+    meta.set_valign(gtk::Align::BaselineFill);
     let calls_off = calls_off_tag();
     calls_off.set_valign(gtk::Align::BaselineFill);
     let line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
-    line.append(&caller);
+    line.append(&meta);
     line.append(&calls_off);
-    line.append(&timer);
-    (line, caller, calls_off, timer)
+    line.set_visible(false);
+    (line, meta, calls_off)
 }
 
 /// The tone entry, and the keypad's buttons, hidden until the keypad opens.
@@ -723,6 +740,20 @@ fn report_mute(mute: Mute, mute_text: &str, content: &mut BTreeMap<String, Strin
             );
         }
         Mute::Off => {}
+    }
+}
+
+/// Adds, under `key`, whether `label` showed its text cut short with "…"
+/// when last laid out: "yes" or "no", once it has been laid out at all. The
+/// timer redraws the surface every second, so the next report has the
+/// layout of this one.
+fn report_cut_short(label: &gtk::Label, key: &str, content: &mut BTreeMap<String, String>) {
+    if label.width() > 0 {
+        let cut_short = label.layout().is_ellipsized();
+        content.insert(
+            key.to_owned(),
+            if cut_short { "yes" } else { "no" }.to_owned(),
+        );
     }
 }
 

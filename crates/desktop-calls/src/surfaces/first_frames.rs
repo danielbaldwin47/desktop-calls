@@ -44,7 +44,7 @@ type Kind = (&'static str, fn(&gtk::Snapshot, &gtk::Window));
 /// Each kind of thing the surfaces draw, one compiled program apiece. The
 /// colour is translucent and the clips off the pixel grid, because GTK
 /// draws an opaque rectangle or a clip on whole pixels without a program.
-const KINDS: [Kind; 7] = [
+const KINDS: [Kind; 10] = [
     // `gskgpucolor`: backgrounds.
     ("colour", |snapshot, _| {
         snapshot.append_color(&grey(), &square());
@@ -75,6 +75,20 @@ const KINDS: [Kind; 7] = [
         snapshot.append_layout(&window.create_pango_layout(Some(TEXT)), &grey());
         snapshot.pop();
     }),
+    // A Cairo drawing, uploaded and drawn as a texture: the icons, such as
+    // the Dialer's search icon (ticket #227). Each clip is a variant of its
+    // own: without these three the Dialer's first frame took 26 ms longer.
+    ("cairo", |snapshot, _| stroke(snapshot, &square())),
+    ("cairo-in-clip", |snapshot, _| {
+        snapshot.push_clip(&Rect::new(0.5, 0.5, SIZE / 2.0, SIZE / 2.0));
+        stroke(snapshot, &square());
+        snapshot.pop();
+    }),
+    ("cairo-in-rounded-clip", |snapshot, _| {
+        snapshot.push_rounded_clip(&rounded());
+        stroke(snapshot, &Rect::new(4.0, 4.0, SIZE, SIZE));
+        snapshot.pop();
+    }),
     // `gskgpuconvert`: a layer drawn offscreen, then blended in.
     ("translucent-layer", |snapshot, _| {
         snapshot.push_opacity(0.5);
@@ -83,6 +97,15 @@ const KINDS: [Kind; 7] = [
         snapshot.pop();
     }),
 ];
+
+/// A circle stroked with Cairo over `bounds`, as an icon is drawn.
+fn stroke(snapshot: &gtk::Snapshot, bounds: &Rect) {
+    let cairo = snapshot.append_cairo(bounds);
+    cairo.set_source_rgba(0.5, 0.5, 0.5, 0.5);
+    cairo.arc(16.0, 16.0, 8.0, 0.0, std::f64::consts::TAU);
+    // A failed stroke draws nothing; there is nothing to warm up instead.
+    let _ = cairo.stroke();
+}
 
 fn grey() -> RGBA {
     RGBA::new(0.5, 0.5, 0.5, 0.5)

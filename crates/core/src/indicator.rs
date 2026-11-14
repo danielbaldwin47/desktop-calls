@@ -80,6 +80,41 @@ pub enum IndicatorStatus {
     },
 }
 
+/// Where the Phone is, apart from any Call: what the Indicator says with no
+/// Call, and the Dialer's footer at all times. Worked out once, here, so the
+/// two can't disagree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PhoneStatus {
+    NoPhone,
+    /// Calls are off until this local time, or until the user turns them
+    /// on; with `quiet_hours`, for Quiet Hours, until they end.
+    CallsOff {
+        until: Option<TimeOfDay>,
+        quiet_hours: bool,
+    },
+    /// Paired, and not yet connected since the Desktop started, or kept
+    /// from connecting until it is paired again.
+    NotConnected(Phone),
+    Connected(Phone),
+    OutOfRange(Phone),
+    /// In range, and hands-free didn't come back after a Handoff to the
+    /// Phone: the Desktop is connecting it again.
+    ConnectionLost(Phone),
+}
+
+impl From<PhoneStatus> for IndicatorStatus {
+    fn from(status: PhoneStatus) -> Self {
+        match status {
+            PhoneStatus::NoPhone => Self::NoPhone,
+            PhoneStatus::CallsOff { until, quiet_hours } => Self::CallsOff { until, quiet_hours },
+            PhoneStatus::NotConnected(phone) => Self::NotConnected(phone),
+            PhoneStatus::Connected(phone) => Self::Connected(phone),
+            PhoneStatus::OutOfRange(phone) => Self::OutOfRange(phone),
+            PhoneStatus::ConnectionLost(phone) => Self::ConnectionLost(phone),
+        }
+    }
+}
+
 /// One entry in the Indicator's menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndicatorEntry {
@@ -224,11 +259,28 @@ impl State {
         }
     }
 
-    /// What the Indicator's status says while calls are off.
-    fn calls_off_status(&self) -> IndicatorStatus {
-        IndicatorStatus::CallsOff {
-            until: self.calls_off_until().map(|until| until.shown),
-            quiet_hours: self.calls_off_for_quiet_hours(),
+    /// Where the Phone is, apart from any Call.
+    #[must_use]
+    pub fn phone_status(&self) -> PhoneStatus {
+        if self.calls_off() {
+            return PhoneStatus::CallsOff {
+                until: self.calls_off_until().map(|until| until.shown),
+                quiet_hours: self.calls_off_for_quiet_hours(),
+            };
+        }
+        let Some(phone) = self.phone().cloned() else {
+            return PhoneStatus::NoPhone;
+        };
+        match self.connection_state() {
+            ConnectionState::Connected => PhoneStatus::Connected(phone),
+            ConnectionState::Disconnected if self.hands_free_lost() => {
+                PhoneStatus::ConnectionLost(phone)
+            }
+            ConnectionState::Disconnected => PhoneStatus::OutOfRange(phone),
+            ConnectionState::PairingLost | ConnectionState::Connecting => {
+                PhoneStatus::NotConnected(phone)
+            }
+            ConnectionState::NotSetUp => PhoneStatus::NoPhone,
         }
     }
 
@@ -248,8 +300,7 @@ impl State {
                 CallWindowPhase::Ended | CallWindowPhase::NotPlaced
             )
         });
-        let phone = self.phone().cloned();
-        let has_phone = phone.is_some();
+        let has_phone = self.phone().is_some();
         let (mut look, status) = if let Some(banner) = &surfaces.banner {
             (
                 IndicatorLook::Ringing,
@@ -268,37 +319,22 @@ impl State {
                     IndicatorStatus::InCall { caller, contact }
                 },
             )
-        } else if self.calls_off() {
-            (IndicatorLook::Off, self.calls_off_status())
         } else {
-            match (self.connection_state(), phone) {
-                (ConnectionState::Connected, Some(phone)) => (
-                    if problems.is_empty() {
-                        IndicatorLook::Connected
-                    } else {
-                        IndicatorLook::Problem
-                    },
-                    IndicatorStatus::Connected(phone),
-                ),
-                (ConnectionState::Disconnected, Some(phone)) if self.hands_free_lost() => (
-                    IndicatorLook::Disconnected,
-                    IndicatorStatus::ConnectionLost(phone),
-                ),
-                (ConnectionState::Disconnected, Some(phone)) => (
-                    IndicatorLook::Disconnected,
-                    IndicatorStatus::OutOfRange(phone),
-                ),
+            let status = self.phone_status();
+            let look = match &status {
+                PhoneStatus::CallsOff { .. } => IndicatorLook::Off,
+                PhoneStatus::Connected(_) if problems.is_empty() => IndicatorLook::Connected,
+                PhoneStatus::Connected(_) => IndicatorLook::Problem,
                 // Not out of range: it needs pairing again, which the
                 // Problem explains.
-                (ConnectionState::PairingLost, Some(phone)) => {
-                    (IndicatorLook::Problem, IndicatorStatus::NotConnected(phone))
+                PhoneStatus::NotConnected(_)
+                    if matches!(self.connection_state(), ConnectionState::PairingLost) =>
+                {
+                    IndicatorLook::Problem
                 }
-                (ConnectionState::Connecting, Some(phone)) => (
-                    IndicatorLook::Disconnected,
-                    IndicatorStatus::NotConnected(phone),
-                ),
-                _ => (IndicatorLook::Disconnected, IndicatorStatus::NoPhone),
-            }
+                _ => IndicatorLook::Disconnected,
+            };
+            (look, status.into())
         };
 
         // The Phone can't connect for Calls until the Desktop's Problem is

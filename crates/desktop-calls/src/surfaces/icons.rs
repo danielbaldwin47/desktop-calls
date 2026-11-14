@@ -1,4 +1,4 @@
-//! The Call Window's icons, drawn in the colour of the text around them, so
+//! The surfaces' icons, drawn in the colour of the text around them, so
 //! they follow the theme and every state's colour (muted, the accent tile,
 //! Hang up's label) without an icon theme. Each is drawn on a 16-unit grid,
 //! with 1.5-unit round strokes.
@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
-/// The icons the Call Window draws.
+/// The icons the Call Window and the Dialer draw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Icon {
     Microphone,
@@ -26,6 +26,8 @@ pub(super) enum Icon {
     Warning,
     /// What a click on the Call Pill's body does: it expands upwards.
     ChevronUp,
+    /// The Dialer's search row: a magnifying glass.
+    Search,
 }
 
 /// An icon, 16 px square, that can be changed in place.
@@ -158,6 +160,11 @@ fn draw(cr: &cairo::Context, icon: Icon) -> Result<(), cairo::Error> {
             cr.move_to(4.0, 10.0);
             cr.line_to(8.0, 6.0);
             cr.line_to(12.0, 10.0);
+        }
+        Icon::Search => {
+            cr.new_sub_path();
+            cr.arc(7.0, 7.0, 4.2, 0.0, 2.0 * PI);
+            line(cr, (10.2, 10.2), (14.0, 14.0));
         }
         Icon::Warning => {
             cr.move_to(8.0, 2.2);

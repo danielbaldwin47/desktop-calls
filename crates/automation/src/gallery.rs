@@ -331,7 +331,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "dialer-call-history",
-        title: "The Dialer, before typing: the Call History, newest first, Missed Calls marked",
+        title: "The Dialer, before typing: the Call History, newest first, the selected Missed Call in red at 4.5:1, and the footer of keys with the Phone connected",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -342,7 +342,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "dialer-results",
-        title: "The Dialer, searching for smith, the second match selected",
+        title: "The Dialer, searching for smith, the second match selected as Omarchy's cursor row",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -357,7 +357,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "dialer-not-connected",
-        title: "The Dialer, after Enter with the Phone out of range",
+        title: "The Dialer, after Enter with the Phone out of range: the notice as a strip under the search row, and the footer says Out of range",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {

@@ -75,6 +75,7 @@ mod banner;
 mod call_window;
 mod dialer;
 mod first_frames;
+mod icons;
 mod setup_problems;
 mod setup_window;
 
@@ -118,8 +119,10 @@ const KEYPAD: [[&str; 3]; 4] = [
 /// [`Theme`] and its classes ([`class`]).
 const CSS: &str = "
 .desktop-calls-surface { padding: 16px; }
-.desktop-calls-surface .dialer-entry { font-size: 1.2em; }
-.desktop-calls-surface .dialer-row { padding: 6px 8px; }
+.desktop-calls-surface.dialer { padding: 2px; }
+.desktop-calls-surface.dialer list { background: none; }
+.desktop-calls-surface .dialer-row { padding: 8px 14px; }
+.desktop-calls-surface.dialer .footer-line { padding-left: 14px; padding-right: 14px; padding-bottom: 12px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
 .desktop-calls-surface.call-pill { padding: 6px 6px 6px 12px; }
 .desktop-calls-surface.call-pill.quiet { padding-right: 12px; }

@@ -334,7 +334,7 @@ fn status(view: &CallWindowView) -> String {
 /// chevron. Returns it and the state icon.
 fn lead() -> (gtk::Stack, IconView) {
     let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    dot.add_css_class("live-dot");
+    dot.add_css_class(class::LIVE_DOT);
     dot.set_halign(gtk::Align::Center);
     dot.set_valign(gtk::Align::Center);
     let state_icon = IconView::new(Icon::Phone);

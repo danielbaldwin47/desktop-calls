@@ -65,10 +65,12 @@ const SECOND_NUMBER: &str = "+447700900456";
 const THIRD_NUMBER: &str = "+447700900789";
 
 /// The stock Answer button's green, the stock Decline and Hang up buttons'
-/// red, and the orange that marks the microphone muted under every look.
+/// red, and stock Adwaita's warning colour, light and dark, which marks the
+/// microphone muted without Omarchy.
 const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
-const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
+const STOCK_WARNING_LIGHT: [u8; 3] = [0xe5, 0xa5, 0x0a];
+const STOCK_WARNING_DARK: [u8; 3] = [0xcd, 0x93, 0x09];
 
 /// How the Desktop looks in one column of the gallery.
 #[derive(Clone, Copy)]
@@ -107,6 +109,16 @@ impl Look {
         match self {
             Self::Stock(_) => RED,
             Self::Omarchy(theme) => theme.colour("red"),
+        }
+    }
+
+    /// The colour that marks the microphone muted: the theme's orange, or
+    /// stock Adwaita's warning colour.
+    fn warning(self) -> [u8; 3] {
+        match self {
+            Self::Stock(Theme::Light) => STOCK_WARNING_LIGHT,
+            Self::Stock(Theme::Dark) => STOCK_WARNING_DARK,
+            Self::Omarchy(theme) => theme.colour("orange"),
         }
     }
 
@@ -235,7 +247,7 @@ const STATES: &[State] = &[
         // it, about 220.
         shown: |screenshot, look| {
             shows(screenshot, look.red())
-                && shows(screenshot, ORANGE)
+                && shows(screenshot, look.warning())
                 && app_region(screenshot).is_some_and(|window| window.bottom - window.top > 300.0)
         },
     },
@@ -265,7 +277,7 @@ const STATES: &[State] = &[
         shown: |screenshot, look| {
             shows(screenshot, look.red())
                 && !shows(screenshot, look.green())
-                && !shows(screenshot, ORANGE)
+                && !shows(screenshot, look.warning())
         },
     },
     State {

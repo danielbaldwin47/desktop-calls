@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use test_harness::{AppState, Harness, LAYOUT_SIZE, Screenshot};
 
-use super::{DEADLINE, ORANGE, State, app_region, as_is, connect, on_a_call, shows};
+use super::{DEADLINE, State, app_region, as_is, connect, on_a_call, shows};
 
 /// How many temporary captures [`hold_call_window_expanded`] has taken.
 static HOVER_CAPTURES: AtomicUsize = AtomicUsize::new(0);
@@ -48,7 +48,9 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             });
         },
         shown: |screenshot, look| {
-            shows(screenshot, look.red()) && shows(screenshot, ORANGE) && in_corner(screenshot)
+            shows(screenshot, look.red())
+                && shows(screenshot, look.warning())
+                && in_corner(screenshot)
         },
     },
 ];

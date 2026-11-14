@@ -1,6 +1,6 @@
 //! The Incoming Call Banner.
 
-use super::{SharedReport, Surface, Who, detail_label, has_command_modifier};
+use super::{SharedReport, Surface, Who, class, detail_label, has_command_modifier};
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{BannerView, CallId, Input, RingingCaller, WaitingOptions};
 use futures_channel::mpsc::UnboundedSender;
@@ -45,7 +45,7 @@ impl Banner {
         heading.add_css_class("dim-label");
         heading.set_xalign(0.0);
         let caller = gtk::Label::new(None);
-        caller.add_css_class("caller");
+        caller.add_css_class(class::WHO);
         caller.set_xalign(0.0);
         let detail = detail_label();
         let decline = surface.button(Label::Decline, "decline", intents, Input::Decline);
@@ -130,10 +130,11 @@ impl Banner {
             RingingCaller::Identifying => Who {
                 caller: messages::label(Label::IdentifyingCaller).to_owned(),
                 detail: None,
+                bare_number: false,
             },
             RingingCaller::Known { caller, contact } => Who::of(caller, contact.as_ref()),
         };
-        self.caller.set_text(&who.caller);
+        who.show(&self.caller);
         who.show_detail(&self.detail);
         // While focused, the heading says which keys do what.
         let heading = messages::label(match (view.waiting, view.focused) {

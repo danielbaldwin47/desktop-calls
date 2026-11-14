@@ -2,7 +2,7 @@
 
 use super::call_window::notice_label;
 use super::{
-    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame,
+    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame, class,
     has_command_modifier, now, utc_offset_seconds,
 };
 use crate::logging::EventKind;
@@ -229,7 +229,7 @@ impl Dialer {
                 // Missed Calls stand out in the theme's red.
                 detail.add_css_class(
                     if row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed) {
-                        "error"
+                        class::MISSED
                     } else {
                         "dim-label"
                     },

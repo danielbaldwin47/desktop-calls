@@ -30,7 +30,7 @@ use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
 
-use super::{SharedReport, after_next_frame, reported, surface_mapped, surface_shown};
+use super::{SharedReport, after_next_frame, class, reported, surface_mapped, surface_shown};
 use crate::logging::EventKind;
 
 const NAME: &str = "setup-window";
@@ -43,9 +43,9 @@ const CSS: &str = "
     font-feature-settings: \"tnum\";
 }
 .desktop-calls-setup .setup-phone { padding: 10px 12px; font-weight: bold; }
-.desktop-calls-setup .setup-keys { font-size: 0.85em; opacity: 0.75; }
+.desktop-calls-setup .setup-keys { font-size: 0.85em; color: var(--dc-secondary); }
 .desktop-calls-setup .setup-line { font-family: monospace; padding: 8px; }
-.desktop-calls-setup .setup-tip { opacity: 0.75; }
+.desktop-calls-setup .setup-tip { color: var(--dc-secondary); }
 ";
 
 /// How often the window checks whether the countdown, or the time left
@@ -100,7 +100,7 @@ impl SetupWindow {
         window.add_css_class("desktop-calls-setup");
 
         let heading = gtk::Label::new(None);
-        heading.add_css_class("title-2");
+        heading.add_css_class(class::HEADING);
         heading.set_xalign(0.0);
         heading.set_wrap(true);
         let summary = gtk::Label::new(None);

@@ -73,6 +73,11 @@ fn synced() -> Input {
     }
 }
 
+/// Paired, and not yet connected.
+fn paired() -> State {
+    run(State::default(), [Input::PhonePaired(my_pixel())]).0
+}
+
 fn connected() -> State {
     run(
         State::default(),
@@ -382,6 +387,22 @@ fn the_footer_shows_the_phone_as_the_indicator_does() {
             PhoneStatus::NoPhone,
             IndicatorStatus::NoPhone,
         ),
+        (
+            paired(),
+            PhoneStatus::NotConnected(my_pixel()),
+            IndicatorStatus::NotConnected(my_pixel()),
+        ),
+        (
+            run(connected(), [Input::TurnCallsOff { until: None }]).0,
+            PhoneStatus::CallsOff {
+                until: None,
+                quiet_hours: false,
+            },
+            IndicatorStatus::CallsOff {
+                until: None,
+                quiet_hours: false,
+            },
+        ),
     ] {
         let state = open(state, "");
         let surfaces = state.surfaces();
@@ -407,6 +428,23 @@ fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
         "Out of range"
     );
     assert_eq!(dialer_phone(&PhoneStatus::NoPhone), "Not set up");
+    assert_eq!(
+        dialer_phone(&PhoneStatus::NotConnected(my_pixel())),
+        "Not connected"
+    );
+    assert_eq!(
+        dialer_phone(&PhoneStatus::ConnectionLost(my_pixel())),
+        "Reconnecting…"
+    );
+    // Calls off in the Indicator's words, with when they come back on.
+    let off = PhoneStatus::CallsOff {
+        until: None,
+        quiet_hours: false,
+    };
+    assert_eq!(
+        dialer_phone(&off),
+        desktop_calls_core::messages::indicator_status(&off.into())
+    );
     assert_eq!(
         dialer_key(desktop_calls_core::DialerKey::Call),
         (&["Enter"][..], "Call")

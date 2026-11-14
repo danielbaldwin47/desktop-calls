@@ -149,10 +149,19 @@ fn band(screenshot: &Screenshot, fill: [u8; 3]) -> Option<(Region, Region)> {
     ))
 }
 
-/// The selected row's detail line: the lower part of its fill.
+/// Where a row's or the strip's content starts, past the accent bar: its
+/// 14 px padding, at the screenshots' scale of 1.6, less a little.
+const CONTENT_INSET: f64 = 20.0;
+/// The notice's icon, 16 across at 1.6, and the gap after it.
+const NOTICE_ICON: f64 = 26.0;
+const NOTICE_GAP: f64 = 16.0;
+
+/// The selected row's detail line: the lower part of its fill, past the
+/// accent bar, which would otherwise pass for its text.
 fn detail_line(row: Region) -> Region {
     Region {
         top: row.top + (row.bottom - row.top) * 0.55,
+        left: row.left + CONTENT_INSET,
         ..row
     }
 }
@@ -260,11 +269,28 @@ fn the_selected_row_reads_and_a_notice_is_a_strip(theme: OmarchyTheme) {
         strip.bottom <= row.top,
         "the strip {strip:?} isn't above the rows {row:?}; see {see}"
     );
+    // The warning icon, a graphic, at 3:1 (WCAG's non-text contrast); then
+    // the words, right of it, at 4.5:1.
+    let icon = Region {
+        left: strip.left + CONTENT_INSET,
+        right: strip.left + CONTENT_INSET + NOTICE_ICON,
+        ..strip
+    };
     assert!(
         screenshot
-            .region_within(strip, |pixel| contrast(pixel, tint) >= READABLE - ANTIALIASING)
+            .region_within(icon, |pixel| contrast(pixel, tint) >= 3.0)
             .is_some(),
-        "the strip has no text at {READABLE}:1 on {tint:02x?}; see {see}"
+        "the strip has no icon at its left; see {see}"
+    );
+    let words = Region {
+        left: icon.right + NOTICE_GAP,
+        ..strip
+    };
+    assert!(
+        screenshot
+            .region_within(words, |pixel| contrast(pixel, tint) >= READABLE - ANTIALIASING)
+            .is_some(),
+        "the strip has no words at {READABLE}:1 on {tint:02x?}; see {see}"
     );
 }
 

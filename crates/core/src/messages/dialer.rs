@@ -17,13 +17,16 @@ pub fn dialer_key(key: DialerKey) -> (&'static [&'static str], &'static str) {
 
 /// Where the Phone is, at the right of the Dialer's footer: its name while
 /// it is connected, which the footer marks with a live dot, otherwise its
-/// state.
+/// state, and while calls are off, the Indicator's words for it.
 #[must_use]
 pub fn dialer_phone(status: &PhoneStatus) -> String {
     match status {
         PhoneStatus::Connected(phone) => phone.name.clone(),
         PhoneStatus::NoPhone => "Not set up".to_owned(),
-        PhoneStatus::CallsOff { .. } => "Calls off".to_owned(),
+        // The Indicator's words, with when calls come back on.
+        PhoneStatus::CallsOff { until, quiet_hours } => {
+            super::calls_off::calls_off(*until, *quiet_hours)
+        }
         PhoneStatus::NotConnected(_) => "Not connected".to_owned(),
         PhoneStatus::OutOfRange(_) => "Out of range".to_owned(),
         PhoneStatus::ConnectionLost(_) => "Reconnecting…".to_owned(),

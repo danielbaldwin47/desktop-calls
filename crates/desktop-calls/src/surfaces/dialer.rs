@@ -320,7 +320,7 @@ impl Footer {
         live_dot.set_valign(gtk::Align::Center);
         let phone = gtk::Label::new(None);
         phone.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        phone.set_max_width_chars(28);
+        phone.set_max_width_chars(36);
         let where_phone_is = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         where_phone_is.append(&live_dot);
         where_phone_is.append(&phone);

@@ -4,7 +4,7 @@
 Places a Call to the Test Number, brings its audio to the Desktop, then
 tries a Handoff back to the Phone while timestamping every D-Bus signal
 from org.pipewire.Telephony and the Phone's org.bluez objects, plus
-`pactl subscribe`. Findings: docs/research/2026-11-04-handoff-to-phone-prototype.md.
+`pactl subscribe`. Findings: the 2026-11-04 research note on the Handoff to the Phone prototype.
 
 Usage:
   /usr/bin/python3 tools/real-phone/handoff_probe.py trial-a [--snapshot OUT.json] [--round-trip]

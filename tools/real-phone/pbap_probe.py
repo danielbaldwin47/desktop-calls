@@ -24,7 +24,7 @@ Have the Phone unlocked and in hand: if it has not yet been told whether
 this Desktop may read Contacts, it asks ("Allow access to contacts and call
 history?"). On 2026-11-04 CreateSession failed twice after about 10 s with
 `org.bluez.obex.Error.Failed: Timed out waiting for response` while nobody
-was at the Phone (docs/research/2026-11-04-contacts-sync.md).
+was at the Phone (the 2026-11-04 research note on Contacts sync).
 
 Usage (through just, which runs it under /usr/bin/python3):
   just pbap-probe [--out OUT.json]

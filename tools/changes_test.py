@@ -44,27 +44,32 @@ class TheRule(unittest.TestCase):
         self.assertTrue(code)
 
 
-class TheToolsTestsDoNotNameTheDocs(unittest.TestCase):
-    """A tools test that names a real docs page as a fixture makes every
-    change to that page count as code: a wiki page named in
-    tools/merge_test.py did, so every wiki PR ran the full suite. Tests only:
-    a probe under tools/real-phone that cites the research note it came from
-    is the rule working as written ("comments count too")."""
+class TheToolsDoNotNameTheDocs(unittest.TestCase):
+    """A tool or test that names a real docs page makes every change to that
+    page count as code: a wiki page named in tools/merge_test.py did, and
+    one named in a probe's docstring did, so wiki PRs ran the full suite.
+    Name a path that does not exist, or describe the page in words."""
 
-    def test_no_tools_test_names_a_docs_path_the_repository_holds(self):
+    def test_no_file_under_tools_names_a_docs_path_the_repository_holds(self):
         references = [re.compile(pattern) for pattern in changes.DOCS_REFERENCE]
         found = []
-        tests = sorted([*TOOLS.glob("*_test.py"), *TOOLS.glob("test_*.py")])
-        for path in tests:
+        for path in sorted(TOOLS.rglob("*")):
             relative = path.relative_to(REPOSITORY).as_posix()
-            text = path.read_text()
+            if (
+                not path.is_file()
+                or path.suffix == changes.DOCS_SUFFIX
+                or f":!{relative}" in changes.DESCRIBING_THE_RULE
+            ):
+                continue
+            try:
+                text = path.read_text()
+            except UnicodeDecodeError:
+                continue
             for reference in references:
                 for name in reference.findall(text):
                     if (REPOSITORY / name.lstrip("./")).exists():
                         found.append(f"{relative} names {name}")
-        self.assertEqual(
-            found, [], "Name a path that does not exist (docs/fixture/page.md), so no change to a real page counts as code"
-        )
+        self.assertEqual(found, [])
 
 
 if __name__ == "__main__":

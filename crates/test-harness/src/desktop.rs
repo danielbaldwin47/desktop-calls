@@ -366,6 +366,44 @@ impl Tray<'_> {
             .unwrap_or_else(|error| panic!("read the tray item's menu: {error}"))
     }
 
+    /// Waits until the one registered item's menu satisfies `condition`,
+    /// and returns it. The app publishes a state on its control interface
+    /// before the Indicator shows it, so a menu read just after a wait on
+    /// the control interface can still be the one before.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first. The panic names `description` and the
+    /// menu.
+    pub fn wait_for_menu(
+        &self,
+        description: &str,
+        deadline: Duration,
+        condition: impl Fn(&[MenuEntry]) -> bool,
+    ) -> Vec<MenuEntry> {
+        self.stand_ins
+            .wait_for_tray_menu(deadline, condition)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "\"{description}\" did not happen within {deadline:?}: {error}{}",
+                    self.timeline.render()
+                )
+            })
+    }
+
+    /// Waits until the menu has an entry labelled `label`, here or in a
+    /// submenu, then clicks it.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first, the entry is disabled, or the click fails.
+    pub fn click_when_shown(&self, label: &str, deadline: Duration) {
+        self.wait_for_menu(&format!("the menu has {label:?}"), deadline, |menu| {
+            MenuEntry::find(menu, label).is_some()
+        });
+        self.click(label);
+    }
+
     /// Clicks the entry labelled `label` in the one registered item's menu,
     /// here or in a submenu.
     ///

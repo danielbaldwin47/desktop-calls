@@ -125,69 +125,51 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     for (index, icon) in icons.iter().enumerate() {
         assert!(!icons[..index].contains(icon), "each state looks different");
     }
-    indicator_menus_are_listed(&output, &index);
+    for state in ["off-until-morning", "off-quiet-hours", "calls-off-pending"] {
+        for look in ["omarchy-light", "omarchy-dark"] {
+            let file = format!("indicator-{state}-{look}.png");
+            assert!(index.contains(&file), "the index shows {file}: {index}");
+        }
+    }
+    indicator_menus_are_drawn(&output, &index);
 }
 
-/// The menu of the Indicator in `state`, as the gallery at `output` lists it.
-fn menu(output: &Path, state: &str) -> String {
-    let path = output.join(format!("indicator-{state}-menu.txt"));
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("the {state} menu is listed at {}: {error}", path.display()))
-}
-
-/// The Indicator's menus in the gallery at `output`, whose page is `index`.
-fn indicator_menus_are_listed(output: &Path, index: &str) {
-    // Each state's menu, listed beneath its icon: calls off offers Turn
-    // calls on, and calls on offers Turn calls off, until I turn them on.
-    let off_menu = menu(output, "off");
-    assert_eq!(
-        off_menu,
-        "Calls off\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
-    );
-    assert!(
-        index.contains("<pre>Calls off\nOpen Dialer\nTurn calls on\n"),
-        "{index}"
-    );
-    let connected_menu = menu(output, "connected");
-    assert!(
-        connected_menu.contains("Turn calls off\n    Until I turn them on\n    For 1 hour (until "),
-        "{connected_menu}"
-    );
-    assert!(
-        connected_menu.contains(")\n    Until tomorrow morning (07:00)\n"),
-        "{connected_menu}"
-    );
-    // Calls off until a time: the menu's first line says until when.
-    let timed_menu = menu(output, "off-until-morning");
-    assert_eq!(
-        timed_menu,
-        "Calls off until 07:00\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
-    );
-    for look in ["omarchy-light", "omarchy-dark"] {
-        let file = format!("indicator-off-until-morning-{look}.png");
-        assert!(index.contains(&file), "the index shows {file}: {index}");
+/// The Indicator's menu in the gallery at `output`, whose page is `index`:
+/// a stand-in for Omarchy's, in four states, light and dark, captioned as
+/// one. Omarchy's menu is 248 logical pixels wide with its padding, and
+/// each state's menu is as tall as its entries: 8 of padding above and
+/// below, 30 for each row and 11 for each separator.
+fn indicator_menus_are_drawn(output: &Path, index: &str) {
+    for (state, rows, separators) in [
+        // Status, Open Dialer, Turn calls off, Quiet Hours…, then setup.
+        ("menu-calls-on", 5, 1),
+        // The header, its line, and the three choices.
+        ("menu-turn-off-choices", 4, 1),
+        // As calls on, with Turn calls on, then the Problem.
+        ("menu-off-problem", 6, 1),
+        // With Mute, Move audio and Hang up, and Keep calls on.
+        ("menu-calls-off-pending", 8, 1),
+    ] {
+        let height: u32 = 2 * (8 + 30 * rows + 11 * separators + 8);
+        for look in ["omarchy-light", "omarchy-dark"] {
+            let file = format!("indicator-{state}-{look}.png");
+            assert!(index.contains(&file), "the index shows {file}: {index}");
+            let png = std::fs::read(output.join(&file))
+                .unwrap_or_else(|error| panic!("{file} is drawn: {error}"));
+            assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "{file} is a PNG");
+            assert_eq!(
+                png[16..20],
+                496_u32.to_be_bytes(),
+                "{file} is 248 wide at 2x"
+            );
+            assert_eq!(png[20..24], height.to_be_bytes(), "{file} is {height} high");
+        }
     }
-    // Calls off for Quiet Hours: the menu says so, and until when.
-    let quiet_menu = menu(output, "off-quiet-hours");
     assert_eq!(
-        quiet_menu,
-        "Calls off until 23:59 (quiet hours)\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
+        index
+            .matches("Stand-in: drawn from the menu layout the app publishes")
+            .count(),
+        8,
+        "each menu's caption says it is a stand-in"
     );
-    for look in ["omarchy-light", "omarchy-dark"] {
-        let file = format!("indicator-off-quiet-hours-{look}.png");
-        assert!(index.contains(&file), "the index shows {file}: {index}");
-    }
-    // Turned off during a Call: the menu says calls turn off when it ends,
-    // and offers Keep calls on where Turn calls off was.
-    let pending_menu = menu(output, "calls-off-pending");
-    assert!(
-        pending_menu.starts_with(
-            "Calls turn off when this Call ends\nOpen Dialer\nKeep calls on\nQuiet Hours…\nConnect your phone…\n"
-        ),
-        "{pending_menu}"
-    );
-    for look in ["omarchy-light", "omarchy-dark"] {
-        let file = format!("indicator-calls-off-pending-{look}.png");
-        assert!(index.contains(&file), "the index shows {file}: {index}");
-    }
 }

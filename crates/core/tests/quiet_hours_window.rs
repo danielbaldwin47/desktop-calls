@@ -92,7 +92,7 @@ fn open(state: State) -> State {
         .indicator(&state.surfaces())
         .menu
         .into_iter()
-        .find(|entry| *entry == IndicatorEntry::QuietHours)
+        .find(|entry| matches!(entry, IndicatorEntry::QuietHours(_)))
         .expect("the menu has Quiet Hours…");
     run(state, [entry.intent().expect("it opens the window")]).0
 }
@@ -126,18 +126,18 @@ fn the_menu_has_one_quiet_hours_entry_whether_calls_are_on_or_off_or_no_phone_is
         let menu = state.indicator(&state.surfaces()).menu;
         let entries = menu
             .iter()
-            .filter(|entry| **entry == IndicatorEntry::QuietHours)
+            .filter(|entry| **entry == IndicatorEntry::QuietHours(None))
             .count();
         assert_eq!(entries, 1, "{menu:?}");
         assert!(
-            IndicatorEntry::QuietHours.choices().is_empty(),
+            IndicatorEntry::QuietHours(None).choices().is_empty(),
             "no submenu"
         );
     }
     let state = connected();
     let view = state.indicator(&state.surfaces());
     assert_eq!(
-        messages::indicator_entry(&IndicatorEntry::QuietHours, &view),
+        messages::indicator_entry(&IndicatorEntry::QuietHours(None), &view),
         "Quiet Hours…"
     );
 }

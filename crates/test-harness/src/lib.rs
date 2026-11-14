@@ -60,6 +60,7 @@ mod simulated_phone;
 mod stand_ins;
 mod timeline;
 mod tray_icon;
+mod tray_menu;
 pub mod vcards;
 
 pub use app::{
@@ -77,6 +78,7 @@ pub use stand_ins::{
     BAR_COLOUR, BAR_HEIGHT, MenuEntry, Notification, OmarchyTheme, Theme, TrayItem,
 };
 pub use tray_icon::draw_tray_icon;
+pub use tray_menu::{MenuColours, draw_tray_menu};
 
 use futures_channel::oneshot;
 use futures_util::StreamExt as _;

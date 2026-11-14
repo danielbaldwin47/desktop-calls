@@ -3,7 +3,7 @@
 //! its menu, with what each menu entry asks for.
 
 use crate::call::{AudioLocation, CallId, Caller};
-use crate::clock::{Deadline, TimeOfDay};
+use crate::clock::{Deadline, QuietHours, TimeOfDay};
 use crate::connection::{ConnectionState, Phone};
 use crate::machine::{CallWindowPhase, Input, Mute, RingingCaller, State, Surfaces};
 use crate::matching::ContactMatch;
@@ -20,7 +20,9 @@ pub struct IndicatorView {
     pub status: IndicatorStatus,
     /// Every Problem, for the tooltip and the menu.
     pub problems: Vec<ProblemKind>,
-    /// The menu's entries, in order.
+    /// The menu's entries, in one order in every state: the status line,
+    /// the main action, during a Call the Call's actions, calls on or off,
+    /// Quiet Hours, a separator, then setup and Problems.
     pub menu: Vec<IndicatorEntry>,
 }
 
@@ -161,8 +163,9 @@ pub enum IndicatorEntry {
     TurnCallsOn,
     /// Cancels the turn-off waiting for the last Call to end.
     KeepCallsOn,
-    /// Opens the Quiet Hours Window, or raises it. Always in the menu.
-    QuietHours,
+    /// Opens the Quiet Hours Window, or raises it. Always in the menu,
+    /// with the Quiet Hours set, if any, as a hint.
+    QuietHours(Option<QuietHours>),
 }
 
 impl IndicatorEntry {
@@ -197,7 +200,7 @@ impl IndicatorEntry {
             }
             Self::TurnCallsOn => Some(Input::TurnCallsOn),
             Self::KeepCallsOn => Some(Input::KeepCallsOn),
-            Self::QuietHours => Some(Input::OpenQuietHoursWindow),
+            Self::QuietHours(_) => Some(Input::OpenQuietHoursWindow),
             Self::Status
             | Self::Separator
             | Self::HangUpOnPhone
@@ -347,16 +350,10 @@ impl State {
         }
 
         let mut menu = vec![IndicatorEntry::Status, IndicatorEntry::OpenDialer];
-        menu.extend(self.calls_off_entry(has_phone));
-        menu.push(IndicatorEntry::QuietHours);
-        menu.push(IndicatorEntry::ConnectPhone);
         if call_window.is_some_and(|window| window.connection_lost) {
             // Nothing acts on the Call from here: only where to hang up.
-            menu.push(IndicatorEntry::Separator);
             menu.push(IndicatorEntry::HangUpOnPhone);
         } else if let Some(window) = call_window {
-            menu.push(IndicatorEntry::Separator);
-            menu.push(IndicatorEntry::HangUp(window.call));
             if let CallWindowPhase::Live { mute, .. } = window.phase {
                 menu.push(IndicatorEntry::Mute(mute));
             }
@@ -369,11 +366,13 @@ impl State {
                     moving: audio.moving.is_some(),
                 });
             }
+            menu.push(IndicatorEntry::HangUp(window.call));
         }
-        if !problems.is_empty() {
-            menu.push(IndicatorEntry::Separator);
-            menu.extend(problems.iter().copied().map(IndicatorEntry::Problem));
-        }
+        menu.extend(self.calls_off_entry(has_phone));
+        menu.push(IndicatorEntry::QuietHours(self.quiet_hours()));
+        menu.push(IndicatorEntry::Separator);
+        menu.push(IndicatorEntry::ConnectPhone);
+        menu.extend(problems.iter().copied().map(IndicatorEntry::Problem));
 
         IndicatorView {
             look,

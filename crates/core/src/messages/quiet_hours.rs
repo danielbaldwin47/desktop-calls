@@ -1,11 +1,19 @@
 //! What the Quiet Hours Window says: its heading, its two times, the
 //! sentence saying what was saved, a notice, and its keys.
 
-use crate::clock::TimeOfDay;
+use crate::clock::{QuietHours, TimeOfDay};
 use crate::machine::{QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView};
 
-/// The Indicator's menu entry that opens the window.
-pub(super) const MENU_ENTRY: &str = "Quiet Hours…";
+/// The Indicator's menu entry that opens the window, with the Quiet Hours
+/// set, if any, as a hint after it: "Quiet Hours…  22:00–07:00". Omarchy's
+/// tray draws one label per entry and nothing beside it, so the hint is in
+/// the label.
+pub(super) fn menu_entry(hours: Option<QuietHours>) -> String {
+    match hours {
+        Some(hours) => format!("Quiet Hours…  {}–{}", hours.start(), hours.end()),
+        None => "Quiet Hours…".to_owned(),
+    }
+}
 
 /// The Quiet Hours Window's text.
 #[derive(Clone, Debug, PartialEq, Eq)]

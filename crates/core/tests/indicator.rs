@@ -3,7 +3,8 @@
 
 use desktop_calls_core::{
     AudioLocation, CallId, CallState, Caller, IndicatorEntry, IndicatorLook, IndicatorView, Input,
-    Mute, Phone, PhoneCommand, State, SyncFailure, Timer, Timestamp, Transport, messages, step,
+    Mute, Phone, PhoneCommand, QuietHours, State, SyncFailure, Timer, Timestamp, Transport,
+    messages, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -186,32 +187,190 @@ fn during_a_call_the_menu_asks_for_what_the_call_window_buttons_do() {
                 query: String::new(),
                 select_call: None,
             }),
-            None,
-            Some(Input::OpenQuietHoursWindow),
-            Some(Input::OpenSetupWindow),
-            None,
-            Some(Input::HangUp(CALL)),
             Some(Input::SetMuted(true)),
             Some(Input::MoveAudio(AudioLocation::Phone)),
+            Some(Input::HangUp(CALL)),
+            None,
+            Some(Input::OpenQuietHoursWindow),
+            None,
+            Some(Input::OpenSetupWindow),
         ]
     );
-    let labels: Vec<String> = view
-        .menu
+}
+
+fn labels(state: &State) -> Vec<String> {
+    let view = indicator(state);
+    view.menu
         .iter()
         .map(|entry| messages::indicator_entry(entry, &view))
-        .collect();
-    assert_eq!(
-        labels,
+        .collect()
+}
+
+/// Calls off by hand, the Phone blocked and gone.
+fn off(state: State) -> State {
+    run(
+        state,
         [
-            "In a Call with +44 7700 900123",
+            Input::TurnCallsOff { until: None },
+            Input::PhoneBlocked {
+                address: ADDRESS.to_owned(),
+                blocked: true,
+            },
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+        ],
+    )
+}
+
+fn with_quiet_hours(state: State) -> State {
+    run(
+        state,
+        [Input::QuietHoursKept(
+            QuietHours::parse("22:00-07:00").unwrap_or_else(|| panic!("valid Quiet Hours")),
+        )],
+    )
+}
+
+/// Where an entry belongs in the menu's one order: the status line, the
+/// main action, the Call's actions, calls on or off, Quiet Hours, the
+/// separator, setup, then Problems.
+fn place(entry: &IndicatorEntry) -> u8 {
+    match entry {
+        IndicatorEntry::Status => 0,
+        IndicatorEntry::OpenDialer => 1,
+        IndicatorEntry::Mute(_) => 2,
+        IndicatorEntry::MoveAudio { .. } => 3,
+        IndicatorEntry::HangUp(_) | IndicatorEntry::HangUpOnPhone => 4,
+        IndicatorEntry::TurnCallsOff { .. }
+        | IndicatorEntry::TurnCallsOn
+        | IndicatorEntry::KeepCallsOn => 5,
+        IndicatorEntry::QuietHours(_) => 6,
+        IndicatorEntry::Separator => 7,
+        IndicatorEntry::ConnectPhone => 8,
+        IndicatorEntry::Problem(_) => 9,
+        IndicatorEntry::CallsOffUntilTurnedOn
+        | IndicatorEntry::CallsOffForAnHour(_)
+        | IndicatorEntry::CallsOffUntilMorning(_) => u8::MAX,
+    }
+}
+
+#[test]
+fn the_menu_keeps_one_order_in_every_state() {
+    let states = vec![
+        State::default(),
+        paired(),
+        connected(),
+        with_quiet_hours(connected()),
+        out_of_range(),
+        denied(),
+        off(connected()),
+        off(denied()),
+        ringing(connected()),
+        ringing(off(connected())),
+        live_on_desktop(),
+        run(live_on_desktop(), [Input::TurnCallsOff { until: None }]),
+        // Contact lost: the Phone gone and hands-free with it, and the
+        // Call with it, though it carries on on the Phone.
+        run(
+            live_on_desktop(),
+            [
+                Input::PhoneAbsent {
+                    address: ADDRESS.to_owned(),
+                },
+                Input::PhoneDisconnected {
+                    address: ADDRESS.to_owned(),
+                },
+                Input::CallEnded {
+                    call: CALL,
+                    at: Timestamp(90_000),
+                },
+            ],
+        ),
+    ];
+
+    let mut seen = Vec::new();
+    for state in &states {
+        let menu = indicator(state).menu;
+        // Each place once, in order; only Problems can be several.
+        let in_order = menu.windows(2).all(|pair| {
+            let (first, next) = (place(&pair[0]), place(&pair[1]));
+            first < next
+                || matches!(
+                    pair,
+                    [IndicatorEntry::Problem(_), IndicatorEntry::Problem(_)]
+                )
+        });
+        assert!(in_order, "out of order: {menu:?}");
+        assert_eq!(menu.first(), Some(&IndicatorEntry::Status), "{menu:?}");
+        assert_eq!(menu.get(1), Some(&IndicatorEntry::OpenDialer), "{menu:?}");
+        assert!(menu.contains(&IndicatorEntry::ConnectPhone), "{menu:?}");
+        assert!(menu.contains(&IndicatorEntry::Separator), "{menu:?}");
+        assert!(
+            menu.iter()
+                .any(|entry| matches!(entry, IndicatorEntry::QuietHours(_))),
+            "{menu:?}"
+        );
+        seen.extend(menu);
+    }
+    // The states between them have every kind of entry.
+    let mut places: Vec<u8> = seen.iter().map(place).collect();
+    places.dedup();
+    places.sort_unstable();
+    places.dedup();
+    assert_eq!(places, (0..=9).collect::<Vec<u8>>());
+    for entry in [
+        IndicatorEntry::HangUpOnPhone,
+        IndicatorEntry::TurnCallsOn,
+        IndicatorEntry::KeepCallsOn,
+    ] {
+        assert!(seen.contains(&entry), "no state has {entry:?}");
+    }
+}
+
+#[test]
+fn the_menu_reads_the_same_way_round_whatever_the_state() {
+    assert_eq!(
+        labels(&with_quiet_hours(connected())),
+        [
+            "My Pixel connected",
             "Open Dialer",
             "Turn calls off",
-            "Quiet Hours…",
-            "Connect your phone…",
+            "Quiet Hours…  22:00–07:00",
             "",
-            "Hang up",
+            "Connect your phone…",
+        ]
+    );
+    assert_eq!(
+        labels(&off(denied())),
+        [
+            "Calls off",
+            "Open Dialer",
+            "Turn calls on",
+            "Quiet Hours…",
+            "",
+            "Connect your phone…",
+            "Contacts not shared",
+        ]
+    );
+    assert_eq!(
+        labels(&run(
+            live_on_desktop(),
+            [Input::TurnCallsOff { until: None }]
+        )),
+        [
+            "Calls turn off when this Call ends",
+            "Open Dialer",
             "Mute",
             "Move audio to phone",
+            "Hang up",
+            "Keep calls on",
+            "Quiet Hours…",
+            "",
+            "Connect your phone…",
         ]
     );
 }

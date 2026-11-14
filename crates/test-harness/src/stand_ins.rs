@@ -432,6 +432,35 @@ impl StandIns {
         }
     }
 
+    /// Waits until the one registered tray item's menu satisfies
+    /// `condition`, reading it again on each signal, such as the menu's
+    /// `LayoutUpdated`.
+    pub fn wait_for_tray_menu(
+        &self,
+        deadline: Duration,
+        condition: impl Fn(&[MenuEntry]) -> bool,
+    ) -> Result<Vec<MenuEntry>, String> {
+        let waited = zbus::block_on(within(deadline, async {
+            // Subscribe before reading, so no change slips between the two.
+            let rule = MatchRule::builder().msg_type(Type::Signal).build()?;
+            let mut signals = MessageStream::for_match_rule(rule, &self.connection, None).await?;
+            loop {
+                if let Ok((bus_name, path)) = self.only_tray_item()
+                    && let Ok(menu) = read_tray_menu(&self.connection, &bus_name, &path).await
+                    && condition(&menu)
+                {
+                    return Ok::<_, zbus::Error>(menu);
+                }
+                signals.next().await;
+            }
+        }));
+        match waited {
+            Some(Ok(menu)) => Ok(menu),
+            Some(Err(error)) => Err(error.to_string()),
+            None => Err(format!("the menu is {:?}", self.tray_menu())),
+        }
+    }
+
     /// Every status the registered items have reported, in order.
     pub fn tray_statuses(&self) -> Vec<String> {
         self.shared.records().tray_statuses.clone()
@@ -464,32 +493,8 @@ impl StandIns {
     /// opens: `AboutToShow`, then the whole layout.
     pub fn tray_menu(&self) -> Result<Vec<MenuEntry>, String> {
         let (bus_name, path) = self.only_tray_item()?;
-        zbus::block_on(async {
-            let menu = menu_path(&self.connection, &bus_name, &path).await?;
-            self.connection
-                .call_method(
-                    Some(bus_name.as_str()),
-                    menu.as_str(),
-                    Some(MENU_INTERFACE),
-                    "AboutToShow",
-                    &(0_i32,),
-                )
-                .await?;
-            let reply = self
-                .connection
-                .call_method(
-                    Some(bus_name.as_str()),
-                    menu.as_str(),
-                    Some(MENU_INTERFACE),
-                    "GetLayout",
-                    &(0_i32, -1_i32, Vec::<String>::new()),
-                )
-                .await?;
-            let (_revision, (_id, _properties, children)): (u32, MenuNode) =
-                reply.body().deserialize()?;
-            menu_entries(children)
-        })
-        .map_err(|error: zbus::Error| error.to_string())
+        zbus::block_on(read_tray_menu(&self.connection, &bus_name, &path))
+            .map_err(|error| error.to_string())
     }
 
     /// Clicks the entry labelled `label` in the one registered tray item's
@@ -522,6 +527,36 @@ impl StandIns {
 /// A dbusmenu layout node: id, properties, and its children, each a node in
 /// a variant.
 type MenuNode = (i32, HashMap<String, OwnedVariant>, Vec<OwnedVariant>);
+
+/// The menu of the tray item `path` at `bus_name`, read as a tray reads it
+/// when it opens: `AboutToShow`, then the whole layout.
+async fn read_tray_menu(
+    connection: &Connection,
+    bus_name: &str,
+    path: &str,
+) -> zbus::Result<Vec<MenuEntry>> {
+    let menu = menu_path(connection, bus_name, path).await?;
+    connection
+        .call_method(
+            Some(bus_name),
+            menu.as_str(),
+            Some(MENU_INTERFACE),
+            "AboutToShow",
+            &(0_i32,),
+        )
+        .await?;
+    let reply = connection
+        .call_method(
+            Some(bus_name),
+            menu.as_str(),
+            Some(MENU_INTERFACE),
+            "GetLayout",
+            &(0_i32, -1_i32, Vec::<String>::new()),
+        )
+        .await?;
+    let (_revision, (_id, _properties, children)): (u32, MenuNode) = reply.body().deserialize()?;
+    menu_entries(children)
+}
 
 async fn menu_path(connection: &Connection, bus_name: &str, path: &str) -> zbus::Result<String> {
     let properties = PropertiesProxy::builder(connection)

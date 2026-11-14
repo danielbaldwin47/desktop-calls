@@ -95,7 +95,10 @@ fn with_call(call_state: CallState) -> State {
 }
 
 fn ended() -> Input {
-    Input::CallEnded { call: CALL }
+    Input::CallEnded {
+        call: CALL,
+        at: Timestamp(NOW + MINUTE),
+    }
 }
 
 fn block_phone(blocked: bool) -> Effect {
@@ -202,7 +205,13 @@ fn a_turn_off_waits_for_the_last_call_not_the_first() {
     let (state, effects) = run(state, [ended()]);
     waits(&state, &effects);
 
-    let (state, _) = run(state, [Input::CallEnded { call: CallId(2) }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CallId(2),
+            at: Timestamp(NOW + MINUTE),
+        }],
+    );
     assert!(state.calls_off());
 }
 

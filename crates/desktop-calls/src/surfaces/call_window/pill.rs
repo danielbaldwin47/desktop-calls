@@ -245,6 +245,9 @@ impl CallPill {
             content.insert("call".to_owned(), call.to_string());
         }
         report_cut_short(&self.caller, "caller-cut-short", &mut content);
+        if self.calls_off.is_visible() {
+            report_cut_short(&self.calls_off, "calls-off-after-cut-short", &mut content);
+        }
         if !quiet {
             content.insert(
                 "hang-up".to_owned(),

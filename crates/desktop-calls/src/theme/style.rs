@@ -257,6 +257,8 @@ entry.tones {
 .tag {
     font-family: monospace; font-size: 11px; font-weight: 500; color: var(--dc-secondary);
 }
+/* Set tight, so the caller over the tag line fits the strip's 44 px. */
+window.call-pill .tag { line-height: 0.95; }
 .pill-state { color: var(--dc-secondary); }
 .pill-state.muted,
 window.call-pill.muted .tag { color: var(--dc-warning-text); font-weight: 600; }

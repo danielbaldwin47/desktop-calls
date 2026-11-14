@@ -388,15 +388,20 @@ fn muted_and_calls_off_after(state: &AppState) -> bool {
         && says(state, "call-pill", "tag", "Muted")
         && pill_has(state, "calls-off-after")
         && says(state, "call-pill", "caller-cut-short", "no")
+        && says(state, "call-pill", "height", "44")
 }
 
-/// The Call Pill shows 1 on hold and Calls off after, the caller in full.
+/// The Call Pill shows 1 on hold and Calls off after, the widest tag line,
+/// the caller and both tags in full.
 fn held_and_calls_off_after(state: &AppState) -> bool {
     collapsed(state)
         && pill_has(state, "held")
         && says(state, "call-pill", "tag", "1 on hold")
         && pill_has(state, "calls-off-after")
         && says(state, "call-pill", "caller-cut-short", "no")
+        && says(state, "call-pill", "calls-off-after-cut-short", "no")
+        && says(state, "call-pill", "width", "320")
+        && says(state, "call-pill", "height", "44")
 }
 
 fn pill_has(state: &AppState, key: &str) -> bool {

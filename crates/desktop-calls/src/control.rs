@@ -369,6 +369,12 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::ClearQuietHours);
     }
 
+    /// Opens the Quiet Hours Window, or raises it, as the Indicator's
+    /// "Quiet Hours…" does.
+    fn open_quiet_hours_window(&self) {
+        let _ = self.intents.unbounded_send(Input::OpenQuietHoursWindow);
+    }
+
     /// Opens the Setup Window, to pair a Phone, pair it again or switch to
     /// another, as the Indicator's "Connect your phone…" does.
     fn open_connect_window(&self) {

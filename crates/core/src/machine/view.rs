@@ -65,6 +65,8 @@ pub enum DialerKey {
     CallAnyway,
     /// Up and Down move the selection.
     Move,
+    /// Alt+Q opens the Quiet Hours Window (ticket #279).
+    QuietHours,
     /// Escape closes the Dialer.
     Close,
 }
@@ -202,7 +204,7 @@ pub struct CallWindowView {
     pub calls_off_after: bool,
 }
 
-/// The one state tag the Call Pill shows beside the caller, where one
+/// The one state tag the Call Pill shows under the caller, where one
 /// applies. "Calls off after" is a second tag beside it, on its own flag
 /// (`CallWindowView::calls_off_after`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -655,6 +657,7 @@ impl State {
             let keys = [
                 selected.map(|_| call),
                 (dialer.rows.len() > 1).then_some(DialerKey::Move),
+                Some(DialerKey::QuietHours),
                 Some(DialerKey::Close),
             ];
             DialerView {

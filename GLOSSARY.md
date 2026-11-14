@@ -85,7 +85,7 @@ One of the Call Window's three equal square-ish buttons above Hang up, each with
 _Avoid_: action button, chip
 
 **Call Pill**:
-The small strip the Call Window collapses to during a Call, showing the caller, the timer, Mute and Hang up, and tags beside the caller: one of Muted, On phone or 1 on hold, and Calls off after while a turn-off waits for the Call to end. Once the Call has ended, or contact with it is lost, it is quiet: only the caller and what happened, without Mute and Hang up.
+The small strip the Call Window collapses to during a Call, showing the caller, the timer, Mute and Hang up, and tags on a small line under the caller, so a number always reads in full: one of Muted, On phone or 1 on hold, and Calls off after while a turn-off waits for the Call to end. Once the Call has ended, or contact with it is lost, it is quiet: only the caller and what happened, without Mute and Hang up.
 _Avoid_: mini window, bubble, picture-in-picture
 
 **Indicator**:
@@ -97,7 +97,7 @@ The guided window that pairs the Phone with the Desktop and walks through granti
 _Avoid_: first-run wizard, onboarding, "Connect your phone" window
 
 **Quiet Hours Window**:
-The small window, opened from the Indicator's menu, where the user turns Quiet Hours on or off and sets their start and end.
+The small window, opened from the Indicator's menu, with Alt+Q in the Dialer, or by `desktop-calls quiet-hours`, where the user turns Quiet Hours on or off and sets their start and end.
 _Avoid_: settings window, preferences, schedule dialog
 
 **Problem**:

@@ -234,14 +234,14 @@ fn the_footer_shows_the_keys_and_follows_the_phone_out_of_range() {
 
     assert_eq!(
         shown(&state, "keys"),
-        Some("Enter Call · ↑ ↓ Move · Esc Close")
+        Some("Enter Call · ↑ ↓ Move · Alt Q Quiet Hours · Esc Close")
     );
     assert_eq!(shown(&state, "phone"), Some("Simulated Pixel"));
     assert_eq!(shown(&state, "phone-live"), Some("true"));
     let state = type_query(&harness, "zzzz");
     assert_eq!(
         shown(&state, "keys"),
-        Some("Esc Close"),
+        Some("Alt Q Quiet Hours · Esc Close"),
         "nothing to Call or move to"
     );
 

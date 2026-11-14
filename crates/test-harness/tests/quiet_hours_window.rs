@@ -1,5 +1,6 @@
 //! Scenarios: the Quiet Hours Window (ticket #209), opened from the
-//! Indicator's Quiet Hours… entry and worked with synthetic keys alone.
+//! Indicator's Quiet Hours… entry, `desktop-calls quiet-hours` or Alt+Q in
+//! the Dialer (ticket #279), and worked with synthetic keys alone.
 //! Each change of its switch or its times is saved at once, and kept
 //! across a restart; equal times, or a time that can't be read, save
 //! nothing.
@@ -256,4 +257,86 @@ fn with_keys_alone_each_change_is_saved_at_once_and_kept_across_a_restart() {
     );
     harness.restart_app();
     wait_for_hours(&harness, None);
+}
+
+/// Runs `desktop-calls` with `arguments`, which must succeed, and returns
+/// what it printed.
+fn cli_ok(harness: &Harness, arguments: &[&str]) -> String {
+    let output = harness.cli(arguments);
+    assert!(output.status.success(), "{arguments:?} failed: {output:?}");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// Keys alone open the window (ticket #279): `desktop-calls quiet-hours`
+/// with no times opens it, as `desktop-calls connect` opens the Setup
+/// Window, and Enter works its switch as Space does. The commands that set
+/// and clear Quiet Hours still do.
+#[test]
+fn the_command_line_opens_it_and_enter_works_the_switch() {
+    let harness = connected();
+    cli_ok(&harness, &["quiet-hours", "22:00-07:00"]);
+    wait_for_hours(&harness, Some((minutes(22, 0), minutes(7, 0))));
+
+    assert_eq!(cli_ok(&harness, &["quiet-hours"]), "", "it opens, saying nothing");
+    wait_for_window(
+        &harness,
+        &[
+            ("switch", "on"),
+            ("start", "22:00"),
+            ("end", "07:00"),
+            ("focus", "switch"),
+        ],
+    );
+
+    // Enter on the switch switches off, and on again.
+    harness.keyboard().press(Key::Return);
+    wait_for_hours(&harness, None);
+    wait_for_window(&harness, &[("switch", "off"), ("focus", "switch")]);
+    harness.keyboard().press(Key::Return);
+    wait_for_hours(&harness, Some((minutes(22, 0), minutes(7, 0))));
+
+    // Asked again while open, it stays one window, with the keyboard.
+    cli_ok(&harness, &["quiet-hours"]);
+    wait_for_window(&harness, &[("switch", "on"), ("focus", "switch")]);
+
+    // Escape closes it; the setting commands still work without it.
+    harness.keyboard().press(Key::Escape);
+    harness.wait_for_app("the Quiet Hours Window is closed", DEADLINE, |state| {
+        window(state).is_none()
+    });
+    cli_ok(&harness, &["quiet-hours", "off"]);
+    let state = wait_for_hours(&harness, None);
+    assert!(window(&state).is_none(), "setting the hours opens nothing");
+}
+
+/// The Dialer, which the Desktop Calls keybinding opens, shows Alt+Q in
+/// its footer, and Alt+Q opens the window with the keyboard: the Dialer
+/// closes, as it does when a Call starts (ticket #279).
+#[test]
+fn alt_q_in_the_dialer_opens_it_with_the_keyboard() {
+    let harness = connected();
+    cli_ok(&harness, &["dialer"]);
+    let dialer = |state: &AppState, name: &str| {
+        state
+            .surface("dialer")
+            .and_then(|dialer| dialer.get(name))
+            .cloned()
+    };
+    let state = harness.wait_for_app("the Dialer has the keyboard", DEADLINE, |state| {
+        dialer(state, "focused").as_deref() == Some("true")
+    });
+    let keys = dialer(&state, "keys").unwrap_or_default();
+    assert!(
+        keys.ends_with("Alt Q Quiet Hours · Esc Close"),
+        "the footer shows Alt+Q: {keys:?}"
+    );
+
+    harness.keyboard().press_with_alt('q');
+    let state = wait_for_window(&harness, &[("switch", "off"), ("focus", "switch")]);
+    assert!(state.surface("dialer").is_none(), "the Dialer closed");
+
+    harness.keyboard().press(Key::Escape);
+    harness.wait_for_app("the Quiet Hours Window is closed", DEADLINE, |state| {
+        window(state).is_none()
+    });
 }

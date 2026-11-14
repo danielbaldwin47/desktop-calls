@@ -37,6 +37,9 @@ pub(super) struct Dialer {
     writing: Cell<bool>,
     /// Which opening of the Dialer is shown, while it is.
     opened: Cell<Option<u32>>,
+    /// How many times the Dialer has opened, so a redraw left waiting by an
+    /// earlier opening knows it is stale.
+    openings: Rc<Cell<u32>>,
     /// The query the rows are for, so the frame that first shows the rows
     /// for a new one can be logged.
     query: RefCell<String>,
@@ -96,6 +99,7 @@ impl Dialer {
             footer,
             writing: Cell::new(false),
             opened: Cell::default(),
+            openings: Rc::default(),
             query: RefCell::default(),
             rows: RefCell::default(),
         });
@@ -225,22 +229,34 @@ impl Dialer {
     /// Redraws the Dialer, unchanged, on the refresh after the one that
     /// showed its first frame, so that the costly frame comes before the
     /// first keystroke rather than with it. GTK's first frame drawn on a
-    /// later refresh than a surface's first took 13 to 15 ms more than any
-    /// after it, which made the first keystroke the slowest: 22 ms against
-    /// 4 ms for later ones, and 48.5 ms under CI's load (ticket #249). A
-    /// redraw on the frame GTK runs as soon as the first is shown, within
-    /// the same refresh, did not take the cost. Redrawing the search icon is
-    /// the smallest change GTK draws a frame for.
+    /// later refresh than a surface's first took 13 to 15 ms more paint
+    /// than any after it, which made the first keystroke pay for it: 22 ms
+    /// against 4 ms for later ones, and 48.5 ms under CI's load (ticket
+    /// #249). A redraw on the frame GTK runs as soon as the first is shown,
+    /// within the same refresh, did not take the cost. Measured on GTK
+    /// 4.24.1; why that frame costs more is not known. Redrawing the search
+    /// icon is the smallest change GTK draws a frame for. Each opening
+    /// cancels a redraw an earlier one left waiting.
     fn redraw_after_shown(&self) {
-        let (window, search) = (self.surface.window.clone(), self.search.clone());
+        let opening = self.openings.get().wrapping_add(1);
+        self.openings.set(opening);
+        let (openings, window, search) = (
+            self.openings.clone(),
+            self.surface.window.clone(),
+            self.search.clone(),
+        );
+        let current = move || openings.get() == opening;
         after_next_frame(&self.surface.window, move || {
+            if !current() {
+                return;
+            }
             let shown = Cell::new(false);
             search.add_tick_callback(move |search, _| {
                 // The first tick comes as the first frame is shown.
                 if !shown.replace(true) {
                     return glib::ControlFlow::Continue;
                 }
-                if window.is_visible() {
+                if current() && window.is_visible() {
                     search.queue_draw();
                     after_next_frame(&window, || {
                         tracing::debug!(

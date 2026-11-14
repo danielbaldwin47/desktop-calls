@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use super::incoming::audio_reaches_the_desktop;
 use super::{
-    ACT_DEADLINE, LOG_DEADLINE, STAYS_ON_PHONE, call_ends, handled_on_desktop, helper_calls,
-    logged_since, stopped_ringing,
+    ACT_DEADLINE, EXPAND_FIRST, LOG_DEADLINE, STAYS_ON_PHONE, call_ends, handled_on_desktop,
+    helper_calls, logged_since, stopped_ringing,
 };
 use crate::checklist::results::unix_micros;
 use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
@@ -47,10 +47,10 @@ fn audio_moves(
     call: u32,
     location: &str,
     request: &str,
-    demo_action: &str,
+    demo_actions: &[&str],
 ) -> Result<bool, Stop> {
     let from_us = unix_micros();
-    sitting.say(request, &[demo_action]);
+    sitting.say(request, demo_actions);
     let requested = logged_since(
         sitting,
         from_us,
@@ -152,8 +152,8 @@ pub(super) fn handoff_twice(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting,
             call,
             "phone",
-            "Click Move audio to phone in the Call Window.",
-            "move-audio-to-phone",
+            &format!("{EXPAND_FIRST} Then click Move audio to phone in the Call Window."),
+            &["expand", "move-audio-to-phone"],
         )? {
             sitting.check(
                 false,
@@ -174,8 +174,8 @@ pub(super) fn handoff_twice(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting,
             call,
             "desktop",
-            "Click Move audio here in the Call Window.",
-            "move-audio-here",
+            &format!("{EXPAND_FIRST} Then click Move audio here in the Call Window."),
+            &["expand", "move-audio-here"],
         )? {
             sitting.check(
                 false,
@@ -222,8 +222,8 @@ fn record_where_the_audio_went(
         sitting,
         call,
         "desktop",
-        "Click Move audio here once more.",
-        "move-audio-here",
+        &format!("{EXPAND_FIRST} Then click Move audio here once more."),
+        &["expand", "move-audio-here"],
     )?;
     sitting.measure("moved_on_second_try", again);
     Ok(())
@@ -294,8 +294,8 @@ pub(super) fn earbuds_answer_on_the_earbuds(sitting: &mut Sitting) -> Result<(),
         sitting,
         call,
         "desktop",
-        "Click Move audio here in the Call Window.",
-        "move-audio-here",
+        &format!("{EXPAND_FIRST} Then click Move audio here in the Call Window."),
+        &["expand", "move-audio-here"],
     )?;
     record_where_the_audio_went(sitting, call, on_the_desktop)?;
     call_ends(sitting, call, "Hang up from the Call Window.", &["hang-up"])?;

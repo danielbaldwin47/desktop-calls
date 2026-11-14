@@ -37,7 +37,7 @@ impl Banner {
             "banner",
             Layer::Overlay,
             KeyboardMode::None,
-            Input::ReleaseFocus,
+            Some(Input::ReleaseFocus),
             intents,
             report,
         );

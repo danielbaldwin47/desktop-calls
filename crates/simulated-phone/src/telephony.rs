@@ -178,6 +178,11 @@ pub enum Quirk {
     /// reply, or a busy `WirePlumber`. Tests use it to order "hands-free is
     /// back" well before "the Calls are listed" (tickets #169 and #170).
     CallsListedLate,
+    /// BlueZ marks the Phone connected without sending the `Connected`
+    /// `PropertiesChanged`: the Desktop's last word on the Phone stays
+    /// "away" while BlueZ has it connected, as the real Desktop's was while
+    /// it paged a connected Phone every 45 s (ticket #212, cause unknown).
+    ConnectedUnannounced,
 }
 
 /// How long [`Quirk::SlowServiceLevel`] takes to bring hands-free up.
@@ -219,6 +224,7 @@ impl Quirk {
             "hangup-unanswered-once" => Some(Self::HangupUnansweredOnce),
             "slow-service-level" => Some(Self::SlowServiceLevel),
             "calls-listed-late" => Some(Self::CallsListedLate),
+            "connected-unannounced" => Some(Self::ConnectedUnannounced),
             _ => None,
         }
     }

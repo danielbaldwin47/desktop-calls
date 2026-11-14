@@ -317,14 +317,26 @@ impl Shell {
                     self.contacts_command(contacts::Command::Detach);
                     self.command(Command::Detach);
                 }
-                Effect::ConnectPhone { address, attempt } => {
+                Effect::ConnectPhone {
+                    address,
+                    attempt,
+                    away,
+                } => {
                     let system = self.system.clone();
                     let inputs = self.inputs.clone();
                     // A Phone out of range takes BlueZ's page timeout to
                     // fail; the Desktop carries on meanwhile.
                     MainContext::default().spawn_local(async move {
-                        let input = match bluez::connect_phone(&system, &address).await {
-                            Ok(()) => Input::ConnectPhoneDone { attempt },
+                        let input = match bluez::connect_phone(&system, &address, away).await {
+                            Ok(connected) => {
+                                // Before the result, which would otherwise
+                                // page a Phone still held as away again. One
+                                // held as present needs no word.
+                                if away && connected == bluez::Connected::Already {
+                                    let _ = inputs.unbounded_send(bluez::presence(&address, true));
+                                }
+                                Input::ConnectPhoneDone { attempt }
+                            }
                             Err(failure) => Input::ConnectPhoneFailed { attempt, failure },
                         };
                         let _ = inputs.unbounded_send(input);
@@ -547,6 +559,10 @@ fn requested(input: &Input) {
         // The Indicator, its menu, `desktop-calls dialer` and the control
         // interface open the Dialer this way: the Dialer's first frame is
         // timed from here too (ticket #125).
+        Input::IndicatorActivated => tracing::info!(
+            event_kind = %EventKind::ActivateRequested,
+            "Asked to activate, as a click on the Indicator does"
+        ),
         Input::OpenDialer { .. } => tracing::info!(
             event_kind = %EventKind::ActivateRequested,
             "Asked to open the Dialer"

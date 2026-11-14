@@ -62,30 +62,37 @@ pub(super) fn keyboard_only_call(sitting: &mut Sitting) -> Result<(), Stop> {
     call_ends(
         sitting,
         call,
-        "Once it rings or connects, press the keybinding again to bring up the Call Window, then Ctrl+H to hang up.",
-        &["callee-answers", "keybinding", "ctrl-h"],
+        "Once the Call connects, wait for the Call Window to collapse to the Call Pill in the bottom-right corner, about 5 s. Then press the keybinding to expand it, and Ctrl+H to hang up.",
+        &[
+            "callee-answers",
+            "wait-for-call-pill",
+            "keybinding",
+            "ctrl-h",
+        ],
     )?;
-    // The keybinding must move the keyboard to the Call Window while the
-    // Call goes on: focus it had from the moment it showed proves nothing,
-    // and neither does the ended Call's window taking it. The app publishes
-    // a Call before the surfaces that follow from it (#107), so the Call
-    // Window must be seen shown without the keyboard first. The compositor
-    // may hand it the keyboard for a moment as the Dialer closes, so it
-    // must also still have it when the Call ends, as Ctrl+H needs.
-    let during = |state: &AppState| state.call(call).is_some() && state.shows("call-window");
-    let moved_focus = sitting.seen_in_order(
+    // The keybinding must expand the collapsed Call Window and move the
+    // keyboard to it while the Call goes on: focus it had from the moment it
+    // showed proves nothing, and neither does the ended Call's window taking
+    // it. So the Call Pill must be seen first, then the Call Window with the
+    // keyboard. The compositor may hand it the keyboard for a moment as the
+    // Dialer closes, so it must also still have it when the Call ends, as
+    // Ctrl+H needs.
+    let during = |state: &AppState| state.call(call).is_some();
+    let expanded_with_keyboard = sitting.seen_in_order(
         focus_mark,
-        |state| during(state) && !state.focused("call-window"),
-        |state| during(state) && state.focused("call-window"),
+        |state| during(state) && state.shows("call-pill") && !state.shows("call-window"),
+        |state| during(state) && state.focused("call-window") && !state.shows("call-pill"),
     ) && sitting
-        .last_seen_since(focus_mark, during)
+        .last_seen_since(focus_mark, |state| {
+            during(state) && state.shows("call-window")
+        })
         .is_some_and(|last| last.state.focused("call-window"));
     sitting.check(
-        moved_focus,
-        if moved_focus {
-            "The keybinding gave the Call Window the keyboard, and the Call ended.".to_owned()
+        expanded_with_keyboard,
+        if expanded_with_keyboard {
+            "The keybinding expanded the collapsed Call Window with the keyboard in it, and the Call ended.".to_owned()
         } else {
-            "The Call Window never went from showing without the keyboard to having it, and keeping it until the Call ended."
+            "The Call Window never went from collapsed to expanded with the keyboard, keeping it until the Call ended."
                 .to_owned()
         },
     );

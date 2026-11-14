@@ -399,6 +399,7 @@ fn start_connect_phone(state: &mut State, effects: &mut Vec<Effect>) {
     effects.push(Effect::ConnectPhone {
         address: phone.address.clone(),
         attempt: state.connect_attempts,
+        away: state.presence.absent(),
     });
 }
 

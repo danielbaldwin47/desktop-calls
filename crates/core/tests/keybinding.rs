@@ -141,12 +141,17 @@ fn activating_during_a_live_call_focuses_the_call_window() {
 }
 
 #[test]
-fn releasing_the_call_window_leaves_the_call_live() {
-    let (state, effects) = run(live(), [Input::Activate, Input::ReleaseFocus]);
+fn escape_on_the_call_window_leaves_the_call_live() {
+    let (state, effects) = run(live(), [Input::Activate, Input::CollapseCallWindow]);
 
     assert!(!call_window_focused(&state));
     assert_eq!(state.calls()[0].state(), CallState::Active);
-    assert!(effects.is_empty(), "{effects:?}");
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Phone(_))),
+        "{effects:?}"
+    );
 }
 
 #[test]

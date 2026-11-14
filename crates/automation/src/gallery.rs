@@ -153,6 +153,24 @@ const STATES: &[State] = &[
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
+        name: "incoming-call-banner-keyboard",
+        title: "The Incoming Call Banner, ringing, given the keyboard by the keybinding: an accent border",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            ring(harness);
+            harness.activate();
+            harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
+                state
+                    .surface("banner")
+                    .and_then(|banner| banner.get("focused"))
+                    .is_some_and(|focused| focused == "true")
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
         // The Banner identifies the caller for only 2 s, so a capture on a

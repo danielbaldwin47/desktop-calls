@@ -10,7 +10,7 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use test_harness::{
-    AppEvent, AppState, BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot,
+    AppEvent, AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot,
 };
 
 /// How long the app may take to notice a change on the Phone.
@@ -302,7 +302,7 @@ fn focused(state: &AppState, surface: &str) -> bool {
 }
 
 #[test]
-fn every_surface_has_a_border_and_the_one_with_the_keyboard_an_accent_border() {
+fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one() {
     let dark = OmarchyTheme::Dark;
     let (harness, banner) = ringing(
         Harness::builder().theme(dark.mode()).omarchy_theme(dark),
@@ -349,6 +349,55 @@ fn every_surface_has_a_border_and_the_one_with_the_keyboard_an_accent_border() {
             .iter()
             .any(|colour| near(*colour, border, 4)),
         "the Dialer, with the keyboard, still has the plain border; see {}",
+        screenshot.path.display()
+    );
+}
+
+#[test]
+fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_plain_one() {
+    let light = OmarchyTheme::Light;
+    let (harness, _) = ringing(
+        Harness::builder().omarchy_theme(light),
+        light.colour("green"),
+    );
+    // The foreground at 30% over the background, by the spec (#221).
+    let border = mix(light.colour("background"), light.colour("foreground"), 30);
+    let accent = light.colour("accent");
+    let call = harness.app_state().calls[0].id;
+
+    harness.answer(call);
+
+    harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
+        focused(state, "call-window")
+    });
+    let screenshot = harness.screenshot_when("call-window-border", DEADLINE, |screenshot| {
+        shows(screenshot, light.colour("red"))
+            && app_region(screenshot).is_some_and(|window| {
+                left_edge(screenshot, window)
+                    .iter()
+                    .any(|colour| near(*colour, accent, 8))
+            })
+    });
+    assert!(app_region(&screenshot).is_some(), "the Call Window is on screen");
+
+    harness.keyboard().press(Key::Escape);
+
+    harness.wait_for_app("Escape collapses the Call Window", DEADLINE, |state| {
+        state.surface("call-window").is_none() && state.surface("call-pill").is_some()
+    });
+    let screenshot = harness.screenshot_when("call-pill-border", DEADLINE, |screenshot| {
+        app_region(screenshot).is_some_and(|pill| {
+            left_edge(screenshot, pill)
+                .iter()
+                .any(|colour| near(*colour, border, 8))
+        })
+    });
+    let pill = app_region(&screenshot).expect("the Call Pill is on screen");
+    assert!(
+        !left_edge(&screenshot, pill)
+            .iter()
+            .any(|colour| near(*colour, accent, 24)),
+        "the Call Pill, which never takes the keyboard, has an accent border; see {}",
         screenshot.path.display()
     );
 }

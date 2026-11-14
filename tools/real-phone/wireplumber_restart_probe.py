@@ -5,7 +5,7 @@ Run only as the hook of `just test-call`, which hangs the Call up afterwards:
   just test-call --max-seconds 90 '/usr/bin/python3 tools/real-phone/wireplumber_restart_probe.py'
 
 The user allows one WirePlumber restart during a short test Call, and only
-while no other audio stream is active (docs/wiki/user-preferences.md, Q30).
+while no other audio stream is active (the wiki's user preferences, Q30).
 So before restarting, this probe checks, and skips the restart (exit 3) if:
   * any Call other than the one to the Test Number exists: the user may be
     on a real Call, and every real-Phone check must stop;

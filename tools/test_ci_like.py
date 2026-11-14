@@ -11,7 +11,7 @@ Arguments go to `cargo test --workspace --locked`, as with `just test`.
 
 The limits, calibrated so that main passes and reverting PR #41's fix for
 slow caller formatting fails the Banner test (see
-docs/research/2026-11-05-diagnosable-ci.md):
+the 2026-11-05 research note on diagnosable CI):
 
   - CPU: a cgroup quota of CPU_QUOTA for every test process together
     (systemd-run --user --scope -p CPUQuota=...), on whichever CPUs the

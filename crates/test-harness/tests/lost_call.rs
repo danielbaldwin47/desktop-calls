@@ -680,3 +680,50 @@ fn losing_contact_and_getting_it_back_moves_neither_mute_nor_hang_up() {
     assert_eq!(after.controls.len(), 2, "Mute and the toggle: {after:?}");
     after.assert_mute_and_hang_up_in_place(hang_up.right, "once contact is back");
 }
+
+/// How long the Call Window may take to collapse to the Call Pill by
+/// itself: 5 s after the Call connects, and a margin.
+const COLLAPSE_DEADLINE: Duration = Duration::from_secs(9);
+
+fn call_pill(state: &AppState, key: &str) -> Option<String> {
+    state
+        .surface("call-pill")
+        .and_then(|pill| pill.get(key).cloned())
+}
+
+/// Ticket #201: the Desktop losing contact with the Call expands the
+/// collapsed Call Window by itself, without taking the keyboard, so the user
+/// sees why. Collapsed again by hand, the Call Pill says the Call is on the
+/// Phone in place of a timer that would mislead.
+#[test]
+fn lost_contact_expands_the_call_pill_and_collapsed_again_it_says_on_your_phone() {
+    let harness = connected();
+    on_a_call(&harness);
+    harness.wait_for_app(
+        "the Call Window collapses to the Call Pill",
+        COLLAPSE_DEADLINE,
+        |state| state.surface("call-pill").is_some() && state.surface("call-window").is_none(),
+    );
+
+    lose_hands_free(&harness);
+
+    let state = wait_lost(&harness);
+    assert_eq!(state.surface("call-pill"), None, "it expands by itself");
+    assert_ne!(
+        call_window(&state, "focused").as_deref(),
+        Some("true"),
+        "without taking the keyboard"
+    );
+
+    harness.activate();
+    harness.wait_for_app("the keybinding gives it the keyboard", DEADLINE, |state| {
+        call_window(state, "focused").as_deref() == Some("true")
+    });
+    harness.keyboard().press(Key::Escape);
+    let state = harness.wait_for_app("Escape collapses it", DEADLINE, |state| {
+        state.surface("call-pill").is_some()
+    });
+    assert_eq!(call_pill(&state, "status").as_deref(), Some("On your phone"));
+    assert_eq!(call_pill(&state, "mute"), None, "nothing to mute here");
+}
+

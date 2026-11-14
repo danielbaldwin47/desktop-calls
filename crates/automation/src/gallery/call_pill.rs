@@ -6,9 +6,12 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use test_harness::{AppState, Harness, LAYOUT_SIZE, Screenshot};
+use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Screenshot};
 
-use super::{DEADLINE, ORANGE, State, app_region, as_is, connect, on_a_call, shows};
+use super::{
+    DEADLINE, NUMBER, ORANGE, State, app_region, as_is, connect, dimmed, held, on_a_call, ring,
+    shows,
+};
 
 /// How many temporary captures [`hold_call_window_expanded`] has taken.
 static HOVER_CAPTURES: AtomicUsize = AtomicUsize::new(0);
@@ -51,7 +54,120 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             shows(screenshot, look.red()) && shows(screenshot, ORANGE) && in_corner(screenshot)
         },
     },
+    State {
+        name: "call-pill-audio-on-phone",
+        title: "The Call Pill, answered on the phone: Audio on phone, and Mute unavailable",
+        still: |state| collapsed(state) && pill_has(state, "audio-location"),
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            let path = harness.simulated_phone().ring(NUMBER);
+            harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+                state.surface("banner").is_some()
+            });
+            harness.simulated_phone().answer_on_phone(&path);
+            harness.wait_for_app(
+                "the Call Pill says the audio is on the phone",
+                DEADLINE,
+                |state| collapsed(state) && pill_has(state, "mute-unavailable"),
+            );
+        },
+        shown: |screenshot, look| {
+            shows(screenshot, look.red()) && !shows(screenshot, ORANGE) && in_corner(screenshot)
+        },
+    },
+    State {
+        name: "call-pill-on-your-phone",
+        title: "The Call Pill, collapsed by hand after contact with the Call was lost: On your phone, in place of the timer",
+        still: collapsed,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            wait_until_collapsed(harness);
+            harness
+                .simulated_phone()
+                .enable_quirk("connect-profile-fails");
+            harness
+                .move_audio("phone")
+                .unwrap_or_else(|error| panic!("move the audio to the phone: {error:?}"));
+            harness.wait_for_app("lost contact expands the Call Window", DEADLINE, |state| {
+                state
+                    .surface("call-window")
+                    .is_some_and(|window| window.contains_key("notice"))
+            });
+            collapse_by_hand(harness);
+            harness.wait_for_app("the Call Pill says On your phone", DEADLINE, |state| {
+                state
+                    .surface("call-pill")
+                    .and_then(|pill| pill.get("status"))
+                    .is_some_and(|status| status == "On your phone")
+            });
+        },
+        // Hang up is dimmed: it would do nothing.
+        shown: |screenshot, look| dimmed(screenshot, look) && in_corner(screenshot),
+    },
+    State {
+        name: "call-pill-held",
+        title: "The Call Pill, collapsed by hand with a Call on hold: 1 on hold",
+        still: |state| collapsed(state) && pill_has(state, "held"),
+        prepare: as_is,
+        reach: |harness| {
+            held(harness);
+            collapse_by_hand(harness);
+            harness.wait_for_app("the Call Pill says 1 on hold", DEADLINE, |state| {
+                collapsed(state) && pill_has(state, "held")
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && in_corner(screenshot),
+    },
+    State {
+        name: "call-pill-ended",
+        title: "The Call Pill, just after the Call ended",
+        still: |state| {
+            state
+                .surface("call-pill")
+                .and_then(|pill| pill.get("status"))
+                .is_some_and(|status| status == "Call ended")
+        },
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            let call = ring(harness);
+            harness.answer(call);
+            wait_until_collapsed(harness);
+            harness.hang_up(call);
+            harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
+                state
+                    .surface("call-pill")
+                    .and_then(|pill| pill.get("status"))
+                    .is_some_and(|status| status == "Call ended")
+            });
+        },
+        // Hang up is dimmed once the Call has ended.
+        shown: |screenshot, look| dimmed(screenshot, look) && in_corner(screenshot),
+    },
 ];
+
+fn pill_has(state: &AppState, key: &str) -> bool {
+    state
+        .surface("call-pill")
+        .is_some_and(|pill| pill.contains_key(key))
+}
+
+/// The keybinding gives the expanded Call Window the keyboard, and Escape
+/// collapses it, as the user does by hand.
+fn collapse_by_hand(harness: &Harness) {
+    harness.activate();
+    harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
+        state.surface("call-window").is_some_and(|window| {
+            window
+                .get("focused")
+                .is_some_and(|focused| focused == "true")
+        })
+    });
+    harness.keyboard().press(Key::Escape);
+}
 
 /// The Call Window shows collapsed: the Call Pill, anchored bottom right,
 /// and no Call Window.

@@ -537,6 +537,11 @@ pub enum Label {
     /// What the Call Window says in place of Swap, Resume and Hang up while a
     /// Call is on hold and a Waiting Call rings.
     WaitingCallFirst,
+    /// What the Call Pill says in place of the timer while the Desktop has
+    /// lost contact with the Call, which carries on on the Phone.
+    OnYourPhone,
+    /// What the Call Pill adds while another Call is on hold.
+    OneOnHold,
 }
 
 /// The text of `label`.
@@ -590,6 +595,8 @@ pub fn label(label: Label) -> &'static str {
         Label::WaitingCallFirst => {
             "Answer or decline the Waiting Call first: until then, your phone would act on it instead of these Calls."
         }
+        Label::OnYourPhone => "On your phone",
+        Label::OneOnHold => "1 on hold",
     }
 }
 

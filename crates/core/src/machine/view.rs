@@ -202,7 +202,7 @@ pub struct CallWindowView {
     pub calls_off_after: bool,
 }
 
-/// The one state tag the Call Pill shows beside the caller, where one
+/// The one state tag the Call Pill shows under the caller, where one
 /// applies. "Calls off after" is a second tag beside it, on its own flag
 /// (`CallWindowView::calls_off_after`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

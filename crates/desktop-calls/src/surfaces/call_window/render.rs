@@ -1,7 +1,9 @@
 //! Bringing the Call Window up to date with the Call state machine's view
 //! and the clock, and reporting what it shows.
 
-use super::{CallWindow, Change, Icon, Who, class, seconds_since, set_class, shows};
+use super::{
+    CallWindow, Change, Icon, Who, class, report_cut_short, seconds_since, set_class, shows,
+};
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{
     AudioLocation, CallAudio, CallWindowPhase, CallWindowView, Mute, StateLine,
@@ -134,10 +136,12 @@ impl CallWindow {
             self.meta.set_text(messages::label(Label::NotInContacts));
             self.meta.set_visible(true);
         }
-        if self.meta.is_visible() {
+        // Its own flag: the line it sits on may still be hidden.
+        if self.meta.get_visible() {
             content.insert("meta".to_owned(), self.meta.text().to_string());
         }
         who.report(content);
+        report_cut_short(&self.caller, "caller-cut-short", content);
     }
 
     /// The timer, while the Call is connected: struck through and still
@@ -167,10 +171,12 @@ impl CallWindow {
         }
     }
 
-    /// The "Calls off after" tag on the top line, while a turn-off waits
-    /// for the Call to end.
+    /// The "Calls off after" tag on the line under who, while a turn-off
+    /// waits for the Call to end.
     fn show_calls_off_after(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         self.calls_off.set_visible(view.calls_off_after);
+        self.detail_line
+            .set_visible(view.calls_off_after || self.meta.get_visible());
         if view.calls_off_after {
             content.insert(
                 "calls-off-after".to_owned(),

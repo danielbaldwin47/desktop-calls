@@ -5,7 +5,7 @@ use super::{Label, label, setup::shown_keys};
 use crate::keybinding::KEYS;
 use crate::machine::CallPillTag;
 
-/// The Call Pill's tag beside the caller.
+/// The Call Pill's tag under the caller.
 #[must_use]
 pub fn call_pill_tag(tag: CallPillTag) -> &'static str {
     match tag {

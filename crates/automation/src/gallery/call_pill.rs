@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Screenshot};
 
 use super::{
-    DEADLINE, NUMBER, State, app_region, as_is, connect, held, on_a_call, ring, shows,
-    without_controls,
+    DEADLINE, LONG_NUMBER, NUMBER, State, app_region, as_is, connect, held, on_a_call,
+    on_a_call_from, ring, shows, without_controls,
 };
 
 /// How many temporary captures [`hold_call_window_expanded`] and
@@ -98,7 +98,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-window-calls-off-after",
-        title: "The Call Window while a turn-off waits for the Call to end: the Calls off after tag on the top line, between who and the timer",
+        title: "The Call Window while a turn-off waits for the Call to end: the Calls off after tag on the line under who, below the timer",
         still: |state| expanded(state) && window_has(state, "calls-off-after"),
         prepare: as_is,
         reach: |harness| {
@@ -114,7 +114,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-calls-off-after",
-        title: "The Call Pill while a turn-off waits for the Call to end: the Calls off after tag beside the caller, in the Muted tag's style",
+        title: "The Call Pill while a turn-off waits for the Call to end: the Calls off after tag on the small line under the caller",
         still: |state| collapsed(state) && pill_has(state, "calls-off-after"),
         prepare: as_is,
         reach: |harness| {
@@ -133,7 +133,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-muted-calls-off-after",
-        title: "The Call Pill, muted while a turn-off waits for the Call to end: Muted and Calls off after, the caller's name still readable",
+        title: "The Call Pill, muted while a turn-off waits for the Call to end: the tint and the crossed microphone say Muted, and Calls off after takes the tag line",
         still: |state| collapsed(state) && state.muted && pill_has(state, "calls-off-after"),
         prepare: as_is,
         reach: |harness| {
@@ -147,6 +147,91 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             harness.wait_for_app("the Call Pill is muted and tagged", DEADLINE, |state| {
                 pill_has(state, "muted") && pill_has(state, "calls-off-after")
             });
+        },
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red())
+                && shows(screenshot, look.warning())
+                && in_corner(screenshot)
+        },
+    },
+    State {
+        name: "call-window-calls-off-after-long-number",
+        title: "The Call Window with a long number not in Contacts while a turn-off waits: the number reads in full, Calls off after under the timer",
+        still: |state| {
+            expanded(state)
+                && window_has(state, "calls-off-after")
+                && says(state, "call-window", "caller-cut-short", "no")
+        },
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call_from(harness, LONG_NUMBER);
+            turn_calls_off(harness);
+            hold_call_window_expanded(harness);
+            harness.wait_for_app(
+                "the Call Window is tagged, the number in full",
+                DEADLINE,
+                |state| {
+                    expanded(state)
+                        && window_has(state, "calls-off-after")
+                        && says(state, "call-window", "caller-cut-short", "no")
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+    },
+    State {
+        name: "call-pill-calls-off-after-long-number",
+        title: "The Call Pill with a long number not in Contacts while a turn-off waits: the number reads in full, Calls off after under it",
+        still: |state| {
+            collapsed(state)
+                && pill_has(state, "calls-off-after")
+                && says(state, "call-pill", "caller-cut-short", "no")
+        },
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call_from(harness, LONG_NUMBER);
+            turn_calls_off(harness);
+            harness.wait_for_app(
+                "the Call Pill is tagged, the number in full",
+                DEADLINE,
+                |state| {
+                    collapsed(state)
+                        && pill_has(state, "calls-off-after")
+                        && says(state, "call-pill", "caller-cut-short", "no")
+                },
+            );
+        },
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red())
+                && shows(screenshot, look.green())
+                && in_corner(screenshot)
+        },
+    },
+    State {
+        name: "call-pill-muted-long-number",
+        title: "The Call Pill, muted, with a long number not in Contacts: the number reads in full, Muted under it",
+        still: |state| {
+            collapsed(state) && state.muted && says(state, "call-pill", "caller-cut-short", "no")
+        },
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call_from(harness, LONG_NUMBER);
+            wait_until_collapsed(harness);
+            harness
+                .set_muted(true)
+                .unwrap_or_else(|error| panic!("mute: {error:?}"));
+            harness.wait_for_app(
+                "the Call Pill is muted, the number in full",
+                DEADLINE,
+                |state| {
+                    pill_has(state, "muted")
+                        && says(state, "call-pill", "tag", "Muted")
+                        && says(state, "call-pill", "caller-cut-short", "no")
+                },
+            );
         },
         shown: |screenshot, look| {
             !shows(screenshot, look.red())
@@ -267,6 +352,14 @@ fn window_has(state: &AppState, key: &str) -> bool {
     state
         .surface("call-window")
         .is_some_and(|window| window.contains_key(key))
+}
+
+/// Whether `surface` reports `key` as `value`.
+fn says(state: &AppState, surface: &str, key: &str, value: &str) -> bool {
+    state
+        .surface(surface)
+        .and_then(|content| content.get(key))
+        .is_some_and(|shown| shown == value)
 }
 
 fn pill_has(state: &AppState, key: &str) -> bool {

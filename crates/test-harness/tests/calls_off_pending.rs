@@ -303,6 +303,64 @@ fn the_call_pill_is_tagged_too_and_the_tag_goes_when_the_call_ends() {
     });
 }
 
+/// A number not in Contacts, in the London range Ofcom keeps for drama, as
+/// long as a number reads: "+44 20 7946 0123".
+const LONG_NUMBER: &str = "+442079460123";
+/// Longer than the timer's one-second redraw, after which a surface
+/// reports how its caller was last laid out.
+const LAID_OUT: Duration = Duration::from_millis(2500);
+
+/// What `surface` says about whether its caller is cut short with "…".
+fn cut_short<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
+    state
+        .surface(surface)
+        .and_then(|content| content.get("caller-cut-short"))
+        .map(String::as_str)
+}
+
+#[test]
+fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and_the_call_window()
+ {
+    let harness = on_screen();
+    let path = harness.simulated_phone().ring(LONG_NUMBER);
+    harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    harness.simulated_phone().answer_on_phone(&path);
+    harness.wait_for_app("the Call is live", DEADLINE, is_live);
+    cli_ok(&harness, &["calls", "off"]);
+    wait_waiting(&harness);
+
+    harness.wait_for_app(
+        "the Call Window collapses to a tagged Call Pill, laid out",
+        COLLAPSE_DEADLINE,
+        |state| {
+            state.surface("call-window").is_none()
+                && tag(state, "call-pill") == Some(TAG)
+                && cut_short(state, "call-pill").is_some()
+        },
+    );
+    harness.app_holds("the Call Pill shows the number in full", LAID_OUT, |state| {
+        cut_short(state, "call-pill") == Some("no")
+    });
+
+    harness.activate();
+
+    harness.wait_for_app(
+        "the keybinding expands a tagged Call Window, laid out",
+        DEADLINE,
+        |state| {
+            state.surface("call-pill").is_none()
+                && tag(state, "call-window") == Some(TAG)
+                && cut_short(state, "call-window").is_some()
+        },
+    );
+    harness.app_holds(
+        "the Call Window shows the number in full",
+        LAID_OUT,
+        |state| cut_short(state, "call-window") == Some("no"),
+    );
+    harness.simulated_phone().caller_hangs_up(&path);
+}
+
 /// What the app notified, in order: summaries only.
 fn summaries(harness: &Harness) -> Vec<String> {
     harness

@@ -11,7 +11,7 @@ use super::roles::Roles;
 /// The CSS classes a surface puts on its widgets.
 pub(crate) mod class {
     /// Who the Call is with: sans 20/650. With [`NUMBER`] too, a bare
-    /// number in monospace 18.
+    /// number in monospace 18/650.
     pub(crate) const WHO: &str = "type-who";
     /// A bare number where a name would be: monospace with tabular figures,
     /// at the size its other classes give.
@@ -39,7 +39,8 @@ pub(crate) mod class {
         reason = "for the surfaces spec #221 rebuilds; the CSS is in place"
     )]
     pub(crate) const EYEBROW: &str = "type-eyebrow";
-    /// A key, in a 1 px outlined box at 72%: monospace 10.5/500.
+    /// A key, in a 1 px outlined box: monospace 10.5/500, in its label's
+    /// colour at full strength, so it reads at 4.5:1 like any text.
     pub(crate) const KEYCAP: &str = "type-keycap";
     /// One row of keycaps with what each does, at a surface's foot.
     #[expect(
@@ -84,7 +85,7 @@ const KEYCAP_RADIUS: u32 = 3;
 const STATIC: &str = r#"
 .number { font-family: monospace; font-feature-settings: "tnum"; }
 .type-who { font-size: 20px; font-weight: 650; }
-.type-who.number { font-size: 18px; font-weight: 500; }
+.type-who.number { font-size: 18px; }
 .type-heading { font-size: 18px; font-weight: 650; }
 .type-body { font-size: 13.5px; font-weight: 400; }
 .type-meta {
@@ -103,7 +104,7 @@ const STATIC: &str = r#"
 }
 .type-keycap {
     font-family: monospace; font-size: 10.5px; font-weight: 500;
-    padding: 1px 4px; border: 1px solid currentColor; opacity: 0.72;
+    padding: 1px 4px; border: 1px solid currentColor;
 }
 .footer-line {
     border-spacing: 16px; padding-top: 12px; border-top: 1px solid var(--dc-border);
@@ -185,4 +186,31 @@ pub(super) fn css(
         );
     }
     css
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The declarations of the first rule for `selector` in `css`.
+    fn rule<'a>(css: &'a str, selector: &str) -> &'a str {
+        let start = css
+            .find(&format!("{selector} {{"))
+            .unwrap_or_else(|| panic!("no rule for {selector}"));
+        let body = &css[start..];
+        &body[..body.find('}').unwrap_or(body.len())]
+    }
+
+    #[test]
+    fn a_keycap_is_drawn_at_full_strength_and_a_bare_number_as_heavy_as_a_name() {
+        let css = css(&Roles::stock(false), &[], None);
+        assert!(
+            !rule(&css, ".type-keycap").contains("opacity"),
+            "keycaps are text the user must read to act, so they meet 4.5:1 unfaded (#222)"
+        );
+        assert!(
+            !rule(&css, ".type-who.number").contains("font-weight"),
+            "a bare number keeps Who's weight, 650"
+        );
+    }
 }

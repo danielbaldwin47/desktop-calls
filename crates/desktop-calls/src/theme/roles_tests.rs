@@ -228,3 +228,25 @@ fn without_omarchy_the_roles_are_stock_adwaitas() {
     assert_eq!(light.call_label, Rgb(0xff, 0xff, 0xff));
     assert_eq!(Roles::stock(true).surface, Rgb(0x22, 0x22, 0x26));
 }
+
+#[test]
+fn keycaps_read_at_full_strength_on_every_control_they_sit_on() {
+    // A keycap is drawn in its label's colour with no fade (#222), so it
+    // reads wherever that label does. On Answer and End it reads as their
+    // shared label does, which a theme's green and red can hold below 4.5:1
+    // (stock white on Adwaita's green is 3.25:1).
+    for (theme, roles) in every_theme() {
+        assert_reads(
+            theme,
+            "a keycap",
+            roles.text,
+            &[("surface", roles.surface), ("raised control", roles.raised)],
+        );
+        assert_reads(
+            theme,
+            "a keycap on Unmute",
+            roles.warning_label,
+            &[("warning", roles.warning)],
+        );
+    }
+}

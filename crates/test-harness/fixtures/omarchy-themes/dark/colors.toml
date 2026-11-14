@@ -3,7 +3,7 @@
 # fixture's, from stock Adwaita's and from the bar stand-in's.
 mode = "dark"
 
-accent = "#e0a040"
+accent = "#7aa2f7"
 selection = "#3a4058"
 muted = "#5a6078"
 

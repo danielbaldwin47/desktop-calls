@@ -288,6 +288,35 @@ fn left_edge(screenshot: &Screenshot, surface: Region) -> Vec<[u8; 3]> {
         .collect()
 }
 
+/// Whether `surface`'s left edge, halfway down, is a border in `border`
+/// rather than its `background` running to the edge.
+///
+/// At scale 1.6 the outermost screen pixel is a blend of the black outside
+/// and whatever is at the edge, and a blend of black and a light
+/// background can match a light theme's border colour. A border at least
+/// 1 layout pixel wide covers 1.6 screen pixels, so at least two pixels
+/// from the edge in differ from the background; with no border only the
+/// blend does.
+fn has_border(
+    screenshot: &Screenshot,
+    surface: Region,
+    border: [u8; 3],
+    background: [u8; 3],
+) -> bool {
+    const SCREEN_PIXEL: f64 = 1.0 / 1.6;
+    let middle = f64::midpoint(surface.top, surface.bottom);
+    let edge: Vec<[u8; 3]> = (0..6)
+        .map(|pixel| {
+            screenshot.colour_at(
+                surface.left + (f64::from(pixel) + 0.5) * SCREEN_PIXEL,
+                middle,
+            )
+        })
+        .take_while(|colour| !near(*colour, background, 4))
+        .collect();
+    edge.len() >= 2 && edge.iter().any(|colour| near(*colour, border, 8))
+}
+
 fn near(colour: [u8; 3], target: [u8; 3], within: u8) -> bool {
     colour
         .iter()
@@ -309,13 +338,14 @@ fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one(
         dark.colour("green"),
     );
     // The foreground at 30% over the background, by the spec (#221).
-    let border = mix(dark.colour("background"), dark.colour("foreground"), 30);
+    let background = dark.colour("background");
+    let border = mix(background, dark.colour("foreground"), 30);
     let accent = dark.colour("accent");
     assert!(!focused(&harness.app_state(), "banner"), "the Banner took the keyboard");
     let screenshot = harness.screenshot("banner-border");
     let edge = left_edge(&screenshot, banner);
     assert!(
-        edge.iter().any(|colour| near(*colour, border, 8)),
+        has_border(&screenshot, banner, border, background),
         "the Banner's edge {edge:02x?} has no {border:02x?} border; see {}",
         screenshot.path.display()
     );
@@ -337,17 +367,12 @@ fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one(
     });
 
     let screenshot = harness.screenshot_when("dialer-border", DEADLINE, |screenshot| {
-        app_region(screenshot).is_some_and(|dialer| {
-            left_edge(screenshot, dialer)
-                .iter()
-                .any(|colour| near(*colour, accent, 8))
-        })
+        app_region(screenshot)
+            .is_some_and(|dialer| has_border(screenshot, dialer, accent, background))
     });
     let dialer = app_region(&screenshot).expect("the Dialer is on screen");
     assert!(
-        !left_edge(&screenshot, dialer)
-            .iter()
-            .any(|colour| near(*colour, border, 4)),
+        !has_border(&screenshot, dialer, border, background),
         "the Dialer, with the keyboard, still has the plain border; see {}",
         screenshot.path.display()
     );
@@ -361,7 +386,8 @@ fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_pl
         light.colour("green"),
     );
     // The foreground at 30% over the background, by the spec (#221).
-    let border = mix(light.colour("background"), light.colour("foreground"), 30);
+    let background = light.colour("background");
+    let border = mix(background, light.colour("foreground"), 30);
     let accent = light.colour("accent");
     let call = harness.app_state().calls[0].id;
 
@@ -372,11 +398,8 @@ fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_pl
     });
     let screenshot = harness.screenshot_when("call-window-border", DEADLINE, |screenshot| {
         shows(screenshot, light.colour("red"))
-            && app_region(screenshot).is_some_and(|window| {
-                left_edge(screenshot, window)
-                    .iter()
-                    .any(|colour| near(*colour, accent, 8))
-            })
+            && app_region(screenshot)
+                .is_some_and(|window| has_border(screenshot, window, accent, background))
     });
     assert!(app_region(&screenshot).is_some(), "the Call Window is on screen");
 
@@ -386,11 +409,7 @@ fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_pl
         state.surface("call-window").is_none() && state.surface("call-pill").is_some()
     });
     let screenshot = harness.screenshot_when("call-pill-border", DEADLINE, |screenshot| {
-        app_region(screenshot).is_some_and(|pill| {
-            left_edge(screenshot, pill)
-                .iter()
-                .any(|colour| near(*colour, border, 8))
-        })
+        app_region(screenshot).is_some_and(|pill| has_border(screenshot, pill, border, background))
     });
     let pill = app_region(&screenshot).expect("the Call Pill is on screen");
     assert!(

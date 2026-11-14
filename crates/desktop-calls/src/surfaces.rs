@@ -610,8 +610,7 @@ impl Who {
         }
     }
 
-    /// Shows who on `label`, a [`class::WHO`] label: a bare number in
-    /// monospace.
+    /// Shows who on `label`: a bare number in monospace.
     fn show(&self, label: &gtk::Label) {
         label.set_text(&self.caller);
         set_class(label, class::NUMBER, self.bare_number);

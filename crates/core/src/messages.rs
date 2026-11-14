@@ -34,11 +34,13 @@ pub use calls_off::{
     phone_unblocked_for_removal, quiet_hours_cleared, quiet_hours_set, quiet_hours_status,
     quiet_hours_unreadable,
 };
-pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
+pub use checks::{
+    command_copied, copy_command_label, fix_failed, fix_label, fixing, problem_keycap,
+};
 pub use dialer::{dialer_key, dialer_phone};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
-pub use setup::{SetupWindowText, setup_window};
+pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
 pub use when::when;
 
 /// A failure the user can be told about.
@@ -423,7 +425,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::CallsOffUntilMorning(until) => calls_off::until_morning(until.shown),
         IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::KeepCallsOn => calls_off::KEEP_CALLS_ON.to_owned(),
-        IndicatorEntry::QuietHours => quiet_hours::MENU_ENTRY.to_owned(),
+        IndicatorEntry::QuietHours(hours) => quiet_hours::menu_entry(*hours),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),

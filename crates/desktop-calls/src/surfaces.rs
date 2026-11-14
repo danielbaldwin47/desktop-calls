@@ -79,6 +79,7 @@ mod banner;
 mod call_window;
 mod dialer;
 mod first_frames;
+mod footer;
 mod icons;
 mod quiet_hours_window;
 mod setup_problems;
@@ -257,7 +258,7 @@ impl Surfaces {
         self.setup_window.top_keeps_focus(
             view.setup_problems
                 .as_ref()
-                .is_some_and(|problems| problems.takes_focus),
+                .is_some_and(|problems| problems.blocks_step),
         );
         self.setup_window.render(view.setup_window.as_ref());
         // After the Setup Window, so its first button takes focus.

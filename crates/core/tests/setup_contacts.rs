@@ -208,7 +208,7 @@ fn text(state: &State) -> messages::SetupWindowText {
     let Some(view) = state.surfaces().setup_window else {
         panic!("the window is open");
     };
-    messages::setup_window(&view, Timestamp(0))
+    messages::setup_window(&view, Timestamp(0), None)
 }
 
 fn synced_312_and_200() -> ContactsOutcome {
@@ -272,9 +272,9 @@ fn while_the_phone_asks_the_window_counts_down_to_its_deadline() {
         })
     );
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(1_800_000_001_500));
+    let text = messages::setup_window(&view, Timestamp(1_800_000_001_500), None);
     assert_eq!(text.countdown.as_deref(), Some("29"));
-    let text = messages::setup_window(&view, Timestamp(1_800_000_040_000));
+    let text = messages::setup_window(&view, Timestamp(1_800_000_040_000), None);
     assert_eq!(text.countdown.as_deref(), Some("0"));
 }
 
@@ -294,7 +294,7 @@ fn an_unanswered_prompt_offers_try_again_which_asks_the_phone_again() {
         Some(SetupStep::ContactsPromptTimedOut { phone: pixel() })
     );
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(0));
+    let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Try again", "Skip"]);
     assert_eq!(
         text.countdown.as_deref(),
@@ -400,7 +400,7 @@ fn granted_the_window_shows_the_call_history_done_first_then_the_contacts_being_
     );
     assert_eq!(state.call_history().entries().len(), 50, "for the Dialer");
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(12_000));
+    let text = messages::setup_window(&view, Timestamp(12_000), None);
     assert_eq!(
         text.progress,
         ["✓ Recent Calls", "312 Contacts… about 8 seconds left"]
@@ -591,13 +591,48 @@ fn denied_the_finish_page_says_calls_still_work_and_how_to_allow_access_later() 
         Some(done(ContactsOutcome::Denied, KeybindingStage::Checking))
     );
     let view = state.surfaces().setup_window.expect("the window is open");
-    let summary = messages::setup_window(&view, Timestamp(0))
+    let summary = messages::setup_window(&view, Timestamp(0), None)
         .summary
         .unwrap_or_default();
     assert!(summary.contains("Calls still work"), "{summary}");
     assert!(
         summary.contains("turn on Contacts and call history"),
         "{summary}"
+    );
+}
+
+#[test]
+fn the_finish_page_names_the_config_file_with_a_tilde_and_shows_the_line_as_written() {
+    let (state, _) = run(synced(), [Input::KeybindingChecked(config(BINDINGS))]);
+    let home = Some("/home/user");
+    let view = state.surfaces().setup_window.expect("the window is open");
+    let text = messages::setup_window(&view, Timestamp(0), home);
+    assert!(
+        text.instructions
+            .iter()
+            .any(|line| line.ends_with("~/.config/hypr/bindings.lua doesn't use those keys yet.")),
+        "{:?}",
+        text.instructions
+    );
+
+    let (state, _) = run(state, [Input::AddKeybinding]);
+    let view = state.surfaces().setup_window.expect("the window is open");
+    let text = messages::setup_window(&view, Timestamp(0), home);
+    assert_eq!(
+        text.instructions[0],
+        "This line goes at the end of ~/.config/hypr/bindings.lua:"
+    );
+    // What the user confirms is what is written: no `~` in it.
+    assert_eq!(text.line.as_deref(), Some(LINE));
+    let (_, effects) = run(state, [Input::ConfirmKeybinding]);
+    assert_eq!(
+        effects,
+        [Effect::AddKeybinding {
+            file: FILE.to_owned(),
+            seen: BINDINGS.to_owned(),
+            added: format!("{BINDINGS}{LINE}\n"),
+        }],
+        "the file written is the whole path"
     );
 }
 
@@ -612,7 +647,7 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
         ))
     );
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(0));
+    let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Add keybinding", "Done"]);
     assert!(
         text.instructions
@@ -626,7 +661,7 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
     let (state, effects) = run(state, [Input::AddKeybinding]);
     assert!(effects.is_empty(), "nothing written yet: {effects:?}");
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(0));
+    let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.line.as_deref(), Some(LINE));
     assert_eq!(text.buttons, ["Confirm", "Cancel"]);
 
@@ -662,7 +697,7 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
         ))
     );
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(0));
+    let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Done"]);
     assert!(
         text.instructions[0].starts_with("Place your first Call: press Super + Alt + C"),
@@ -705,7 +740,7 @@ fn without_a_hyprland_config_to_add_to_the_finish_page_says_what_to_bind() {
     );
 
     let view = state.surfaces().setup_window.expect("the window is open");
-    let text = messages::setup_window(&view, Timestamp(0));
+    let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Done"]);
     assert!(
         text.instructions

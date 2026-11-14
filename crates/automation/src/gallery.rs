@@ -4,9 +4,10 @@
 //!
 //! Each surface ticket adds its states to [`STATES`], or to a list of its
 //! own in a module here, such as [`call_pill::CALL_PILL_STATES`] or
-//! [`banner::BANNER_STATES`]. The Indicator's
+//! [`banner::BANNER_STATES`] or [`setup_window::SETUP_PROBLEM_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
-//! icon, light and dark.
+//! icon, light and dark, and its menu's, in [`indicator::MENU_STATES`], as
+//! Omarchy's tray draws the menu: a stand-in.
 
 use std::fs;
 use std::num::NonZeroUsize;
@@ -24,15 +25,17 @@ mod indicator;
 mod look;
 mod page;
 mod quiet_hours_window;
+mod setup_window;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use indicator::{
-    INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, draw_indicator, indicator_path,
+    INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, MENU_STATES, draw_indicator, indicator_path,
 };
 use look::{LOOKS, Look};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
+use setup_window::SETUP_PROBLEM_STATES;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -456,9 +459,9 @@ const STATES: &[State] = &[
     },
     State {
         name: "setup-window-done",
-        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding",
+        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding, with the config file named from `~`",
         still: |_| true,
-        prepare: fresh_install,
+        prepare: |builder| fresh_install(builder).config_under_home(),
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -472,9 +475,9 @@ const STATES: &[State] = &[
     },
     State {
         name: "setup-window-keybinding",
-        title: "The Setup Window, showing the exact keybinding line before writing it",
+        title: "The Setup Window, showing the exact keybinding line before writing it, the path wrapping only after a `/`",
         still: |_| true,
-        prepare: fresh_install,
+        prepare: |builder| fresh_install(builder).config_under_home(),
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -810,9 +813,13 @@ pub fn run(options: &Options) -> ExitCode {
     // The Indicator is drawn with the whole gallery; redoing one state
     // keeps it as an earlier run drew it.
     if options.only.is_none() {
-        for state in INDICATOR_STATES {
+        let drawings = INDICATOR_STATES
+            .iter()
+            .map(|state| (state, false))
+            .chain(MENU_STATES.iter().map(|state| (state, true)));
+        for (state, menu) in drawings {
             for theme in INDICATOR_THEMES {
-                if let Err(error) = draw_indicator(state, theme, &output) {
+                if let Err(error) = draw_indicator(state, theme, menu, &output) {
                     eprintln!("Can't draw the Indicator {}: {error}", state.name);
                     return ExitCode::FAILURE;
                 }
@@ -829,23 +836,29 @@ pub fn run(options: &Options) -> ExitCode {
         })
         .filter(|(_, _, path)| path.exists())
         .collect();
-    let indicators: Vec<(&IndicatorState, OmarchyTheme, PathBuf)> = INDICATOR_STATES
-        .iter()
-        .flat_map(|state| INDICATOR_THEMES.map(|theme| (state, theme)))
-        .map(|(state, theme)| (state, theme, indicator_path(state, theme, &output)))
-        .filter(|(_, _, path)| path.exists())
-        .collect();
+    let drawn =
+        |states: &'static [IndicatorState]| -> Vec<(&IndicatorState, OmarchyTheme, PathBuf)> {
+            states
+                .iter()
+                .flat_map(|state| INDICATOR_THEMES.map(|theme| (state, theme)))
+                .map(|(state, theme)| (state, theme, indicator_path(state, theme, &output)))
+                .filter(|(_, _, path)| path.exists())
+                .collect()
+        };
+    let indicators = drawn(INDICATOR_STATES);
+    let menus = drawn(MENU_STATES);
 
     let index = output.join("index.html");
-    if let Err(error) = fs::write(&index, index_html(&shots, &indicators)) {
+    if let Err(error) = fs::write(&index, index_html(&shots, &indicators, &menus)) {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }
     let states = shots.len() / LOOKS.len();
     let indicator_states = indicators.len() / INDICATOR_THEMES.len();
+    let menu_states = menus.len() / INDICATOR_THEMES.len();
     println!(
         "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy; \
-         the Indicator in {indicator_states} state{}, light and dark.",
+         the Indicator in {indicator_states} state{} and its menu in {menu_states}, light and dark.",
         shots.len(),
         if states == 1 { "" } else { "s" },
         if indicator_states == 1 { "" } else { "s" }
@@ -861,6 +874,7 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .chain(BANNER_STATES)
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
+        .chain(SETUP_PROBLEM_STATES)
 }
 
 /// Renders each of `shots` into `output`, several at a time: `workers`, or

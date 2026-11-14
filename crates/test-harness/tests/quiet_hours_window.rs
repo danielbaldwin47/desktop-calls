@@ -95,8 +95,15 @@ fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
     )
 }
 
+/// Chooses Quiet Hours… in the Indicator's menu, whatever times its hint
+/// shows.
 fn open(harness: &Harness) {
-    harness.tray().click("Quiet Hours…");
+    let menu = harness.tray().menu();
+    let entry = menu
+        .iter()
+        .find(|entry| entry.label.starts_with("Quiet Hours…"))
+        .unwrap_or_else(|| panic!("the menu has Quiet Hours…: {menu:#?}"));
+    harness.tray().click(&entry.label);
 }
 
 #[test]
@@ -107,7 +114,10 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
         .unwrap_or_else(|error| panic!("SetQuietHours: {error:?}"));
     wait_for_hours(&harness, Some((minutes(22, 0), minutes(7, 0))));
 
-    open(&harness);
+    // The menu shows the times as a hint.
+    harness
+        .tray()
+        .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
     let state = wait_for_window(
         &harness,
         &[

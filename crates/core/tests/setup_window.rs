@@ -513,17 +513,44 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         desktop_name: Some("desktop".to_owned()),
         notice: None,
         opened: 1,
-        problem_has_focus: false,
+        problem_has_focus: None,
     };
     let choose = messages::setup_window(
         &view(SetupStep::Choose {
             phones: vec![pixel()],
         }),
         Timestamp(0),
+        None,
     );
     assert_eq!(
         choose.keys,
-        "Up and Down choose a phone, Enter pairs it; Escape closes"
+        [(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")],
+        "one Phone has nothing to move between"
+    );
+    let two = messages::setup_window(
+        &view(SetupStep::Choose {
+            phones: vec![pixel(), phone("Other", OTHER)],
+        }),
+        Timestamp(0),
+        None,
+    );
+    assert_eq!(
+        two.keys,
+        [
+            (&["↑", "↓"][..], "Choose"),
+            (&["Enter"][..], "Pair"),
+            (&["Esc"][..], "Close")
+        ]
+    );
+    let none = messages::setup_window(
+        &view(SetupStep::Choose { phones: vec![] }),
+        Timestamp(0),
+        None,
+    );
+    assert_eq!(
+        none.keys,
+        [(&["Esc"][..], "Close")],
+        "with no Phone listed, only Escape works"
     );
 
     let confirm = messages::setup_window(
@@ -532,16 +559,32 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
             code: 42,
         }),
         Timestamp(0),
+        None,
     );
     assert_eq!(confirm.code.as_deref(), Some("000042"));
     assert_eq!(
         confirm.keys,
-        "Enter: Confirm; Tab moves between buttons; Escape closes"
+        [
+            (&["Enter"][..], "Confirm"),
+            (&["Tab"][..], "Next button"),
+            (&["Esc"][..], "Close")
+        ]
     );
+}
 
+#[test]
+fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
+    let view = |step| SetupWindowView {
+        step,
+        desktop_name: Some("desktop".to_owned()),
+        notice: None,
+        opened: 1,
+        problem_has_focus: None,
+    };
     let off = messages::setup_window(
         &view(SetupStep::PhoneCallsOff { phone: pixel() }),
         Timestamp(0),
+        None,
     );
     assert_eq!(
         off.summary.as_deref(),
@@ -564,6 +607,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
             keybinding: KeybindingStage::Checking,
         }),
         Timestamp(0),
+        None,
     );
     assert_eq!(
         done.summary.as_deref(),
@@ -574,5 +618,117 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
             .iter()
             .all(|line| !line.contains("Synced"))
     );
-    assert_eq!(done.keys, "Enter: Done; Escape closes");
+    assert_eq!(
+        done.keys,
+        [(&["Enter"][..], "Done"), (&["Esc"][..], "Close")]
+    );
+    let syncing = messages::setup_window(
+        &view(SetupStep::Pairing { phone: pixel() }),
+        Timestamp(0),
+        None,
+    );
+    assert_eq!(
+        syncing.keys,
+        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Close")]
+    );
+    let close_only = messages::setup_window(
+        &view(SetupStep::Connecting { phone: pixel() }),
+        Timestamp(0),
+        None,
+    );
+    assert_eq!(
+        close_only.keys,
+        [(&["Enter", "Esc"][..], "Close")],
+        "Enter and Escape both close, so one entry says it"
+    );
+}
+
+#[test]
+fn a_problem_says_bluetooth_is_off_once_and_the_window_adds_no_second_sentence() {
+    use desktop_calls_core::{BluetoothPower, DesktopCheck};
+    let off = Input::DesktopChecked(DesktopCheck::Bluetooth(BluetoothPower::Off));
+    let (state, _) = run(choosing(), [off, Input::SetupUnavailable]);
+    let window = state.surfaces().setup_window.expect("the Setup Window");
+    assert_eq!(window.notice, None, "the Problem card says it");
+    let problems = state.surfaces().setup_problems.expect("the Problem");
+    assert_eq!(problems.problems, [ProblemKind::BluetoothOff]);
+    assert!(problems.blocks_step);
+    assert_eq!(window.problem_has_focus, Some(ProblemKind::BluetoothOff));
+
+    // With no Bluetooth adapter at all there is no Problem to say it, so
+    // the window does.
+    let (state, _) = run(choosing(), [Input::SetupUnavailable]);
+    let window = state.surfaces().setup_window.expect("the Setup Window");
+    assert_eq!(window.notice, Some(SetupNotice::BluetoothUnavailable));
+    assert_eq!(state.surfaces().setup_problems, None);
+    assert_eq!(window.problem_has_focus, None);
+}
+
+#[test]
+fn a_file_in_the_home_directory_is_named_with_a_tilde_and_other_files_whole() {
+    assert_eq!(
+        messages::shown_path("/home/user/.config/hypr/bindings.lua", Some("/home/user")),
+        "~/.config/hypr/bindings.lua"
+    );
+    assert_eq!(
+        messages::shown_path("/home/user/.config/hypr/bindings.lua", Some("/home/user/")),
+        "~/.config/hypr/bindings.lua",
+        "a trailing slash on the home directory changes nothing"
+    );
+    assert_eq!(
+        messages::shown_path("/home/user-b/.config", Some("/home/user")),
+        "/home/user-b/.config",
+        "a folder that only starts with the same letters is not the home"
+    );
+    assert_eq!(
+        messages::shown_path("/etc/hypr/bindings.lua", Some("/home/user")),
+        "/etc/hypr/bindings.lua"
+    );
+    assert_eq!(
+        messages::shown_path("/home/user/.config", None),
+        "/home/user/.config"
+    );
+    assert_eq!(messages::shown_path("/x/y", Some("")), "/x/y");
+    assert_eq!(messages::shown_path("/x/y", Some("/")), "/x/y");
+}
+
+/// The text of `text` cut into the pieces a line may not break inside.
+fn pieces(text: &str) -> Vec<&str> {
+    messages::unbreakable_runs(text)
+        .into_iter()
+        .map(|run| &text[run])
+        .collect()
+}
+
+#[test]
+fn a_path_may_break_only_after_a_slash_never_inside_a_name() {
+    assert_eq!(
+        pieces("~/repos/desktop-calls/.claude/bindings.lua"),
+        ["~/", "repos/", "desktop-calls/", ".claude/", "bindings.lua"]
+    );
+    // Spaces are break points too, so a sentence wraps between words.
+    assert_eq!(
+        pieces("goes into ~/.config/a-b.lua, then"),
+        ["goes ", "into ", "~/", ".config/", "a-b.lua, ", "then"]
+    );
+    assert_eq!(
+        pieces(r#"o.bind("SUPER + ALT + C", "Desktop Calls", "/usr/bin/desktop-calls")"#),
+        [
+            "o.bind(\"SUPER ",
+            "+ ",
+            "ALT ",
+            "+ ",
+            "C\", ",
+            "\"Desktop ",
+            "Calls\", ",
+            "\"/",
+            "usr/",
+            "bin/",
+            "desktop-calls\")"
+        ]
+    );
+    // Together the pieces are the whole text, so nothing is left out.
+    let text = "/home/user/ünï-code/x y/";
+    assert_eq!(pieces(text).concat(), text);
+    assert!(messages::unbreakable_runs("").is_empty());
 }

@@ -166,17 +166,16 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
         BEFORE_CONSENT,
         |recorded| !sets_powered(recorded),
     );
-    // Enter presses Turn on, so the key hint no longer says Enter pairs.
-    harness.wait_for_app(
-        "the key hint says Enter presses the highlighted button",
+    // Enter presses Turn on, so the footer says so, and the step it blocks
+    // is dimmed.
+    let state = harness.wait_for_app(
+        "the footer says Enter turns Bluetooth on",
         DEADLINE,
         |state| {
-            window_field(state, "keys")
-                == Some(
-                    "Enter presses the highlighted button; Tab moves between buttons; Escape closes",
-                )
+            window_field(state, "keys") == Some("Enter Turn on · Tab Next button · Esc Close")
         },
     );
+    assert_eq!(window_field(&state, "dimmed"), Some("true"));
 
     harness.keyboard().press(Key::Return);
 
@@ -191,6 +190,35 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
             .and_then(|window| window.get("phones"))
             .is_some_and(|phones| phones == PHONE_NAME)
     });
+}
+
+#[test]
+fn a_problem_is_said_once_on_screen_as_one_card_with_its_fix() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .bluetooth_off()
+        .start();
+
+    let state = wait_for_problems(&harness, "bluetooth-off", STARTUP);
+
+    // The sentence appears once among everything the surfaces show, and the
+    // Setup Window adds no second sentence of its own about Bluetooth.
+    let sentence = field(&state, "messages").expect("the Problem's sentence is shown");
+    let said = state
+        .surfaces
+        .values()
+        .flat_map(BTreeMap::values)
+        .filter(|shown| shown.contains(sentence))
+        .count();
+    assert_eq!(said, 1, "{sentence:?} shows once: {:?}", state.surfaces);
+    assert_eq!(window_field(&state, "notice"), None);
+    assert_eq!(field(&state, "headings"), Some("Bluetooth is off"));
+    // The steps it blocks are dimmed, and the Fix is its button.
+    assert_eq!(window_field(&state, "dimmed"), Some("true"));
+    assert_eq!(field(&state, "buttons"), Some("Turn on"));
+    assert_eq!(field(&state, "focused"), Some("true"));
 }
 
 #[test]
@@ -324,7 +352,12 @@ fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
     let state = wait_for_phone_listed(&harness);
     assert_eq!(
         window_field(&state, "keys"),
-        Some("Up and Down choose a phone, Enter pairs it; Escape closes")
+        Some("Enter Pair · Esc Close")
+    );
+    assert_eq!(
+        window_field(&state, "dimmed"),
+        None,
+        "a Problem that doesn't stop pairing leaves the step as it is"
     );
 
     harness.keyboard().press(Key::Return);

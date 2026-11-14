@@ -101,8 +101,9 @@ pub struct SetupProblemsView {
     pub notice: Option<FixFailure>,
     /// Bluetooth is off or blocked while choosing a Phone, so nothing can
     /// pair until it is put right: the Problem's button takes keyboard
-    /// focus. Other Problems, and later steps, leave Enter to the step.
-    pub takes_focus: bool,
+    /// focus, and the step's instructions and list are dimmed. Other
+    /// Problems, and later steps, leave Enter and the step as they are.
+    pub blocks_step: bool,
 }
 
 impl DesktopChecks {
@@ -152,14 +153,15 @@ impl State {
             problems,
             fixing: self.desktop.fixing,
             notice: self.desktop.notice,
-            takes_focus: self.problem_takes_focus(),
+            blocks_step: self.problem_blocks_step(),
         })
     }
 
-    /// Whether a Problem's button takes keyboard focus in the Setup Window,
-    /// so Enter presses it. Only while choosing a Phone, and only for what
-    /// stops pairing: later steps keep Enter for themselves.
-    pub(super) fn problem_takes_focus(&self) -> bool {
+    /// Whether a Problem stops the Setup Window's step from working, so
+    /// the Problem's button takes keyboard focus (Enter presses it) and the
+    /// step is dimmed. Only while choosing a Phone, and only for what stops
+    /// pairing: later steps keep Enter for themselves.
+    pub(super) fn problem_blocks_step(&self) -> bool {
         self.desktop.bluetooth_off()
             && self
                 .setup

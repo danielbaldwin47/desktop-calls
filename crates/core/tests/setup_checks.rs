@@ -3,7 +3,7 @@
 //! hands-free competing), decided by the Call state machine, at its public
 //! interface (ticket #23).
 
-use desktop_calls_core::messages::{self, NextAction, ProblemKind};
+use desktop_calls_core::messages::{self, FooterKeys, NextAction, ProblemKind};
 use desktop_calls_core::{
     BluetoothPower, DesktopCheck, DesktopFix, Effect, FixFailure, IndicatorEntry, IndicatorLook,
     Input, Phone, PhoneCommand, State, Timer, Timestamp, step,
@@ -60,6 +60,14 @@ fn kinds(state: &State) -> Vec<ProblemKind> {
 
 fn setup_open(state: State) -> State {
     run(state, [Input::OpenSetupWindow])
+}
+
+/// A Phone nearby, for the window to list.
+fn nearby() -> Input {
+    Input::PhoneNearby(Phone {
+        name: "Other Phone".to_owned(),
+        address: "11:22:33:44:55:66".to_owned(),
+    })
 }
 
 #[test]
@@ -190,30 +198,36 @@ fn the_setup_window_shows_the_desktop_problems_only_while_it_is_open() {
     assert_eq!(shown.notice, None);
 }
 
-/// The keys hint at the foot of the Setup Window, while it is open.
-fn key_hint(state: &State) -> Option<String> {
+/// The keys shown at the foot of the Setup Window, while it is open.
+fn key_hint(state: &State) -> Option<FooterKeys> {
     let window = state.surfaces().setup_window?;
-    Some(messages::setup_window(&window, Timestamp(0)).keys)
+    Some(messages::setup_window(&window, Timestamp(0), None).keys)
 }
 
 #[test]
 fn the_key_hint_does_not_promise_enter_pairs_while_a_problem_button_has_focus() {
-    let state = setup_open(run(
-        all_well(connected()),
-        [checked(DesktopCheck::Bluetooth(BluetoothPower::Off))],
-    ));
+    let state = run(
+        setup_open(run(
+            all_well(connected()),
+            [checked(DesktopCheck::Bluetooth(BluetoothPower::Off))],
+        )),
+        [nearby()],
+    );
     assert!(
         state
             .surfaces()
             .setup_problems
-            .is_some_and(|problems| problems.takes_focus),
+            .is_some_and(|problems| problems.blocks_step),
         "Turn on has keyboard focus"
     );
-    let hint = key_hint(&state).expect("the window is open");
-    assert!(!hint.contains("pairs"), "{hint}");
     assert_eq!(
-        hint,
-        "Enter presses the highlighted button; Tab moves between buttons; Escape closes"
+        key_hint(&state),
+        Some(vec![
+            (&["Enter"][..], "Turn on"),
+            (&["Tab"][..], "Next button"),
+            (&["Esc"][..], "Close"),
+        ]),
+        "Enter presses the Problem's button"
     );
 
     let state = run(
@@ -221,21 +235,41 @@ fn the_key_hint_does_not_promise_enter_pairs_while_a_problem_button_has_focus() 
         [checked(DesktopCheck::Bluetooth(BluetoothPower::On))],
     );
     assert_eq!(
-        key_hint(&state).as_deref(),
-        Some("Up and Down choose a phone, Enter pairs it; Escape closes"),
+        key_hint(&state),
+        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")]),
         "with Bluetooth on, Enter pairs again"
     );
 }
 
 #[test]
-fn the_key_hint_keeps_enter_pairs_when_a_problem_takes_no_focus() {
+fn a_blocked_bluetooth_problem_with_a_command_to_copy_names_that_button_for_enter() {
     let state = setup_open(run(
         all_well(connected()),
-        [checked(DesktopCheck::ContactsSupport(false))],
+        [checked(DesktopCheck::Bluetooth(BluetoothPower::Blocked))],
     ));
     assert_eq!(
-        key_hint(&state).as_deref(),
-        Some("Up and Down choose a phone, Enter pairs it; Escape closes")
+        key_hint(&state).map(|keys| keys.first().copied()),
+        Some(Some((&["Enter"][..], "Copy command")))
+    );
+}
+
+#[test]
+fn the_key_hint_keeps_enter_pairs_when_a_problem_takes_no_focus() {
+    let state = run(
+        setup_open(run(
+            all_well(connected()),
+            [checked(DesktopCheck::ContactsSupport(false))],
+        )),
+        [nearby()],
+    );
+    assert_eq!(
+        key_hint(&state),
+        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")])
+    );
+    let shown = state.surfaces().setup_problems.expect("shown");
+    assert!(
+        !shown.blocks_step,
+        "pairing still works, so nothing is dimmed"
     );
 }
 

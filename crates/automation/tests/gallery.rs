@@ -4,6 +4,54 @@
 use std::path::Path;
 use std::process::Command;
 
+/// The states the gallery shows, each in four looks.
+const STATES: &[&str] = &[
+    "bare-output",
+    "incoming-call-banner",
+    "incoming-call-banner-identifying",
+    "incoming-call-banner-keyboard",
+    "incoming-call-banner-not-in-contacts",
+    "incoming-call-banner-no-keybinding",
+    "call-waiting-banner-keyboard",
+    "call-waiting-banner-without-hold",
+    "call-window-live",
+    "call-window-muted",
+    "call-window-keypad",
+    "call-window-audio-on-phone",
+    "call-window-ended",
+    "call-window-connection-lost",
+    "call-window-calling",
+    "call-window-ringing",
+    "call-window-not-placed",
+    "call-waiting-banner",
+    "call-window-held",
+    "call-window-held-third-call-waiting",
+    "call-pill",
+    "call-pill-muted",
+    "call-pill-audio-on-phone",
+    "call-pill-on-your-phone",
+    "call-pill-held",
+    "call-pill-ended",
+    "dialer-call-history",
+    "dialer-results",
+    "dialer-not-connected",
+    "quiet-hours-window-off",
+    "quiet-hours-window-on",
+    "quiet-hours-window-refused",
+    "setup-window-choose",
+    "setup-window-confirm",
+    "setup-window-phone-calls-off",
+    "setup-window-contacts-prompt",
+    "setup-window-contacts-syncing",
+    "setup-window-done",
+    "setup-window-keybinding",
+    "setup-problem-bluetooth-off",
+    "setup-problem-bluetooth-blocked",
+    "setup-problem-contacts-support-missing",
+    "setup-problem-audio-not-set-up",
+    "setup-problem-bluez-hands-free",
+];
+
 /// Renders the gallery exactly as `just screenshot` does, into its default
 /// directory, `target/screenshots/gallery`. CI keeps that directory as an
 /// artifact, so this test is also what makes CI's gallery.
@@ -40,41 +88,7 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     );
     let index =
         std::fs::read_to_string(output.join("index.html")).expect("the gallery has an index");
-    let states = [
-        "bare-output",
-        "incoming-call-banner",
-        "incoming-call-banner-identifying",
-        "incoming-call-banner-keyboard",
-        "incoming-call-banner-not-in-contacts",
-        "incoming-call-banner-no-keybinding",
-        "call-waiting-banner-keyboard",
-        "call-waiting-banner-without-hold",
-        "call-window-live",
-        "call-window-muted",
-        "call-window-keypad",
-        "call-window-audio-on-phone",
-        "call-window-ended",
-        "call-window-connection-lost",
-        "call-window-calling",
-        "call-window-ringing",
-        "call-window-not-placed",
-        "call-waiting-banner",
-        "call-window-held",
-        "call-window-held-third-call-waiting",
-        "call-pill",
-        "call-pill-muted",
-        "call-pill-audio-on-phone",
-        "call-pill-on-your-phone",
-        "call-pill-held",
-        "call-pill-ended",
-        "dialer-call-history",
-        "dialer-results",
-        "dialer-not-connected",
-        "quiet-hours-window-off",
-        "quiet-hours-window-on",
-        "quiet-hours-window-refused",
-    ];
-    let files = states.iter().flat_map(|state| {
+    let files = STATES.iter().flat_map(|state| {
         ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))
     });
     for file in files {

@@ -5,13 +5,16 @@
 //! when it opens and can be moved aside. Each step's default button has
 //! keyboard focus, so Enter takes the step; while choosing, the first Phone
 //! listed has focus, the arrow keys move between Phones and Enter chooses.
-//! Escape or closing the window cancels.
+//! Escape or closing the window cancels. A footer line shows the keys that
+//! work now. While a Problem blocks the step, its card sits under the
+//! heading (`setup_problems`) and the step's words are dimmed.
 //!
 //! It reports `setup-window` with `step`, `heading`, `instructions`,
 //! `buttons` and `progress` (one per line), `phones` (names, one per line),
-//! `summary`, `code`, `countdown`, `line`, `tip`, `notice`, `desktop` and
-//! `focused`, and logs when each step and the first Phone listed reached the
-//! screen, timed from the window opening.
+//! `summary`, `code`, `countdown`, `line`, `tip`, `notice`, `keys`,
+//! `dimmed` (while a Problem blocks the step), `desktop` and `focused`, and
+//! logs when each step and the first Phone listed reached the screen, timed
+//! from the window opening.
 //!
 //! While the Phone asks whether to share Contacts, the countdown changes by
 //! the second, and so does the time left reading Contacts: the window shows
@@ -30,8 +33,13 @@ use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
 
-use super::{SharedReport, after_next_frame, class, reported, surface_mapped, surface_shown};
+use super::setup_problems::notice_card;
+use super::{
+    SharedReport, after_next_frame, class, footer, reported, set_class, surface_mapped,
+    surface_shown,
+};
 use crate::logging::EventKind;
+use crate::theme::space;
 
 const NAME: &str = "setup-window";
 const WIDTH: i32 = 480;
@@ -43,9 +51,25 @@ const CSS: &str = "
     font-feature-settings: \"tnum\";
 }
 .desktop-calls-setup .setup-phone { padding: 10px 12px; font-weight: bold; }
-.desktop-calls-setup .setup-keys { font-size: 0.85em; color: var(--dc-secondary); }
 .desktop-calls-setup .setup-line { font-family: monospace; padding: 8px; }
 .desktop-calls-setup .setup-tip { color: var(--dc-secondary); }
+/* A Problem and a notice are cards on the warning tint, with the warning
+   colour down the left edge. */
+.desktop-calls-setup .notice { border-left: 3px solid var(--dc-warning); }
+/* A Problem's button: small, and the Fix filled with the accent, whose
+   label reads on it at 4.5:1 in every theme (stock Adwaita's suggested
+   blue does not). */
+.desktop-calls-setup button.small {
+    min-height: 30px; min-width: 0; padding: 0 10px; font-size: 12.5px;
+}
+.desktop-calls-setup button.accent {
+    background: var(--dc-accent); color: var(--dc-accent-label);
+}
+/* The steps a Problem blocks: in secondary text, the weakest that still
+   reads at 4.5:1, not faded. */
+.desktop-calls-setup .setup-dimmed, .desktop-calls-setup .setup-dimmed label {
+    color: var(--dc-secondary);
+}
 ";
 
 /// How often the window checks whether the countdown, or the time left
@@ -62,10 +86,15 @@ pub(super) struct SetupWindow {
     progress: gtk::Label,
     line: gtk::Label,
     tip: gtk::Label,
-    notice: gtk::Label,
+    notice: gtk::Box,
+    notice_text: gtk::Label,
+    /// Said while no Phone is listed.
+    empty: gtk::Label,
     list: gtk::ListBox,
     buttons: gtk::Box,
-    keys: gtk::Label,
+    footer: gtk::Box,
+    /// The home directory, which a file in it is named relative to.
+    home: Option<String>,
     intents: UnboundedSender<Input>,
     report: SharedReport,
     content: Rc<RefCell<BTreeMap<String, String>>>,
@@ -118,7 +147,8 @@ impl SetupWindow {
         line.add_css_class("card");
         line.set_xalign(0.0);
         line.set_wrap(true);
-        line.set_wrap_mode(gtk::pango::WrapMode::Char);
+        // Breaks only at a space or after a `/`: see `keep_runs_whole`.
+        line.set_wrap_mode(gtk::pango::WrapMode::Word);
         line.set_max_width_chars(50);
         // Selectable with the pointer, to copy; Tab still moves only
         // between the buttons.
@@ -129,21 +159,21 @@ impl SetupWindow {
         tip.set_xalign(0.0);
         tip.set_wrap(true);
         tip.set_max_width_chars(50);
-        let notice = gtk::Label::new(None);
-        notice.add_css_class("error");
-        notice.set_xalign(0.0);
-        notice.set_wrap(true);
-        notice.set_max_width_chars(50);
+        let (notice, notice_text) = notice_card();
+        // Plain dimmed words, not a field that looks like an input.
+        let empty = gtk::Label::new(None);
+        empty.add_css_class("dim-label");
+        empty.set_xalign(0.0);
+        empty.set_visible(false);
         let list = gtk::ListBox::new();
         list.add_css_class("boxed-list");
         list.set_selection_mode(gtk::SelectionMode::Single);
-        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
         buttons.set_halign(gtk::Align::End);
-        let keys = gtk::Label::new(None);
-        keys.add_css_class("setup-keys");
-        keys.set_xalign(0.0);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        footer.add_css_class(class::FOOTER_LINE);
 
-        let layout = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        let layout = gtk::Box::new(gtk::Orientation::Vertical, space::L);
         for widget in [
             heading.upcast_ref::<gtk::Widget>(),
             summary.upcast_ref(),
@@ -152,10 +182,11 @@ impl SetupWindow {
             progress.upcast_ref(),
             line.upcast_ref(),
             notice.upcast_ref(),
+            empty.upcast_ref(),
             list.upcast_ref(),
             tip.upcast_ref(),
             buttons.upcast_ref(),
-            keys.upcast_ref(),
+            footer.upcast_ref(),
         ] {
             layout.append(widget);
         }
@@ -171,9 +202,12 @@ impl SetupWindow {
             line,
             tip,
             notice,
+            notice_text,
+            empty,
             list,
             buttons,
-            keys,
+            footer,
+            home: std::env::var("HOME").ok(),
             intents: intents.clone(),
             report,
             content: Rc::default(),
@@ -263,10 +297,11 @@ impl SetupWindow {
         });
     }
 
-    /// Puts `widget` above everything else in the window.
+    /// Puts `widget` under the heading, above the step: where a Problem
+    /// that blocks the step is read first.
     pub(super) fn put_on_top(&self, widget: &impl IsA<gtk::Widget>) {
         if let Some(layout) = self.window.child().and_downcast::<gtk::Box>() {
-            layout.prepend(widget);
+            layout.insert_child_after(widget, Some(&self.heading));
             self.top.replace(Some(widget.clone().upcast()));
         }
     }
@@ -311,7 +346,7 @@ impl SetupWindow {
             view.step,
             SetupStep::ContactsPrompt { .. } | SetupStep::ContactsSyncing { .. }
         ));
-        let text = messages::setup_window(view, now());
+        let text = messages::setup_window(view, now(), self.home.as_deref());
         let shown = (view.clone(), text.clone());
         if self.shown.borrow().as_ref() == Some(&shown) {
             return;
@@ -362,6 +397,16 @@ impl SetupWindow {
         self.summary
             .set_text(text.summary.as_deref().unwrap_or_default());
         self.summary.set_visible(text.summary.is_some());
+        // A Problem that stops the step: its words in secondary text.
+        let dimmed = view.problem_has_focus.is_some();
+        for widget in [
+            self.summary.upcast_ref::<gtk::Widget>(),
+            self.instructions.upcast_ref(),
+            self.empty.upcast_ref(),
+            self.list.upcast_ref(),
+        ] {
+            set_class(widget, "setup-dimmed", dimmed);
+        }
         self.show_instructions(&text.instructions);
         // The pairing code, or the countdown: both big digits.
         let digits = text.code.as_deref().or(text.countdown.as_deref());
@@ -369,13 +414,14 @@ impl SetupWindow {
         self.code.set_visible(digits.is_some());
         self.progress.set_text(&text.progress.join("\n"));
         self.progress.set_visible(!text.progress.is_empty());
-        self.line.set_text(text.line.as_deref().unwrap_or_default());
+        keep_runs_whole(&self.line, text.line.as_deref().unwrap_or_default());
         self.line.set_visible(text.line.is_some());
         self.tip.set_text(text.tip.unwrap_or_default());
         self.tip.set_visible(text.tip.is_some());
-        self.notice.set_text(text.notice.unwrap_or_default());
+        self.notice_text.set_text(text.notice.unwrap_or_default());
         self.notice.set_visible(text.notice.is_some());
-        self.keys.set_text(&text.keys);
+        footer::show(&self.footer, &text.keys);
+        self.footer.set_visible(!text.keys.is_empty());
         let phones = match &view.step {
             SetupStep::Choose { phones } => phones.as_slice(),
             _ => &[],
@@ -426,10 +472,11 @@ impl SetupWindow {
             } else {
                 instruction.clone()
             };
-            let label = gtk::Label::new(Some(&line));
+            let label = gtk::Label::new(None);
             label.set_xalign(0.0);
             label.set_wrap(true);
             label.set_max_width_chars(50);
+            keep_runs_whole(&label, &line);
             self.instructions.append(&label);
         }
         self.instructions.set_visible(!instructions.is_empty());
@@ -437,15 +484,13 @@ impl SetupWindow {
 
     /// Lists `phones`, keeping the one selected; whether the list changed.
     fn show_phones(&self, phones: &[Phone], text: &SetupWindowText, new_step: bool) -> bool {
-        let empty = text.empty_list.map(|empty| {
-            let label = gtk::Label::new(Some(empty));
-            label.add_css_class("dim-label");
-            label.set_margin_top(12);
-            label.set_margin_bottom(12);
-            label
-        });
-        self.list.set_placeholder(empty.as_ref());
-        self.list.set_visible(text.empty_list.is_some());
+        // While no Phone is nearby, plain dimmed words; the list shows only
+        // once there is a Phone in it.
+        let looking = text.empty_list.filter(|_| phones.is_empty());
+        self.empty.set_text(looking.unwrap_or_default());
+        self.empty.set_visible(looking.is_some());
+        self.list
+            .set_visible(text.empty_list.is_some() && !phones.is_empty());
         if *self.phones.borrow() == phones && !new_step {
             return false;
         }
@@ -552,6 +597,21 @@ impl SetupWindow {
     }
 }
 
+/// Sets `label`'s text so it can break only at a space or after a `/`,
+/// never inside a word or a path's name: Pango may not break inside each
+/// run, so the text itself stays exactly as given, to copy.
+fn keep_runs_whole(label: &gtk::Label, text: &str) {
+    label.set_text(text);
+    let attributes = gtk::pango::AttrList::new();
+    for run in messages::unbreakable_runs(text) {
+        let mut no_break = gtk::pango::AttrInt::new_allow_breaks(false);
+        no_break.set_start_index(u32::try_from(run.start).unwrap_or(u32::MAX));
+        no_break.set_end_index(u32::try_from(run.end).unwrap_or(u32::MAX));
+        attributes.insert(no_break);
+    }
+    label.set_attributes(Some(&attributes));
+}
+
 /// Tab on the last button moves round to the first: GTK would move focus
 /// out of the window. Shift+Tab is GTK's own, so from the first button it
 /// reaches the Problems above.
@@ -628,7 +688,7 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     let mut content = BTreeMap::from([
         ("step".to_owned(), view.step.as_str().to_owned()),
         ("heading".to_owned(), text.heading.clone()),
-        ("keys".to_owned(), text.keys.clone()),
+        ("keys".to_owned(), footer::text(&text.keys)),
         ("instructions".to_owned(), text.instructions.join("\n")),
         ("buttons".to_owned(), text.buttons.join("\n")),
     ]);
@@ -660,6 +720,9 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     }
     if let Some(notice) = text.notice {
         content.insert("notice".to_owned(), notice.to_owned());
+    }
+    if view.problem_has_focus.is_some() {
+        content.insert("dimmed".to_owned(), "true".to_owned());
     }
     if let Some(desktop) = &view.desktop_name {
         content.insert("desktop".to_owned(), desktop.clone());

@@ -100,6 +100,12 @@ pub fn copy_command_label() -> &'static str {
     "Copy command"
 }
 
+/// The keycap on a Problem's button while Enter presses it.
+#[must_use]
+pub fn problem_keycap() -> &'static str {
+    "↵"
+}
+
 /// What the Setup Window says once a command is copied.
 #[must_use]
 pub fn command_copied() -> &'static str {

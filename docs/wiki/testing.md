@@ -44,12 +44,12 @@ Each was first filed as a flake under load; the PR that fixed it found where the
 
 ## GitHub CI on main: red or cancelled again (2026-11-14)
 
-- 2026-11-14, source: `gh run list --branch main` and `gh run view --log-failed`, read after 11:36Z; the [scorecard audit](../research/2026-11-14-scorecard-audit.md) has the same list. **Supersedes** the section above on whether `main` is green: the fix of #211 held for the lint job, and `main` is red again for other causes. Of the pushes after `52d001f`, success on 6, failure on 8 (`6c66202`, `e47491a`, `4f9c050`, `e61605f`, `ea3d854`, `818e67b`, `f5bdb81`, `5eb5dda`), cancelled on the 13 from `7a5d87c` to `88a8352`, and `32c46f0` in progress.
+- 2026-11-14, source: `gh run list --branch main` and `gh run view --log-failed`, read after 11:36Z; the [scorecard audit](../research/2026-11-14-scorecard-audit.md) has the same list. **Supersedes** the section above on whether `main` is green: the fix of #211 held for the lint job, and `main` is red again for other causes. Of the pushes after `52d001f`, success on 6, failure on 8 (`6c66202`, `e47491a`, `4f9c050`, `e61605f`, `ea3d854`, `818e67b`, `f5bdb81`, `5eb5dda`), cancelled on the 12 from `7a5d87c` to `88a8352`, and `32c46f0` in progress when first checked, failed when checked again later (cause not read).
   - First-Banner stall scenario (`the_first_banner_shows_without_holding_up_the_main_loop`, run alone by `just ci-first-frame-timings`): main loop held 110 ms on `e47491a`, 159 ms on `e61605f` and 177 ms on `ea3d854`.
   - Gallery state `incoming-call-banner-identifying-light` not shown within 10 s, on `4f9c050`, `818e67b` and `f5bdb81`: the pattern of #248, open.
   - Gallery test failing in the job that runs everything but the harness's scenarios, on `6c66202` (state not read).
   - `ci-first-frame-timings` failing on `5eb5dda` (cause not read).
-  - The 13 cancellations: not explained. The workflow's own comment says never to cancel on `main`.
+  - The 12 cancellations: not explained. The workflow's own comment says never to cancel on `main`.
 - Reading: every one of those PRs showed "CI passed" from `just ci-local` before it merged, so `just ci-local` and GitHub's 2-CPU runner disagree on the timing and capture checks. That is inferred from the two lists, not tested. `just test-ci-like` is the repro for a failure that shows only under two CPUs ([implementer brief](../agents/implementer-brief.md)). Related open tickets: #248, #255 (a 0-byte `.rmeta` in the shared CI cache) and #269 (the Dialer's first frame under `--ci-like`).
 - 2026-11-14: `just scorecard` cannot pass any item (`crates/automation/src/scorecard.rs` returns "no evidence yet" for every item except 3 and 5, and its test pins `0 of 8 items pass`); #27 is the ticket, labelled `after-v1`.
 

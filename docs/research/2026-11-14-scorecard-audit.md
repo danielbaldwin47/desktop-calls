@@ -41,7 +41,7 @@ Rows by verdict: 6 covered (1, 2, 5a, 6, 7a, B), 2 gap (7b, 8), 4 owner-only (3,
 
 ## GitHub CI on `main` (seen while auditing; checked 2026-11-14 on GitHub)
 
-Not part of the table, but it bears on [destination](../wiki/destination.md) item 2. `gh run list --branch main` shows, for pushes after `52d001f`: success on `795cfca`, `7379d55`, `3a914f5`, `adb00e1`, `ab1f108` and `7ae04a8`; **failure** on `6c66202`, `e47491a`, `4f9c050`, `e61605f`, `ea3d854`, `818e67b`, `f5bdb81` and `5eb5dda`; **cancelled** on the 13 pushes from `7a5d87c` to `88a8352`; `32c46f0` in progress. I did not find who or what cancelled those 13 (the workflow comment says never to cancel on `main`). Causes of the failures, from `gh run view --log-failed`, where I read them:
+Not part of the table, but it bears on [destination](../wiki/destination.md) item 2. `gh run list --branch main` shows, for pushes after `52d001f`: success on `795cfca`, `7379d55`, `3a914f5`, `adb00e1`, `ab1f108` and `7ae04a8`; **failure** on `6c66202`, `e47491a`, `4f9c050`, `e61605f`, `ea3d854`, `818e67b`, `f5bdb81` and `5eb5dda`; **cancelled** on the 12 pushes from `7a5d87c` to `88a8352`; `32c46f0` in progress when first checked (it had completed with failure when checked again later; cause not read). I did not find who or what cancelled those 13 (the workflow comment says never to cancel on `main`). Causes of the failures, from `gh run view --log-failed`, where I read them:
 
 - the first-Banner stall scenario, main loop held 110 ms on `e47491a`, 159 ms on `e61605f` and 177 ms on `ea3d854`;
 - the gallery state `incoming-call-banner-identifying-light` never shown within 10 s, on `4f9c050`, `818e67b` and `f5bdb81` (the #248 pattern, open);

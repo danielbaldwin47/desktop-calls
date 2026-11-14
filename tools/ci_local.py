@@ -4,6 +4,7 @@
 Usage (through just):
   just ci-local                  # every job on HEAD: lint, test, scenarios, timings
   just ci-local lint             # one or more jobs; nothing is posted
+  just ci-local --full           # every job, even for a change that touches only docs
   just ci-local --rebuild-image  # throw the image away and build it again
 
 GitHub runs the full CI only on pushes to main (ticket #158). Everywhere
@@ -39,6 +40,19 @@ What it does, in order:
      If a job failed, posts "CI passed" with state failure. Branch
      protection requires that context, and `just merge` reads it.
 
+Two shortcuts, both said in the log and the status:
+  - Docs only: when HEAD contains origin/main and tools/changes.py says the
+    change from origin/main to HEAD touches only docs that no code names, the
+    run is lint alone, and a pass posts "CI passed" as usual. GitHub CI skips
+    the test jobs for such a push through the same script. It is safe because
+    a squash merge keeps the tree of the head that passed. If main has moved
+    with code since, the head no longer contains origin/main: `just merge`
+    sends the PR back to be brought up to date, and the new run, whose change
+    from origin/main is docs only again, is lint alone as well, while that
+    code is already tested on main. --full runs every job regardless.
+  - A failed lint ends the run: the other jobs would test a commit that must
+    change before it can pass.
+
 The cache, image and logs are under ~/.cache/desktop-calls-ci, never /tmp,
 which has a per-user quota. Each run's log is in logs/. A failed run keeps
 its /tmp (the failed scenarios' directories) in runs/.
@@ -63,6 +77,8 @@ import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
+
+import changes  # the docs-only rule that CI's "Code changed?" job and `just merge` share
 
 EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
 
@@ -113,6 +129,9 @@ JOBS: dict[str, str] = {
 }
 # Jobs that run tests in parallel, so are held to the Desktop's spare CPUs.
 PARALLEL_JOBS = {"test", "scenarios"}
+# A failure here ends the run: the fix is a new commit and a new run, so the
+# other jobs would only spend minutes on a commit that will not be posted.
+FAIL_FAST_JOBS = {"lint"}
 # Jobs whose timings are the test: they run at normal priority, one at a time.
 UNHURRIED_JOBS = {"timings"}
 # Lint's `cargo deny` fetches the advisory database, and its ticket check asks
@@ -549,6 +568,11 @@ def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Pa
             verdict = "passed" if status == 0 else f"FAILED (exit {status})"
             log.line(f"== {job}: {verdict}, {time.monotonic() - started:.0f} s")
             log.line(f"   {blame(usage.others_cpus(), cpus, status != 0)}")
+            if status != 0 and job in FAIL_FAST_JOBS:
+                skipped = jobs[jobs.index(job) + 1:]
+                if skipped:
+                    log.line(f"== {job} failed, so {', '.join(skipped)} did not run.")
+                break
     finally:
         remove_tree(scratch)
     return failed, tmp
@@ -592,8 +616,12 @@ def push_branch(sha: str, log: Log) -> None:
     )
 
 
-def status_description(state: str, seconds: float, failed: list[str], log: Log) -> str:
+def status_description(
+    state: str, seconds: float, failed: list[str], log: Log, docs_only: bool = False
+) -> str:
     what = "passed" if state == "success" else f"failed: {', '.join(failed)}"
+    if docs_only:
+        what += " (docs only, lint alone)"
     return f"just ci-local {what} in {seconds:.0f} s; log {log.display_path()}"[:140]
 
 
@@ -621,7 +649,7 @@ def require_online() -> None:
         )
 
 
-def settle(sha: str, failed: list[str], seconds: float, log: Log) -> int:
+def settle(sha: str, failed: list[str], seconds: float, log: Log, docs_only: bool = False) -> int:
     """Posts the result, if HEAD is still the commit that was tested."""
     require_online()
     now, dirty = head_and_cleanliness()
@@ -637,7 +665,7 @@ def settle(sha: str, failed: list[str], seconds: float, log: Log) -> int:
             log.line(f"{', '.join(failed)} failed, and GitHub doesn't have {sha[:7]}: nothing posted.")
             return EXIT_FAILED
         push_branch(sha, log)
-    post_status(sha, state, status_description(state, seconds, failed, log))
+    post_status(sha, state, status_description(state, seconds, failed, log, docs_only))
     if failed:
         log.line(f"{CONTEXT}: failure posted on {sha[:7]} ({', '.join(failed)} failed).")
         return EXIT_FAILED
@@ -646,6 +674,26 @@ def settle(sha: str, failed: list[str], seconds: float, log: Log) -> int:
 
 
 # -- Main ---------------------------------------------------------------------
+
+
+def is_docs_only(sha: str, log: Log) -> bool:
+    """Whether the change from origin/main to `sha` touches only docs that no
+    code names, which lint alone tests. Anything unclear says no, and says why."""
+    if subprocess.run(["git", "fetch", "--quiet", "origin", "main"], capture_output=True).returncode != 0:
+        log.line("Couldn't fetch origin/main, so every job runs.")
+        return False
+    base = git("rev-parse", "origin/main")
+    contains = subprocess.run(["git", "merge-base", "--is-ancestor", base, sha], capture_output=True)
+    if contains.returncode != 0:
+        log.line(f"{sha[:7]} doesn't contain origin/main ({base[:7]}), so every job runs.")
+        return False
+    try:
+        code, reason = changes.code_changes(changes.run_git, base, sha)
+    except RuntimeError as error:
+        log.line(f"Couldn't compare with origin/main ({error}), so every job runs.")
+        return False
+    log.line(reason)
+    return not code
 
 
 def stop_on_sigterm() -> None:
@@ -666,11 +714,15 @@ def main() -> int:
                         help=f"one of {', '.join(JOBS)}; default all, which alone posts a status")
     parser.add_argument("--rebuild-image", action="store_true",
                         help="remove the image and build it again from the newest archlinux:latest")
+    parser.add_argument("--full", action="store_true",
+                        help="run every job even when the change touches only docs")
     args = parser.parse_args()
     jobs = args.jobs or list(JOBS)
+    every_job = not args.jobs or set(args.jobs) == set(JOBS)
+    docs_only = False
     stop_on_sigterm()
     try:
-        if not args.jobs or set(args.jobs) == set(JOBS):
+        if every_job:
             require_online()
         sha = require_clean_head()
         lock = take_turn()  # held until the process exits
@@ -682,6 +734,9 @@ def main() -> int:
         prune_old_runs()
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
+        if every_job and not args.full and is_docs_only(sha, log):
+            docs_only, jobs = True, ["lint"]
+            log.line("Docs only: lint alone, as GitHub CI skips the test jobs for such a change.")
         build_image(log, args.rebuild_image)
         started = time.monotonic()
         failed, tmp = run_jobs(log, sha, jobs)
@@ -691,10 +746,10 @@ def main() -> int:
             log.line(f"Failed scenarios' directories are in {tmp}")
         else:
             remove_tree(tmp)
-        if args.jobs and set(args.jobs) != set(JOBS):
+        if not every_job:
             log.line("Only some jobs ran, so no status was posted.")
             return EXIT_FAILED if failed else EXIT_PASSED
-        return settle(sha, failed, seconds, log)
+        return settle(sha, failed, seconds, log, docs_only)
     except Refused as refusal:
         print(refusal, file=sys.stderr)
         return EXIT_REFUSED

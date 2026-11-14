@@ -424,5 +424,174 @@ class Posting(unittest.TestCase):
             push.assert_not_called()
 
 
+class Stopped(unittest.TestCase):
+    """A failed lint ends the run: head 8b3c277 failed lint in 4 s and the
+    other jobs still ran for 205 s."""
+
+    def run_jobs(self, statuses: dict[str, int], jobs: list[str]) -> tuple[list[str], list[str]]:
+        ran = []
+
+        def run_in_image(log, scratch, tmp, command, **options):
+            job = next(name for name, text in ci_local.JOBS.items() if text == command) \
+                if command != ci_local.PREPARE else "prepare"
+            ran.append(job)
+            return statuses.get(job, 0)
+
+        with tempfile.TemporaryDirectory() as runs, contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(ci_local, "RUNS", pathlib.Path(runs)), \
+                mock.patch.object(ci_local, "checkout"), \
+                mock.patch.object(ci_local, "remove_tree"), \
+                mock.patch.object(ci_local, "watch_others", return_value=0.0), \
+                mock.patch.object(ci_local, "wait_for_calm"), \
+                mock.patch.object(ci_local, "run_in_image", side_effect=run_in_image):
+            log = mock.Mock()
+            log.name = "run"
+            failed, _ = ci_local.run_jobs(log, "a" * 40, jobs)
+        return failed, ran[1:]
+
+    def test_a_failed_lint_runs_no_other_job(self):
+        failed, ran = self.run_jobs({"lint": 1}, list(ci_local.JOBS))
+        self.assertEqual((failed, ran), (["lint"], ["lint"]))
+
+    def test_a_failed_test_job_still_lets_the_scenarios_run(self):
+        failed, ran = self.run_jobs({"test": 1}, list(ci_local.JOBS))
+        self.assertEqual(failed, ["test"])
+        self.assertEqual(ran, list(ci_local.JOBS))
+
+
+class DocsOnly(unittest.TestCase):
+    """`just ci-local` tests only lint when the change from origin/main is
+    docs that no code names (tools/changes.py, the rule GitHub CI uses)."""
+
+    ENV = {
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = pathlib.Path(directory.name)
+        patcher = mock.patch.dict(os.environ, self.ENV)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.origin, self.work = root / "origin.git", root / "work"
+        self.git("init", "--quiet", "--bare", "--initial-branch=main", str(self.origin), cwd=root)
+        self.git("clone", "--quiet", str(self.origin), str(self.work), cwd=root)
+        self.commit("justfile", "lint:\n", "Start")
+        self.git("push", "--quiet", "origin", "HEAD:main")
+        self.git("checkout", "--quiet", "-b", "change")
+        previous = os.getcwd()
+        os.chdir(self.work)
+        self.addCleanup(os.chdir, previous)
+
+    def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd or self.work, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def commit(self, name: str, text: str, subject: str) -> str:
+        path = self.work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        self.git("add", name)
+        self.git("commit", "--quiet", "-m", subject)
+        return self.git("rev-parse", "HEAD")
+
+    def docs_only(self, sha: str) -> tuple[bool, str]:
+        log = mock.Mock()
+        return ci_local.is_docs_only(sha, log), " ".join(call.args[0] for call in log.line.call_args_list)
+
+    def test_a_change_to_docs_alone_is_docs_only(self):
+        sha = self.commit("docs/fixture/page.md", "words\n", "Docs")
+        self.assertEqual(self.docs_only(sha)[0], True)
+
+    def test_a_change_that_touches_code_is_not(self):
+        self.commit("docs/fixture/page.md", "words\n", "Docs")
+        sha = self.commit("justfile", "lint:\n\techo\n", "Code")
+        self.assertEqual(self.docs_only(sha)[0], False)
+
+    def test_docs_that_code_names_are_not_docs_only(self):
+        self.commit("tools/reader.py", "open('docs/fixture/page.md')\n", "Code that reads a page")
+        self.git("push", "--quiet", "origin", "HEAD:main")
+        sha = self.commit("docs/fixture/page.md", "words\n", "Docs")
+        self.assertEqual(self.docs_only(sha)[0], False)
+
+    def test_a_head_that_lacks_a_newer_origin_main_is_not_docs_only(self):
+        sha = self.commit("docs/fixture/page.md", "words\n", "Docs")
+        self.git("checkout", "--quiet", "main")
+        self.commit("crates/x.rs", "fn main() {}\n", "Code lands on main")
+        self.git("push", "--quiet", "origin", "HEAD:main")
+        self.git("checkout", "--quiet", "change")
+        answer, said = self.docs_only(sha)
+        self.assertEqual(answer, False)
+        self.assertIn("doesn't contain origin/main", said)
+
+    def test_a_head_that_merged_the_newer_origin_main_is_judged_from_it(self):
+        self.commit("docs/fixture/page.md", "words\n", "Docs")
+        self.git("checkout", "--quiet", "main")
+        self.commit("crates/x.rs", "fn main() {}\n", "Code lands on main")
+        self.git("push", "--quiet", "origin", "HEAD:main")
+        self.git("checkout", "--quiet", "change")
+        self.git("merge", "--quiet", "--no-edit", "main")
+        self.assertEqual(self.docs_only(self.git("rev-parse", "HEAD"))[0], True)
+
+    def test_a_failed_fetch_is_not_docs_only(self):
+        sha = self.commit("docs/fixture/page.md", "words\n", "Docs")
+        self.git("remote", "set-url", "origin", str(self.origin) + "-gone")
+        self.assertEqual(self.docs_only(sha)[0], False)
+
+
+class Choosing(unittest.TestCase):
+    """What main() runs and what it posts."""
+
+    SHA = "a" * 40
+
+    def main(self, *arguments: str, docs_only: bool) -> tuple[mock.Mock, mock.Mock]:
+        run_jobs = mock.Mock(return_value=([], pathlib.Path("/tmp/x")))
+        settle = mock.Mock(return_value=ci_local.EXIT_PASSED)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch("sys.argv", ["ci_local.py", *arguments]), \
+                mock.patch.object(ci_local, "require_online"), \
+                mock.patch.object(ci_local, "require_clean_head", return_value=self.SHA), \
+                mock.patch.object(ci_local, "take_turn"), \
+                mock.patch.object(ci_local, "Log"), \
+                mock.patch.object(ci_local, "clear_stale_test_folders", return_value=[]), \
+                mock.patch.object(ci_local, "prune_old_runs"), \
+                mock.patch.object(ci_local, "build_image"), \
+                mock.patch.object(ci_local, "remove_tree"), \
+                mock.patch.object(ci_local, "is_docs_only", return_value=docs_only), \
+                mock.patch.object(ci_local, "run_jobs", run_jobs), \
+                mock.patch.object(ci_local, "settle", settle):
+            ci_local.main()
+        return run_jobs, settle
+
+    def test_a_docs_only_change_runs_lint_alone_and_posts_the_status(self):
+        run_jobs, settle = self.main(docs_only=True)
+        self.assertEqual(run_jobs.call_args.args[2], ["lint"])
+        self.assertEqual(settle.call_args.args[4], True)
+
+    def test_a_change_with_code_runs_every_job(self):
+        run_jobs, settle = self.main(docs_only=False)
+        self.assertEqual(run_jobs.call_args.args[2], list(ci_local.JOBS))
+        self.assertEqual(settle.call_args.args[4], False)
+
+    def test_full_runs_every_job_for_docs(self):
+        run_jobs, _ = self.main("--full", docs_only=True)
+        self.assertEqual(run_jobs.call_args.args[2], list(ci_local.JOBS))
+
+    def test_named_jobs_run_as_named_for_docs(self):
+        run_jobs, settle = self.main("lint", "test", docs_only=True)
+        self.assertEqual(run_jobs.call_args.args[2], ["lint", "test"])
+        settle.assert_not_called()
+
+    def test_the_status_says_the_run_was_docs_only(self):
+        log = mock.Mock()
+        log.display_path.return_value = "~/.cache/desktop-calls-ci/logs/x.log"
+        text = ci_local.status_description("success", 40, [], log, docs_only=True)
+        self.assertIn("docs only, lint alone", text)
+        self.assertLessEqual(len(text), 140)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -330,8 +330,9 @@ impl Shell {
                         let input = match bluez::connect_phone(&system, &address, away).await {
                             Ok(connected) => {
                                 // Before the result, which would otherwise
-                                // page a Phone still held as away again.
-                                if connected == bluez::Connected::Already {
+                                // page a Phone still held as away again. One
+                                // held as present needs no word.
+                                if away && connected == bluez::Connected::Already {
                                     let _ = inputs.unbounded_send(bluez::presence(&address, true));
                                 }
                                 Input::ConnectPhoneDone { attempt }

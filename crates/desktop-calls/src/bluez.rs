@@ -253,14 +253,8 @@ pub async fn connect_phone(
     away: bool,
 ) -> Result<Connected, ConnectFailure> {
     let device = match find_phone(system, address).await {
-        Ok(Some((_, true))) if away => {
-            tracing::debug!(
-                event_kind = %EventKind::PhoneConnectRequested,
-                phone_address = %address,
-                "BlueZ has the Phone connected already: not asking it to connect"
-            );
-            return Ok(Connected::Already);
-        }
+        // Reported as the Phone present, which logs it.
+        Ok(Some((_, true))) if away => return Ok(Connected::Already),
         Ok(Some((device, _))) => device,
         Ok(None) => {
             connect_failed(

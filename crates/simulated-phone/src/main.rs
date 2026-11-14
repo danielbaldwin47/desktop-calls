@@ -710,11 +710,11 @@ impl Control {
     /// `"connect-profile-fails"`, `"connect-profile-fails-once"`,
     /// `"late-line-identification"`, `"chld-unsupported"`,
     /// `"hangup-ignored"`, `"hangup-unanswered-once"`,
-    /// `"slow-service-level"` or `"calls-listed-late"`.
+    /// `"slow-service-level"`, `"calls-listed-late"` or `"connected-unannounced"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level and calls-listed-late"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late and connected-unannounced"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

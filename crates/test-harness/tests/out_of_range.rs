@@ -183,6 +183,60 @@ fn a_phone_that_connects_by_itself_during_a_page_is_not_paged_again() {
     assert_eq!(connects(&held), paged);
 }
 
+/// The Phone connects by itself between two pages, and the app never hears
+/// BlueZ mark it connected, so it still holds the Phone as away: when the
+/// next page is due, the app sees BlueZ has the Phone connected and doesn't
+/// page it (ticket #212).
+#[test]
+fn a_phone_connected_unheard_between_pages_is_not_paged() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    let phone = harness.simulated_phone();
+    phone.enable_quirk("connected-unannounced");
+    // The first page fails; the next is due 1 s later.
+    harness.wait_for_app_log("br-connection-page-timeout", RECONNECT_DEADLINE);
+    let paged = connects(&recorded(&harness));
+
+    phone.connect();
+    wait_connected(&harness, DEADLINE);
+
+    let held = phone.recorded_holds(
+        "no Connect to a connected Phone",
+        RECONNECT_DEADLINE,
+        |recorded| connects(recorded) == paged,
+    );
+    assert_eq!(connects(&held), paged);
+    harness.wait_for_app_log("phone-present", DEADLINE);
+}
+
+/// The Phone connects by itself while the app pages it, unheard, and BlueZ
+/// fails the page `br-connection-already-connected`: the app reads that as
+/// the Phone present, not as a failure to try again (ticket #212).
+#[test]
+fn a_page_answered_already_connected_counts_as_the_phone_present() {
+    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    let phone = harness.simulated_phone();
+    phone.enable_quirk("connected-unannounced");
+    phone.wait_for_recorded(
+        "the app pages the Phone before it is in range",
+        DEADLINE,
+        |recorded| connects(recorded) >= 1,
+    );
+
+    phone.connect();
+    wait_connected(&harness, DEADLINE);
+
+    // Only the page's answer can say the Phone is present: BlueZ never
+    // announced it.
+    harness.wait_for_app_log("phone-present", DEADLINE);
+    let failures: Vec<_> = harness
+        .app_log()
+        .lines()
+        .filter(|line| line.contains("phone-connect-failed") && line.contains("already-connected"))
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(failures, Vec::<String>::new());
+}
+
 /// Scenario 18.
 #[test]
 fn after_resume_the_phone_is_connected_within_10_s() {

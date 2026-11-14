@@ -143,6 +143,16 @@ const INSTALL_SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/i
 /// CI sets it when run by hand with `keep_scenario_logs`.
 pub const KEEP_SCENARIO_LOGS: &str = "KEEP_SCENARIO_LOGS";
 
+/// The environment variable naming a Mesa shader cache that scenarios share,
+/// in place of the empty one in each scenario's own `XDG_CACHE_HOME`. A
+/// Desktop that has run the app before keeps Mesa's compiled programs in its
+/// cache; a scenario's is always empty, so without this, every first frame on
+/// a machine with no GPU waits for Mesa's software renderer to compile the
+/// programs a window draws with (#282). `just ci-first-frame-timings` fills
+/// one with a warm-up run, then judges the first frames against it. Only
+/// Mesa reads it, as `MESA_SHADER_CACHE_DIR`; the app can't tell.
+pub const SCENARIO_SHADER_CACHE: &str = "SCENARIO_SHADER_CACHE";
+
 /// The journal's socket. While it is reachable the app logs there, so the
 /// harness hides it from the app to get a log file per scenario.
 const JOURNAL_SOCKET: &str = "/run/systemd/journal/socket";

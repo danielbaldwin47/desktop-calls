@@ -70,6 +70,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: archlinux:latest
     steps:
@@ -95,6 +96,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # A green run took 6 minutes (run 43545913400). Without a limit, a hung gallery held
+    # this job for GitHub's 6 h default (#282).
+    timeout-minutes: 30
     # Arch Linux, to match the user's Desktop (Omarchy).
     container: &container
       image: archlinux:latest

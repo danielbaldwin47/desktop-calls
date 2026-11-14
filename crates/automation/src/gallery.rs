@@ -19,16 +19,16 @@ use test_harness::vcards::{self, CallKind};
 
 mod call_pill;
 mod indicator;
+mod look;
 mod page;
 
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, draw_indicator, indicator_path,
 };
+use look::{LOOKS, Look};
 use page::index_html;
-use test_harness::{
-    AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot, Theme,
-};
+use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
 static BEFORE_KEYPAD_CAPTURES: AtomicUsize = AtomicUsize::new(0);
@@ -64,62 +64,6 @@ const SECOND_NUMBER: &str = "+447700900456";
 /// A third caller, while the first Call is on hold and the second live.
 const THIRD_NUMBER: &str = "+447700900789";
 
-/// The stock Answer button's green, the stock Decline and Hang up buttons'
-/// red, and the orange that marks the microphone muted under every look.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
-const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
-const ORANGE: [u8; 3] = [0xe6, 0x61, 0x00];
-
-/// How the Desktop looks in one column of the gallery.
-#[derive(Clone, Copy)]
-enum Look {
-    /// No Omarchy, light or dark as the settings portal says.
-    Stock(Theme),
-    Omarchy(OmarchyTheme),
-}
-
-const LOOKS: [Look; 4] = [
-    Look::Stock(Theme::Light),
-    Look::Stock(Theme::Dark),
-    Look::Omarchy(OmarchyTheme::Light),
-    Look::Omarchy(OmarchyTheme::Dark),
-];
-
-impl Look {
-    /// Its name, for file names and captions.
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Stock(theme) => theme.as_str(),
-            Self::Omarchy(theme) => theme.as_str(),
-        }
-    }
-
-    /// The Answer button's colour.
-    fn green(self) -> [u8; 3] {
-        match self {
-            Self::Stock(_) => GREEN,
-            Self::Omarchy(theme) => theme.colour("green"),
-        }
-    }
-
-    /// The Decline and Hang up buttons' colour.
-    fn red(self) -> [u8; 3] {
-        match self {
-            Self::Stock(_) => RED,
-            Self::Omarchy(theme) => theme.colour("red"),
-        }
-    }
-
-    /// Sets the Desktop up to look this way. Omarchy also tells the settings
-    /// portal whether its theme is light or dark.
-    fn builder(self) -> Builder {
-        match self {
-            Self::Stock(theme) => Harness::builder().theme(theme),
-            Self::Omarchy(theme) => Harness::builder().theme(theme.mode()).omarchy_theme(theme),
-        }
-    }
-}
-
 const STATES: &[State] = &[
     State {
         name: "bare-output",
@@ -139,6 +83,28 @@ const STATES: &[State] = &[
             ring(harness);
         },
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
+        name: "incoming-call-banner-keyboard",
+        title: "The Incoming Call Banner, ringing, given the keyboard by the keybinding: an accent border",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            ring(harness);
+            harness.activate();
+            harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
+                state
+                    .surface("banner")
+                    .and_then(|banner| banner.get("focused"))
+                    .is_some_and(|focused| focused == "true")
+            });
+        },
+        shown: |screenshot, look| {
+            shows(screenshot, look.green())
+                && shows(screenshot, look.red())
+                && bordered(screenshot, look.accent())
+        },
     },
     State {
         name: "incoming-call-banner-identifying",
@@ -235,7 +201,7 @@ const STATES: &[State] = &[
         // it, about 220.
         shown: |screenshot, look| {
             shows(screenshot, look.red())
-                && shows(screenshot, ORANGE)
+                && shows(screenshot, look.warning())
                 && app_region(screenshot).is_some_and(|window| window.bottom - window.top > 300.0)
         },
     },
@@ -265,7 +231,7 @@ const STATES: &[State] = &[
         shown: |screenshot, look| {
             shows(screenshot, look.red())
                 && !shows(screenshot, look.green())
-                && !shows(screenshot, ORANGE)
+                && !shows(screenshot, look.warning())
         },
     },
     State {
@@ -365,7 +331,11 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| dimmed(screenshot, look) && !shows(screenshot, look.green()),
+        shown: |screenshot, look| {
+            dimmed(screenshot, look)
+                && !shows(screenshot, look.green())
+                && shows(screenshot, look.warning())
+        },
     },
     State {
         name: "call-window-calling",
@@ -788,6 +758,28 @@ fn shows(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
                 .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
         })
         .is_some()
+}
+
+/// Whether the surface on screen is edged all round in `colour`: the
+/// pixels of that colour reach each of its four sides, as a border does
+/// and a button or focus ring inside it does not.
+fn bordered(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
+    let Some(surface) = app_region(screenshot) else {
+        return false;
+    };
+    let Some(edged) = screenshot.region_where(|pixel| {
+        pixel
+            .iter()
+            .zip(colour)
+            .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
+    }) else {
+        return false;
+    };
+    let reaches = |edge: f64, side: f64| (edge - side).abs() <= 2.0;
+    reaches(edged.left, surface.left)
+        && reaches(edged.top, surface.top)
+        && reaches(edged.right, surface.right)
+        && reaches(edged.bottom, surface.bottom)
 }
 
 /// What `automation screenshot` renders, and where.

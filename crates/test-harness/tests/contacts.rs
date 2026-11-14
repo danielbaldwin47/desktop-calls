@@ -106,7 +106,7 @@ fn contacts_with_alice(others: usize) -> String {
 }
 
 /// The Banner's Answer button's green.
-const GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 /// How long the screen may take to show what the app reports.
 const SCREEN_DEADLINE: Duration = Duration::from_secs(10);
 

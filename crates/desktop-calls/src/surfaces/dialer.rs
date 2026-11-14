@@ -2,13 +2,13 @@
 
 use super::call_window::notice_label;
 use super::{
-    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame,
+    DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame, class,
     has_command_modifier, now, utc_offset_seconds,
 };
 use crate::logging::EventKind;
 use desktop_calls_core::matching::{DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{CallHistoryKind, DialerView, Input, Timestamp};
+use desktop_calls_core::{CallHistoryKind, Caller, DialerView, Input, Timestamp};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -217,6 +217,13 @@ impl Dialer {
             let text = row_text(row, now, offset);
             let title = gtk::Label::new(Some(&text.title));
             title.add_css_class("title");
+            // A Call History row with no name shows the bare number.
+            if row.kind != DialerRowKind::CallNumber
+                && row.name.trim().is_empty()
+                && matches!(row.caller, Caller::Number(_))
+            {
+                title.add_css_class(class::NUMBER);
+            }
             title.set_xalign(0.0);
             title.set_ellipsize(gtk::pango::EllipsizeMode::End);
             let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -227,13 +234,10 @@ impl Dialer {
                 detail.set_xalign(0.0);
                 detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 // Missed Calls stand out in the theme's red.
-                detail.add_css_class(
-                    if row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed) {
-                        "error"
-                    } else {
-                        "dim-label"
-                    },
-                );
+                detail.add_css_class(class::META);
+                if row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed) {
+                    detail.add_css_class(class::MISSED);
+                }
                 lines.append(&detail);
             }
             let list_row = gtk::ListBoxRow::new();

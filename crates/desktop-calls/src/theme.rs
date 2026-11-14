@@ -16,13 +16,22 @@
 //!   replaced.
 //! - Without Omarchy, stock Adwaita, light or dark as the settings portal
 //!   says. Without Hyprland, stock corners.
+//! - Every surface draws with the colour roles in [`roles`], computed from
+//!   the palette so that text reads at 4.5:1 or better, and with the type
+//!   roles and pieces in [`style`]. Surfaces name a class, never a colour.
 //! - Once a switch has been applied, the hook given to
 //!   [`Theme::when_switched`] runs, so the surfaces can log when they reach
 //!   the screen in the new theme (ticket #99).
 
+mod colour;
+mod roles;
+mod style;
+
+pub(crate) use style::class;
+
 use std::cell::{Cell, RefCell};
 use std::env;
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
@@ -35,22 +44,14 @@ use gtk::glib::{self, SourceId};
 use crate::hyprland::{self, Unknown};
 use crate::logging::EventKind;
 
+use roles::{Palette, Roles};
+
 /// How long `current/` must be quiet before the theme is read again. A
 /// switch is a delete and a move a moment apart.
 const DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// Omarchy's state directory for the current theme, under the home directory.
 const OMARCHY_CURRENT: &str = ".local/state/omarchy/current";
-
-/// The Answer button's green and the Decline and Hang up buttons' red, with
-/// white labels, as on a phone, when there is no Omarchy theme.
-const STOCK_GREEN: Rgb = Rgb(0x26, 0xa2, 0x69);
-const STOCK_RED: Rgb = Rgb(0xc0, 0x1c, 0x28);
-const WHITE: Rgb = Rgb(0xff, 0xff, 0xff);
-const BLACK: Rgb = Rgb(0x00, 0x00, 0x00);
-
-/// The contrast a label needs against its background (WCAG AA).
-const READABLE: f64 = 4.5;
 
 /// Follows the look for as long as it lives.
 pub struct Theme {
@@ -98,6 +99,13 @@ impl Theme {
         });
         let _ = shared.reread_palette();
         shared.apply();
+        // Without Omarchy, stock Adwaita's roles follow its light or dark.
+        let following = Rc::downgrade(&shared);
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(shared) = following.upgrade() {
+                shared.apply();
+            }
+        });
         let monitor = shared
             .current
             .as_deref()
@@ -151,7 +159,14 @@ impl Shared {
     /// Brings the provider and the colour scheme up to date.
     fn apply(&self) {
         let palette = self.palette.borrow();
-        let css = css(palette.as_ref(), self.rounding.get());
+        let (roles, adwaita) = match palette.as_ref() {
+            Some(palette) => (Roles::omarchy(palette), palette.adwaita_variables()),
+            None => (
+                Roles::stock(adw::StyleManager::default().is_dark()),
+                Vec::new(),
+            ),
+        };
+        let css = style::css(&roles, &adwaita, self.rounding.get());
         if *self.css.borrow() != css {
             self.provider.load_from_string(&css);
             *self.css.borrow_mut() = css;
@@ -310,225 +325,5 @@ fn rounding_unknown(unknown: &Unknown) {
             error_kind = unknown.as_str(),
             "Hyprland has no corner rounding to follow"
         ),
-    }
-}
-
-/// The CSS for `palette` (stock Adwaita without one) and `rounding` (stock
-/// corners without one).
-fn css(palette: Option<&Palette>, rounding: Option<u32>) -> String {
-    let mut css = String::new();
-    let (green, red, label) = match palette {
-        Some(palette) => {
-            css.push_str(":root {\n");
-            for (variable, colour) in palette.variables() {
-                let _ = writeln!(css, "  --{variable}: {colour};");
-            }
-            css.push_str("}\n");
-            palette.call_buttons()
-        }
-        None => (STOCK_GREEN, STOCK_RED, WHITE),
-    };
-    let _ = writeln!(
-        css,
-        ".desktop-calls-surface button.answer {{ background: {green}; color: {label}; }}\n\
-         .desktop-calls-surface button.decline,\n\
-         .desktop-calls-surface button.hang-up {{ background: {red}; color: {label}; }}"
-    );
-    if let Some(rounding) = rounding {
-        let _ = writeln!(
-            css,
-            ".desktop-calls-surface,\n\
-             .desktop-calls-surface button {{ border-radius: {rounding}px; }}"
-        );
-    }
-    css
-}
-
-/// An sRGB colour.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Rgb(u8, u8, u8);
-
-impl Rgb {
-    /// `#rrggbb` or `#rgb`; anything else is no colour.
-    fn parse(text: &str) -> Option<Self> {
-        let hex = text.strip_prefix('#')?;
-        if !hex.bytes().all(|digit| digit.is_ascii_hexdigit()) {
-            return None;
-        }
-        let channel = |digits: &str| u8::from_str_radix(digits, 16).ok();
-        match hex.len() {
-            6 => Some(Self(
-                channel(&hex[0..2])?,
-                channel(&hex[2..4])?,
-                channel(&hex[4..6])?,
-            )),
-            3 => {
-                let short = |at: usize| channel(&hex[at..=at]).map(|value| value * 17);
-                Some(Self(short(0)?, short(1)?, short(2)?))
-            }
-            _ => None,
-        }
-    }
-
-    /// WCAG relative luminance, 0 for black to 1 for white.
-    fn luminance(self) -> f64 {
-        let linear = |channel: u8| {
-            let value = f64::from(channel) / 255.0;
-            if value <= 0.040_45 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * linear(self.0) + 0.7152 * linear(self.1) + 0.0722 * linear(self.2)
-    }
-
-    /// WCAG contrast ratio, from 1 to 21.
-    fn contrast(self, other: Self) -> f64 {
-        let (a, b) = (self.luminance(), other.luminance());
-        (a.max(b) + 0.05) / (a.min(b) + 0.05)
-    }
-
-    fn is_dark(self) -> bool {
-        self.contrast(BLACK) < self.contrast(WHITE)
-    }
-}
-
-impl fmt::Display for Rgb {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
-    }
-}
-
-/// What Desktop Calls takes from an Omarchy theme's `colors.toml`. A colour
-/// the theme lacks, or gives in a form other than `#rrggbb`, stays stock.
-#[derive(Clone, Debug, PartialEq)]
-struct Palette {
-    dark: bool,
-    accent: Option<Rgb>,
-    background: Option<Rgb>,
-    foreground: Option<Rgb>,
-    red: Option<Rgb>,
-    green: Option<Rgb>,
-    yellow: Option<Rgb>,
-}
-
-impl Palette {
-    /// `None` if the table has no colour Desktop Calls uses.
-    fn from_table(table: &toml::Table) -> Option<Self> {
-        let colour = |key: &str| table.get(key)?.as_str().and_then(Rgb::parse);
-        let background = colour("background");
-        let dark = match table.get("mode").and_then(toml::Value::as_str) {
-            Some("dark") => true,
-            Some("light") => false,
-            _ => background.is_some_and(Rgb::is_dark),
-        };
-        let palette = Self {
-            dark,
-            accent: colour("accent"),
-            background,
-            foreground: colour("foreground"),
-            red: colour("red"),
-            green: colour("green"),
-            yellow: colour("yellow"),
-        };
-        let any = [
-            palette.accent,
-            palette.background,
-            palette.foreground,
-            palette.red,
-            palette.green,
-            palette.yellow,
-        ]
-        .iter()
-        .any(Option::is_some);
-        any.then_some(palette)
-    }
-
-    /// libadwaita's colour variables, without the leading `--`, and their
-    /// colours. Borders and shades are left to libadwaita, which mixes them
-    /// from these.
-    fn variables(&self) -> Vec<(&'static str, Rgb)> {
-        let mut variables = Vec::new();
-        if let Some(background) = self.background {
-            for variable in [
-                "window-bg-color",
-                "view-bg-color",
-                "headerbar-bg-color",
-                "headerbar-backdrop-color",
-                "sidebar-bg-color",
-                "sidebar-backdrop-color",
-                "secondary-sidebar-bg-color",
-                "secondary-sidebar-backdrop-color",
-                "dialog-bg-color",
-                "popover-bg-color",
-                "overview-bg-color",
-            ] {
-                variables.push((variable, background));
-            }
-        }
-        if let Some(foreground) = self.foreground {
-            for variable in [
-                "window-fg-color",
-                "view-fg-color",
-                "headerbar-fg-color",
-                "sidebar-fg-color",
-                "secondary-sidebar-fg-color",
-                "dialog-fg-color",
-                "popover-fg-color",
-                "overview-fg-color",
-                "card-fg-color",
-            ] {
-                variables.push((variable, foreground));
-            }
-        }
-        for (background, foreground, colour) in [
-            ("accent-bg-color", "accent-fg-color", self.accent),
-            ("destructive-bg-color", "destructive-fg-color", self.red),
-            ("error-bg-color", "error-fg-color", self.red),
-            ("success-bg-color", "success-fg-color", self.green),
-            ("warning-bg-color", "warning-fg-color", self.yellow),
-        ] {
-            if let Some(colour) = colour {
-                variables.push((background, colour));
-                variables.push((foreground, self.label_on(&[colour])));
-            }
-        }
-        variables
-    }
-
-    /// The Answer button's colour and the Decline and Hang up buttons'
-    /// colour, the theme's green and red, and one label colour for both, so
-    /// the pair looks alike.
-    fn call_buttons(&self) -> (Rgb, Rgb, Rgb) {
-        let green = self.green.unwrap_or(STOCK_GREEN);
-        let red = self.red.unwrap_or(STOCK_RED);
-        (green, red, self.label_on(&[green, red]))
-    }
-
-    /// A label colour readable on every one of `colours`: the theme's own
-    /// background or foreground if either is readable, otherwise whichever
-    /// of those, white or black is the most readable.
-    fn label_on(&self, colours: &[Rgb]) -> Rgb {
-        let contrast = |label: Rgb| {
-            colours
-                .iter()
-                .map(|colour| colour.contrast(label))
-                .fold(f64::INFINITY, f64::min)
-        };
-        let most_readable = |candidates: &[Option<Rgb>]| {
-            candidates
-                .iter()
-                .flatten()
-                .copied()
-                .max_by(|a, b| contrast(*a).total_cmp(&contrast(*b)))
-        };
-        let themed = most_readable(&[self.background, self.foreground])
-            .filter(|label| contrast(*label) >= READABLE);
-        themed
-            .or_else(|| {
-                most_readable(&[self.background, self.foreground, Some(WHITE), Some(BLACK)])
-            })
-            .unwrap_or(WHITE)
     }
 }

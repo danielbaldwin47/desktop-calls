@@ -9,7 +9,9 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
-use test_harness::{AppEvent, BAR_COLOUR, Builder, Harness, OmarchyTheme, Region, Screenshot};
+use test_harness::{
+    AppEvent, AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot,
+};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -28,7 +30,7 @@ const NUMBER: &str = "+447700900123";
 /// Stock Adwaita's light window background (libadwaita 1.10).
 const ADWAITA_LIGHT_WINDOW: [u8; 3] = [0xfa, 0xfa, 0xfb];
 /// The stock Answer button's green.
-const STOCK_GREEN: [u8; 3] = [0x26, 0xa2, 0x69];
+const STOCK_GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 
 /// The Banner's corner radius once Hyprland rounds windows.
 const ROUNDING: u32 = 12;
@@ -86,23 +88,23 @@ fn ringing(builder: Builder, green: [u8; 3]) -> (Harness, Region) {
 }
 
 /// A few pixels of a surface's background: in its left padding, halfway
-/// down, clear of its corners and its content.
+/// down, clear of its border, its corners and its content.
 fn background_patch(surface: Region) -> Region {
     let middle = f64::midpoint(surface.top, surface.bottom);
     Region {
-        left: surface.left + 3.0,
+        left: surface.left + 4.0,
         top: middle - 3.0,
-        right: surface.left + 9.0,
+        right: surface.left + 10.0,
         bottom: middle + 3.0,
     }
 }
 
-/// One layout pixel just inside the surface's top-left corner: background
-/// where the corner is square, black where it is rounded. At scale 1.6 the
-/// surface's edges fall between screen pixels, so its outermost pixels are
-/// blends; this is one layout pixel clear of them.
+/// One layout pixel inside the surface's top-left corner, clear of its
+/// border: background where the corner is square, black where it is
+/// rounded. At scale 1.6 the surface's edges fall between screen pixels, so
+/// its outermost pixels are blends.
 fn corner(surface: Region) -> Region {
-    let (left, top) = (surface.left.ceil() + 1.0, surface.top.ceil() + 1.0);
+    let (left, top) = (surface.left.ceil() + 2.0, surface.top.ceil() + 2.0);
     Region {
         left,
         top,
@@ -265,4 +267,156 @@ fn an_open_banner_rounds_its_corners_when_hyprland_reloads_with_rounding() {
     // The rest of the Banner stays put.
     let screenshot = harness.screenshot("rounded-banner");
     assert_eq!(app_region(&screenshot), Some(banner));
+}
+
+/// `percent` of `top` over `bottom`, as CSS mixes colours.
+fn mix(bottom: [u8; 3], top: [u8; 3], percent: u16) -> [u8; 3] {
+    let channel = |at: usize| {
+        let mixed =
+            (u16::from(bottom[at]) * (100 - percent) + u16::from(top[at]) * percent + 50) / 100;
+        u8::try_from(mixed).unwrap_or(u8::MAX)
+    };
+    [channel(0), channel(1), channel(2)]
+}
+
+/// The colours across a surface's left edge, halfway down: from just
+/// outside it to three layout pixels in.
+fn left_edge(screenshot: &Screenshot, surface: Region) -> Vec<[u8; 3]> {
+    let middle = f64::midpoint(surface.top, surface.bottom);
+    (0..16)
+        .map(|step| screenshot.colour_at(surface.left - 0.5 + f64::from(step) * 0.25, middle))
+        .collect()
+}
+
+/// Whether `surface`'s left edge, halfway down, is a border in `border`
+/// rather than its `background` running to the edge.
+///
+/// At scale 1.6 the outermost screen pixel is a blend of the black outside
+/// and whatever is at the edge, and a blend of black and a light
+/// background can match a light theme's border colour. A border at least
+/// 1 layout pixel wide covers 1.6 screen pixels, so at least two pixels
+/// from the edge in differ from the background; with no border only the
+/// blend does.
+fn has_border(
+    screenshot: &Screenshot,
+    surface: Region,
+    border: [u8; 3],
+    background: [u8; 3],
+) -> bool {
+    const SCREEN_PIXEL: f64 = 1.0 / 1.6;
+    let middle = f64::midpoint(surface.top, surface.bottom);
+    let edge: Vec<[u8; 3]> = (0..6)
+        .map(|pixel| {
+            screenshot.colour_at(
+                surface.left + (f64::from(pixel) + 0.5) * SCREEN_PIXEL,
+                middle,
+            )
+        })
+        .take_while(|colour| !near(*colour, background, 4))
+        .collect();
+    edge.len() >= 2 && edge.iter().any(|colour| near(*colour, border, 8))
+}
+
+fn near(colour: [u8; 3], target: [u8; 3], within: u8) -> bool {
+    colour
+        .iter()
+        .zip(target)
+        .all(|(channel, wanted)| channel.abs_diff(wanted) <= within)
+}
+
+fn focused(state: &AppState, surface: &str) -> bool {
+    state
+        .surface(surface)
+        .is_some_and(|shown| shown.get("focused").map(String::as_str) == Some("true"))
+}
+
+#[test]
+fn the_banner_has_a_plain_border_and_the_dialer_with_the_keyboard_an_accent_one() {
+    let dark = OmarchyTheme::Dark;
+    let (harness, banner) = ringing(
+        Harness::builder().theme(dark.mode()).omarchy_theme(dark),
+        dark.colour("green"),
+    );
+    // The foreground at 30% over the background, by the spec (#221).
+    let background = dark.colour("background");
+    let border = mix(background, dark.colour("foreground"), 30);
+    let accent = dark.colour("accent");
+    assert!(!focused(&harness.app_state(), "banner"), "the Banner took the keyboard");
+    let screenshot = harness.screenshot("banner-border");
+    let edge = left_edge(&screenshot, banner);
+    assert!(
+        has_border(&screenshot, banner, border, background),
+        "the Banner's edge {edge:02x?} has no {border:02x?} border; see {}",
+        screenshot.path.display()
+    );
+    assert!(
+        !edge.iter().any(|colour| near(*colour, accent, 24)),
+        "the Banner, without the keyboard, has an accent border; see {}",
+        screenshot.path.display()
+    );
+
+    let call = harness.app_state().calls[0].id;
+    harness.decline(call);
+    harness.wait_for_app("the Banner goes", DEADLINE, |state| {
+        state.surface("banner").is_none()
+    });
+    let output = harness.cli(&["dialer"]);
+    assert!(output.status.success(), "desktop-calls dialer failed");
+    harness.wait_for_app("the Dialer has the keyboard", DEADLINE, |state| {
+        focused(state, "dialer")
+    });
+
+    let screenshot = harness.screenshot_when("dialer-border", DEADLINE, |screenshot| {
+        app_region(screenshot)
+            .is_some_and(|dialer| has_border(screenshot, dialer, accent, background))
+    });
+    let dialer = app_region(&screenshot).expect("the Dialer is on screen");
+    assert!(
+        !has_border(&screenshot, dialer, border, background),
+        "the Dialer, with the keyboard, still has the plain border; see {}",
+        screenshot.path.display()
+    );
+}
+
+#[test]
+fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_plain_one() {
+    let light = OmarchyTheme::Light;
+    let (harness, _) = ringing(
+        Harness::builder().omarchy_theme(light),
+        light.colour("green"),
+    );
+    // The foreground at 30% over the background, by the spec (#221).
+    let background = light.colour("background");
+    let border = mix(background, light.colour("foreground"), 30);
+    let accent = light.colour("accent");
+    let call = harness.app_state().calls[0].id;
+
+    harness.answer(call);
+
+    harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
+        focused(state, "call-window")
+    });
+    let screenshot = harness.screenshot_when("call-window-border", DEADLINE, |screenshot| {
+        shows(screenshot, light.colour("red"))
+            && app_region(screenshot)
+                .is_some_and(|window| has_border(screenshot, window, accent, background))
+    });
+    assert!(app_region(&screenshot).is_some(), "the Call Window is on screen");
+
+    harness.keyboard().press(Key::Escape);
+
+    harness.wait_for_app("Escape collapses the Call Window", DEADLINE, |state| {
+        state.surface("call-window").is_none() && state.surface("call-pill").is_some()
+    });
+    let screenshot = harness.screenshot_when("call-pill-border", DEADLINE, |screenshot| {
+        app_region(screenshot).is_some_and(|pill| has_border(screenshot, pill, border, background))
+    });
+    let pill = app_region(&screenshot).expect("the Call Pill is on screen");
+    assert!(
+        !left_edge(&screenshot, pill)
+            .iter()
+            .any(|colour| near(*colour, accent, 24)),
+        "the Call Pill, which never takes the keyboard, has an accent border; see {}",
+        screenshot.path.display()
+    );
 }

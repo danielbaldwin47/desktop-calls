@@ -9,8 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Screenshot};
 
 use super::{
-    DEADLINE, NUMBER, ORANGE, State, app_region, as_is, connect, dimmed, held, on_a_call, ring,
-    shows,
+    DEADLINE, NUMBER, State, app_region, as_is, connect, dimmed, held, on_a_call, ring, shows,
 };
 
 /// How many temporary captures [`hold_call_window_expanded`] has taken.
@@ -51,7 +50,9 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             });
         },
         shown: |screenshot, look| {
-            shows(screenshot, look.red()) && shows(screenshot, ORANGE) && in_corner(screenshot)
+            shows(screenshot, look.red())
+                && shows(screenshot, look.warning())
+                && in_corner(screenshot)
         },
     },
     State {
@@ -73,7 +74,9 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             );
         },
         shown: |screenshot, look| {
-            shows(screenshot, look.red()) && !shows(screenshot, ORANGE) && in_corner(screenshot)
+            shows(screenshot, look.red())
+                && !shows(screenshot, look.warning())
+                && in_corner(screenshot)
         },
     },
     State {

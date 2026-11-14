@@ -3,8 +3,8 @@
 //! #200).
 
 use desktop_calls_core::{
-    AudioLocation, CallId, CallState, Caller, Effect, Input, Phone, State, Timer, Timestamp,
-    Transport, step,
+    AudioLocation, CallId, CallState, Caller, Effect, Input, Phone, State, SyncFailure, Timer,
+    Timestamp, Transport, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -511,4 +511,150 @@ fn once_the_call_has_ended_the_indicator_opens_the_dialer() {
             "the Indicator opens the Dialer"
         );
     }
+}
+
+/// Expanded by itself: shown in full, without taking the keyboard, and with
+/// no collapse timer running, as what expanded it keeps it so.
+fn expanded_by_itself(state: &State, effects: &[Effect]) {
+    assert!(!collapsed(state), "it expands by itself");
+    assert!(!focused(state), "without taking the keyboard");
+    assert_eq!(collapse_timers(effects), []);
+}
+
+#[test]
+fn lost_contact_expands_the_collapsed_call_window() {
+    let (state, effects) = run(
+        collapsed_by_itself(),
+        [
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::CallEnded { call: CALL },
+        ],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert!(window.connection_lost);
+    expanded_by_itself(&state, &effects);
+}
+
+#[test]
+fn a_notice_expands_the_collapsed_call_window_and_it_collapses_again_once_the_notice_goes() {
+    // A Handoff the Phone ignores, asked for from the Indicator's menu.
+    let (state, handoff) = run(
+        collapsed_by_itself(),
+        [Input::MoveAudio(AudioLocation::Phone)],
+    );
+    assert!(
+        collapsed(&state),
+        "asking for the Handoff doesn't expand it"
+    );
+    let Some(timed_out) = handoff.iter().find_map(|effect| match effect {
+        Effect::StartTimer {
+            timer: timer @ Timer::HandoffTimedOut(_),
+            ..
+        } => Some(*timer),
+        _ => None,
+    }) else {
+        panic!("a Handoff limit expected: {handoff:?}");
+    };
+
+    let (state, effects) = run(state, [Input::TimerFired(timed_out)]);
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert!(window.notice.is_some(), "{window:?}");
+    expanded_by_itself(&state, &effects);
+    let (state, effects) = run(state, [Input::TransportChanged(Transport::Idle)]);
+    let (state, _) = run(state, [Input::TimerFired(collapse_timer(&effects))]);
+    assert!(collapsed(&state));
+}
+
+#[test]
+fn a_call_put_on_hold_from_the_phone_expands_the_collapsed_call_window() {
+    let (state, effects) = run(
+        collapsed_by_itself(),
+        [Input::CallChanged {
+            call: CALL,
+            state: CallState::Held,
+            at: Timestamp(4_000),
+        }],
+    );
+
+    expanded_by_itself(&state, &effects);
+}
+
+fn waiting_call() -> Input {
+    Input::CallAdded {
+        call: SECOND,
+        state: CallState::Waiting,
+        caller: Caller::Number("+447700900456".to_owned()),
+        at: Timestamp(3_000),
+    }
+}
+
+#[test]
+fn a_ringing_waiting_call_leaves_it_collapsed_and_hold_and_answer_expands_it() {
+    let (state, _) = run(collapsed_by_itself(), [waiting_call()]);
+    assert!(collapsed(&state), "the Banner shows the Waiting Call");
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::HoldAndAnswer,
+            Input::CallChanged {
+                call: CALL,
+                state: CallState::Held,
+                at: Timestamp(4_000),
+            },
+            Input::CallChanged {
+                call: SECOND,
+                state: CallState::Active,
+                at: Timestamp(4_000),
+            },
+        ],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert!(window.held.is_some());
+    expanded_by_itself(&state, &effects);
+}
+
+#[test]
+fn end_and_answer_expands_it_for_the_new_call_which_collapses_five_seconds_later() {
+    let (state, _) = run(collapsed_by_itself(), [waiting_call()]);
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::EndAndAnswer,
+            Input::CallEnded { call: CALL },
+            Input::CallChanged {
+                call: SECOND,
+                state: CallState::Active,
+                at: Timestamp(4_000),
+            },
+        ],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(window.call, Some(SECOND));
+    assert!(!collapsed(&state), "it expands for the new Call");
+    assert!(!focused(&state));
+    let (state, _) = run(state, [Input::TimerFired(collapse_timer(&effects))]);
+    assert!(collapsed(&state));
+}
+
+#[test]
+fn a_new_problem_leaves_it_collapsed() {
+    let (state, effects) = run(
+        collapsed_by_itself(),
+        [Input::ContactsSyncFailed(SyncFailure::Denied)],
+    );
+
+    assert!(!state.problems().is_empty(), "a Problem shows");
+    assert!(collapsed(&state));
+    assert_eq!(collapse_timers(&effects), []);
 }

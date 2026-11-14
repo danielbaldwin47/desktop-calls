@@ -8,7 +8,7 @@
 use super::{SharedReport, Surface, Who, hang_up_button, report_mute, seconds_since, status_label};
 use crate::surfaces::GAP;
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{CallWindowPhase, CallWindowView, Input, Mute};
+use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell as _};
@@ -103,13 +103,26 @@ impl CallPill {
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
         let (status, mute) = match view.phase {
+            // Its timer would mislead: the Desktop can't tell whether the
+            // Call still goes on.
+            _ if view.connection_lost => (messages::label(Label::OnYourPhone).to_owned(), None),
             CallWindowPhase::Live {
                 active_since, mute, ..
             } => (messages::elapsed(seconds_since(active_since)), Some(mute)),
             phase => (messages::label(status_label(&phase)).to_owned(), None),
         };
-        self.status.set_text(&status);
-        let mute = mute.filter(|_| !view.connection_lost);
+        let audio_on_phone = !view.connection_lost
+            && view
+                .audio
+                .is_some_and(|audio| audio.location == AudioLocation::Phone);
+        let mut line = vec![status.clone()];
+        if audio_on_phone {
+            line.push(messages::label(Label::AudioOnPhone).to_owned());
+        }
+        if view.held.is_some() {
+            line.push(messages::label(Label::OneOnHold).to_owned());
+        }
+        self.status.set_text(&line.join(" · "));
         let mute_text = messages::label(if mute == Some(Mute::On) {
             Label::Unmute
         } else {
@@ -147,6 +160,18 @@ impl CallPill {
         content.insert("caller".to_owned(), who.caller.clone());
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
+        }
+        if audio_on_phone {
+            content.insert(
+                "audio-location".to_owned(),
+                messages::label(Label::AudioOnPhone).to_owned(),
+            );
+        }
+        if view.held.is_some() {
+            content.insert(
+                "held".to_owned(),
+                messages::label(Label::OneOnHold).to_owned(),
+            );
         }
         self.report_geometry(&mut content);
         self.surface.show(content);

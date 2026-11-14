@@ -33,6 +33,7 @@ const STATES: &[&str] = &[
     "call-window-calls-off-after-long-number",
     "call-pill-calls-off-after-long-number",
     "call-pill-muted-long-number",
+    "call-pill-held-calls-off-after",
     "call-pill-muted",
     "call-pill-audio-on-phone",
     "call-pill-on-your-phone",

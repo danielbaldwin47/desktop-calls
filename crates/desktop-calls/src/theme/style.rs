@@ -73,7 +73,7 @@ pub(crate) mod class {
     /// The Call Window's state line: 12.5, in secondary text; with
     /// [`MUTED`], in warning text.
     pub(crate) const STATE_LINE: &str = "state-line";
-    /// A tag beside who a Call is with, on the Call Window's top line and on
+    /// A tag on the line under who a Call is with, on the Call Window and
     /// the Call Pill: monospace 11/500, in secondary text.
     pub(crate) const TAG: &str = "tag";
     /// With [`TAG`]: "Calls off after", which stays in secondary text even

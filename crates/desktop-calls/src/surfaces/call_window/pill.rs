@@ -19,6 +19,7 @@ use super::{
     Anchor, HANG_UP_SHORTCUT, Icon, IconView, MUTE_SHORTCUT, SharedReport, Surface, Who, class,
     hang_up_button, keycap, report_cut_short, report_mute, seconds_since, set_class, status_label,
 };
+use crate::theme::space;
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{
     AudioLocation, CallPillLead, CallPillTag, CallWindowPhase, CallWindowView, Input, Mute,
@@ -50,10 +51,10 @@ pub(super) struct CallPill {
     /// Whether the pointer is over the body, and what leads at rest.
     pointer: Rc<Pointer>,
     caller: gtk::Label,
-    /// The line under the caller, with the tag or "Calls off after".
+    /// The line under the caller, with the state tag and "Calls off after".
     tag_line: gtk::Box,
     tag: gtk::Label,
-    /// "Calls off after", in the state tag's place, while a turn-off waits.
+    /// "Calls off after", after the state tag, while a turn-off waits.
     calls_off: gtk::Label,
     status: gtk::Label,
     divider: gtk::Separator,
@@ -96,26 +97,29 @@ impl CallPill {
         let tag = gtk::Label::new(None);
         tag.add_css_class(class::TAG);
         let calls_off = calls_off_tag();
-        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // Should a tag line ever outgrow the strip, it gives way before the
+        // strip's width would.
+        calls_off.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
         tag_line.append(&tag);
         tag_line.append(&calls_off);
         tag_line.set_visible(false);
-        // Who over the tag line, together no higher than Mute and Hang up.
-        let who = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        who.set_hexpand(true);
-        who.append(&caller);
-        who.append(&tag_line);
         let status = gtk::Label::new(None);
         status.add_css_class(class::TIMER);
         status.set_xalign(1.0);
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        // Who and the timer, over the tag line, which runs under both as on
+        // the Call Window; together no higher than Mute and Hang up.
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+        top.append(&caller);
+        top.append(&status);
+        let who = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        who.set_hexpand(true);
+        who.append(&top);
+        who.append(&tag_line);
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
         body.set_hexpand(true);
         body.set_tooltip_text(Some(&messages::show_call_tooltip()));
-        for part in [
-            lead.upcast_ref::<gtk::Widget>(),
-            who.upcast_ref(),
-            status.upcast_ref(),
-        ] {
+        for part in [lead.upcast_ref::<gtk::Widget>(), who.upcast_ref()] {
             part.set_valign(gtk::Align::Center);
             body.append(part);
         }
@@ -276,12 +280,10 @@ impl CallPill {
         }
     }
 
-    /// Shows a tag on the line under the caller, and returns the state tag
-    /// shown. "Calls off after" takes the state tag's place, which has no
-    /// room beside it: the lead's icon still says Muted, On phone or on
-    /// hold, and the strip's tint says Muted too.
+    /// Shows the tags on the line under the caller: the state tag, then
+    /// "Calls off after" while a turn-off waits. Returns the state tag.
     fn show_tags(&self, view: &CallWindowView) -> Option<CallPillTag> {
-        let tag = view.call_pill_tag().filter(|_| !view.calls_off_after);
+        let tag = view.call_pill_tag();
         self.tag
             .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
         self.tag.set_visible(tag.is_some());
@@ -377,7 +379,7 @@ fn report_tags(
 }
 
 /// The "Calls off after" tag, hidden until a turn-off waits for the Call.
-/// The Call Window's top line has the same one.
+/// The Call Window's line under who has the same one.
 pub(super) fn calls_off_tag() -> gtk::Label {
     let tag = gtk::Label::new(Some(messages::calls_off_after_tag()));
     tag.add_css_class(class::TAG);

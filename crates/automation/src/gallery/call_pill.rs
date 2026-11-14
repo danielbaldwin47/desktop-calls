@@ -133,20 +133,22 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-muted-calls-off-after",
-        title: "The Call Pill, muted while a turn-off waits for the Call to end: the tint and the crossed microphone say Muted, and Calls off after takes the tag line",
-        still: |state| collapsed(state) && state.muted && pill_has(state, "calls-off-after"),
+        title: "The Call Pill, muted while a turn-off waits for the Call to end, with a long number not in Contacts: Muted and Calls off after under the number, which reads in full",
+        still: |state| muted_and_calls_off_after(state),
         prepare: as_is,
         reach: |harness| {
             connect(harness);
-            on_a_call(harness);
+            on_a_call_from(harness, LONG_NUMBER);
             turn_calls_off(harness);
             wait_until_collapsed(harness);
             harness
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));
-            harness.wait_for_app("the Call Pill is muted and tagged", DEADLINE, |state| {
-                pill_has(state, "muted") && pill_has(state, "calls-off-after")
-            });
+            harness.wait_for_app(
+                "the Call Pill is muted and tagged, the number in full",
+                DEADLINE,
+                muted_and_calls_off_after,
+            );
         },
         shown: |screenshot, look| {
             !shows(screenshot, look.red())
@@ -310,6 +312,23 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         shown: |screenshot, look| !shows(screenshot, look.red()) && in_corner(screenshot),
     },
     State {
+        name: "call-pill-held-calls-off-after",
+        title: "The Call Pill with a Call on hold while a turn-off waits: 1 on hold and Calls off after under the caller, who reads in full",
+        still: |state| held_and_calls_off_after(state),
+        prepare: as_is,
+        reach: |harness| {
+            held(harness);
+            turn_calls_off(harness);
+            collapse_by_hand(harness);
+            harness.wait_for_app(
+                "the Call Pill says 1 on hold and Calls off after",
+                DEADLINE,
+                held_and_calls_off_after,
+            );
+        },
+        shown: |screenshot, look| !shows(screenshot, look.red()) && in_corner(screenshot),
+    },
+    State {
         name: "call-pill-ended",
         title: "The Call Pill, just after the Call ended: Call ended and how long it lasted",
         still: |state| {
@@ -360,6 +379,24 @@ fn says(state: &AppState, surface: &str, key: &str, value: &str) -> bool {
         .surface(surface)
         .and_then(|content| content.get(key))
         .is_some_and(|shown| shown == value)
+}
+
+/// The Call Pill shows Muted and Calls off after, the caller in full.
+fn muted_and_calls_off_after(state: &AppState) -> bool {
+    collapsed(state)
+        && state.muted
+        && says(state, "call-pill", "tag", "Muted")
+        && pill_has(state, "calls-off-after")
+        && says(state, "call-pill", "caller-cut-short", "no")
+}
+
+/// The Call Pill shows 1 on hold and Calls off after, the caller in full.
+fn held_and_calls_off_after(state: &AppState) -> bool {
+    collapsed(state)
+        && pill_has(state, "held")
+        && says(state, "call-pill", "tag", "1 on hold")
+        && pill_has(state, "calls-off-after")
+        && says(state, "call-pill", "caller-cut-short", "no")
 }
 
 fn pill_has(state: &AppState, key: &str) -> bool {

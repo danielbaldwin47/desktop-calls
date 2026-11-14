@@ -197,7 +197,7 @@ fn the_call_pill_and_the_expanded_call_window_share_the_bottom_right_corner_at_h
 }
 
 #[test]
-fn hang_up_stays_put_when_the_microphone_is_muted_the_keypad_opens_or_a_call_goes_on_hold() {
+fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_goes_on_hold() {
     let harness = connected(Harness::builder());
     bob_live_here(&harness);
     let hang_up = hang_up_on_screen(&harness, "call-window");
@@ -211,9 +211,10 @@ fn hang_up_stays_put_when_the_microphone_is_muted_the_keypad_opens_or_a_call_goe
         screenshot
             .region_within(bottom_half(), |pixel| close_to(pixel, WARNING))
             .is_some()
-            && window_height(screenshot) > height
     });
-    let height = window_height(&harness.screenshot("call-window-muted-settled"));
+    // Muting recolours the window and moves nothing: it keeps its height.
+    let muted = window_height(&harness.screenshot("call-window-muted-settled"));
+    assert!((muted - height).abs() <= 1.0, "the Call Window went from {height} to {muted} high");
 
     // A click in the padding gives the window the keyboard; K opens the
     // keypad.
@@ -255,7 +256,7 @@ fn hang_up_stays_put_when_a_notice_shows() {
     harness.wait_for_app("Bob's Call rings", DEADLINE, |state| state.ringing);
     harness.simulated_phone().answer_on_phone(&path);
     harness.wait_for_app("the Call is live on the Phone", DEADLINE, |state| {
-        state.audio_location == "phone" && shown(state, "handoff").as_deref() == Some("Move audio here")
+        state.audio_location == "phone" && shown(state, "handoff").as_deref() == Some("Move here")
     });
     let hang_up = hang_up_on_screen(&harness, "call-window");
     hover_beside(&harness, hang_up);

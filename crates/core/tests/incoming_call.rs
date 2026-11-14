@@ -190,7 +190,13 @@ fn declining_hangs_up_the_ringing_call_and_closes_the_banner() {
 fn a_declined_call_ending_keeps_audio_on_the_phone_and_shows_no_call_window() {
     let (state, effects) = run(
         ringing(),
-        [Input::Decline(CALL), Input::CallEnded { call: CALL }],
+        [
+            Input::Decline(CALL),
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     assert!(effects.contains(&Effect::Phone(PhoneCommand::KeepAudioOnPhone)));
@@ -202,7 +208,13 @@ fn a_declined_call_ending_keeps_audio_on_the_phone_and_shows_no_call_window() {
 fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     let (state, effects) = run(
         answered_on_desktop(),
-        [Input::HangUp(CALL), Input::CallEnded { call: CALL }],
+        [
+            Input::HangUp(CALL),
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     assert_eq!(effects[0], Effect::Phone(PhoneCommand::HangUp(CALL)));
@@ -226,7 +238,10 @@ fn a_new_call_replaces_the_ended_call_window_and_the_old_timer_does_not_close_it
         answered_on_desktop(),
         [
             Input::HangUp(CALL),
-            Input::CallEnded { call: CALL },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
             Input::CallAdded {
                 call: next,
                 state: CallState::Ringing,
@@ -343,7 +358,13 @@ fn answered_on_the_phone_the_desktop_leaves_the_audio_there() {
 
 #[test]
 fn the_caller_hanging_up_stops_the_ringing() {
-    let (state, effects) = run(ringing(), [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        ringing(),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert!(effects.contains(&Effect::StopRinging));
     assert!(!state.ringing());

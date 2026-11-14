@@ -534,7 +534,13 @@ fn a_ringing_call_rings_on_through_a_plain_hands_free_drop() {
     assert!(state.ringing());
     assert!(state.surfaces().banner.is_some());
 
-    let (_, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (_, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert!(
         effects
@@ -550,7 +556,13 @@ fn a_ringing_call_rings_on_through_a_plain_hands_free_drop() {
 fn a_live_call_ending_during_a_plain_hands_free_drop_shows_as_ended() {
     let (state, _) = run(
         live_call(),
-        [hands_free_down(), Input::CallEnded { call: CALL }],
+        [
+            hands_free_down(),
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     let window = state.surfaces().call_window.expect("the Call Window shows");
@@ -560,7 +572,14 @@ fn a_live_call_ending_during_a_plain_hands_free_drop_shows_as_ended() {
 /// The Bluetooth connection drops mid-Call: hands-free goes with it, and
 /// the Phone link gives up waiting for the Call.
 fn link_lost() -> [Input; 3] {
-    [absent(), hands_free_down(), Input::CallEnded { call: CALL }]
+    [
+        absent(),
+        hands_free_down(),
+        Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        },
+    ]
 }
 
 #[test]

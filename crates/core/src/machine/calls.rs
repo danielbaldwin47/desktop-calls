@@ -56,15 +56,20 @@ pub(super) fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Ef
 
 /// The Phone reports the Call over: it leaves the Desktop, and if it rang
 /// out, it may be a Missed Call. With the Calls out of reach, the Phone
-/// link has only given up on it.
-pub(super) fn phone_ended_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+/// link has only given up on it. It ended `at` then.
+pub(super) fn phone_ended_call(
+    state: &mut State,
+    call: CallId,
+    at: Timestamp,
+    effects: &mut Vec<Effect>,
+) {
     call_gone_mid_handoff(state, effects);
     if state.calls_out_of_reach() {
         lost_track(state, call);
         return;
     }
     let ended = state.calls.iter().find(|known| known.id == call).cloned();
-    end_call(state, call, effects);
+    end_call(state, call, at, effects);
     if let Some(ended) = ended {
         call_ended(state, &ended, effects);
     }
@@ -336,7 +341,9 @@ fn call_ended(state: &mut State, ended: &Call, effects: &mut Vec<Effect>) {
     }
 }
 
-fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
+/// `call` is over, `at` then: the Call Window says so, with how long it
+/// lasted, for a while.
+fn end_call(state: &mut State, call: CallId, at: Timestamp, effects: &mut Vec<Effect>) {
     let Some(index) = state.calls.iter().position(|known| known.id == call) else {
         return;
     };
@@ -348,6 +355,9 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         state.ended = Some(EndedCall {
             id: ended.id,
             caller: ended.caller,
+            lasted: ended
+                .active_since
+                .map(|since| at.0.saturating_sub(since.0) / 1_000),
         });
         effects.push(Effect::StartTimer {
             timer: Timer::CloseCallWindow(call),

@@ -154,7 +154,13 @@ fn if_hands_free_doesnt_reconnect_the_window_says_the_call_continues_on_the_phon
 fn the_phone_link_giving_up_on_the_call_doesnt_end_it() {
     let (state, _) = not_reconnected();
 
-    let (state, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert_shown_lost(&state);
     assert!(
@@ -279,7 +285,13 @@ fn hands_free_back_before_the_phone_link_gives_up_picks_the_call_back_up() {
 #[test]
 fn hands_free_back_after_the_phone_link_gave_up_picks_the_call_back_up() {
     let (state, effects) = not_reconnected();
-    let (state, _) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     let state = reconnected(
         state,
@@ -323,7 +335,13 @@ fn hands_free_not_back_by_the_limit_is_lost_the_same_way() {
     assert_shown_lost(&state);
     assert_eq!(state.connection_state(), &ConnectionState::Disconnected);
     assert_eq!(reconnect_wait(&effects).1, 1_000);
-    let (state, _) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     assert_shown_lost(&state);
 }
 
@@ -331,7 +349,13 @@ fn hands_free_not_back_by_the_limit_is_lost_the_same_way() {
 fn the_phone_link_giving_up_on_the_call_mid_handoff_doesnt_end_it() {
     let (state, limit) = dropped_for_handoff();
 
-    let (state, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert_shown_lost(&state);
     assert!(
@@ -347,7 +371,13 @@ fn the_phone_link_giving_up_on_the_call_mid_handoff_doesnt_end_it() {
 #[test]
 fn hands_free_back_late_from_the_drop_itself_picks_the_call_back_up() {
     let (state, _) = dropped_for_handoff();
-    let (state, _) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     // The drop's own `ConnectProfile` got there in the end.
     let (state, _) = run(
@@ -408,7 +438,13 @@ fn the_desktop_stops_asking_while_suspended_and_asks_at_once_on_resume() {
 #[test]
 fn a_call_that_ended_while_hands_free_was_lost_closes_the_window_once_hands_free_is_back() {
     let (state, effects) = not_reconnected();
-    let (state, _) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     let (timer, _) = reconnect_wait(&effects);
 
     let (state, effects) = run(

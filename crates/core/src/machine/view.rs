@@ -76,6 +76,10 @@ pub struct CallWindowView {
     /// The Contact the other party is, if Contacts say.
     pub contact: Option<ContactMatch>,
     pub phase: CallWindowPhase,
+    /// The one line under who that says where the Call is heard, or how it
+    /// went; `None` while a notice says it instead (contact lost, or the
+    /// Call not placed).
+    pub state_line: Option<StateLine>,
     /// Where the Call's audio is, while there is a Call to move it for.
     pub audio: Option<CallAudio>,
     /// A failure to explain beside the Call.
@@ -156,6 +160,28 @@ pub enum CallWindowPhase {
     Ended,
 }
 
+/// What the Call Window's state line says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StateLine {
+    /// Answered here, and not yet connected.
+    Connecting,
+    /// Placed here, and the other end isn't ringing yet.
+    Calling,
+    /// Placed here, and ringing at the other end.
+    Ringing,
+    /// Live, with the audio here; `wideband` adds the HD mark.
+    OnThisComputer { wideband: bool },
+    /// Live, with the audio here and the microphone muted: the other party
+    /// can't hear the user.
+    Muted,
+    /// Live, with the audio on the Phone: mute there, or move it here.
+    OnYourPhone,
+    /// The only Call, on hold.
+    OnHold,
+    /// Over, after `lasted` seconds connected; `None` if it never connected.
+    Ended { lasted: Option<u64> },
+}
+
 /// The Call Window's Mute control.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mute {
@@ -201,6 +227,7 @@ impl State {
             caller: lost.caller.clone(),
             contact: self.contact(&lost.caller),
             phase: phase(lost, false, Mute::Unavailable),
+            state_line: None,
             audio: None,
             notice: Some(connection_lost.notice),
             focused: self.focus == Focus::CallWindow,
@@ -225,6 +252,31 @@ impl State {
                 caller: call.caller.clone(),
                 contact: self.contact(&call.caller),
             }
+        }
+    }
+
+    /// The Call Window with `caller` and no Call in progress: one placed
+    /// here on its way, ended, or not placed.
+    fn callless_window(
+        &self,
+        call: Option<CallId>,
+        caller: Caller,
+        phase: CallWindowPhase,
+        notice: Option<Failure>,
+    ) -> CallWindowView {
+        CallWindowView {
+            call,
+            contact: self.contact(&caller),
+            caller,
+            audio: None,
+            state_line: state_line(phase, None),
+            phase,
+            notice,
+            focused: self.focus == Focus::CallWindow,
+            held: None,
+            waiting_first: false,
+            connection_lost: false,
+            collapsed: self.form.collapsed(),
         }
     }
 
@@ -263,66 +315,39 @@ impl State {
                     .dialling
                     .as_ref()
                     .filter(|dialling| !dialling.cancelled)?;
-                let caller = Caller::Number(dialling.number.clone());
-                Some(CallWindowView {
-                    call: None,
-                    contact: self.contact(&caller),
-                    caller,
-                    audio: None,
-                    phase: CallWindowPhase::Calling,
+                Some(self.callless_window(
+                    None,
+                    Caller::Number(dialling.number.clone()),
+                    CallWindowPhase::Calling,
                     notice,
-                    focused: self.focus == Focus::CallWindow,
-                    held: None,
-                    waiting_first: false,
-                    connection_lost: false,
-                    collapsed: self.form.collapsed(),
-                })
+                ))
             })
             .or_else(|| {
-                self.hung_up_dial.as_ref().map(|hung_up| CallWindowView {
-                    call: None,
-                    caller: hung_up.caller.clone(),
-                    contact: self.contact(&hung_up.caller),
-                    audio: None,
-                    phase: CallWindowPhase::Ended,
-                    notice: None,
-                    focused: self.focus == Focus::CallWindow,
-                    held: None,
-                    waiting_first: false,
-                    connection_lost: false,
-                    collapsed: self.form.collapsed(),
+                self.hung_up_dial.as_ref().map(|hung_up| {
+                    self.callless_window(None, hung_up.caller.clone(), CallWindowPhase::Ended, None)
                 })
             })
             .or_else(|| {
                 let notice = self.notice.as_ref()?;
                 let caller = notice.not_placed.clone()?;
-                Some(CallWindowView {
-                    call: None,
-                    contact: self.contact(&caller),
+                Some(self.callless_window(
+                    None,
                     caller,
-                    audio: None,
-                    phase: CallWindowPhase::NotPlaced,
-                    notice: Some(notice.failure),
-                    focused: self.focus == Focus::CallWindow,
-                    held: None,
-                    waiting_first: false,
-                    connection_lost: false,
-                    collapsed: self.form.collapsed(),
-                })
+                    CallWindowPhase::NotPlaced,
+                    Some(notice.failure),
+                ))
             })
             .or_else(|| {
                 self.ended.as_ref().map(|ended| CallWindowView {
-                    call: Some(ended.id),
-                    caller: ended.caller.clone(),
-                    contact: self.contact(&ended.caller),
-                    audio: None,
-                    phase: CallWindowPhase::Ended,
-                    notice: None,
-                    focused: self.focus == Focus::CallWindow,
-                    held: None,
-                    waiting_first: false,
-                    connection_lost: false,
-                    collapsed: self.form.collapsed(),
+                    state_line: Some(StateLine::Ended {
+                        lasted: ended.lasted,
+                    }),
+                    ..self.callless_window(
+                        Some(ended.id),
+                        ended.caller.clone(),
+                        CallWindowPhase::Ended,
+                        None,
+                    )
                 })
             });
         Surfaces {
@@ -337,19 +362,22 @@ impl State {
     /// The Call Window for the Phone's Calls, with `notice` beside them.
     fn calls_window(&self, notice: Option<Failure>) -> Option<CallWindowView> {
         let (call, held) = self.call_window_calls()?;
+        let phase = phase(
+            call,
+            self.codec.is_some_and(Codec::is_wideband),
+            self.mute(),
+        );
+        let audio = call.state.is_live().then(|| CallAudio {
+            location: self.audio_location().unwrap_or(AudioLocation::Phone),
+            moving: self.audio_moving_to(),
+        });
         Some(CallWindowView {
             call: Some(call.id),
             caller: call.caller.clone(),
             contact: self.contact(&call.caller),
-            phase: phase(
-                call,
-                self.codec.is_some_and(Codec::is_wideband),
-                self.mute(),
-            ),
-            audio: call.state.is_live().then(|| CallAudio {
-                location: self.audio_location().unwrap_or(AudioLocation::Phone),
-                moving: self.audio_moving_to(),
-            }),
+            phase,
+            state_line: state_line(phase, audio),
+            audio,
             notice,
             focused: self.focus == Focus::CallWindow,
             held: held.map(|held| HeldCall {
@@ -390,6 +418,24 @@ impl State {
             opened: dialer.opened,
         })
     }
+}
+
+/// What the state line says of a Call the Phone has, in `phase`, with its
+/// audio at `audio`.
+fn state_line(phase: CallWindowPhase, audio: Option<CallAudio>) -> Option<StateLine> {
+    Some(match phase {
+        CallWindowPhase::Connecting => StateLine::Connecting,
+        CallWindowPhase::Calling => StateLine::Calling,
+        CallWindowPhase::Ringing => StateLine::Ringing,
+        CallWindowPhase::OnHold { .. } => StateLine::OnHold,
+        CallWindowPhase::Live { mute: Mute::On, .. } => StateLine::Muted,
+        CallWindowPhase::Live { wideband, .. } => match audio.map(|audio| audio.location) {
+            Some(AudioLocation::Desktop) => StateLine::OnThisComputer { wideband },
+            Some(AudioLocation::Phone) | None => StateLine::OnYourPhone,
+        },
+        CallWindowPhase::NotPlaced => return None,
+        CallWindowPhase::Ended => StateLine::Ended { lasted: None },
+    })
 }
 
 /// Where `call` is, as the Call Window shows it.

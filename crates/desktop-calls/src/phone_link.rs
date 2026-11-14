@@ -503,7 +503,10 @@ impl PhoneLink {
                     "Call {} ended",
                     followed.id
                 );
-                outcome.inputs.push(Input::CallEnded { call: followed.id });
+                outcome.inputs.push(Input::CallEnded {
+                    call: followed.id,
+                    at: now(),
+                });
             }
             None => unknown_state(&state),
         }
@@ -685,7 +688,10 @@ impl PhoneLink {
             call_id = id.0,
             "Call {id} ended: it didn't come back"
         );
-        outcome.inputs.push(Input::CallEnded { call: id });
+        outcome.inputs.push(Input::CallEnded {
+            call: id,
+            at: now(),
+        });
     }
 
     /// Starts a grace period of `lasting` for the vanished Call `call`.

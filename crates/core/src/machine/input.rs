@@ -66,8 +66,8 @@ pub enum Input {
     /// the Call: some Phones send the number a moment after a Call starts
     /// ringing.
     CallerChanged { call: CallId, caller: Caller },
-    /// A Call is over, however it ended.
-    CallEnded { call: CallId },
+    /// A Call is over, however it ended, `at` the time the Phone link heard.
+    CallEnded { call: CallId, at: Timestamp },
     /// The Phone link gave up on this Call with no word from the Phone that
     /// the Hang up the user asked for worked: the Call went away without
     /// ending, and either didn't come back while the Phone was away, or a

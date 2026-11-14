@@ -69,7 +69,7 @@ fn with_earbuds_connected_the_banner_appears_and_answering_here_brings_the_audio
         DEADLINE,
         |state| {
             state.audio_location == "desktop"
-                && shown(state, "audio-location").as_deref() == Some("Audio on this computer")
+                && shown(state, "state").as_deref() == Some("On this computer")
         },
     );
     assert!(is_live(&state), "{state:?}");
@@ -91,10 +91,10 @@ fn a_phone_that_keeps_the_audio_on_the_earbuds_gets_a_plain_message_and_the_call
     assert_eq!(shown(&state, "notice").as_deref(), Some(AUDIO_NOT_MOVED));
     assert_eq!(state.audio_location, "phone");
     assert_eq!(
-        shown(&state, "audio-location").as_deref(),
-        Some("Audio on phone")
+        shown(&state, "state").as_deref(),
+        Some("On your phone. Mute there, or move the audio here")
     );
-    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move audio here"));
+    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     assert_eq!(harness.wait_for_app_error(DEADLINE).kind, "audio-not-moved");
     harness.app_holds("the Call stays live", QUIET, is_live);
     harness.simulated_phone().recorded_holds(
@@ -117,10 +117,10 @@ fn a_call_answered_on_the_earbuds_shows_its_audio_on_the_phone() {
     );
     assert_eq!(state.audio_location, "phone");
     assert_eq!(
-        shown(&state, "audio-location").as_deref(),
-        Some("Audio on phone")
+        shown(&state, "state").as_deref(),
+        Some("On your phone. Mute there, or move the audio here")
     );
-    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move audio here"));
+    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     assert_eq!(state.surface("banner"), None);
     harness.app_holds("the audio stays on the earbuds", QUIET, |state| {
         state.audio_location == "phone"
@@ -132,7 +132,7 @@ fn moving_the_audio_off_the_earbuds_says_plainly_how_when_the_phone_refuses() {
     let (harness, path, _) = ringing_with_earbuds();
     harness.simulated_phone().answer_on_phone(&path);
     harness.wait_for_app("the Call is live on the earbuds", DEADLINE, |state| {
-        is_live(state) && shown(state, "handoff").as_deref() == Some("Move audio here")
+        is_live(state) && shown(state, "handoff").as_deref() == Some("Move here")
     });
 
     harness

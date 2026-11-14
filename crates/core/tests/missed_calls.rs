@@ -104,7 +104,10 @@ fn rings_out(state: State, call: u32, caller: Caller, at: u64) -> (State, Vec<Ef
                 caller,
                 at: Timestamp(at),
             },
-            Input::CallEnded { call: CallId(call) },
+            Input::CallEnded {
+                call: CallId(call),
+                at: Timestamp(90_000),
+            },
         ],
     )
 }
@@ -213,7 +216,10 @@ fn a_call_declined_on_the_desktop_is_never_missed() {
                 at: Timestamp(5_000),
             },
             Input::Decline(CallId(1)),
-            Input::CallEnded { call: CallId(1) },
+            Input::CallEnded {
+                call: CallId(1),
+                at: Timestamp(90_000),
+            },
             // Some Phones list a Call declined from a hands-free device as
             // missed.
             Input::CallHistoryRefreshed(history(vec![missed(number(ALICE), 5_000)])),
@@ -239,7 +245,10 @@ fn a_call_answered_on_the_phone_is_never_missed() {
                 state: CallState::Active,
                 at: Timestamp(6_000),
             },
-            Input::CallEnded { call: CallId(1) },
+            Input::CallEnded {
+                call: CallId(1),
+                at: Timestamp(90_000),
+            },
             Input::CallHistoryRefreshed(history(vec![missed(number(ALICE), 5_000)])),
         ],
     );
@@ -347,7 +356,10 @@ fn a_waiting_call_nobody_answers_is_missed() {
                 caller: number(ALICE),
                 at: Timestamp(5_000),
             },
-            Input::CallEnded { call: CallId(2) },
+            Input::CallEnded {
+                call: CallId(2),
+                at: Timestamp(90_000),
+            },
             Input::CallHistoryRefreshed(history(vec![missed(number(ALICE), 5_000)])),
         ],
     );
@@ -530,7 +542,10 @@ fn a_missed_call_whose_caller_came_late_names_them_and_opens_on_them() {
     let (state, effects) = run(
         state,
         [
-            Input::CallEnded { call: CallId(1) },
+            Input::CallEnded {
+                call: CallId(1),
+                at: Timestamp(90_000),
+            },
             Input::CallHistoryRefreshed(history(vec![missed(number(ALICE), 5_000)])),
         ],
     );

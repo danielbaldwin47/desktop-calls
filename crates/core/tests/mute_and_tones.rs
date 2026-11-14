@@ -3,7 +3,7 @@
 
 use desktop_calls_core::{
     CallId, CallState, CallWindowPhase, Caller, Effect, Input, Mute, Phone, PhoneCommand, State,
-    Timestamp, Transport, messages::Failure, step,
+    StateLine, Timestamp, Transport, messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -281,7 +281,14 @@ fn with_the_audio_on_the_phone_mute_is_unavailable_and_refused() {
 
 #[test]
 fn with_no_call_mute_is_refused() {
-    let state = run(ringing(15), [Input::CallEnded { call: CALL }]).0;
+    let state = run(
+        ringing(15),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    )
+    .0;
 
     assert_eq!(
         state.refusal(&Input::SetMuted(true)),
@@ -316,7 +323,13 @@ fn the_audio_leaving_the_desktop_unmutes() {
 fn the_call_ending_while_muted_turns_the_microphone_back_on() {
     let (state, effects) = run(
         live_on_desktop(11),
-        [Input::SetMuted(true), Input::CallEnded { call: CALL }],
+        [
+            Input::SetMuted(true),
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     assert!(effects.contains(&Effect::Phone(PhoneCommand::SetMicrophoneVolume(11))));
@@ -362,4 +375,26 @@ fn an_unmute_the_phone_refuses_is_reported_and_still_shows_muted() {
         effects,
         [Effect::Phone(PhoneCommand::SetMicrophoneVolume(11))]
     );
+}
+
+#[test]
+fn the_state_line_says_muted_while_muted_and_where_the_audio_is_otherwise() {
+    let line = |state: &State| state.surfaces().call_window?.state_line;
+    let state = live_on_desktop(11);
+    assert_eq!(
+        line(&state),
+        Some(StateLine::OnThisComputer { wideband: false })
+    );
+
+    let (state, _) = run(
+        state,
+        [
+            Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
+        ],
+    );
+    assert!(state.muted());
+    assert_eq!(line(&state), Some(StateLine::Muted));
+
+    assert_eq!(line(&live_on_phone()), Some(StateLine::OnYourPhone));
 }

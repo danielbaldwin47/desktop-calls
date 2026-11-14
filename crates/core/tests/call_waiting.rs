@@ -200,7 +200,10 @@ fn hanging_up_the_live_call_leaves_the_held_one_which_the_phone_makes_live() {
     let (state, effects) = run(
         state,
         [
-            Input::CallEnded { call: SECOND },
+            Input::CallEnded {
+                call: SECOND,
+                at: Timestamp(90_000),
+            },
             Input::CallChanged {
                 call: FIRST,
                 state: CallState::Active,
@@ -221,7 +224,13 @@ fn hanging_up_the_held_call_leaves_the_live_one() {
     let (state, effects) = run(held(), [Input::HangUp(FIRST)]);
     assert_eq!(effects, [Effect::Phone(PhoneCommand::HangUp(FIRST))]);
 
-    let (state, _) = run(state, [Input::CallEnded { call: FIRST }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: FIRST,
+            at: Timestamp(90_000),
+        }],
+    );
 
     let window = state.surfaces().call_window.expect("the Call Window shows");
     assert_eq!(window.call, Some(SECOND));
@@ -232,7 +241,13 @@ fn hanging_up_the_held_call_leaves_the_live_one() {
 fn a_lone_call_on_hold_shows_as_on_hold_and_swap_resumes_it() {
     let (state, _) = run(
         held(),
-        [Input::HangUp(SECOND), Input::CallEnded { call: SECOND }],
+        [
+            Input::HangUp(SECOND),
+            Input::CallEnded {
+                call: SECOND,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     let window = state.surfaces().call_window.expect("the Call Window shows");
@@ -256,7 +271,10 @@ fn end_and_answer_asks_the_phone_and_the_answered_call_takes_the_call_window() {
     let (state, effects) = run(
         state,
         [
-            Input::CallEnded { call: FIRST },
+            Input::CallEnded {
+                call: FIRST,
+                at: Timestamp(90_000),
+            },
             Input::CallChanged {
                 call: SECOND,
                 state: CallState::Active,
@@ -276,7 +294,13 @@ fn declining_a_waiting_call_hangs_up_only_that_call() {
     let (state, effects) = run(waiting(), [Input::Decline(SECOND)]);
     assert_eq!(effects, [Effect::Phone(PhoneCommand::HangUp(SECOND))]);
 
-    let (state, effects) = run(state, [Input::CallEnded { call: SECOND }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: SECOND,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert!(!effects.contains(&Effect::Phone(PhoneCommand::KeepAudioOnPhone)));
     assert_eq!(state.surfaces().banner, None);
@@ -403,7 +427,13 @@ fn hanging_up_the_held_call_while_a_waiting_call_rings_is_refused_and_asks_nothi
 fn once_the_waiting_call_is_gone_the_held_call_offers_swap_and_hang_up_again() {
     let (state, _) = run(
         three_calls(),
-        [Input::Decline(THIRD), Input::CallEnded { call: THIRD }],
+        [
+            Input::Decline(THIRD),
+            Input::CallEnded {
+                call: THIRD,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     let window = state.surfaces().call_window.expect("the Call Window shows");
@@ -480,7 +510,10 @@ fn end_and_answer_while_placing_hangs_that_call_up_then_answers_once_the_phone_r
     let (_, effects) = run(
         state,
         [
-            Input::CallEnded { call: FIRST },
+            Input::CallEnded {
+                call: FIRST,
+                at: Timestamp(90_000),
+            },
             Input::CallChanged {
                 call: SECOND,
                 state: CallState::Ringing,
@@ -560,7 +593,10 @@ fn end_and_answer_with_a_call_on_hold_ends_only_the_live_call() {
     let (state, _) = run(
         state,
         [
-            Input::CallEnded { call: SECOND },
+            Input::CallEnded {
+                call: SECOND,
+                at: Timestamp(90_000),
+            },
             Input::CallChanged {
                 call: THIRD,
                 state: CallState::Active,
@@ -579,7 +615,10 @@ fn held_alone_while_one_waits() -> State {
     run(
         held(),
         [
-            Input::CallEnded { call: SECOND },
+            Input::CallEnded {
+                call: SECOND,
+                at: Timestamp(90_000),
+            },
             Input::CallAdded {
                 call: THIRD,
                 state: CallState::Waiting,
@@ -696,7 +735,13 @@ fn a_waiting_call_answered_that_ends_unconnected_ends_the_handoff_its_answer_ask
     let (state, _) = run(waiting_with_audio_on_the_phone(), [Input::HoldAndAnswer]);
     assert_eq!(audio_moving(&state), Some(AudioLocation::Desktop));
 
-    let (state, effects) = run(state, [Input::CallEnded { call: SECOND }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: SECOND,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert_eq!(audio_moving(&state), None);
     assert!(
@@ -721,7 +766,13 @@ fn a_waiting_call_answered_that_ends_unconnected_leaves_the_users_own_move_audio
         ],
     );
 
-    let (state, effects) = run(state, [Input::CallEnded { call: SECOND }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: SECOND,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert_eq!(audio_moving(&state), Some(AudioLocation::Desktop));
     assert!(

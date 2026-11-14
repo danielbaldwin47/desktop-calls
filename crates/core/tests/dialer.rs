@@ -307,7 +307,14 @@ fn activating_while_a_call_rings_closes_the_dialer_and_focuses_the_banner() {
 
 #[test]
 fn opening_for_a_call_selects_its_call_history_row() {
-    let state = run(ringing(connected()), [Input::CallEnded { call: CALL }]).0;
+    let state = run(
+        ringing(connected()),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    )
+    .0;
 
     let (state, _) = run(
         state,

@@ -1,16 +1,27 @@
-//! The Call Window: the Call's caller, status and audio, and its actions with
-//! their shortcuts.
+//! The Call Window: who the Call is with and for how long, one state line
+//! that says where it is heard, three tiles (Mute, Keypad and the audio
+//! move) and Hang up, each with its shortcut.
+//!
+//! Anchored at the bottom, it grows upwards. From the bottom up, Hang up,
+//! then the tiles, then the state line and who are fixed; whatever comes and
+//! goes during a Call (the Held Call's row, a notice, the keypad and its
+//! tone entry) sits above the tiles, so they and Hang up never move under
+//! the pointer. Muting recolours the Mute tile, the state line and the
+//! border, and moves nothing. Placing a Call, after it ends and once contact
+//! with it is lost, the window shows only what works.
 
 use super::{
     Anchor, HANDOFF_SHORTCUT, HANG_UP_HELD_SHORTCUT, HANG_UP_SHORTCUT, KEYPAD, KEYPAD_SHORTCUT,
     MUTE_SHORTCUT, SWAP_SHORTCUT, SharedReport, Surface, Who, class, detail_label, keycap,
     seconds_since, set_class,
 };
+use crate::theme::space;
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    AudioLocation, CallAudio, CallWindowPhase, CallWindowView, Input, Mute, keypad_tones,
+    AudioLocation, CallWindowPhase, CallWindowView, Input, Mute, keypad_tones,
 };
 use futures_channel::mpsc::UnboundedSender;
+use gtk::gdk::ModifierType;
 use gtk::glib::{self, SourceId};
 use gtk::prelude::*;
 use gtk4_layer_shell::{KeyboardMode, Layer};
@@ -20,48 +31,113 @@ use std::rc::Rc;
 use std::time::Duration;
 
 mod held;
+mod icons;
 mod pill;
+mod render;
 
 use held::HeldRow;
+use icons::{Icon, IconView};
 use pill::CallPill;
+
+/// Each shortcut as the window shows it, by the action's report key, with
+/// the keycap that shows it.
+type Shortcuts = BTreeMap<String, (String, Option<gtk::Widget>)>;
 
 /// The Call Window.
 pub(super) struct CallWindow {
     pub(super) surface: Surface,
     intents: UnboundedSender<Input>,
     caller: gtk::Label,
-    detail: gtk::Label,
-    status: gtk::Label,
-    /// Where the audio is, and the Handoff button.
-    audio: AudioRow,
-    hd: gtk::Label,
-    mute: gtk::Button,
-    mute_label: gtk::Label,
-    keypad_shown: gtk::ToggleButton,
-    hang_up: gtk::Button,
-    hang_up_label: gtk::Label,
-    /// The other Call, on hold, with Swap.
-    held: HeldRow,
-    /// Why a Call placed here failed or was refused.
-    notice: gtk::Label,
-    /// The strip that says the microphone is muted.
-    microphone_muted: gtk::Label,
-    /// Why Mute is disabled, while it is.
-    mute_unavailable: gtk::Label,
-    /// Where keypad tones are typed or pasted, and which shows those sent.
+    timer: gtk::Label,
+    /// The number's label and the number, or "Not in Contacts".
+    meta: gtk::Label,
+    state: StateRow,
+    notice: Notice,
+    /// Where keypad tones are typed or pasted, and which shows those sent;
+    /// there only while the keypad is open.
     tones: gtk::Entry,
     keypad: gtk::Grid,
+    tiles: gtk::Box,
+    mute: Tile<gtk::Button>,
+    keypad_shown: Tile<gtk::ToggleButton>,
+    /// Moves the audio to where the Call isn't heard.
+    handoff: Tile<gtk::Button>,
+    /// Makes the only Call, on hold, live again.
+    resume: gtk::Button,
+    hang_up: gtk::Button,
+    /// The other Call, on hold, with Swap.
+    held: HeldRow,
     /// Each shortcut as the window shows it, by the action's report key,
-    /// with the hint that shows it on its button.
-    shortcuts: BTreeMap<String, (String, Option<gtk::Widget>)>,
+    /// with the keycap that shows it.
+    shortcuts: Shortcuts,
     /// Set while the window writes the tones it sent into `tones`, so the
     /// write isn't taken for typing.
     writing_tones: Cell<bool>,
     /// The once-a-second update of the Call timer, while it runs.
     ticker: RefCell<Option<SourceId>>,
+    /// The timer as it read when contact with the Call was lost, struck
+    /// through and still while it is.
+    lost_timer: RefCell<Option<String>>,
     view: Rc<RefCell<Option<CallWindowView>>>,
     /// What the window shows as while it is collapsed.
     pill: CallPill,
+}
+
+/// The state line: an icon, what it says, and the HD mark.
+struct StateRow {
+    row: gtk::Box,
+    icon: IconView,
+    text: gtk::Label,
+    hd: gtk::Label,
+}
+
+/// A notice in the warning tint: a heading, if it has one, over what to do.
+struct Notice {
+    row: gtk::Box,
+    heading: gtk::Label,
+    text: gtk::Label,
+}
+
+/// One of the three tiles: an icon over a label, and its keycap in the
+/// corner.
+struct Tile<B> {
+    button: B,
+    icon: IconView,
+    label: gtk::Label,
+}
+
+impl<B: IsA<gtk::Button>> Tile<B> {
+    /// A tile on `button`, with `icon`, saying `text`, for `accelerator`.
+    /// Returns it and its key as shown, with the keycap.
+    fn new(button: B, icon: Icon, text: Label, accelerator: &str) -> (Self, String, gtk::Widget) {
+        let icon = IconView::new(icon);
+        let label = gtk::Label::new(Some(messages::label(text)));
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let face = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        face.set_valign(gtk::Align::Center);
+        face.append(&icon.area);
+        face.append(&label);
+        let (cap, shown) = keycap(accelerator);
+        cap.set_halign(gtk::Align::End);
+        cap.set_valign(gtk::Align::Start);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&face));
+        overlay.add_overlay(&cap);
+        let tile = button.as_ref();
+        tile.add_css_class(class::TILE);
+        tile.set_child(Some(&overlay));
+        tile.set_hexpand(true);
+        tile.set_focus_on_click(false);
+        (
+            Self {
+                button,
+                icon,
+                label,
+            },
+            shown,
+            cap.upcast(),
+        )
+    }
 }
 
 impl CallWindow {
@@ -77,65 +153,47 @@ impl CallWindow {
             intents,
             report.clone(),
         );
-        let (heading, caller, hd) = heading();
-        let detail = detail_label();
-        let status = gtk::Label::new(None);
-        status.add_css_class(class::TIMER);
-        status.set_xalign(0.0);
+        let (top, caller, timer) = top_line();
+        let meta = detail_label();
         let mut shortcuts = BTreeMap::new();
-        let audio = AudioRow::new();
-        shortcuts.insert(
-            "handoff-shortcut".to_owned(),
-            (audio.shortcut.clone(), hint(&audio.handoff_label)),
-        );
-        let mute = gtk::Button::new();
-        mute.add_css_class("mute");
-        let mute_label = gtk::Label::new(Some(messages::label(Label::Mute)));
-        let shown = show_shortcut(&mute, &mute_label, MUTE_SHORTCUT);
-        shortcuts.insert("mute-shortcut".to_owned(), (shown, hint(&mute_label)));
-        let keypad_shown = gtk::ToggleButton::new();
-        let keypad_label = gtk::Label::new(Some(messages::label(Label::Keypad)));
-        let shown = show_shortcut(&keypad_shown, &keypad_label, KEYPAD_SHORTCUT);
-        shortcuts.insert("keypad-shortcut".to_owned(), (shown, hint(&keypad_label)));
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        controls.set_homogeneous(true);
-        controls.append(&mute);
-        controls.append(&keypad_shown);
+        let (tiles, mute, keypad_shown, handoff) = tiles(&mut shortcuts);
+
+        let resume = gtk::Button::new();
+        resume.add_css_class("resume");
+        let resume_label = gtk::Label::new(Some(messages::label(Label::Resume)));
+        let shown = show_shortcut(&resume, None, &resume_label, SWAP_SHORTCUT);
+        shortcuts.insert("swap-shortcut".to_owned(), (shown, hint(&resume_label)));
         let hang_up = hang_up_button(&surface, intents);
-        let hang_up_label = gtk::Label::new(Some(messages::label(Label::HangUp)));
-        let shown = show_shortcut(&hang_up, &hang_up_label, HANG_UP_SHORTCUT);
-        shortcuts.insert("hang-up-shortcut".to_owned(), (shown, hint(&hang_up_label)));
+        let shown = show_shortcut(
+            &hang_up,
+            Some(Icon::HangUp),
+            &gtk::Label::new(Some(messages::label(Label::HangUp))),
+            HANG_UP_SHORTCUT,
+        );
+        if let Some(cap) = hang_up_keycap(&hang_up) {
+            shortcuts.insert("hang-up-shortcut".to_owned(), (shown, Some(cap)));
+        }
 
         let held = HeldRow::new(intents);
-        let notice = notice_label();
-        let (microphone_muted, mute_unavailable) = mute_notices();
+        let state = StateRow::new();
+        let notice = Notice::new();
         let (tones, keypad) = keypad();
 
-        // Anchored at the bottom, the window grows upwards. So everything
-        // that comes and goes during a Call (the Held Call, a notice, the
-        // mute notices, the keypad) sits above the controls, and the
-        // controls, the audio row with its Handoff button, Mute and the
-        // keypad toggle, and Hang up never move under the pointer.
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let who = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        who.append(&top);
+        who.append(&meta);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, space::M);
         content.append(&held.row);
-        content.append(&heading);
-        content.append(&detail);
-        content.append(&status);
-        content.append(&notice);
-        content.append(&microphone_muted);
-        content.append(&mute_unavailable);
+        content.append(&who);
+        content.append(&state.row);
+        content.append(&notice.row);
         content.append(&tones);
         content.append(&keypad);
-        content.append(&audio.row);
-        content.append(&controls);
+        content.append(&tiles);
+        content.append(&resume);
         content.append(&hang_up);
         surface.window.set_child(Some(&content));
-        for button in [
-            mute.upcast_ref::<gtk::Button>(),
-            keypad_shown.upcast_ref(),
-            &audio.handoff,
-            &hang_up,
-        ] {
+        for button in [&resume, &hang_up] {
             // Clicking leaves the keyboard with the tone entry.
             button.set_focus_on_click(false);
         }
@@ -144,24 +202,23 @@ impl CallWindow {
             surface,
             intents: intents.clone(),
             caller,
-            detail,
-            status,
-            audio,
-            hd,
-            mute,
-            mute_label,
-            keypad_shown,
-            hang_up,
-            hang_up_label,
-            held,
+            timer,
+            meta,
+            state,
             notice,
-            microphone_muted,
-            mute_unavailable,
             tones,
             keypad,
+            tiles,
+            mute,
+            keypad_shown,
+            handoff,
+            resume,
+            hang_up,
+            held,
             shortcuts,
             writing_tones: Cell::new(false),
             ticker: RefCell::default(),
+            lost_timer: RefCell::default(),
             view: Rc::default(),
             pill: CallPill::new(intents, report),
         });
@@ -172,19 +229,23 @@ impl CallWindow {
     /// Wires the controls, the keypad and the shortcuts to the window.
     fn connect(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
-        self.mute.connect_clicked(move |_| {
+        self.mute.button.connect_clicked(move |_| {
             if let Some(window) = weak.upgrade() {
                 window.toggle_mute();
             }
         });
         let weak = Rc::downgrade(self);
-        self.audio.handoff.connect_clicked(move |_| {
+        self.handoff.button.connect_clicked(move |_| {
             if let Some(window) = weak.upgrade() {
                 window.hand_off();
             }
         });
+        let intents = self.intents.clone();
+        self.resume.connect_clicked(move |_| {
+            let _ = intents.unbounded_send(Input::Swap);
+        });
         let weak = Rc::downgrade(self);
-        self.keypad_shown.connect_toggled(move |toggle| {
+        self.keypad_shown.button.connect_toggled(move |toggle| {
             if let Some(window) = weak.upgrade() {
                 let _ = window
                     .intents
@@ -218,24 +279,44 @@ impl CallWindow {
                 }
             });
         }
+        self.connect_shortcuts();
+        self.connect_typing();
+    }
 
+    /// Each action's shortcut. A control that is hidden or disabled
+    /// ignores it, and the key is still taken: `activate` would press a
+    /// greyed-out button anyway.
+    fn connect_shortcuts(&self) {
         let shortcuts = gtk::ShortcutController::new();
         // Before any control sees the key, so M and K never reach the tone
         // entry.
         shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let actions: [(&str, gtk::Widget); 6] = [
-            (MUTE_SHORTCUT, self.mute.clone().upcast()),
-            (KEYPAD_SHORTCUT, self.keypad_shown.clone().upcast()),
-            (HANDOFF_SHORTCUT, self.audio.handoff.clone().upcast()),
-            (HANG_UP_SHORTCUT, self.hang_up.clone().upcast()),
-            (SWAP_SHORTCUT, self.held.swap.clone().upcast()),
-            (HANG_UP_HELD_SHORTCUT, self.held.hang_up.clone().upcast()),
+        let actions: [(&str, Vec<gtk::Widget>); 6] = [
+            (MUTE_SHORTCUT, vec![self.mute.button.clone().upcast()]),
+            (
+                KEYPAD_SHORTCUT,
+                vec![self.keypad_shown.button.clone().upcast()],
+            ),
+            (HANDOFF_SHORTCUT, vec![self.handoff.button.clone().upcast()]),
+            (HANG_UP_SHORTCUT, vec![self.hang_up.clone().upcast()]),
+            (
+                SWAP_SHORTCUT,
+                vec![
+                    self.held.swap.clone().upcast(),
+                    self.resume.clone().upcast(),
+                ],
+            ),
+            (
+                HANG_UP_HELD_SHORTCUT,
+                vec![self.held.hang_up.clone().upcast()],
+            ),
         ];
-        for (accelerator, control) in actions {
-            // Disabled controls ignore it, and the key is still taken.
-            // `activate` would press a greyed-out button anyway.
+        for (accelerator, controls) in actions {
             let action = gtk::CallbackAction::new(move |_, _| {
-                if control.is_sensitive() {
+                if let Some(control) = controls
+                    .iter()
+                    .find(|control| control.is_sensitive() && shows(*control))
+                {
                     control.activate();
                 }
                 glib::Propagation::Stop
@@ -246,27 +327,49 @@ impl CallWindow {
             ));
         }
         self.surface.window.add_controller(shortcuts);
+    }
 
-        // A tone typed while a button has the keyboard goes to the keypad
-        // too.
+    /// A tone typed or pasted while the tone entry doesn't have the
+    /// keyboard goes to the keypad too, and opens it, so the tones sent
+    /// show.
+    fn connect_typing(self: &Rc<Self>) {
         let keys = gtk::EventControllerKey::new();
         let weak = Rc::downgrade(self);
         keys.connect_key_pressed(move |_, key, _, modifiers| {
-            let plain = !modifiers.intersects(
-                gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK,
-            );
+            let Some(window) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let control = modifiers.contains(ModifierType::CONTROL_MASK);
+            let plain = !modifiers.intersects(ModifierType::CONTROL_MASK | ModifierType::ALT_MASK);
             let tone = key
                 .to_unicode()
                 .filter(|character| plain && keypad_tones(&character.to_string()).is_some());
-            match (weak.upgrade(), tone) {
-                (Some(window), Some(tone)) => {
-                    window.press_tone(&tone.to_string());
-                    glib::Propagation::Stop
-                }
-                _ => glib::Propagation::Proceed,
+            if let Some(tone) = tone
+                && window.open_keypad()
+            {
+                window.press_tone(&tone.to_string());
+                return glib::Propagation::Stop;
             }
+            if control
+                && matches!(key, gtk::gdk::Key::v | gtk::gdk::Key::V)
+                && window.open_keypad()
+                && let Some(text) = window.tones.delegate()
+            {
+                let _ = text.activate_action("clipboard.paste", None);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
         });
         self.surface.window.add_controller(keys);
+    }
+
+    /// Opens the keypad if tones can be sent, and returns whether they can.
+    fn open_keypad(&self) -> bool {
+        let can = self.tones.is_sensitive() && shows(&self.keypad_shown.button);
+        if can && !self.keypad_shown.button.is_active() {
+            self.keypad_shown.button.set_active(true);
+        }
+        can
     }
 
     /// Reports the pointer entering and leaving the window, each click and
@@ -352,10 +455,100 @@ impl CallWindow {
         self.writing_tones.set(false);
         self.update();
     }
+
+    fn start_ticker(self: &Rc<Self>) {
+        if self.ticker.borrow().is_some() {
+            return;
+        }
+        let window = Rc::downgrade(self);
+        let ticker = glib::timeout_add_local(Duration::from_secs(1), move || {
+            let Some(window) = window.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            window.update();
+            glib::ControlFlow::Continue
+        });
+        *self.ticker.borrow_mut() = Some(ticker);
+    }
+
+    fn stop_ticker(&self) {
+        if let Some(ticker) = self.ticker.borrow_mut().take() {
+            ticker.remove();
+        }
+    }
+
+    /// The Call Pill's surface.
+    pub(super) fn pill_surface(&self) -> &Surface {
+        &self.pill.surface
+    }
+}
+
+impl StateRow {
+    fn new() -> Self {
+        let icon = IconView::new(Icon::Computer);
+        let text = gtk::Label::new(None);
+        text.set_xalign(0.0);
+        text.set_wrap(true);
+        text.set_max_width_chars(40);
+        let hd = gtk::Label::new(Some(messages::label(Label::Hd)));
+        hd.add_css_class("hd");
+        hd.set_valign(gtk::Align::Center);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        row.add_css_class(class::STATE_LINE);
+        row.append(&icon.area);
+        row.append(&text);
+        row.append(&hd);
+        Self {
+            row,
+            icon,
+            text,
+            hd,
+        }
+    }
+}
+
+impl Notice {
+    fn new() -> Self {
+        let icon = IconView::new(Icon::Warning);
+        icon.area.set_valign(gtk::Align::Start);
+        icon.area.add_css_class("notice-icon");
+        let heading = gtk::Label::new(None);
+        heading.add_css_class("notice-heading");
+        heading.set_xalign(0.0);
+        heading.set_wrap(true);
+        heading.set_max_width_chars(36);
+        let text = gtk::Label::new(None);
+        text.set_xalign(0.0);
+        text.set_wrap(true);
+        text.set_max_width_chars(36);
+        let words = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        words.set_hexpand(true);
+        words.append(&heading);
+        words.append(&text);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        row.add_css_class(class::NOTICE);
+        row.append(&icon.area);
+        row.append(&words);
+        row.set_visible(false);
+        Self { row, heading, text }
+    }
+}
+
+/// Whether `widget` and every widget it is in, short of its window, are
+/// visible: shown whenever its window is.
+fn shows(widget: &impl IsA<gtk::Widget>) -> bool {
+    let mut widget = widget.as_ref().clone();
+    while let Some(parent) = widget.parent() {
+        if !widget.is_visible() {
+            return false;
+        }
+        widget = parent;
+    }
+    true
 }
 
 /// The Call Window's status for a phase without a live Call, whose status
-/// is its timer instead.
+/// is its timer instead, as the Call Pill shows it.
 fn status_label(phase: &CallWindowPhase) -> Label {
     match phase {
         CallWindowPhase::Connecting | CallWindowPhase::Live { .. } => Label::Connecting,
@@ -365,61 +558,6 @@ fn status_label(phase: &CallWindowPhase) -> Label {
         CallWindowPhase::Ended => Label::CallEnded,
         CallWindowPhase::OnHold { .. } => Label::OnHold,
     }
-}
-
-/// The Call Window's row that says where the audio is, with the Handoff
-/// button beside it.
-struct AudioRow {
-    row: gtk::Box,
-    audio_location: gtk::Label,
-    /// Moves the audio to where its label says.
-    handoff: gtk::Button,
-    handoff_label: gtk::Label,
-    /// The Handoff button's shortcut, as shown.
-    shortcut: String,
-}
-
-impl AudioRow {
-    fn new() -> Self {
-        let audio_location = gtk::Label::new(None);
-        audio_location.add_css_class("dim-label");
-        audio_location.set_xalign(0.0);
-        audio_location.set_hexpand(true);
-        // As wide as its widest text, and the Handoff button as wide as its
-        // widest label, so the window never changes width under the pointer
-        // as the audio moves.
-        audio_location.set_width_chars(widest(&[Label::AudioOnPhone, Label::AudioOnDesktop]));
-        let handoff = gtk::Button::new();
-        handoff.add_css_class("handoff");
-        let handoff_label = gtk::Label::new(Some(messages::label(Label::MoveAudioHere)));
-        handoff_label.set_width_chars(widest(&[
-            Label::MoveAudioHere,
-            Label::MoveAudioToPhone,
-            Label::MovingAudioHere,
-            Label::MovingAudioToPhone,
-        ]));
-        let shortcut = show_shortcut(&handoff, &handoff_label, HANDOFF_SHORTCUT);
-        handoff.set_hexpand(false);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        row.append(&audio_location);
-        row.append(&handoff);
-        Self {
-            row,
-            audio_location,
-            handoff,
-            handoff_label,
-            shortcut,
-        }
-    }
-}
-
-/// How many characters the longest of `labels` has.
-fn widest(labels: &[Label]) -> i32 {
-    labels
-        .iter()
-        .map(|label| messages::label(*label).chars().count())
-        .max()
-        .map_or(0, |widest| i32::try_from(widest).unwrap_or(i32::MAX))
 }
 
 /// Hang up. With no Call yet, hanging up a Call placed here cancels the
@@ -435,18 +573,69 @@ fn hang_up_button(surface: &Surface, intents: &UnboundedSender<Input>) -> gtk::B
     hang_up
 }
 
-/// The heading row: the caller, and HD beside it. Returns the row, the
-/// caller and HD.
-fn heading() -> (gtk::Box, gtk::Label, gtk::Label) {
+/// The keycap [`show_shortcut`] put on `button`: the last thing on it.
+fn hang_up_keycap(button: &gtk::Button) -> Option<gtk::Widget> {
+    button.child()?.last_child()
+}
+
+/// The three tiles: Mute, Keypad and the audio move, in a row of equal
+/// widths. Adds each one's shortcut to `shortcuts`.
+fn tiles(
+    shortcuts: &mut Shortcuts,
+) -> (
+    gtk::Box,
+    Tile<gtk::Button>,
+    Tile<gtk::ToggleButton>,
+    Tile<gtk::Button>,
+) {
+    let (mute, shown, cap) = Tile::new(
+        gtk::Button::new(),
+        Icon::Microphone,
+        Label::Mute,
+        MUTE_SHORTCUT,
+    );
+    mute.button.add_css_class("mute");
+    shortcuts.insert("mute-shortcut".to_owned(), (shown, Some(cap)));
+    let (keypad_shown, shown, cap) = Tile::new(
+        gtk::ToggleButton::new(),
+        Icon::Keypad,
+        Label::Keypad,
+        KEYPAD_SHORTCUT,
+    );
+    shortcuts.insert("keypad-shortcut".to_owned(), (shown, Some(cap)));
+    let (handoff, shown, cap) = Tile::new(
+        gtk::Button::new(),
+        Icon::Phone,
+        Label::ToPhone,
+        HANDOFF_SHORTCUT,
+    );
+    handoff.button.add_css_class("handoff");
+    shortcuts.insert("handoff-shortcut".to_owned(), (shown, Some(cap)));
+    let tiles = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+    tiles.set_homogeneous(true);
+    tiles.append(&mute.button);
+    tiles.append(&keypad_shown.button);
+    tiles.append(&handoff.button);
+    (tiles, mute, keypad_shown, handoff)
+}
+
+/// The top line: who, and the timer at the right. Returns the line, who and
+/// the timer.
+fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
     let caller = gtk::Label::new(None);
     caller.add_css_class(class::WHO);
     caller.set_xalign(0.0);
-    let hd = gtk::Label::new(Some(messages::label(Label::Hd)));
-    hd.add_css_class("hd");
-    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    heading.append(&caller);
-    heading.append(&hd);
-    (heading, caller, hd)
+    caller.set_hexpand(true);
+    caller.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    caller.set_valign(gtk::Align::BaselineFill);
+    let timer = gtk::Label::new(None);
+    timer.add_css_class(class::TIMER);
+    timer.set_xalign(1.0);
+    timer.set_valign(gtk::Align::BaselineFill);
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+    line.append(&caller);
+    line.append(&timer);
+    (line, caller, timer)
 }
 
 /// Why a Call placed here failed or was refused, hidden.
@@ -459,12 +648,15 @@ pub(super) fn notice_label() -> gtk::Label {
     notice
 }
 
-/// The tone entry, and the keypad's buttons, hidden.
+/// The tone entry, and the keypad's buttons, hidden until the keypad opens.
 fn keypad() -> (gtk::Entry, gtk::Grid) {
     let tones = gtk::Entry::new();
+    tones.add_css_class(class::TONES);
     tones.set_placeholder_text(Some(messages::label(Label::KeypadPlaceholder)));
     tones.set_input_purpose(gtk::InputPurpose::Phone);
+    tones.set_visible(false);
     let keypad = gtk::Grid::new();
+    keypad.add_css_class(class::KEYPAD);
     keypad.set_row_spacing(6);
     keypad.set_column_spacing(6);
     keypad.set_row_homogeneous(true);
@@ -473,22 +665,8 @@ fn keypad() -> (gtk::Entry, gtk::Grid) {
     (tones, keypad)
 }
 
-/// The strip that says the microphone is muted, and the note that says why
-/// Mute is disabled, both hidden.
-fn mute_notices() -> (gtk::Label, gtk::Label) {
-    let microphone_muted = gtk::Label::new(Some(messages::label(Label::MicrophoneMuted)));
-    microphone_muted.add_css_class(class::WARNING_STRIP);
-    microphone_muted.set_visible(false);
-    let mute_unavailable = gtk::Label::new(Some(messages::failure(Failure::MuteUnavailable).text));
-    mute_unavailable.add_css_class("dim-label");
-    mute_unavailable.set_wrap(true);
-    mute_unavailable.set_xalign(0.0);
-    mute_unavailable.set_visible(false);
-    (microphone_muted, mute_unavailable)
-}
-
-/// Adds what Mute and its notices show for `mute`, with Mute saying
-/// `mute_text`, to `content`.
+/// Adds what the Call Pill's Mute and its notices show for `mute`, with
+/// Mute saying `mute_text`, to `content`.
 fn report_mute(mute: Mute, mute_text: &str, content: &mut BTreeMap<String, String>) {
     content.insert("mute".to_owned(), mute_text.to_owned());
     match mute {
@@ -513,314 +691,23 @@ fn hint(text: &gtk::Label) -> Option<gtk::Widget> {
     text.next_sibling()
 }
 
-/// Puts `text` and `accelerator`'s label on `button`, and returns the label
-/// as shown.
-fn show_shortcut(button: &impl IsA<gtk::Button>, text: &gtk::Label, accelerator: &str) -> String {
+/// Puts `icon`, if any, `text` and `accelerator`'s keycap on `button`, and
+/// returns the key as shown.
+fn show_shortcut(
+    button: &impl IsA<gtk::Button>,
+    icon: Option<Icon>,
+    text: &gtk::Label,
+    accelerator: &str,
+) -> String {
     let (shortcut, shown) = keycap(accelerator);
-    let label = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let label = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
     label.set_halign(gtk::Align::Center);
+    if let Some(icon) = icon {
+        label.append(&IconView::new(icon).area);
+    }
     label.append(text);
     label.append(&shortcut);
     button.as_ref().set_child(Some(&label));
     button.as_ref().set_hexpand(true);
     shown
-}
-
-impl CallWindow {
-    pub(super) fn render(self: &Rc<Self>, view: Option<&CallWindowView>) {
-        let was_live = matches!(
-            self.view.borrow().as_ref().map(|view| &view.phase),
-            Some(CallWindowPhase::Live { .. })
-        );
-        let new_call =
-            self.view.borrow().as_ref().map(|view| view.call) != view.map(|view| view.call);
-        *self.view.borrow_mut() = view.cloned();
-        if new_call {
-            self.tones.set_text("");
-            self.keypad_shown.set_active(false);
-        }
-        let Some(view) = view else {
-            self.stop_ticker();
-            self.surface.hide();
-            self.pill.hide();
-            return;
-        };
-        let live = matches!(view.phase, CallWindowPhase::Live { .. });
-        if live {
-            self.start_ticker();
-        } else {
-            self.stop_ticker();
-        }
-        if view.collapsed {
-            // The window keeps its keypad and tones for when it expands.
-            if self.surface.window.is_visible() {
-                self.surface.hide();
-            }
-            self.update();
-            return;
-        }
-        self.pill.hide();
-        self.surface.call.set(view.call);
-        self.update();
-        if live && !was_live {
-            // Once the update has enabled it: a disabled entry can't take
-            // the keyboard.
-            self.tones.grab_focus();
-        }
-        self.surface.focus(view.focused);
-    }
-
-    /// Brings every label up to date with the view and the clock.
-    fn update(&self) {
-        let Some(view) = self.view.borrow().clone() else {
-            return;
-        };
-        if view.collapsed {
-            self.pill.render(&view);
-            return;
-        }
-        let who = Who::of(&view.caller, view.contact.as_ref());
-        who.show(&self.caller);
-        who.show_detail(&self.detail);
-        let (status, wideband, mute) = match view.phase {
-            CallWindowPhase::Live {
-                active_since,
-                wideband,
-                mute,
-            } => (
-                messages::elapsed(seconds_since(active_since)),
-                wideband,
-                Some(mute),
-            ),
-            phase => (
-                messages::label(status_label(&phase)).to_owned(),
-                false,
-                None,
-            ),
-        };
-        self.status.set_text(&status);
-        set_class(&self.status, class::WORDS, mute.is_none());
-        let audio_location = view.audio.map(|audio| {
-            messages::label(match audio.location {
-                AudioLocation::Desktop => Label::AudioOnDesktop,
-                AudioLocation::Phone => Label::AudioOnPhone,
-            })
-        });
-        // The row stays, empty, while there is nothing to say, so Hang up
-        // never moves under the pointer when the Call connects.
-        self.audio
-            .audio_location
-            .set_text(audio_location.unwrap_or_default());
-        let handoff = self.show_handoff(view.audio);
-        self.hd.set_visible(wideband);
-        // While a Call is on hold and a Waiting Call rings, the Phone would
-        // answer or decline the Waiting Call instead; the held row says so.
-        self.hang_up.set_sensitive(
-            !view.waiting_first
-                && !view.connection_lost
-                && !matches!(
-                    view.phase,
-                    CallWindowPhase::Ended | CallWindowPhase::NotPlaced
-                ),
-        );
-        let hang_up_on_phone = self.show_hang_up(view.connection_lost);
-        let notice = view.notice.map(|failure| messages::failure(failure).text);
-        self.notice.set_text(notice.unwrap_or_default());
-        self.notice.set_visible(notice.is_some());
-        // With contact lost, nothing in the window works; the notice says
-        // why, without Mute's hint beside it.
-        let mute = mute.filter(|_| !view.connection_lost);
-        let mute_text = self.show_controls(mute, view.connection_lost);
-        set_class(&self.surface.window, class::MUTED, mute == Some(Mute::On));
-        set_class(
-            &self.surface.window,
-            class::CONTACT_LOST,
-            view.connection_lost,
-        );
-
-        let mut content = BTreeMap::from([("status".to_owned(), status)]);
-        if let Some(call) = view.call {
-            content.insert("call".to_owned(), call.to_string());
-        }
-        if let Some(notice) = notice {
-            content.insert("notice".to_owned(), notice.to_owned());
-        }
-        who.report(&mut content);
-        if let Some(hang_up_on_phone) = hang_up_on_phone {
-            content.insert("hang-up".to_owned(), hang_up_on_phone.to_owned());
-            content.insert("mute".to_owned(), messages::label(Label::Mute).to_owned());
-        }
-        // Each shortcut whose hint is on screen.
-        content.extend(
-            self.shortcuts
-                .iter()
-                .filter(|(_, (_, hint))| hint.as_ref().is_none_or(WidgetExt::is_visible))
-                .map(|(key, (shown, _))| (key.clone(), shown.clone())),
-        );
-        if view.waiting_first {
-            // Greyed out, Hang up has no shortcut to report.
-            content.remove("hang-up-shortcut");
-        }
-        if let Some(audio_location) = audio_location {
-            content.insert("audio-location".to_owned(), audio_location.to_owned());
-            content.insert("handoff".to_owned(), handoff.to_owned());
-        }
-        if wideband {
-            content.insert("hd".to_owned(), messages::label(Label::Hd).to_owned());
-        }
-        if let Some(mute) = mute {
-            report_mute(mute, mute_text, &mut content);
-        }
-        self.report_tones(&mut content);
-        self.held.update(&view, &mut content);
-        self.surface.show(content);
-    }
-
-    /// Reports the tone entry, the keypad toggle and the keypad while they
-    /// show, and the tones typed while the entry shows.
-    fn report_tones(&self, content: &mut BTreeMap<String, String>) {
-        // The toggle keeps its place while hidden, so it counts as hidden
-        // only when it can't be seen, pressed or reached with the keyboard:
-        // any one of those left is the toggle still there.
-        let toggle_there = self.keypad_shown.opacity() > 0.0
-            || self.keypad_shown.can_target()
-            || self.keypad_shown.can_focus();
-        for (key, shown) in [
-            ("tone-entry", WidgetExt::is_visible(&self.tones)),
-            ("keypad-toggle", toggle_there),
-            ("keypad", WidgetExt::is_visible(&self.keypad)),
-        ] {
-            if shown {
-                content.insert(key.to_owned(), "shown".to_owned());
-            }
-        }
-        let tones = self.tones.text();
-        if WidgetExt::is_visible(&self.tones) && !tones.is_empty() {
-            content.insert("tones".to_owned(), tones.to_string());
-        }
-    }
-
-    /// The Call Pill's surface.
-    pub(super) fn pill_surface(&self) -> &Surface {
-        &self.pill.surface
-    }
-
-    /// Brings the Handoff button up to date with the Call's audio, `None`
-    /// with no live Call, and returns its label. It names where the audio
-    /// will go, and is disabled while the audio is on its way.
-    fn show_handoff(&self, audio: Option<CallAudio>) -> &'static str {
-        let label = messages::label(match audio {
-            Some(CallAudio {
-                moving: Some(AudioLocation::Desktop),
-                ..
-            }) => Label::MovingAudioHere,
-            Some(CallAudio {
-                moving: Some(AudioLocation::Phone),
-                ..
-            }) => Label::MovingAudioToPhone,
-            Some(CallAudio {
-                location: AudioLocation::Desktop,
-                ..
-            }) => Label::MoveAudioToPhone,
-            Some(CallAudio {
-                location: AudioLocation::Phone,
-                ..
-            })
-            | None => Label::MoveAudioHere,
-        });
-        self.audio.handoff_label.set_text(label);
-        self.audio
-            .handoff
-            .set_sensitive(audio.is_some_and(|audio| audio.moving.is_none()));
-        label
-    }
-
-    /// Brings Hang up's look up to date: while the Desktop has lost contact
-    /// with the Call, a plain button saying to hang up on the Phone, and no
-    /// control shows a shortcut, as none works. Returns that label then.
-    fn show_hang_up(&self, connection_lost: bool) -> Option<&'static str> {
-        let label = messages::label(if connection_lost {
-            Label::HangUpOnPhone
-        } else {
-            Label::HangUp
-        });
-        self.hang_up_label.set_text(label);
-        for hint in self
-            .shortcuts
-            .values()
-            .filter_map(|(_, hint)| hint.as_ref())
-        {
-            hint.set_visible(!connection_lost);
-        }
-        // Not red: it isn't a Hang up that works.
-        if connection_lost {
-            self.hang_up.remove_css_class("hang-up");
-        } else {
-            self.hang_up.add_css_class("hang-up");
-        }
-        connection_lost.then_some(label)
-    }
-
-    /// Brings Mute, its notices and the keypad up to date with `mute`, which
-    /// is `None` with no live Call, and returns Mute's label. While the
-    /// Desktop has lost contact with the Call, the tone entry and the keypad
-    /// are hidden, and so is the keypad toggle: no tone can be sent. The
-    /// entry and the keypad sit above the controls. The toggle shares Mute's
-    /// row, so it keeps its place, invisible, and Mute doesn't stretch.
-    fn show_controls(&self, mute: Option<Mute>, connection_lost: bool) -> &'static str {
-        let live = mute.is_some();
-        let mute_text = messages::label(if mute == Some(Mute::On) {
-            Label::Unmute
-        } else {
-            Label::Mute
-        });
-        self.mute_label.set_text(mute_text);
-        self.mute
-            .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
-        set_class(&self.mute, class::MUTED, mute == Some(Mute::On));
-        self.microphone_muted.set_visible(mute == Some(Mute::On));
-        self.mute_unavailable
-            .set_visible(mute == Some(Mute::Unavailable));
-        let contact_back = !connection_lost && !WidgetExt::is_visible(&self.tones);
-        self.keypad_shown
-            .set_opacity(if connection_lost { 0.0 } else { 1.0 });
-        self.keypad_shown.set_can_target(!connection_lost);
-        self.keypad_shown.set_can_focus(!connection_lost);
-        self.keypad_shown
-            .update_state(&[gtk::accessible::State::Hidden(connection_lost)]);
-        self.tones.set_visible(!connection_lost);
-        self.keypad
-            .set_visible(!connection_lost && self.keypad_shown.is_active());
-        self.keypad_shown.set_sensitive(live);
-        self.tones.set_sensitive(live);
-        self.keypad.set_sensitive(live);
-        if live && contact_back {
-            // Once enabled, as when the Call went live: the keyboard
-            // returns to the tone entry, without selecting the tones typed
-            // so far, which the next one would replace.
-            self.tones.grab_focus_without_selecting();
-        }
-        mute_text
-    }
-
-    fn start_ticker(self: &Rc<Self>) {
-        if self.ticker.borrow().is_some() {
-            return;
-        }
-        let window = Rc::downgrade(self);
-        let ticker = glib::timeout_add_local(Duration::from_secs(1), move || {
-            let Some(window) = window.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            window.update();
-            glib::ControlFlow::Continue
-        });
-        *self.ticker.borrow_mut() = Some(ticker);
-    }
-
-    fn stop_ticker(&self) {
-        if let Some(ticker) = self.ticker.borrow_mut().take() {
-            ticker.remove();
-        }
-    }
 }

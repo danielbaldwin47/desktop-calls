@@ -247,7 +247,7 @@ fn down_down_enter_dials_the_selected_row_and_the_dialer_closes_as_the_call_star
             dialer(state).is_none()
                 && state
                     .surface("call-window")
-                    .and_then(|window| window.get("status"))
+                    .and_then(|window| window.get("state"))
                     .is_some_and(|status| status == "Calling…")
         },
     );

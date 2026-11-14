@@ -78,7 +78,7 @@ fn live_on_desktop(harness: &Harness) -> u32 {
         state.audio_location == "desktop"
             && state
                 .surface("call-window")
-                .is_some_and(|window| window.contains_key("audio-location"))
+                .is_some_and(|window| window.contains_key("handoff"))
     });
     call
 }

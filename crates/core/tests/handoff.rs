@@ -633,7 +633,16 @@ fn a_handoff_to_the_phone_that_never_starts_says_so_at_the_limit() {
 #[test]
 fn the_phone_link_giving_up_on_the_call_mid_handoff_to_the_phone_ends_the_handoff() {
     let (state, limit) = asked_for_phone(live_here());
-    let (state, _) = run(state, [dropped(), Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [
+            dropped(),
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
+    );
 
     let (state, effects) = run(state, [Input::TimerFired(limit)]);
     assert_eq!(effects, []);
@@ -652,7 +661,13 @@ fn the_call_ending_mid_handoff_forgets_it() {
     let (state, effects) = run(live_on_phone(), [Input::MoveAudio(AudioLocation::Desktop)]);
     let first = handoff_timer(&effects).expect("a Handoff timer");
 
-    let (state, _) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, _) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     let (_, effects) = run(state, [Input::TimerFired(first)]);
 
     assert_eq!(effects, []);

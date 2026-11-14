@@ -35,7 +35,7 @@ pub use machine::{
     ConnectFailure, ContactsOutcome, DesktopCheck, DesktopFix, DialProgress, DialerView, Effect,
     FixFailure, HeldCall, Input, KeybindingStage, Mute, PairingFailure, PhoneCommand, PhoneRefusal,
     Problem, ReadingContacts, RingingCaller, SetupNotice, SetupProblemsView, SetupStep,
-    SetupWindowView, State, Surfaces, Timer, WaitingOptions, keypad_tones, step,
+    SetupWindowView, State, StateLine, Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

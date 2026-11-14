@@ -34,10 +34,6 @@ pub(crate) mod class {
     /// With [`TIMER`]: the line holds words, not a time.
     pub(crate) const WORDS: &str = "words";
     /// A small heading over a group: monospace 10.5/600 in capitals.
-    #[expect(
-        dead_code,
-        reason = "for the surfaces spec #221 rebuilds; the CSS is in place"
-    )]
     pub(crate) const EYEBROW: &str = "type-eyebrow";
     /// A key, in a 1 px outlined box: monospace 10.5/500, in its label's
     /// colour at full strength, so it reads at 4.5:1 like any text.
@@ -58,8 +54,29 @@ pub(crate) mod class {
     pub(crate) const CONTACT_LOST: &str = "contact-lost";
     /// Red text: a Missed Call.
     pub(crate) const MISSED: &str = "missed";
-    /// A strip that says the microphone is muted, in the warning colour.
-    pub(crate) const WARNING_STRIP: &str = "warning-strip";
+    /// One of the Call Window's three tiles: 58 high, its icon over its
+    /// label in 12, its keycap in the corner. With [`MUTED`], in the warning
+    /// colour; with [`ACCENT`], in the accent.
+    pub(crate) const TILE: &str = "tile";
+    /// A control filled with the accent: the one action that fixes things.
+    pub(crate) const ACCENT: &str = "accent";
+    /// A small button, 30 high.
+    pub(crate) const SMALL: &str = "small";
+    /// The Call Window's state line: 12.5, in secondary text; with
+    /// [`MUTED`], in warning text.
+    pub(crate) const STATE_LINE: &str = "state-line";
+    /// A notice on the warning tint, its icon in warning text.
+    pub(crate) const NOTICE: &str = "notice";
+    /// A row above a rule: the Held Call's.
+    pub(crate) const HELD_ROW: &str = "held-row";
+    /// A timer struck through and in secondary text: it stopped counting.
+    pub(crate) const STRUCK: &str = "struck";
+    /// On a surface: the Call is over, so who is in secondary text.
+    pub(crate) const ENDED: &str = "ended";
+    /// The keypad's tone entry: monospace 15, spaced.
+    pub(crate) const TONES: &str = "tones";
+    /// The keypad's buttons: monospace 15/500, 34 high.
+    pub(crate) const KEYPAD: &str = "keypad";
 }
 
 /// The gaps between things, in pixels: the scale the surfaces #224 to #228
@@ -130,11 +147,49 @@ window.desktop-calls-surface.contact-lost { box-shadow: inset 0 0 0 2px var(--dc
 .desktop-calls-surface button.answer { background: var(--dc-answer); color: var(--dc-call-label); }
 .desktop-calls-surface button.decline,
 .desktop-calls-surface button.hang-up { background: var(--dc-end); color: var(--dc-call-label); }
-.desktop-calls-surface button.mute.muted,
-.desktop-calls-surface .warning-strip {
+.desktop-calls-surface button.mute.muted {
     background: var(--dc-warning); color: var(--dc-warning-label);
 }
-.desktop-calls-surface .warning-strip { font-weight: bold; padding: 8px; }
+
+.desktop-calls-surface button.hang-up,
+.desktop-calls-surface button.resume { min-height: 36px; padding-top: 0; padding-bottom: 0; }
+.desktop-calls-surface button.tile {
+    min-height: 58px; padding: 0 4px; font-size: 12px; font-weight: 600;
+}
+.desktop-calls-surface button.tile .type-keycap { border-color: transparent; padding: 0; }
+.desktop-calls-surface button.tile:checked { box-shadow: inset 0 0 0 2px var(--dc-accent); }
+.desktop-calls-surface button.tile.accent {
+    background: var(--dc-accent); color: var(--dc-accent-label);
+}
+.desktop-calls-surface button.small {
+    min-height: 30px; min-width: 0; padding: 0 10px; font-size: 12.5px;
+}
+.desktop-calls-surface button.hang-up-held {
+    background: transparent; color: var(--dc-missed);
+    box-shadow: inset 0 0 0 1px var(--dc-end);
+}
+.desktop-calls-surface button.hang-up-held:hover,
+.desktop-calls-surface button.hang-up-held:focus-visible {
+    background: var(--dc-end); color: var(--dc-call-label); box-shadow: none;
+}
+.state-line { font-size: 12.5px; color: var(--dc-secondary); }
+.state-line.muted { color: var(--dc-warning-text); font-weight: 600; }
+.notice { padding: 10px 12px; background: var(--dc-warning-tint); font-size: 12.5px; }
+.notice .notice-icon { color: var(--dc-warning-text); }
+.notice .notice-heading { font-weight: 600; }
+.held-row { padding-bottom: 12px; border-bottom: 1px solid var(--dc-border); }
+.held-caller { font-weight: 600; }
+.held-row .dim-label { font-size: 12.5px; }
+.type-timer.struck { text-decoration-line: line-through; color: var(--dc-secondary); }
+window.desktop-calls-surface.ended .type-who,
+window.desktop-calls-surface.ended .type-meta,
+window.desktop-calls-surface.ended .state-line { color: var(--dc-secondary); }
+entry.tones {
+    font-family: monospace; font-size: 15px; letter-spacing: 1px; min-height: 34px;
+}
+.keypad button {
+    font-family: monospace; font-size: 15px; font-weight: 500; min-height: 34px; padding: 0;
+}
 
 .desktop-calls-surface row:selected,
 .desktop-calls-surface row:selected:hover {
@@ -192,7 +247,7 @@ pub(super) fn css(
             ".desktop-calls-surface {{ border-radius: {rounding}px; }}\n\
              .desktop-calls-surface button,\n\
              .desktop-calls-surface entry,\n\
-             .desktop-calls-surface .warning-strip {{ border-radius: {control}px; }}"
+             .desktop-calls-surface .notice {{ border-radius: {control}px; }}"
         );
     }
     css

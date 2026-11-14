@@ -13,10 +13,12 @@ use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
+mod call_window;
 mod calls_off;
 mod checks;
 mod problems;
 mod setup;
+pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{calls_off_status, calls_off_until_unknown, calls_turned};
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
@@ -587,6 +589,19 @@ pub enum Label {
     OnYourPhone,
     /// What the Call Pill adds while another Call is on hold.
     OneOnHold,
+    /// The Call Window's audio tile while the audio is on the Desktop.
+    ToPhone,
+    /// The Call Window's audio tile while the audio is on the Phone.
+    MoveHere,
+    /// The Call Window's audio tile while a Handoff is under way.
+    Moving,
+    /// The line under a bare number: no Contact has it.
+    NotInContacts,
+    /// The heading of the Call Window's notice while the Desktop has lost
+    /// contact with the Call.
+    ConnectionToPhoneLost,
+    /// The tooltip of the Call Window's Hang up for the Held Call.
+    HangUpHeldCall,
 }
 
 /// The text of `label`.
@@ -642,6 +657,12 @@ pub fn label(label: Label) -> &'static str {
         }
         Label::OnYourPhone => "On your phone",
         Label::OneOnHold => "1 on hold",
+        Label::ToPhone => "To phone",
+        Label::MoveHere => "Move here",
+        Label::Moving => "Moving…",
+        Label::NotInContacts => "Not in Contacts",
+        Label::ConnectionToPhoneLost => "Connection to phone lost",
+        Label::HangUpHeldCall => "Hang up the Held Call",
     }
 }
 
@@ -973,15 +994,4 @@ fn civil_date(days: i64) -> (i64, usize, i64) {
     };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     (year, usize::try_from(month).unwrap_or(1), day)
-}
-
-/// The Call timer's text for `seconds`: `m:ss`, or `h:mm:ss` from an hour.
-#[must_use]
-pub fn elapsed(seconds: u64) -> String {
-    let (hours, minutes, seconds) = (seconds / 3_600, seconds / 60 % 60, seconds % 60);
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
 }

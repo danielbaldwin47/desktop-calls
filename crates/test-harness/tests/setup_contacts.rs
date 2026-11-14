@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use test_harness::vcards;
-use test_harness::{AppState, Harness, Key};
+use test_harness::{AppState, Builder, Harness, Key};
 
 /// How long the app may take to start and show the Setup Window by itself.
 const STARTUP: Duration = Duration::from_secs(10);
@@ -45,7 +45,12 @@ const SYNCED: &str = "Synced 312 Contacts and 200 recent Calls.";
 /// Calls, which it gives at the Pixel's pace, and asking whether to share
 /// them as Android does.
 fn fresh_install() -> Harness {
-    let harness = Harness::builder()
+    fresh_install_of(Harness::builder())
+}
+
+/// [`fresh_install`], started from `builder`.
+fn fresh_install_of(builder: Builder) -> Harness {
+    let harness = builder
         .headless_screen()
         .phone_name(PHONE_NAME)
         .phone_unpaired()
@@ -450,6 +455,34 @@ fn the_keybinding_is_written_exactly_as_shown_once_confirmed_and_not_at_all_when
         format!("{BINDINGS}{line}\n"),
         "exactly the line shown, at the end"
     );
+}
+
+#[test]
+fn the_finish_page_names_the_config_file_from_a_tilde_and_writes_the_line_as_shown() {
+    let harness = fresh_install_of(Harness::builder().config_under_home());
+    let state = at_the_finish_page_offering_the_keybinding(&harness);
+    let named = "~/.config/hypr/bindings.lua";
+    assert!(
+        field(&state, "instructions").is_some_and(|text| text.contains(named)),
+        "{state:?}"
+    );
+
+    harness.keyboard().press(Key::Return);
+    let state = harness.wait_for_app("the window shows the line", DEADLINE, |state| {
+        field(state, "line").is_some() && field(state, "buttons") == Some("Confirm\nCancel")
+    });
+    assert!(
+        field(&state, "instructions").is_some_and(|text| text.contains(named)),
+        "{state:?}"
+    );
+    // What is written is the line shown, with no `~` in it.
+    let line = field(&state, "line").unwrap_or_default().to_owned();
+    assert!(!line.contains('~'), "{line}");
+    harness.keyboard().press(Key::Return);
+    harness.wait_for_app("the keybinding is added", DEADLINE, |state| {
+        field(state, "buttons") == Some("Done")
+    });
+    assert_eq!(bindings(&harness), format!("{BINDINGS}{line}\n"));
 }
 
 #[test]

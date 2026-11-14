@@ -38,6 +38,7 @@ use crate::call::Timestamp;
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{ContactsState, SyncProgress, Unavailable};
 use crate::keybinding::KeybindingCheck;
+use crate::messages::ProblemKind;
 
 /// How long a Phone that just paired may take to connect before the
 /// Desktop asks it for hands-free alone. A Phone sharing Calls had its
@@ -179,19 +180,21 @@ pub struct SetupWindowView {
     pub step: SetupStep,
     /// How this Desktop shows on Phones, once known.
     pub desktop_name: Option<String>,
-    /// Why the last attempt didn't work.
+    /// Why the last attempt didn't work, unless a Problem card says it.
     pub notice: Option<SetupNotice>,
     /// Different each time the window opens.
     pub opened: u32,
-    /// A Problem's button has keyboard focus, so Enter presses it instead
-    /// of the step's default button.
-    pub problem_has_focus: bool,
+    /// The Problem whose button has keyboard focus, so Enter presses it
+    /// instead of the step's default button.
+    pub problem_has_focus: Option<ProblemKind>,
 }
 
 /// Why the Setup Window's last attempt didn't work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetupNotice {
     /// The Desktop can't look for Phones: its Bluetooth is off or missing.
+    /// With Bluetooth off or blocked, the view leaves it to the Problem
+    /// card.
     BluetoothUnavailable,
     /// Pairing was turned down, on the Phone or here, or cancelled.
     PairingRejected,
@@ -351,12 +354,19 @@ impl State {
                 keybinding: setup.keybinding.clone(),
             },
         };
+        // A Problem card already says Bluetooth is off or blocked, with its
+        // Fix: the window says it once.
+        let said_by_a_problem =
+            setup.notice == Some(SetupNotice::BluetoothUnavailable) && self.desktop.bluetooth_off();
         Some(SetupWindowView {
             step,
             desktop_name: setup.desktop_name.clone(),
-            notice: setup.notice,
+            notice: setup.notice.filter(|_| !said_by_a_problem),
             opened: setup.opened,
-            problem_has_focus: self.problem_takes_focus(),
+            problem_has_focus: self
+                .problem_blocks_step()
+                .then(|| self.desktop.problems().first().copied())
+                .flatten(),
         })
     }
 

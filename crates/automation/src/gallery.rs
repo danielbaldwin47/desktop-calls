@@ -4,7 +4,7 @@
 //!
 //! Each surface ticket adds its states to [`STATES`], or to a list of its
 //! own in a module here, such as [`call_pill::CALL_PILL_STATES`] or
-//! [`banner::BANNER_STATES`]. The Indicator's
+//! [`banner::BANNER_STATES`] or [`setup_window::SETUP_PROBLEM_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark.
 
@@ -24,6 +24,7 @@ mod indicator;
 mod look;
 mod page;
 mod quiet_hours_window;
+mod setup_window;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
@@ -33,6 +34,7 @@ use indicator::{
 use look::{LOOKS, Look};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
+use setup_window::SETUP_PROBLEM_STATES;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -456,9 +458,9 @@ const STATES: &[State] = &[
     },
     State {
         name: "setup-window-done",
-        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding",
+        title: "The Setup Window's finish page: what was synced, the first Call and the keybinding, with the config file named from `~`",
         still: |_| true,
-        prepare: fresh_install,
+        prepare: |builder| fresh_install(builder).config_under_home(),
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -472,9 +474,9 @@ const STATES: &[State] = &[
     },
     State {
         name: "setup-window-keybinding",
-        title: "The Setup Window, showing the exact keybinding line before writing it",
+        title: "The Setup Window, showing the exact keybinding line before writing it, the path wrapping only after a `/`",
         still: |_| true,
-        prepare: fresh_install,
+        prepare: |builder| fresh_install(builder).config_under_home(),
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -861,6 +863,7 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .chain(BANNER_STATES)
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
+        .chain(SETUP_PROBLEM_STATES)
 }
 
 /// Renders each of `shots` into `output`, several at a time: `workers`, or

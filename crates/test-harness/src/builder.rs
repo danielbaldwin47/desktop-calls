@@ -59,6 +59,18 @@ pub struct Builder {
     wireplumber: Option<Vec<WirePlumberEntry>>,
     /// What Omarchy's `hypr/bindings.lua` holds, if the Desktop has one.
     hyprland_bindings: Option<String>,
+    config_home: ConfigHome,
+}
+
+/// Where the scenario's config folder is.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum ConfigHome {
+    /// `config`, beside the home.
+    #[default]
+    BesideHome,
+    /// `~/.config`, as on a real Desktop, so a file in it is named with a
+    /// `~`.
+    UnderHome,
 }
 
 /// One entry in the Desktop's `WirePlumber` drop-in folder.
@@ -416,6 +428,15 @@ impl Builder {
         self
     }
 
+    /// The Desktop's config folder is `~/.config`, as on a real Desktop,
+    /// not a folder beside the home: files in it are named with a `~`. The
+    /// scenario's `config` folder is a link to it, so a scenario's own paths
+    /// reach the same files.
+    pub fn config_under_home(mut self) -> Self {
+        self.config_home = ConfigHome::UnderHome;
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -470,7 +491,7 @@ impl Builder {
                     .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
                 address
             });
-        let mut environment = environment(&directory, &system_bus, &session_bus);
+        let mut environment = environment(&directory, &system_bus, &session_bus, self.config_home);
         desktop_settings(&directory.join("config"), self.motion);
         if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
@@ -717,6 +738,7 @@ pub(super) fn environment(
     directory: &Path,
     system_bus: &str,
     session_bus: &str,
+    config_home: ConfigHome,
 ) -> Vec<(&'static str, String)> {
     let path_of = |name: &str| {
         let path = directory.join(name);
@@ -726,7 +748,14 @@ pub(super) fn environment(
     let runtime = path_of("runtime");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700))
         .expect("make XDG_RUNTIME_DIR private");
-    let config = path_of("config");
+    let config = if config_home == ConfigHome::UnderHome {
+        let config = path_of("home/.config");
+        std::os::unix::fs::symlink(&config, directory.join("config"))
+            .expect("link the scenario's config folder to ~/.config");
+        config
+    } else {
+        path_of("config")
+    };
     vec![
         ("DBUS_SYSTEM_BUS_ADDRESS", system_bus.to_owned()),
         ("DBUS_SESSION_BUS_ADDRESS", session_bus.to_owned()),

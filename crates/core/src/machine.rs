@@ -60,8 +60,8 @@ pub use setup::{
 };
 pub use view::{
     BannerChoice, BannerFooter, BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase,
-    CallWindowView, DialerView, HeldCall, Mute, OtherCall, RingingCaller, StateLine, Surfaces,
-    WaitingOptions,
+    CallWindowView, DialerKey, DialerView, HeldCall, Mute, OtherCall, RingingCaller, StateLine,
+    Surfaces, WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so

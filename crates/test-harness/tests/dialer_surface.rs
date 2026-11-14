@@ -223,6 +223,37 @@ fn the_dialer_command_shows_the_dialer_centred_with_focus_listing_the_call_histo
     assert!((y - middle).abs() <= 2.0, "not centred down: {region:?}");
 }
 
+/// The footer shows the keys that work now and, at the right, the Phone as
+/// the Indicator does: its name beside a live dot while connected, and its
+/// state once it goes out of range, with the Dialer open (ticket #227).
+#[test]
+fn the_footer_shows_the_keys_and_follows_the_phone_out_of_range() {
+    let harness = synced_on_screen();
+
+    let state = open(&harness);
+
+    assert_eq!(
+        shown(&state, "keys"),
+        Some("Enter Call · ↑ ↓ Move · Esc Close")
+    );
+    assert_eq!(shown(&state, "phone"), Some("Simulated Pixel"));
+    assert_eq!(shown(&state, "phone-live"), Some("true"));
+    let state = type_query(&harness, "zzzz");
+    assert_eq!(
+        shown(&state, "keys"),
+        Some("Esc Close"),
+        "nothing to Call or move to"
+    );
+
+    harness.simulated_phone().disconnect();
+
+    let state = harness.wait_for_app("the footer says out of range", DEADLINE, |state| {
+        shown(state, "phone") == Some("Out of range")
+    });
+    assert_eq!(shown(&state, "phone-live"), None, "{:?}", dialer(&state));
+    assert!(focused(&state), "the Dialer stays open with the keyboard");
+}
+
 #[test]
 fn down_down_enter_dials_the_selected_row_and_the_dialer_closes_as_the_call_starts() {
     let harness = synced_on_screen();

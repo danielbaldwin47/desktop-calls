@@ -1,14 +1,17 @@
 //! The Dialer: search Contacts and the Call History, and Call the selected row.
 
-use super::call_window::notice_label;
+use super::icons::{Icon, IconView};
 use super::{
     Anchor, DIALER_LIST_HEIGHT, DIALER_PAGE, DIALER_WIDTH, SharedReport, Surface, after_next_frame,
     class, has_command_modifier, now, utc_offset_seconds,
 };
 use crate::logging::EventKind;
+use crate::theme::space;
 use desktop_calls_core::matching::{DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{CallHistoryKind, Caller, DialerView, Input, Timestamp};
+use desktop_calls_core::{
+    CallHistoryKind, Caller, DialerKey, DialerView, Input, PhoneStatus, Timestamp,
+};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -23,7 +26,10 @@ pub(super) struct Dialer {
     entry: gtk::Entry,
     list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,
-    notice: gtk::Label,
+    /// The notice strip under the search row, and its words.
+    notice: gtk::Box,
+    notice_text: gtk::Label,
+    footer: Footer,
     /// Set while the Dialer writes the query into `entry`, so the write
     /// isn't taken for typing.
     writing: Cell<bool>,
@@ -48,12 +54,17 @@ impl Dialer {
             report,
         );
         surface.window.set_default_size(DIALER_WIDTH, -1);
+        surface.window.add_css_class("dialer");
         let entry = gtk::Entry::new();
-        entry.add_css_class("dialer-entry");
         entry.set_placeholder_text(Some(messages::label(Label::DialerPlaceholder)));
         entry.set_hexpand(true);
-        let notice = notice_label();
-        notice.set_max_width_chars(60);
+        let search = IconView::new(Icon::Search);
+        search.area.add_css_class("search-icon");
+        let search_row = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+        search_row.add_css_class(class::SEARCH_ROW);
+        search_row.append(&search.area);
+        search_row.append(&entry);
+        let (notice, notice_text) = notice_strip();
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
         list.set_focusable(false);
@@ -65,10 +76,12 @@ impl Dialer {
         scrolled.set_size_request(-1, DIALER_LIST_HEIGHT);
         scrolled.set_focusable(false);
         scrolled.set_child(Some(&list));
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        content.append(&entry);
+        let footer = Footer::new();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&search_row);
         content.append(&notice);
         content.append(&scrolled);
+        content.append(&footer.line);
         surface.window.set_child(Some(&content));
         let dialer = Rc::new(Self {
             surface,
@@ -76,6 +89,8 @@ impl Dialer {
             list,
             scrolled,
             notice,
+            notice_text,
+            footer,
             writing: Cell::new(false),
             opened: Cell::default(),
             query: RefCell::default(),
@@ -174,7 +189,7 @@ impl Dialer {
             self.scroll_to(&row);
         }
         let notice = view.notice.map(|failure| messages::failure(failure).text);
-        self.notice.set_text(notice.unwrap_or_default());
+        self.notice_text.set_text(notice.unwrap_or_default());
         self.notice.set_visible(notice.is_some());
 
         let mut content = BTreeMap::from([
@@ -187,6 +202,7 @@ impl Dialer {
         if let Some(notice) = notice {
             content.insert("notice".to_owned(), notice.to_owned());
         }
+        self.footer.show(&view.keys, &view.phone, &mut content);
         let (now, offset) = (now(), utc_offset_seconds());
         for (index, row) in view.rows.iter().enumerate() {
             let text = row_text(row, now, offset);
@@ -263,4 +279,109 @@ impl Dialer {
 fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRowText {
     let when = row.at.map(|at| messages::when(at, now, offset));
     messages::dialer_row(row, when.as_deref())
+}
+
+/// The notice strip, hidden: the warning icon beside the notice's words.
+fn notice_strip() -> (gtk::Box, gtk::Label) {
+    let icon = IconView::new(Icon::Warning);
+    icon.area.add_css_class("notice-icon");
+    icon.area.set_valign(gtk::Align::Start);
+    let text = gtk::Label::new(None);
+    text.set_xalign(0.0);
+    text.set_wrap(true);
+    text.set_hexpand(true);
+    let strip = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+    strip.add_css_class(class::NOTICE);
+    strip.add_css_class(class::STRIP);
+    strip.append(&icon.area);
+    strip.append(&text);
+    strip.set_visible(false);
+    (strip, text)
+}
+
+/// The footer line: each key that works now with what it does, and at the
+/// right where the Phone is.
+struct Footer {
+    line: gtk::Box,
+    /// The keys, rebuilt only when they change.
+    keys: gtk::Box,
+    shown_keys: RefCell<Vec<DialerKey>>,
+    live_dot: gtk::Box,
+    phone: gtk::Label,
+}
+
+impl Footer {
+    fn new() -> Self {
+        let keys = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        keys.add_css_class("keys");
+        keys.set_hexpand(true);
+        let live_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        live_dot.add_css_class(class::LIVE_DOT);
+        live_dot.set_valign(gtk::Align::Center);
+        let phone = gtk::Label::new(None);
+        phone.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        phone.set_max_width_chars(36);
+        let where_phone_is = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        where_phone_is.append(&live_dot);
+        where_phone_is.append(&phone);
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        line.add_css_class(class::FOOTER_LINE);
+        line.append(&keys);
+        line.append(&where_phone_is);
+        Self {
+            line,
+            keys,
+            shown_keys: RefCell::default(),
+            live_dot,
+            phone,
+        }
+    }
+
+    /// Shows `keys` and where the Phone is, and adds what it shows to
+    /// `content`: `keys`, `phone`, and `phone-live` while the live dot
+    /// shows.
+    fn show(
+        &self,
+        keys: &[DialerKey],
+        phone: &PhoneStatus,
+        content: &mut BTreeMap<String, String>,
+    ) {
+        let words: Vec<String> = keys
+            .iter()
+            .map(|key| {
+                let (caps, does) = messages::dialer_key(*key);
+                format!("{} {does}", caps.join(" "))
+            })
+            .collect();
+        content.insert("keys".to_owned(), words.join(" · "));
+        if *self.shown_keys.borrow() != keys {
+            while let Some(child) = self.keys.first_child() {
+                self.keys.remove(&child);
+            }
+            for key in keys {
+                let (caps, does) = messages::dialer_key(*key);
+                let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                let keycaps = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                keycaps.add_css_class("keycaps");
+                for cap in caps {
+                    let keycap = gtk::Label::new(Some(cap));
+                    keycap.add_css_class(class::KEYCAP);
+                    keycap.set_valign(gtk::Align::Center);
+                    keycaps.append(&keycap);
+                }
+                group.append(&keycaps);
+                group.append(&gtk::Label::new(Some(does)));
+                self.keys.append(&group);
+            }
+            *self.shown_keys.borrow_mut() = keys.to_vec();
+        }
+        let live = matches!(phone, PhoneStatus::Connected(_));
+        let words = messages::dialer_phone(phone);
+        self.phone.set_text(&words);
+        self.live_dot.set_visible(live);
+        content.insert("phone".to_owned(), words);
+        if live {
+            content.insert("phone-live".to_owned(), "true".to_owned());
+        }
+    }
 }

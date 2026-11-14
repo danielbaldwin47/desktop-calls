@@ -18,6 +18,7 @@ mod call_pill;
 mod call_window;
 mod calls_off;
 mod checks;
+mod dialer;
 mod problems;
 mod quiet_hours;
 mod setup;
@@ -34,6 +35,7 @@ pub use calls_off::{
     quiet_hours_unreadable,
 };
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
+pub use dialer::{dialer_key, dialer_phone};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{SetupWindowText, setup_window};
@@ -635,7 +637,7 @@ pub fn label(label: Label) -> &'static str {
         Label::Keypad => "Keypad",
         Label::MicrophoneMuted => "Microphone muted",
         Label::KeypadPlaceholder => "Type or paste digits to send tones",
-        Label::DialerPlaceholder => "Type a name or number",
+        Label::DialerPlaceholder => "Name or number",
         Label::NoMatches => "No matches",
         Label::Missed => "Missed",
         Label::Incoming => "Incoming",

@@ -41,7 +41,7 @@ pub(super) fn mute(sitting: &mut Sitting) -> Result<(), Stop> {
         return Ok(());
     }
     sitting.say(
-        "Click Mute in the Call Window, then keep talking to your helper.",
+        "Click the Mute tile in the Call Window, then keep talking to your helper.",
         &["mute"],
     );
     let muted = sitting.wait_for("Mute", ACT_DEADLINE, |state| {
@@ -61,7 +61,10 @@ pub(super) fn mute(sitting: &mut Sitting) -> Result<(), Stop> {
             "Your helper still heard you while muted: the Pixel ignores MicrophoneVolume 0, so #51 is needed.".to_owned()
         },
     );
-    sitting.say("Click Unmute.", &["unmute"]);
+    sitting.say(
+        "Click the Mute tile again: it now says Unmute.",
+        &["unmute"],
+    );
     let unmuted = sitting.wait_for("Unmute", ACT_DEADLINE, |state| {
         !state.muted || state.call(call).is_none()
     })?;
@@ -108,7 +111,7 @@ pub(super) fn keypad_tones(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.observed("Your Call from the Pixel connected.".to_owned());
     sitting.say(
         &format!(
-            "When the menu asks: {EXPAND_FIRST} Then click Keypad in the Call Window and press the digits it wants."
+            "When the menu asks: {EXPAND_FIRST} Then click the Keypad tile in the Call Window and press the digits it wants."
         ),
         &["expand"],
     );

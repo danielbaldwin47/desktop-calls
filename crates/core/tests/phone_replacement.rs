@@ -329,7 +329,13 @@ fn an_earlier_phones_connection_loss_timer_cannot_dismiss_the_current_notice() {
         },
     );
     let current = timer(&effects, |timer| matches!(timer, Timer::ConnectionLost(_)));
-    let state = run(state, [Input::CallEnded { call: CALL }]);
+    let state = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     let before = state.surfaces();
 
     let (state, _) = step(state, Input::TimerFired(old));

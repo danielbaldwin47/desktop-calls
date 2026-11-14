@@ -432,10 +432,7 @@ impl Demo {
     fn move_audio_to_phone_and_back(&self) {
         // The Call Window offers each way back once the Handoff before it
         // has settled (ADR-0005).
-        for (location, back) in [
-            ("phone", "Move audio here"),
-            ("desktop", "Move audio to phone"),
-        ] {
+        for (location, back) in [("phone", "Move here"), ("desktop", "To phone")] {
             if let Err(error) = self.harness.move_audio(location) {
                 println!("  demo: {}", error.message);
                 return;

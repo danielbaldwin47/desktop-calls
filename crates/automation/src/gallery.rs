@@ -129,7 +129,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-live",
-        title: "The Call Window, answered here, with HD audio on this computer",
+        title: "The Call Window, answered here: who and the timer, the state line with HD, three tiles and Hang up",
         still: expanded,
         prepare: as_is,
         reach: |harness| {
@@ -143,7 +143,7 @@ const STATES: &[State] = &[
                 |state| {
                     state.audio_location == "desktop"
                         && state.surface("call-window").is_some_and(|window| {
-                            window.contains_key("hd") && window.contains_key("audio-location")
+                            window.contains_key("hd") && window.contains_key("handoff")
                         })
                 },
             );
@@ -153,32 +153,40 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-muted",
-        title: "The Call Window, muted, with the keypad shown and tones sent: both above the controls, so Hang up stays put",
-        still: |_| true,
+        title: "The Call Window, muted: the Mute tile, the state line and the border take the warning colour, and nothing moves",
+        still: expanded,
         prepare: as_is,
         reach: |harness| {
-            connect(harness);
-            let call = ring(harness);
-            harness.answer(call);
-            // The Call Window opens, reading "Mute", before the audio reaches
-            // the Desktop, and Mute is refused until it has.
-            harness.wait_for_app(
-                "the audio is on the Desktop and the Call Window offers Mute",
-                DEADLINE,
-                |state| {
-                    state.audio_location == "desktop"
-                        && state.surface("call-window").is_some_and(|window| {
-                            window.get("mute").is_some_and(|mute| mute == "Mute")
-                                && !window.contains_key("mute-unavailable")
-                        })
-                },
-            );
+            live_here(harness);
             harness
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));
+            harness.wait_for_app("the Call Window says muted", DEADLINE, |state| {
+                state.muted
+                    && state
+                        .surface("call-window")
+                        .and_then(|window| window.get("mute"))
+                        .is_some_and(|mute| mute == "Unmute")
+            });
+            hold_call_window_expanded(harness);
+        },
+        // Without the keypad, the window is under 300 px tall.
+        shown: |screenshot, look| {
+            shows(screenshot, look.red())
+                && shows(screenshot, look.warning())
+                && app_region(screenshot).is_some_and(|window| window.bottom - window.top < 300.0)
+        },
+    },
+    State {
+        name: "call-window-keypad",
+        title: "The Call Window with the keypad open and tones sent: the tone entry and the keypad above the tiles, so Hang up stays put",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            live_here(harness);
             // Click the window, to give it the keyboard, then show the
             // keypad and type tones. The screenshot and the click both wait
-            // for the muted Call Window to be drawn (#53).
+            // for the Call Window to be drawn (#53).
             // Named apart from the other looks' captures, which render at
             // the same time into the same directory.
             let unique = BEFORE_KEYPAD_CAPTURES.fetch_add(1, Ordering::Relaxed);
@@ -190,24 +198,23 @@ const STATES: &[State] = &[
             }
             harness.keyboard().type_text("k123#");
             harness.wait_for_app("the keypad shows the tones", DEADLINE, |state| {
-                state.muted
-                    && state.surface("call-window").is_some_and(|window| {
-                        window.contains_key("keypad")
-                            && window.get("tones").is_some_and(|tones| tones == "123#")
-                    })
+                state.surface("call-window").is_some_and(|window| {
+                    window.contains_key("keypad")
+                        && window.get("tones").is_some_and(|tones| tones == "123#")
+                })
             });
         },
         // Once the keypad is drawn the window is over 300 px tall; without
         // it, about 220.
         shown: |screenshot, look| {
             shows(screenshot, look.red())
-                && shows(screenshot, look.warning())
+                && !shows(screenshot, look.warning())
                 && app_region(screenshot).is_some_and(|window| window.bottom - window.top > 300.0)
         },
     },
     State {
-        name: "call-window-mute-unavailable",
-        title: "The Call Window, answered on the phone, so Mute is unavailable",
+        name: "call-window-audio-on-phone",
+        title: "The Call Window, answered on the phone: Mute disabled, the state line says where to mute, and Move here is the one accent tile",
         still: expanded,
         prepare: as_is,
         reach: |harness| {
@@ -218,25 +225,27 @@ const STATES: &[State] = &[
             });
             harness.simulated_phone().answer_on_phone(&path);
             harness.wait_for_app(
-                "the Call Window says why Mute is unavailable",
+                "the Call Window offers to move the audio here",
                 DEADLINE,
                 |state| {
                     state
                         .surface("call-window")
-                        .is_some_and(|window| window.contains_key("mute-unavailable"))
+                        .and_then(|window| window.get("handoff"))
+                        .is_some_and(|handoff| handoff == "Move here")
                 },
             );
             hold_call_window_expanded(harness);
         },
         shown: |screenshot, look| {
             shows(screenshot, look.red())
+                && shows(screenshot, look.accent())
                 && !shows(screenshot, look.green())
                 && !shows(screenshot, look.warning())
         },
     },
     State {
         name: "call-window-ended",
-        title: "The Call Window, just after the Call ended",
+        title: "The Call Window, just after the Call ended: who and how long it lasted, and no controls",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -246,18 +255,18 @@ const STATES: &[State] = &[
             harness.wait_for_app("the Call is live", DEADLINE, |state| {
                 state
                     .surface("call-window")
-                    .is_some_and(|window| window.contains_key("audio-location"))
+                    .is_some_and(|window| window.contains_key("handoff"))
             });
             harness.hang_up(call);
             harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
                 state
                     .surface("call-window")
-                    .and_then(|window| window.get("status"))
-                    .is_some_and(|status| status == "Call ended")
+                    .and_then(|window| window.get("state"))
+                    .is_some_and(|line| line.starts_with("Call ended · "))
             });
         },
-        // Hang up is dimmed once the Call has ended.
-        shown: dimmed,
+        // No Hang up once the Call has ended.
+        shown: without_controls,
     },
     State {
         name: "call-waiting-banner",
@@ -305,7 +314,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-connection-lost",
-        title: "The Call Window, after the audio went to the phone and hands-free didn't come back: Hang up says to hang up on the phone, and nothing is red",
+        title: "The Call Window, after the audio went to the phone and hands-free didn't come back: the timer struck through, a notice to hang up on the phone, and no controls",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -327,19 +336,19 @@ const STATES: &[State] = &[
                 |state| {
                     state
                         .surface("call-window")
-                        .is_some_and(|window| window.contains_key("notice"))
+                        .is_some_and(|window| window.contains_key("notice-heading"))
                 },
             );
         },
         shown: |screenshot, look| {
-            dimmed(screenshot, look)
+            without_controls(screenshot, look)
                 && !shows(screenshot, look.green())
                 && shows(screenshot, look.warning())
         },
     },
     State {
         name: "call-window-calling",
-        title: "The Call Window, placing a Call, before the other end rings",
+        title: "The Call Window, placing a Call, before the other end rings: who, the state line and Hang up, nothing disabled",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -350,7 +359,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-ringing",
-        title: "The Call Window, placing a Call, ringing at the other end",
+        title: "The Call Window, placing a Call, ringing at the other end: who, the state line and Hang up",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -363,7 +372,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-not-placed",
-        title: "The Call Window, after the Phone couldn't place the Call",
+        title: "The Call Window, after the Phone couldn't place the Call: who, and why, as a notice",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -373,10 +382,15 @@ const STATES: &[State] = &[
                 harness.dial(NUMBER).is_err(),
                 "the app placed the Call the Phone refused"
             );
-            wait_for_status(harness, "Call not placed");
+            harness.wait_for_app("the Call Window says Call not placed", DEADLINE, |state| {
+                state
+                    .surface("call-window")
+                    .and_then(|window| window.get("notice-heading"))
+                    .is_some_and(|heading| heading == "Call not placed")
+            });
         },
-        // Hang up is dimmed: there is no Call to hang up.
-        shown: dimmed,
+        // No Hang up: there is no Call to hang up.
+        shown: without_controls,
     },
     State {
         name: "dialer-call-history",
@@ -630,7 +644,7 @@ fn wait_for_status(harness: &Harness, status: &str) {
         |state| {
             state
                 .surface("call-window")
-                .and_then(|window| window.get("status"))
+                .and_then(|window| window.get("state"))
                 .is_some_and(|shown| shown == status)
         },
     );
@@ -707,8 +721,28 @@ fn on_a_call(harness: &Harness) {
     harness.wait_for_app("the Call is live", DEADLINE, |state| {
         state
             .surface("call-window")
-            .is_some_and(|window| window.contains_key("audio-location"))
+            .is_some_and(|window| window.contains_key("handoff"))
     });
+}
+
+/// A Call answered here, with its audio here and Mute offered: the Call
+/// Window opens, reading "Mute", before the audio reaches the Desktop, and
+/// Mute is refused until it has.
+fn live_here(harness: &Harness) {
+    connect(harness);
+    let call = ring(harness);
+    harness.answer(call);
+    harness.wait_for_app(
+        "the audio is on the Desktop and the Call Window offers Mute",
+        DEADLINE,
+        |state| {
+            state.audio_location == "desktop"
+                && state
+                    .surface("call-window")
+                    .and_then(|window| window.get("mute-shortcut"))
+                    .is_some()
+        },
+    );
 }
 
 /// A Waiting Call rings during the Call: waits for its Banner.
@@ -721,8 +755,6 @@ fn waiting(harness: &Harness) {
     });
 }
 
-/// Where the app's surfaces are: everything that is neither the black
-/// background nor the bar stand-in.
 /// Two Calls: the answered one live, the first on hold.
 fn held(harness: &Harness) {
     connect(harness);
@@ -739,12 +771,14 @@ fn held(harness: &Harness) {
     });
 }
 
+/// Where the app's surfaces are: everything that is neither the black
+/// background nor the bar stand-in.
 fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }
 
-/// Whether a surface is on screen with no red: Hang up is dimmed.
-fn dimmed(screenshot: &Screenshot, look: Look) -> bool {
+/// Whether a surface is on screen with no red: no Hang up, or a dimmed one.
+fn without_controls(screenshot: &Screenshot, look: Look) -> bool {
     app_region(screenshot).is_some() && !shows(screenshot, look.red())
 }
 

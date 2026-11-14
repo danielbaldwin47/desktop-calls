@@ -29,6 +29,8 @@ const LOST_WINDOW_DEADLINE: Duration = Duration::from_secs(14);
 const NUMBER: &str = "+447700900123";
 const DEVICE: &str = "org.bluez.Device1";
 const LOST: &str = "Connection to phone lost: the Call continues on your phone.";
+/// What the Call Window's notice says while contact is lost.
+const LOST_NOTICE: &str = "The Call continues on your phone. Hang up there.";
 
 /// The app on a screen of its own, so its surfaces show, with the Phone
 /// connected.
@@ -49,7 +51,7 @@ fn shown(state: &AppState, key: &str) -> Option<String> {
 
 /// Whether the Call Window says the Call is over.
 fn shows_ended(state: &AppState) -> bool {
-    shown(state, "status").as_deref() == Some("Call ended")
+    shown(state, "state").is_some_and(|line| line.starts_with("Call ended"))
 }
 
 /// A Call placed on the Phone, live, with its audio brought to the Desktop.
@@ -68,7 +70,7 @@ fn live_here(harness: &Harness) -> AppCall {
     }
     let state = harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
         state.audio_location == "desktop"
-            && shown(state, "handoff").as_deref() == Some("Move audio to phone")
+            && shown(state, "handoff").as_deref() == Some("To phone")
     });
     state.calls[0].clone()
 }
@@ -124,7 +126,7 @@ fn with_connect_profile_failing_once_the_call_is_picked_back_up_when_hands_free_
         DEADLINE,
         |state| {
             watch(state);
-            shown(state, "notice").as_deref() == Some(LOST)
+            shown(state, "notice").as_deref() == Some(LOST_NOTICE)
         },
     );
     let state = harness.wait_for_app(
@@ -135,8 +137,8 @@ fn with_connect_profile_failing_once_the_call_is_picked_back_up_when_hands_free_
             state.connection_state == "connected"
                 && state.calls.len() == 1
                 && shown(state, "notice").is_none()
-                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
-                && shown(state, "handoff").as_deref() == Some("Move audio here")
+                && shown(state, "state").as_deref() == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
     assert!(!ended.get(), "the Call Window said Call ended");
@@ -185,11 +187,11 @@ fn with_connect_profile_failing_always_the_call_is_never_shown_as_ended() {
         DEADLINE,
         |state| {
             watch(state);
-            shown(state, "notice").as_deref() == Some(LOST)
+            shown(state, "notice").as_deref() == Some(LOST_NOTICE)
         },
     );
     assert_eq!(shown(&state, "call"), Some(before.id.to_string()));
-    assert_eq!(shown(&state, "audio-location"), None);
+    assert_eq!(shown(&state, "handoff"), None);
     assert_eq!(state.connection_state, "disconnected");
     let refused = harness
         .move_audio("desktop")
@@ -212,7 +214,7 @@ fn with_connect_profile_failing_always_the_call_is_never_shown_as_ended() {
     harness.wait_for_app("the Call Window closes", LOST_WINDOW_DEADLINE, |state| {
         watch(state);
         if state.surface("call-window").is_some() {
-            assert_eq!(shown(state, "notice").as_deref(), Some(LOST));
+            assert_eq!(shown(state, "notice").as_deref(), Some(LOST_NOTICE));
         }
         state.surface("call-window").is_none()
     });
@@ -248,8 +250,8 @@ fn with_the_calls_listed_late_after_hands_free_returns_the_call_keeps_its_id_and
             watch(state);
             state.connection_state == "connected"
                 && state.calls.len() == 1
-                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
-                && shown(state, "handoff").as_deref() == Some("Move audio here")
+                && shown(state, "state").as_deref() == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
     assert!(!ended.get(), "the Call Window said Call ended");

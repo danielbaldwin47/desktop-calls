@@ -449,7 +449,7 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     assert!(
         !windows
             .iter()
-            .any(|window| window.get("status").map(String::as_str) == Some("Call ended")),
+            .any(|window| window.get("state").is_some_and(|line| line.starts_with("Call ended"))),
         "{windows:#?}"
     );
     harness.simulated_phone().recorded_holds(

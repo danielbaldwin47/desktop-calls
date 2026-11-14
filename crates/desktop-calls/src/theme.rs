@@ -30,7 +30,7 @@ mod colour;
 mod roles;
 mod style;
 
-pub(crate) use style::class;
+pub(crate) use style::{class, space};
 
 use std::cell::{Cell, RefCell};
 use std::env;

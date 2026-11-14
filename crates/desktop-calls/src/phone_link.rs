@@ -241,6 +241,8 @@ struct Vanished {
     /// A Call came back that may be this one, with no number to tell: it
     /// isn't hung up on a guess, and this Call may still be live.
     doubt: bool,
+    /// When it went: the Call ended then, if it never comes back.
+    went: Timestamp,
 }
 
 /// Whether a Call the Phone lists is a vanished Call come back.
@@ -503,7 +505,10 @@ impl PhoneLink {
                     "Call {} ended",
                     followed.id
                 );
-                outcome.inputs.push(Input::CallEnded { call: followed.id });
+                outcome.inputs.push(Input::CallEnded {
+                    call: followed.id,
+                    at: now(),
+                });
             }
             None => unknown_state(&state),
         }
@@ -651,6 +656,7 @@ impl PhoneLink {
             state: object.and_then(|object| call_state(&object.state)),
             hang_up: followed.ending,
             doubt: false,
+            went: now(),
         });
     }
 
@@ -685,7 +691,10 @@ impl PhoneLink {
             call_id = id.0,
             "Call {id} ended: it didn't come back"
         );
-        outcome.inputs.push(Input::CallEnded { call: id });
+        outcome.inputs.push(Input::CallEnded {
+            call: id,
+            at: vanished.went,
+        });
     }
 
     /// Starts a grace period of `lasting` for the vanished Call `call`.

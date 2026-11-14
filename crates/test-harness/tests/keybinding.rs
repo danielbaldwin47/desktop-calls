@@ -210,7 +210,7 @@ fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_collapse
         is_live(state, call)
             && state
                 .surface("call-window")
-                .is_some_and(|window| window.contains_key("audio-location"))
+                .is_some_and(|window| window.contains_key("handoff"))
     });
 
     press_the_keybinding(&harness);

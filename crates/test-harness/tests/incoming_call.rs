@@ -560,12 +560,13 @@ fn an_answer_dropped_because_the_caller_gave_up_leaves_no_handoff_under_way() {
         state.calls.len() == 1 && state.calls[0].id == placed
     });
     harness.app_holds(
-        "the placed Call offers to move its audio here, with no notice",
+        "the placed Call says Calling with its audio on the Phone, and no notice",
         HANDOFF_LIMIT,
         |state| {
             let window = state.surface("call-window");
-            window.and_then(|window| window.get("handoff")).map(String::as_str)
-                == Some("Move audio here")
+            state.audio_location == "phone"
+                && window.and_then(|window| window.get("state")).map(String::as_str)
+                    == Some("Calling…")
                 && window.is_some_and(|window| !window.contains_key("notice"))
         },
     );

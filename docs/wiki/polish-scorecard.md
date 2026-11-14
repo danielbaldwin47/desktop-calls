@@ -17,6 +17,7 @@ Agreed with the user on 2026-11-04 (grilling round 2) as the definition of "poli
 7. Every action is reachable by keyboard alone.
 8. A screenshot-review agent finds no visual defects.
 
+- 2026-11-14, audit against the Simulated Phone at `32c46f0` ([note](../research/2026-11-14-scorecard-audit.md)): items 1, 2 and 6 and the 50 ms keystroke target are covered by named tests; item 7 is covered surface by surface but not for "every" action (#25); item 8 has a gallery of 49 states in four looks but no recorded review verdict (#26, #262); items 3, 4 and 5's Checklist half, and the 150 ms first-frame target, wait for the user. Item 5's 20 scenarios each have a test, matched by name (read), but the tool that should count them does not (#27). Row-by-row proofs are in the note; this page does not repeat them.
 - 2026-11-05 (#83): the Dialer's first frame measured 306 to 319 ms after `Activate`, cold, on the Desktop, and misses the 150 ms target (spec story 100, issue #11). The tests hold only GTK's map to 150 ms. Tracked in #47. **Superseded 2026-11-05 by #47 below:** the tests now hold the drawn frame, not GTK's map. Each keystroke is held to 50 ms up to the frame that shows its rows.
 - 2026-11-05 (#47, `3def480`): the app now does the first-frame work while idle, once the Phone is Connected. The Dialer's drawn first frame after `Activate`, warm, is held to:
   - 150 ms locally and under `just test-ci-like`, one scenario at a time. Measured 97 to 102 ms there.

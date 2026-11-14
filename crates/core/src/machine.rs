@@ -952,6 +952,7 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         clock: state.clock,
         quiet_hours: state.quiet_hours,
         kept_on_until: state.kept_on_until,
+        keybinding: state.keybinding.clone(),
         ..forget_phone(state)
     }
 }

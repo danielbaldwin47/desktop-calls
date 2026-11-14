@@ -333,6 +333,38 @@ fn with_the_keyboard_the_footer_says_escape_gives_it_back() {
     );
 }
 
+/// The keybinding belongs to the Desktop: unpairing the Phone and pairing
+/// it again doesn't lose it, though nothing reads the config again.
+#[test]
+fn the_footer_still_names_the_keybinding_after_the_phone_is_unpaired_and_paired_again() {
+    let state = run(
+        connected(),
+        [
+            with_bindings(
+                "o.bind(\"SUPER + ALT + C\", \"Desktop Calls\", \"/usr/bin/desktop-calls\")\n",
+            ),
+            Input::PhoneUnpaired {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhonePaired(Phone {
+                name: "My Pixel".to_owned(),
+                address: ADDRESS.to_owned(),
+            }),
+            Input::PhoneConnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+            added(FIRST, CallState::Ringing, ALICE, 1_000),
+        ],
+    );
+
+    assert!(
+        matches!(banner(&state).footer, Some(BannerFooter::Keybinding(_))),
+        "{:?}",
+        banner(&state).footer
+    );
+}
+
 /// Alice on hold and a Call to José being placed when a stranger calls:
 /// nothing live to hold, so End & Answer names the Call being placed.
 #[test]

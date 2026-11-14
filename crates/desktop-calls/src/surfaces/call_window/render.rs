@@ -1,7 +1,7 @@
 //! Bringing the Call Window up to date with the Call state machine's view
 //! and the clock, and reporting what it shows.
 
-use super::{CallWindow, Icon, Who, class, seconds_since, set_class, shows};
+use super::{CallWindow, Change, Icon, Who, class, seconds_since, set_class, shows};
 use desktop_calls_core::messages::{self, Label};
 use desktop_calls_core::{
     AudioLocation, CallAudio, CallWindowPhase, CallWindowView, Mute, StateLine,
@@ -24,6 +24,7 @@ impl CallWindow {
             self.stop_ticker();
             self.surface.hide();
             self.pill.hide();
+            self.reset_change();
             return;
         };
         // While contact is lost, the timer stands still at the loss.
@@ -38,14 +39,19 @@ impl CallWindow {
         }
         if view.collapsed {
             // The window keeps its keypad and tones for when it expands.
-            if self.surface.window.is_visible() {
-                self.surface.hide();
+            if self.surface.window.is_visible() && self.change.get() != Some(Change::Collapsing) {
+                self.start_collapsing();
             }
             self.update();
             return;
         }
+        let from_pill =
+            self.pill.surface.window.is_visible() || self.change.get() == Some(Change::Collapsing);
         self.pill.hide();
         self.surface.call.set(view.call);
+        if from_pill {
+            self.start_expanding();
+        }
         self.update();
         self.surface.focus(view.focused);
     }
@@ -57,7 +63,10 @@ impl CallWindow {
             return;
         };
         if view.collapsed {
-            self.pill.render(&view);
+            // While the window shrinks into it, the Call Pill is reported
+            // as shown, and shows once the window has gone.
+            self.pill
+                .render(&view, self.change.get() != Some(Change::Collapsing));
             return;
         }
         let mut content = BTreeMap::new();

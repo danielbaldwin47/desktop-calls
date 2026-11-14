@@ -2,8 +2,8 @@
 
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    CallId, Caller, ConnectionState, ContactMatch, MissedCallNotice, NumberLabel, Phone, StateLine,
-    Timestamp,
+    CallId, CallPillTag, Caller, ConnectionState, ContactMatch, MissedCallNotice, NumberLabel,
+    Phone, StateLine, Timestamp,
 };
 
 fn pixel() -> Phone {
@@ -303,4 +303,19 @@ fn missed_call_notifications_never_look_like_a_verification_code() {
             "{label}"
         );
     }
+}
+
+/// Ticket #225: the Call Pill's tags read alike, and its tooltips name each
+/// control and how to reach it from the keyboard.
+#[test]
+fn the_call_pill_says_its_tags_and_tooltips_in_sentence_case() {
+    assert_eq!(messages::call_pill_tag(CallPillTag::Muted), "Muted");
+    assert_eq!(messages::call_pill_tag(CallPillTag::OnPhone), "On phone");
+    assert_eq!(messages::call_pill_tag(CallPillTag::OneOnHold), "1 on hold");
+    assert_eq!(
+        messages::call_pill_tooltip(Label::HangUp, "Ctrl+H"),
+        "Hang up · Ctrl+H"
+    );
+    assert_eq!(messages::call_pill_tooltip(Label::Mute, "M"), "Mute · M");
+    assert_eq!(messages::show_call_tooltip(), "Show Call · Super+Alt+C");
 }

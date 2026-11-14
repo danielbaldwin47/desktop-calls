@@ -102,6 +102,86 @@ pub struct CallWindowView {
     pub collapsed: bool,
 }
 
+/// The one tag the Call Pill shows beside the caller, where one applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallPillTag {
+    /// The microphone is muted: the other party can't hear the user.
+    Muted,
+    /// The audio is on the Phone, so Mute works only there.
+    OnPhone,
+    /// Another Call is on hold.
+    OneOnHold,
+}
+
+impl CallWindowView {
+    /// The tag the Call Pill shows. Muted comes first, since talking while
+    /// unheard is the costliest mistake; then a Held Call, which nothing
+    /// else on the Call Pill shows; then the audio on the Phone, which its
+    /// icon and a disabled Mute also show. None while contact with the Call
+    /// is lost: the Call Pill says "On your phone" in place of the timer.
+    #[must_use]
+    pub fn call_pill_tag(&self) -> Option<CallPillTag> {
+        if self.connection_lost {
+            return None;
+        }
+        let live = matches!(self.phase, CallWindowPhase::Live { .. });
+        if matches!(self.phase, CallWindowPhase::Live { mute: Mute::On, .. }) {
+            Some(CallPillTag::Muted)
+        } else if self.held.is_some() {
+            Some(CallPillTag::OneOnHold)
+        } else if live
+            && self
+                .audio
+                .is_some_and(|audio| audio.location == AudioLocation::Phone)
+        {
+            Some(CallPillTag::OnPhone)
+        } else {
+            None
+        }
+    }
+
+    /// What leads the Call Pill at rest. None once it is quiet.
+    #[must_use]
+    pub fn call_pill_lead(&self) -> Option<CallPillLead> {
+        if self.call_pill_quiet() {
+            return None;
+        }
+        Some(match self.phase {
+            CallWindowPhase::Live { mute: Mute::On, .. } => CallPillLead::Muted,
+            CallWindowPhase::OnHold { .. } => CallPillLead::OnHold,
+            CallWindowPhase::Live { .. }
+                if self
+                    .audio
+                    .is_some_and(|audio| audio.location == AudioLocation::Phone) =>
+            {
+                CallPillLead::OnPhone
+            }
+            _ => CallPillLead::Live,
+        })
+    }
+
+    /// Whether the Call Pill is quiet: once the Call has ended, or contact
+    /// with it is lost, nothing on it would act, so it says only who and
+    /// what happened, without Mute and Hang up.
+    #[must_use]
+    pub fn call_pill_quiet(&self) -> bool {
+        self.connection_lost || self.phase == CallWindowPhase::Ended
+    }
+}
+
+/// What leads the Call Pill at rest, left of the caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallPillLead {
+    /// The live dot: the Call goes on, with nothing to flag.
+    Live,
+    /// The crossed microphone.
+    Muted,
+    /// The Phone: the audio is there.
+    OnPhone,
+    /// The hold icon: the Call is itself on hold.
+    OnHold,
+}
+
 /// What the Banner offers for a Waiting Call, besides Decline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitingOptions {

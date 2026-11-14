@@ -22,6 +22,17 @@ use crate::stand_ins::StandIns;
 use crate::timeline::{Timeline, unique_name};
 use crate::{OmarchyTheme, Theme, hyprland, omarchy_quiet, stand_ins};
 
+/// Whether the Desktop animates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Motion {
+    /// GTK animates, as it does by default.
+    #[default]
+    Full,
+    /// The Desktop asks for reduced motion: GTK's `gtk-enable-animations`
+    /// is off.
+    Reduced,
+}
+
 /// Chooses what a scenario's world has beyond the buses, the Simulated Phone
 /// and the app. [`Harness::builder`] makes one.
 #[derive(Default)]
@@ -38,6 +49,7 @@ pub struct Builder {
     omarchy_theme: Option<OmarchyTheme>,
     hyprland: Option<hyprland::Config>,
     installed: bool,
+    motion: Motion,
     notification_state: NotificationState,
     /// The Simulated Phone's arguments saying who is nearby, and what the
     /// Desktop's Bluetooth is like.
@@ -371,6 +383,13 @@ impl Builder {
         self
     }
 
+    /// Turns animations off, as a Desktop set for reduced motion: GTK's
+    /// `gtk-enable-animations` is false.
+    pub fn reduced_motion(mut self) -> Self {
+        self.motion = Motion::Reduced;
+        self
+    }
+
     /// Turns Omarchy's Do Not Disturb on before the app starts, as a
     /// Desktop that was left with it on. See [`Harness::set_do_not_disturb`].
     pub fn do_not_disturb(mut self) -> Self {
@@ -435,6 +454,7 @@ impl Builder {
                 address
             });
         let mut environment = environment(&directory, &system_bus, &session_bus);
+        desktop_settings(&directory.join("config"), self.motion);
         if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
         }
@@ -690,7 +710,6 @@ pub(super) fn environment(
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700))
         .expect("make XDG_RUNTIME_DIR private");
     let config = path_of("config");
-    still_cursor(Path::new(&config));
     vec![
         ("DBUS_SYSTEM_BUS_ADDRESS", system_bus.to_owned()),
         ("DBUS_SESSION_BUS_ADDRESS", session_bus.to_owned()),
@@ -706,27 +725,34 @@ pub(super) fn environment(
     ]
 }
 
-/// Turns the text cursor's blinking off, as a Desktop setting, so a still
-/// surface leaves the screen still: GTK fades the cursor in and out over
+/// The Desktop's settings: the text cursor's blinking off, so a still
+/// surface leaves the screen still (GTK fades the cursor in and out over
 /// many frames, which would keep [`Harness`]'s actions waiting for the
-/// screen to settle for up to 10 s after every key. GTK reads the setting
-/// from `GSettings`, here kept in a key file in `config` (`GSETTINGS_BACKEND`
+/// screen to settle for up to 10 s after every key), and animations off
+/// too when the Desktop asks for [`Motion::Reduced`]. GTK reads them from
+/// `GSettings`, here kept in a key file in `config` (`GSETTINGS_BACKEND`
 /// is GLib's own variable, read by every GLib program), and from
 /// `gtk-4.0/settings.ini` where the `GSettings` schema is not installed.
-fn still_cursor(config: &Path) {
+fn desktop_settings(config: &Path, motion: Motion) {
     let write = |path: PathBuf, text: &str| {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create a settings directory");
         }
         fs::write(path, text).expect("write the Desktop's settings");
     };
+    let animations = match motion {
+        Motion::Full => "true",
+        Motion::Reduced => "false",
+    };
     write(
         config.join("glib-2.0/settings/keyfile"),
-        "[org/gnome/desktop/interface]\ncursor-blink=false\n",
+        &format!(
+            "[org/gnome/desktop/interface]\ncursor-blink=false\nenable-animations={animations}\n"
+        ),
     );
     write(
         config.join("gtk-4.0/settings.ini"),
-        "[Settings]\ngtk-cursor-blink=false\n",
+        &format!("[Settings]\ngtk-cursor-blink=false\ngtk-enable-animations={animations}\n"),
     );
 }
 

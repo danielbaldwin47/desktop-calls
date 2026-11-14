@@ -435,7 +435,7 @@ fn finish(
 
 /// Keys as Hyprland names them, `SUPER + ALT + C`, as people read them:
 /// `Super + Alt + C`.
-fn shown_keys(keys: &str) -> String {
+pub(super) fn shown_keys(keys: &str) -> String {
     keys.split('+')
         .map(|key| {
             let key = key.trim();

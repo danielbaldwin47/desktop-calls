@@ -121,9 +121,8 @@ const CSS: &str = "
 .desktop-calls-surface .dialer-entry { font-size: 1.2em; }
 .desktop-calls-surface .dialer-row { padding: 6px 8px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
-.desktop-calls-surface.call-pill { padding: 6px 8px; }
-.desktop-calls-surface.call-pill button { padding: 4px 8px; min-height: 0; }
-.desktop-calls-surface .pill-caller { font-weight: bold; }
+.desktop-calls-surface.call-pill { padding: 6px 6px 6px 12px; }
+.desktop-calls-surface.call-pill.quiet { padding-right: 12px; }
 .desktop-calls-surface .hd {
     font-size: 0.8em; font-weight: bold; padding: 0 6px;
     border: 1px solid currentColor;
@@ -577,6 +576,34 @@ impl Surface {
                 )),
             );
         }
+    }
+
+    /// Reports the surface as shown with `content` before it is on screen:
+    /// the Call Pill, while the Call Window shrinks into it, so the control
+    /// interface reports the end of the change at once. Mapping it later
+    /// reports the same.
+    fn report_ahead(&self, content: BTreeMap<String, String>) {
+        *self.content.borrow_mut() = content;
+        self.publish();
+    }
+
+    /// Reports the surface as shown with what it shows now.
+    fn publish(&self) {
+        self.report.borrow_mut().set(
+            self.name,
+            Some(reported_placed(
+                &self.content.borrow(),
+                &self.window,
+                self.anchor,
+                self.gap.get(),
+            )),
+        );
+    }
+
+    /// Reports the surface as gone while it is still on screen: the Call
+    /// Window, while it shrinks into the Call Pill.
+    fn report_gone(&self) {
+        self.report.borrow_mut().set(self.name, None);
     }
 
     /// What moves the surface to a new standard gap.

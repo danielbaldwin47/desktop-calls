@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Screenshot};
 
 use super::{
-    DEADLINE, NUMBER, State, app_region, as_is, connect, dimmed, held, on_a_call, ring, shows,
+    DEADLINE, NUMBER, State, app_region, as_is, connect, held, on_a_call, ring, shows,
+    without_controls,
 };
 
 /// How many temporary captures [`hold_call_window_expanded`] has taken.
@@ -108,7 +109,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             });
         },
         // Hang up is dimmed: it would do nothing.
-        shown: |screenshot, look| dimmed(screenshot, look) && in_corner(screenshot),
+        shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
     State {
         name: "call-pill-held",
@@ -148,7 +149,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             });
         },
         // Hang up is dimmed once the Call has ended.
-        shown: |screenshot, look| dimmed(screenshot, look) && in_corner(screenshot),
+        shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
 ];
 

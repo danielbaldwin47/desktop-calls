@@ -2,7 +2,8 @@
 
 use desktop_calls_core::messages::{self, Failure, Label};
 use desktop_calls_core::{
-    CallId, Caller, ConnectionState, ContactMatch, MissedCallNotice, NumberLabel, Phone, Timestamp,
+    CallId, Caller, ConnectionState, ContactMatch, MissedCallNotice, NumberLabel, Phone, StateLine,
+    Timestamp,
 };
 
 fn pixel() -> Phone {
@@ -61,6 +62,45 @@ fn the_call_timer_reads_minutes_and_seconds() {
     assert_eq!(messages::elapsed(0), "0:00");
     assert_eq!(messages::elapsed(65), "1:05");
     assert_eq!(messages::elapsed(3_725), "1:02:05");
+}
+
+#[test]
+fn the_call_windows_state_line_names_a_contact_by_first_name_and_an_ended_calls_duration() {
+    let alice_smith = ContactMatch {
+        name: "Alice Smith".to_owned(),
+        label: NumberLabel::Mobile,
+    };
+    let line = |line| messages::state_line(line, &alices_number(), Some(&alice_smith));
+    assert_eq!(
+        line(StateLine::OnThisComputer { wideband: true }),
+        "On this computer"
+    );
+    assert_eq!(line(StateLine::Muted), "Muted. Alice can't hear you");
+    assert_eq!(
+        messages::state_line(StateLine::Muted, &alices_number(), None),
+        "Muted. They can't hear you"
+    );
+    assert_eq!(
+        line(StateLine::OnYourPhone),
+        "On your phone. Mute there, or move the audio here"
+    );
+    assert_eq!(line(StateLine::Calling), "Calling…");
+    assert_eq!(
+        line(StateLine::Ended { lasted: Some(971) }),
+        "Call ended · 16:11"
+    );
+    assert_eq!(line(StateLine::Ended { lasted: None }), "Call ended");
+}
+
+#[test]
+fn losing_contact_with_a_call_says_where_to_hang_up() {
+    assert_eq!(
+        messages::contact_lost(Failure::ConnectionLost),
+        (
+            "Connection to phone lost",
+            "The Call continues on your phone. Hang up there."
+        )
+    );
 }
 
 #[test]

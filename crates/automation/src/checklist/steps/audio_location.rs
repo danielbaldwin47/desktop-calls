@@ -105,9 +105,9 @@ fn audio_moves(
             // A Handoff to the Phone bounces hands-free (ADR-0005): the
             // Call Window offers the way back only once it has returned.
             let back = if location == "phone" {
-                "Move audio here"
+                "Move here"
             } else {
-                "Move audio to phone"
+                "To phone"
             };
             let settled =
                 sitting.happens_within("the Handoff settling", HANDOFF_DEADLINE, |state| {
@@ -152,7 +152,7 @@ pub(super) fn handoff_twice(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting,
             call,
             "phone",
-            &format!("{EXPAND_FIRST} Then click Move audio to phone in the Call Window."),
+            &format!("{EXPAND_FIRST} Then click the To phone tile in the Call Window."),
             &["expand", "move-audio-to-phone"],
         )? {
             sitting.check(
@@ -174,7 +174,7 @@ pub(super) fn handoff_twice(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting,
             call,
             "desktop",
-            &format!("{EXPAND_FIRST} Then click Move audio here in the Call Window."),
+            &format!("{EXPAND_FIRST} Then click the Move here tile in the Call Window."),
             &["expand", "move-audio-here"],
         )? {
             sitting.check(
@@ -191,7 +191,7 @@ pub(super) fn handoff_twice(sitting: &mut Sitting) -> Result<(), Stop> {
 
 /// Records where the audio went, either way: on the Desktop, or kept by
 /// the Phone. When the Phone kept it, checks the Call Window says so
-/// plainly with the Call still live, and has the user try Move audio here
+/// plainly with the Call still live, and has the user try Move here
 /// once more, as #13's expectations ask.
 fn record_where_the_audio_went(
     sitting: &mut Sitting,
@@ -222,7 +222,7 @@ fn record_where_the_audio_went(
         sitting,
         call,
         "desktop",
-        &format!("{EXPAND_FIRST} Then click Move audio here once more."),
+        &format!("{EXPAND_FIRST} Then click the Move here tile once more."),
         &["expand", "move-audio-here"],
     )?;
     sitting.measure("moved_on_second_try", again);
@@ -294,7 +294,7 @@ pub(super) fn earbuds_answer_on_the_earbuds(sitting: &mut Sitting) -> Result<(),
         sitting,
         call,
         "desktop",
-        &format!("{EXPAND_FIRST} Then click Move audio here in the Call Window."),
+        &format!("{EXPAND_FIRST} Then click the Move here tile in the Call Window."),
         &["expand", "move-audio-here"],
     )?;
     record_where_the_audio_went(sitting, call, on_the_desktop)?;

@@ -54,7 +54,7 @@ pub use setup::{
 };
 pub use view::{
     BannerView, CallAudio, CallWindowPhase, CallWindowView, DialerView, HeldCall, Mute,
-    RingingCaller, Surfaces, WaitingOptions,
+    RingingCaller, StateLine, Surfaces, WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so
@@ -155,6 +155,8 @@ enum Focus {
 struct EndedCall {
     id: CallId,
     caller: Caller,
+    /// How long it was connected, in seconds; `None` if it never was.
+    lasted: Option<u64>,
 }
 
 /// A Call the user placed here that the Phone hasn't reported yet.
@@ -759,7 +761,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             at,
         } => call_changed(&mut state, call, call_state, at, &mut effects),
         Input::CallerChanged { call, caller } => caller_changed(&mut state, call, caller),
-        Input::CallEnded { call } => phone_ended_call(&mut state, call, &mut effects),
+        Input::CallEnded { call, at } => phone_ended_call(&mut state, call, at, &mut effects),
         Input::HangUpUndelivered(call) => hang_up_undelivered(&mut state, call, &mut effects),
         input @ (Input::ContactsLoaded { .. }
         | Input::ContactsSynced { .. }

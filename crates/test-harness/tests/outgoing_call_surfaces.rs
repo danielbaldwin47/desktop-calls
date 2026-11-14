@@ -33,10 +33,15 @@ fn call_window(state: &AppState) -> Option<&BTreeMap<String, String>> {
     state.surface("call-window")
 }
 
-fn status_of(state: &AppState) -> Option<&str> {
+fn shown<'a>(state: &'a AppState, key: &str) -> Option<&'a str> {
     call_window(state)
-        .and_then(|window| window.get("status"))
+        .and_then(|window| window.get(key))
         .map(String::as_str)
+}
+
+/// The Call Window's state line.
+fn status_of(state: &AppState) -> Option<&str> {
+    shown(state, "state")
 }
 
 fn wait_for_status(harness: &Harness, status: &str) -> AppState {
@@ -75,12 +80,12 @@ fn find_on_screen(harness: &Harness, name: &str, colour: [u8; 3]) -> Region {
     found(&screenshot).unwrap_or_else(|| panic!("{colour:02x?} left the screen"))
 }
 
-/// Every Call Window status the app reported since the scenario started.
+/// Every Call Window state line the app reported since the scenario started.
 fn statuses_seen(harness: &Harness) -> Vec<String> {
     harness
         .surfaces_seen()
         .iter()
-        .filter_map(|surfaces| surfaces.get("call-window")?.get("status").cloned())
+        .filter_map(|surfaces| surfaces.get("call-window")?.get("state").cloned())
         .collect()
 }
 
@@ -97,6 +102,25 @@ fn dial(harness: &Harness, number: &str) -> RunningCli {
     cli
 }
 
+/// The controls the Call Window can show besides Hang up.
+const CONTROLS: [&str; 6] = ["mute", "keypad-toggle", "handoff", "tone-entry", "keypad", "swap"];
+
+/// Placing a Call, the Call Window offers Hang up and nothing that wouldn't
+/// work yet.
+fn assert_offers_only_hang_up(window: &BTreeMap<String, String>) {
+    assert_eq!(window.get("hang-up").map(String::as_str), Some("Hang up"), "{window:?}");
+    for key in CONTROLS {
+        assert!(!window.contains_key(key), "{key}: {window:?}");
+    }
+}
+
+/// Once there is no Call, the Call Window offers nothing at all.
+fn assert_offers_nothing(window: &BTreeMap<String, String>) {
+    for key in CONTROLS.iter().chain(&["hang-up"]) {
+        assert!(!window.contains_key(*key), "{key}: {window:?}");
+    }
+}
+
 fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_owned()
 }
@@ -111,10 +135,12 @@ fn a_placed_call_shows_calling_then_ringing_then_a_timer_with_the_audio_here() {
     let window = call_window(&state).expect("the Call Window shows");
     assert_eq!(window.get("caller").map(String::as_str), Some(SHOWN));
     assert_eq!(window.get("notice"), None);
+    assert_offers_only_hang_up(window);
     find_on_screen(&harness, "calling", RED);
 
     let _call = harness.simulated_phone().alert();
     let state = wait_for_status(&harness, "Ringing…");
+    assert_offers_only_hang_up(call_window(&state).expect("the Call Window shows"));
     let output = cli.finish(DEADLINE);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(state.calls[0].direction, "outgoing");
@@ -127,15 +153,11 @@ fn a_placed_call_shows_calling_then_ringing_then_a_timer_with_the_audio_here() {
 
     harness.simulated_phone().callee_answers();
     let state = harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
-        status_of(state).is_some_and(is_timer)
+        shown(state, "timer").is_some_and(is_timer)
     });
     assert_eq!(state.audio_location, "desktop");
-    assert_eq!(
-        call_window(&state)
-            .and_then(|window| window.get("audio-location"))
-            .map(String::as_str),
-        Some("Audio on this computer")
-    );
+    assert_eq!(status_of(&state), Some("On this computer"));
+    assert_eq!(shown(&state, "handoff"), Some("To phone"));
     assert_eq!(
         call_window(&state).and_then(|window| window.get("call")),
         Some(&state.calls[0].id.to_string())
@@ -184,9 +206,12 @@ fn a_refused_call_shows_why_in_the_call_window() {
     let output = harness.cli(&["dial", TYPED]);
 
     assert!(!output.status.success());
-    let state = wait_for_status(&harness, "Call not placed");
+    let state = harness.wait_for_app("the Call Window says Call not placed", DEADLINE, |state| {
+        shown(state, "notice-heading") == Some("Call not placed")
+    });
     let window = call_window(&state).expect("the Call Window shows");
     assert_eq!(window.get("caller").map(String::as_str), Some(SHOWN));
+    assert_offers_nothing(window);
     assert_eq!(
         window.get("notice").map(String::as_str),
         Some("Phone not connected: it's out of range or has Bluetooth off.")
@@ -239,7 +264,7 @@ fn each_phone_failure_shows_one_plain_sentence_in_the_call_window() {
             &format!("the Call Window explains {error}"),
             DEADLINE,
             |state| {
-                status_of(state) == Some("Call not placed")
+                shown(state, "notice-heading") == Some("Call not placed")
                     && call_window(state)
                         .and_then(|window| window.get("notice"))
                         .is_some_and(|notice| notice == sentence)
@@ -271,12 +296,12 @@ fn while_get_calls_is_empty_during_dialling_the_call_window_never_says_call_ende
     );
     harness.simulated_phone().callee_answers();
     harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
-        status_of(state).is_some_and(is_timer)
+        shown(state, "timer").is_some_and(is_timer)
     });
 
     let seen = statuses_seen(&harness);
     assert!(
-        !seen.iter().any(|status| status == "Call ended"),
+        !seen.iter().any(|status| status.starts_with("Call ended")),
         "{seen:?}"
     );
     assert_eq!(
@@ -284,4 +309,28 @@ fn while_get_calls_is_empty_during_dialling_the_call_window_never_says_call_ende
         Some("Calling…"),
         "{seen:?}"
     );
+}
+
+#[test]
+fn a_call_that_ends_says_how_long_it_lasted_and_offers_nothing() {
+    let harness = connected_on_screen();
+    let cli = dial(&harness, TYPED);
+    let call = harness.simulated_phone().alert();
+    wait_for_status(&harness, "Ringing…");
+    let _ = cli.finish(DEADLINE);
+    harness.simulated_phone().callee_answers();
+    harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
+        shown(state, "timer").is_some_and(is_timer)
+    });
+
+    harness.simulated_phone().caller_hangs_up(&call);
+
+    let state = harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
+        status_of(state).is_some_and(|line| line.starts_with("Call ended"))
+    });
+    let line = status_of(&state).unwrap_or_default();
+    let lasted = line.strip_prefix("Call ended · ");
+    assert!(lasted.is_some_and(is_timer), "{line}");
+    assert_offers_nothing(call_window(&state).expect("the Call Window shows"));
+    assert_eq!(shown(&state, "timer"), None);
 }

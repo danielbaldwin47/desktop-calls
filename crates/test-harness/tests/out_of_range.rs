@@ -445,7 +445,7 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
                 .surface("call-window")
                 .and_then(|window| window.get("notice"))
                 .is_some_and(|notice| {
-                    notice == "Connection to phone lost: the Call continues on your phone."
+                    notice == "The Call continues on your phone. Hang up there."
                 })
         },
     );

@@ -57,7 +57,7 @@ fn is_live(state: &AppState) -> bool {
 
 /// The Call Window's timer, in seconds, if it shows one.
 fn timer_seconds(state: &AppState) -> Option<u64> {
-    let status = state.surface("call-window")?.get("status")?;
+    let status = state.surface("call-window")?.get("timer")?;
     let (minutes, seconds) = status.split_once(':')?;
     Some(minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?)
 }

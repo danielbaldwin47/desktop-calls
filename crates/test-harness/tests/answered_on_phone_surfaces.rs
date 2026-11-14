@@ -85,7 +85,7 @@ fn answered_on_the_phone_the_banner_closes_and_the_call_window_says_audio_on_pho
         |state| {
             banner_closed(state)
                 && state.surface("call-window").is_some_and(|window| {
-                    window.get("audio-location").map(String::as_str) == Some("Audio on phone")
+                    window.get("state").map(String::as_str) == Some("On your phone. Mute there, or move the audio here")
                 })
         },
     );

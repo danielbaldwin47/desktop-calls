@@ -4,8 +4,8 @@
 
 use desktop_calls_core::{
     AudioLocation, CallId, CallState, CallWindowPhase, Caller, DialProgress, Effect, Input, Phone,
-    PhoneCommand, PhoneRefusal, State, Timer, Timestamp, Transport, matching, messages::Failure,
-    step,
+    PhoneCommand, PhoneRefusal, State, StateLine, Timer, Timestamp, Transport, matching,
+    messages::Failure, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -442,7 +442,13 @@ fn hanging_up_before_the_phone_reports_the_call_shows_call_ended_once_and_never_
     let state = appeared(state, CallState::Alerting, number());
     assert_eq!(phase(&state), Some(CallWindowPhase::Ended));
 
-    let (state, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     assert_eq!(phase(&state), Some(CallWindowPhase::Ended));
     assert!(
         !effects
@@ -475,7 +481,13 @@ fn the_phone_disconnecting_while_dialling_ends_the_dial_with_the_reason() {
 fn a_call_placed_here_ends_with_call_ended_and_the_audio_kept_on_the_phone_again() {
     let state = appeared(dialled(), CallState::Alerting, number());
 
-    let (state, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
 
     assert_eq!(
         phone_commands(&effects),
@@ -587,4 +599,90 @@ fn a_dial_that_times_out_or_loses_the_phone_is_not_placed() {
         progress(&unpaired),
         vec![DialProgress::NotPlaced(attempt, Failure::PhoneNotSetUp)]
     );
+}
+
+/// The Call Window's state line, while it shows.
+fn state_line(state: &State) -> Option<StateLine> {
+    state.surfaces().call_window?.state_line
+}
+
+#[test]
+fn placing_a_call_says_calling_then_ringing_then_where_the_audio_is() {
+    assert_eq!(state_line(&dialled()), Some(StateLine::Calling));
+    let state = appeared(dialled(), CallState::Alerting, number());
+    assert_eq!(state_line(&state), Some(StateLine::Ringing));
+
+    let (state, _) = run(
+        state,
+        [
+            Input::TransportChanged(Transport::Active),
+            Input::CallChanged {
+                call: CALL,
+                state: CallState::Active,
+                at: Timestamp(2_000),
+            },
+        ],
+    );
+    assert_eq!(
+        state_line(&state),
+        Some(StateLine::OnThisComputer { wideband: false })
+    );
+}
+
+#[test]
+fn a_call_that_ended_says_how_long_it_was_connected() {
+    let state = appeared(dialled(), CallState::Alerting, number());
+    let (state, _) = run(
+        state,
+        [
+            Input::TransportChanged(Transport::Active),
+            Input::CallChanged {
+                call: CALL,
+                state: CallState::Active,
+                at: Timestamp(2_000),
+            },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(973_400),
+            },
+        ],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(window.phase, CallWindowPhase::Ended);
+    assert_eq!(
+        window.state_line,
+        Some(StateLine::Ended { lasted: Some(971) })
+    );
+}
+
+#[test]
+fn a_call_that_never_connected_ends_with_no_duration() {
+    let ended_unanswered = run(
+        appeared(dialled(), CallState::Alerting, number()),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(30_000),
+        }],
+    )
+    .0;
+    let hung_up_dial = run(dialled(), [Input::CancelDial]).0;
+
+    for state in [ended_unanswered, hung_up_dial] {
+        assert_eq!(state_line(&state), Some(StateLine::Ended { lasted: None }));
+    }
+}
+
+#[test]
+fn a_call_not_placed_has_no_state_line_its_notice_says_why() {
+    let (state, _) = run(
+        dialled(),
+        [Input::PhoneDisconnected {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+
+    let window = state.surfaces().call_window.expect("the Call Window shows");
+    assert_eq!(window.state_line, None);
+    assert_eq!(window.notice, Some(Failure::PhoneOutOfRange));
 }

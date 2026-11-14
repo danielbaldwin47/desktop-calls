@@ -114,7 +114,13 @@ fn answering_from_the_focused_banner_answers_on_the_desktop() {
 fn focus_goes_when_the_call_stops_ringing_on_the_phone() {
     let (state, _) = run(
         ringing(),
-        [Input::Activate, Input::CallEnded { call: CALL }],
+        [
+            Input::Activate,
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
     );
 
     assert_eq!(state.surfaces().banner, None);

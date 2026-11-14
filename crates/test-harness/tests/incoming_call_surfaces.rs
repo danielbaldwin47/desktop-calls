@@ -358,16 +358,16 @@ fn clicking_answer_answers_and_the_call_window_shows_the_audio_here_and_a_timer(
     let state = harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
         state.surface("banner").is_none()
             && call_window(state).is_some_and(|window| {
-                window.get("audio-location").map(String::as_str) == Some("Audio on this computer")
-                    && window.get("status").is_some_and(|status| is_timer(status))
+                window.get("state").map(String::as_str) == Some("On this computer")
+                    && window.get("timer").is_some_and(|status| is_timer(status))
             })
     });
     let started = call_window(&state)
-        .and_then(|window| window.get("status"))
+        .and_then(|window| window.get("timer"))
         .cloned();
     harness.wait_for_app("the timer runs", DEADLINE, |state| {
         call_window(state)
-            .and_then(|window| window.get("status"))
+            .and_then(|window| window.get("timer"))
             .is_some_and(|status| is_timer(status) && Some(status) != started.as_ref())
     });
 
@@ -429,7 +429,7 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     harness.answer(call);
     harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
         call_window(state)
-            .and_then(|window| window.get("status"))
+            .and_then(|window| window.get("timer"))
             .is_some_and(|status| is_timer(status))
     });
     let hang_up = find_on_screen(&harness, "call-window", RED);
@@ -439,8 +439,8 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
         state.calls.is_empty()
             && call_window(state)
-                .and_then(|window| window.get("status"))
-                .is_some_and(|status| status == "Call ended")
+                .and_then(|window| window.get("state"))
+                .is_some_and(|line| line.starts_with("Call ended"))
     });
     harness.wait_for_app("the Call Window closes", DEADLINE, |state| {
         call_window(state).is_none()
@@ -489,7 +489,7 @@ fn a_narrowband_call_does_not_show_hd() {
     let state = harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
         state.codec == "cvsd"
             && call_window(state)
-                .and_then(|window| window.get("status"))
+                .and_then(|window| window.get("timer"))
                 .is_some_and(|status| is_timer(status))
     });
     assert_eq!(

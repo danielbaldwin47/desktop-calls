@@ -139,7 +139,8 @@ fn placed_on_phone(harness: &Harness) -> AppState {
         DEADLINE,
         |state| {
             state.calls.len() == 1
-                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
+                && state.audio_location == "phone"
+                && shown(state, "state").as_deref() == Some("Calling…")
         },
     )
 }
@@ -154,21 +155,24 @@ fn live_on_phone(harness: &Harness) {
             .first()
             .is_some_and(|call| call.state == "active")
             && state.audio_location == "phone"
-            && shown(state, "handoff").as_deref() == Some("Move audio here")
+            && shown(state, "handoff").as_deref() == Some("Move here")
     });
 }
 
 /// Waits until the audio is on the Desktop and the Call Window offers to
-/// move it back, and checks the app's own part took no longer than
+/// move it back, once the Call is live, and checks the app's own part took no longer than
 /// [`HANDOFF_DEADLINE`].
 fn wait_for_audio_here(harness: &Harness) -> AppState {
     let state = harness.wait_for_app(
         "the audio is on the Desktop and the Call Window offers to move it back",
         DEADLINE,
         |state| {
-            state.audio_location == "desktop"
-                && shown(state, "audio-location").as_deref() == Some("Audio on this computer")
-                && shown(state, "handoff").as_deref() == Some("Move audio to phone")
+            let live = shown(state, "state").as_deref() == Some("On this computer")
+                && shown(state, "handoff").as_deref() == Some("To phone");
+            // Placing a Call, the window offers only Hang up.
+            let calling = shown(state, "state").as_deref() == Some("Calling…")
+                && shown(state, "handoff").is_none();
+            state.audio_location == "desktop" && (live || calling)
         },
     );
     let took = since_handoff_requested(harness, "audio-moved");
@@ -233,7 +237,7 @@ fn a_call_placed_on_the_phone_shows_calling_and_leaves_the_audio_there() {
 
     let state = placed_on_phone(&harness);
 
-    assert_eq!(shown(&state, "status").as_deref(), Some("Calling…"));
+    assert_eq!(shown(&state, "state").as_deref(), Some("Calling…"));
     assert_eq!(state.calls[0].direction, "outgoing");
     assert_eq!(state.calls[0].number, NUMBER);
     assert_eq!(state.audio_location, "phone");
@@ -298,7 +302,7 @@ fn a_handoff_works_while_the_call_placed_on_the_phone_still_dials() {
         .expect("MoveAudio(\"desktop\") is accepted");
 
     let state = wait_for_audio_here(&harness);
-    assert_eq!(shown(&state, "status").as_deref(), Some("Calling…"));
+    assert_eq!(shown(&state, "state").as_deref(), Some("Calling…"));
 }
 
 #[test]
@@ -312,7 +316,7 @@ fn an_incoming_call_answered_on_the_phone_can_move_its_audio_here() {
         DEADLINE,
         |state| {
             state.audio_location == "phone"
-                && shown(state, "handoff").as_deref() == Some("Move audio here")
+                && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
 
@@ -341,8 +345,8 @@ fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
 
     // The audio can't arrive before the second `Activate` a second in, so
     // the Call Window says it is coming the whole time.
-    harness.app_holds("the Call Window says Moving audio here…", QUIET, |state| {
-        shown(state, "handoff").as_deref() == Some("Moving audio here…")
+    harness.app_holds("the Call Window says Moving…", QUIET, |state| {
+        shown(state, "handoff").as_deref() == Some("Moving…")
             && state.audio_location == "phone"
     });
     let state = harness.wait_for_app("the audio reaches the Desktop", DEADLINE, |state| {
@@ -438,7 +442,7 @@ fn a_phone_that_keeps_the_audio_gets_a_plain_message_and_the_call_stays_live() {
         "{notice}"
     );
     assert_eq!(state.audio_location, "phone");
-    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move audio here"));
+    assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "audio-not-moved");
     // The Call is still live, and the Phone was never asked to hang up.
@@ -508,8 +512,8 @@ fn wait_for_audio_on_phone(harness: &Harness, before: &AppCall) -> AppState {
         DEADLINE,
         |state| {
             state.audio_location == "phone"
-                && shown(state, "audio-location").as_deref() == Some("Audio on phone")
-                && shown(state, "handoff").as_deref() == Some("Move audio here")
+                && shown(state, "state").as_deref() == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
     assert_eq!(state.calls.len(), 1, "{:?}", state.calls);
@@ -518,7 +522,7 @@ fn wait_for_audio_on_phone(harness: &Harness, before: &AppCall) -> AppState {
     assert_eq!(call.state, "active");
     assert_eq!(call.active_since_ms, before.active_since_ms);
     assert_eq!(state.connection_state, "connected");
-    let status = shown(&state, "status").unwrap_or_default();
+    let status = shown(&state, "timer").unwrap_or_default();
     assert!(
         is_timer(&status),
         "the Call Window shows {status:?}, not the Call's timer"
@@ -694,7 +698,7 @@ fn the_audio_goes_here_to_the_phone_here_and_to_the_phone_again_in_one_call() {
         .expect("MoveAudio(\"desktop\") is accepted on the AudioGateway that came back");
     harness.wait_for_app("the audio is back on the Desktop", DEADLINE, |state| {
         state.audio_location == "desktop"
-            && shown(state, "handoff").as_deref() == Some("Move audio to phone")
+            && shown(state, "handoff").as_deref() == Some("To phone")
     });
     let took = since_last_handoff_request(&harness, "desktop");
     assert!(
@@ -776,7 +780,7 @@ fn a_handoff_to_the_phone_bluez_refuses_says_how_to_do_it_on_the_phone() {
     assert_eq!(state.audio_location, "desktop");
     assert_eq!(
         shown(&state, "handoff").as_deref(),
-        Some("Move audio to phone")
+        Some("To phone")
     );
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "audio-not-moved-to-phone");

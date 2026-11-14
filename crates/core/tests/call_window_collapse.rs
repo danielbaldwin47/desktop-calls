@@ -279,7 +279,10 @@ fn lost_contact_keeps_it_expanded() {
             Input::PhoneDisconnected {
                 address: ADDRESS.to_owned(),
             },
-            Input::CallEnded { call: CALL },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
             Input::TimerFired(first),
         ],
     );
@@ -323,7 +326,13 @@ fn a_call_on_hold_keeps_it_expanded_and_it_collapses_five_seconds_after_the_swap
     assert!(!window.collapsed, "the Call on hold keeps it expanded");
     assert_eq!(collapse_timers(&effects), []);
 
-    let (state, effects) = run(state, [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        state,
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     let (state, _) = run(state, [Input::TimerFired(collapse_timer(&effects))]);
     assert!(collapsed(&state));
 }
@@ -404,7 +413,13 @@ fn an_expanded_window_collapses_again_five_seconds_after_escape_leaves_it_alone(
 
 #[test]
 fn the_next_call_starts_expanded() {
-    let (state, effects) = run(collapsed_by_itself(), [Input::CallEnded { call: CALL }]);
+    let (state, effects) = run(
+        collapsed_by_itself(),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     assert!(collapsed(&state), "the Call Pill says the Call ended");
     let Some(close) = effects.iter().find_map(|effect| match effect {
         Effect::StartTimer {
@@ -492,7 +507,13 @@ fn a_keystroke_in_a_window_the_compositor_focused_keeps_it_expanded() {
 #[test]
 fn once_the_call_has_ended_the_indicator_opens_the_dialer() {
     // While the Call Pill still says Call ended, and after it has gone.
-    let (ended, _) = run(collapsed_by_itself(), [Input::CallEnded { call: CALL }]);
+    let (ended, _) = run(
+        collapsed_by_itself(),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
     assert!(collapsed(&ended), "the Call Pill says Call ended");
     let (gone, _) = run(
         ended.clone(),
@@ -532,7 +553,10 @@ fn lost_contact_expands_the_collapsed_call_window() {
             Input::PhoneDisconnected {
                 address: ADDRESS.to_owned(),
             },
-            Input::CallEnded { call: CALL },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
         ],
     );
 
@@ -630,7 +654,10 @@ fn end_and_answer_expands_it_for_the_new_call_which_collapses_five_seconds_later
         state,
         [
             Input::EndAndAnswer,
-            Input::CallEnded { call: CALL },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
             Input::CallChanged {
                 call: SECOND,
                 state: CallState::Active,

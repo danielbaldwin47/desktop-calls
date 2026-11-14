@@ -121,10 +121,22 @@ run *args:
 pbap-probe *args:
     @/usr/bin/python3 tools/real-phone/pbap_probe.py "$@"
 
-# The only way to merge: it checks more than branch protection's "CI passed",
-# which `just ci-local` posts. `just merge --help` for options and the
-# conditions it checks.
-# Squash-merge PR once its checks pass on a head containing origin/main.
+# How to land a PR: bring it up to date with origin/main if it is behind, run
+# what `just ci-local` runs on the result, post "CI passed" and squash-merge,
+# all while holding the CI lane's lock so nothing else lands in between. Run
+# it from the worktree that has the PR's branch. Takes its turn like `just
+# ci-local` (a run of 204 to 262 s when main has moved, none when it hasn't).
+# `just land 42 --plan` says what it would do. `just land --help`. Ticket #247.
+[positional-arguments]
+[no-exit-message]
+land pr *args:
+    @python3 tools/land.py "$@"
+
+# Squash-merge PR once its checks pass on a head containing origin/main: the
+# last step of `just land`, and by itself for a PR that is already current.
+# It checks more than branch protection's "CI passed", which `just ci-local`
+# posts, and refuses a PR that main has moved past, naming `just land`.
+# `just merge --help` for options and the conditions it checks.
 [positional-arguments]
 [no-exit-message]
 merge pr *args:

@@ -619,11 +619,12 @@ class Queued(unittest.TestCase):
             child.kill()
             child.wait()
 
-    def run_in(self, directory: str) -> tuple[ci_local.Claim, subprocess.Popen]:
-        """A stand-in for a ci-local run, which `is_ci_local` takes for one
-        by its command line, with its claim on `directory`."""
+    def run_in(self, directory: str, script: str = "ci_local.py") -> tuple[ci_local.Claim, subprocess.Popen]:
+        """A stand-in for a ci-local run (or, with `land.py`, a landing), which
+        `is_ci_local` takes for one by its command line, with its claim on
+        `directory`."""
         child = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(60)", "ci_local.py"],
+            [sys.executable, "-c", "import time; time.sleep(60)", script],
         )
         self.children.append(child)
         deadline = time.monotonic() + 10
@@ -645,6 +646,15 @@ class Queued(unittest.TestCase):
         self.assertIn(f"process {child.pid}", message)
         self.assertIn("waiting since 20:41:00 UTC", message)
         self.assertIn("just ci-local --cancel", message)
+
+    def test_a_landing_holds_the_worktrees_claim_and_cancel_stops_it(self):
+        """`just land` runs as tools/land.py and takes the same claim (#247)."""
+        _, landing = self.run_in("/work/here", script="land.py")
+        with self.assertRaises(ci_local.Refused):
+            ci_local.Claim("/work/here").take("b" * 40)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ci_local.cancel("/work/here"), ci_local.EXIT_PASSED)
+        landing.wait(timeout=5)
 
     def test_a_run_from_another_worktree_is_not_refused(self):
         self.run_in("/work/elsewhere")

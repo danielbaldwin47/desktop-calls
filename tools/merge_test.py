@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Tests of how `just merge` says to bring a PR up to date (tools/merge.py,
-ticket #181). GitHub is never asked. `just lint` runs them."""
+tickets #181 and #247), and of the lock its final step takes. GitHub is never
+asked. `just lint` runs them."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import unittest
@@ -56,32 +59,30 @@ class Next(unittest.TestCase):
         with mock.patch.object(merge, "git", git_stub(worktrees(*checkouts))):
             return merge.bring_up_to_date(pr)
 
-    def test_a_branch_checked_out_nowhere_is_switched_to_and_brought_level_with_github(self):
+    def test_a_branch_checked_out_nowhere_is_switched_to_and_landed(self):
         self.assertIn(
-            "Next: git fetch origin && git switch fix-the-thing "
-            "&& git merge --ff-only origin/fix-the-thing "
-            "&& git merge --no-edit origin/main && just ci-local   (then `just merge 42`)",
+            "Next: git fetch origin && git switch fix-the-thing && just land 42\n",
             self.next_step(PR, (HERE, "other")),
         )
 
-    def test_a_branch_checked_out_here_is_not_switched_to(self):
+    def test_a_branch_checked_out_here_is_landed_from_here(self):
         message = self.next_step(PR, (HERE, "fix-the-thing"))
-        self.assertIn("Next: git fetch origin && git merge --ff-only origin/fix-the-thing", message)
+        self.assertIn("Next: just land 42\n", message)
         self.assertNotIn("git switch", message)
 
-    def test_a_branch_checked_out_in_another_worktree_is_updated_there(self):
+    def test_a_branch_checked_out_in_another_worktree_is_landed_there(self):
         message = self.next_step(PR, (HERE, "other"), ("/work/agent", "fix-the-thing"))
-        self.assertIn("Next: cd /work/agent && git fetch origin && git merge --ff-only", message)
+        self.assertIn("Next: cd /work/agent && just land 42\n", message)
         self.assertNotIn("git switch", message)
 
-    def test_it_merges_the_base_the_pr_targets_into_the_branch_it_names(self):
-        pr = {**PR, "baseRefName": "release/1.0", "headRefName": "agent/fix"}
-        message = self.next_step(pr)
-        self.assertIn("git merge --ff-only origin/agent/fix", message)
-        self.assertIn("git merge --no-edit origin/release/1.0", message)
+    def test_it_names_the_base_the_pr_targets(self):
+        pr = {**PR, "baseRefName": "release/1.0"}
+        self.assertIn("merges origin/release/1.0 into the branch", self.next_step(pr))
 
-    def test_it_says_what_to_do_on_a_conflict(self):
-        self.assertIn("On a conflict: resolve it, commit, then `just ci-local`.", self.next_step(PR))
+    def test_it_says_what_land_does_and_that_it_stops_on_a_conflict(self):
+        message = self.next_step(PR)
+        self.assertIn("runs CI on the result", message)
+        self.assertIn("On a conflict it stops and says what to run.", message)
 
 
 class BehindMain(unittest.TestCase):
@@ -108,12 +109,13 @@ class BehindMain(unittest.TestCase):
         self.assertIn("which a.rs names", message)
         self.assertIn("Next: the one command", message)
 
-    def test_none_of_them_sends_the_user_to_update_branch_or_a_force_push(self):
+    def test_none_of_them_sends_the_user_to_update_branch_a_force_push_or_a_rebase(self):
         with mock.patch.object(merge, "git", git_stub(worktrees())):
             text = merge.bring_up_to_date(PR)
         self.assertNotIn("Next: gh pr update-branch", text)
         self.assertNotIn("--force", text)
         self.assertNotIn("git rebase", text)
+        self.assertNotIn("git merge --no-edit", text)
 
     def test_a_docs_only_gap_is_still_let_through(self):
         with mock.patch.object(merge, "gh", return_value=compare(1, ["docs/fixture/index.md"])):
@@ -121,6 +123,48 @@ class BehindMain(unittest.TestCase):
                 with mock.patch.object(merge, "git", git_stub(worktrees())):
                     allowed = merge.require_contains_base(PR)
         self.assertIn("Letting through 1 docs-only commit", allowed)
+
+
+class TheLane(unittest.TestCase):
+    """A merge to main takes the CI lane's lock for its final recheck and the
+    squash, so it can't fall between `just land`'s merge of main and its own
+    squash (ticket #247). `just land` holds the lock already."""
+
+    def merge(self, lane_held: bool) -> list[str]:
+        """The order of the steps of one merge."""
+        steps: list[str] = []
+        pr = {**PR, "mergeable": "MERGEABLE", "isDraft": False, "state": "OPEN"}
+
+        def gh(*args):
+            if args[:2] == ("pr", "merge"):
+                steps.append("squash")
+            return json.dumps({"mergeCommit": {"oid": "c" * 40}})
+
+        def step(name):
+            return lambda *_, **__: steps.append(name)
+
+        with (
+            mock.patch.object(merge, "pull_request", return_value=pr),
+            mock.patch.object(merge, "require_contains_base", return_value=None),
+            mock.patch.object(merge, "wait_for_checks", step("wait")),
+            mock.patch.object(merge, "require_checks_passed", step("checked")),
+            mock.patch.object(merge, "require_mergeable", side_effect=lambda pr: pr),
+            mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", step("ticket")),
+            mock.patch.object(merge.ci_local, "take_turn", step("take the lock")),
+            mock.patch.object(merge, "gh", gh),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            merge.merge(42, 0, lane_held=lane_held)
+        return steps
+
+    def test_a_bare_merge_waits_for_checks_without_the_lock_then_holds_it_to_the_squash(self):
+        self.assertEqual(
+            self.merge(lane_held=False),
+            ["wait", "checked", "take the lock", "ticket", "squash"],
+        )
+
+    def test_land_holds_the_lock_itself_so_merge_does_not_take_it_again(self):
+        self.assertEqual(self.merge(lane_held=True), ["wait", "checked", "ticket", "squash"])
 
 
 if __name__ == "__main__":

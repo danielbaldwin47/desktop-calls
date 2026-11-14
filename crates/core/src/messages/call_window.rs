@@ -12,6 +12,7 @@ use crate::matching::ContactMatch;
 pub fn state_line(line: StateLine, caller: &Caller, contact: Option<&ContactMatch>) -> String {
     match line {
         StateLine::Connecting => label(Label::Connecting).to_owned(),
+        StateLine::ConnectingToPhone => "Connecting to your phone…".to_owned(),
         StateLine::Calling => label(Label::Calling).to_owned(),
         StateLine::Ringing => label(Label::Ringing).to_owned(),
         StateLine::OnThisComputer { .. } => "On this computer".to_owned(),

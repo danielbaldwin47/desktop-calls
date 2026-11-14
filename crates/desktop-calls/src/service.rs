@@ -385,6 +385,9 @@ impl Shell {
                 Effect::CallsOffDeadlinePassed { address } => calls_off::deadline_passed(&address),
                 Effect::CallsOffPending { address } => calls_off::pending(&address),
                 Effect::CallsKeptOn { address } => calls_off::kept_on(&address),
+                Effect::CallPlacedWhileCallsOff { address } => {
+                    calls_off::placed_while_off(&address);
+                }
                 Effect::BlockPhone { address, blocked } => {
                     calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
                 }

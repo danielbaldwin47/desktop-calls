@@ -37,7 +37,7 @@ pub use calls_off::{
 pub use checks::{
     command_copied, copy_command_label, fix_failed, fix_label, fixing, problem_keycap,
 };
-pub use dialer::{dialer_key, dialer_phone};
+pub use dialer::{dialer_calls_off, dialer_key, dialer_phone};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
@@ -136,8 +136,6 @@ pub enum Failure {
     /// Hold & Answer or End & Answer while the only other Call is on hold:
     /// there is no live Call to hold or end.
     NothingToHoldOrEnd,
-    /// A Call placed while calls are off: the Phone isn't connected.
-    CallsOff,
     /// Calls turned off until a time that has already passed.
     CallsOffUntilPassed,
     /// BlueZ didn't block the Phone, so calls are still on.
@@ -190,7 +188,6 @@ impl Failure {
             Self::WaitingCallFirst => "waiting-call-first",
             Self::AlreadyHolding => "already-holding",
             Self::NothingToHoldOrEnd => "nothing-to-hold-or-end",
-            Self::CallsOff => "calls-off",
             Self::CallsOffUntilPassed => "calls-off-until-passed",
             Self::CallsOffFailed => "calls-off-failed",
             Self::CallsOnFailed => "calls-on-failed",
@@ -345,10 +342,6 @@ pub fn failure(failure: Failure) -> Message {
             "Your other Call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
             None,
         ),
-        Failure::CallsOff => (
-            "Calls are off, so your phone isn't connected; turn calls on to call.",
-            Some(NextAction::Command("desktop-calls calls on")),
-        ),
         Failure::CallsOffUntilPassed => (calls_off::UNTIL_PASSED, None),
         Failure::CallsOffFailed => (
             "Calls couldn't be turned off: Bluetooth didn't disconnect your phone. Try again.",
@@ -376,6 +369,7 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
             calls_off::calls_off(*until, *quiet_hours)
         }
         IndicatorStatus::CallsOffPending => calls_off::PENDING.to_owned(),
+        IndicatorStatus::CallsOffAgain => calls_off::AGAIN.to_owned(),
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
         IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),

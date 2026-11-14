@@ -100,7 +100,6 @@ impl From<Failure> for Refused {
             | Failure::PhoneConnecting
             | Failure::PhoneOutOfRange
             | Failure::CallInProgress
-            | Failure::CallsOff
             | Failure::NumberRefused
             | Failure::PhoneBusy
             | Failure::DialNotSupported

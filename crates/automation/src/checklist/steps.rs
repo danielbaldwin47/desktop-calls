@@ -13,6 +13,7 @@ use super::sitting::{Seen, Sitting, Stop, seconds};
 use super::watch::AppState;
 
 mod audio_location;
+mod calls_off_call;
 mod during_a_call;
 mod first_run;
 mod incoming;
@@ -21,6 +22,7 @@ mod missed_calls;
 mod range_and_power;
 
 use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
+use calls_off_call::call_while_calls_off;
 use during_a_call::{call_pill, calls_off_during_a_call, keypad_tones, mute};
 use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
 use incoming::{
@@ -351,6 +353,13 @@ pub const GROUPS: &[Group] = &[
                 needs: &[],
                 title: "Run `desktop-calls quiet-hours HH:MM-HH:MM` from one minute ahead to three minutes ahead: the Pixel disconnects when they begin, and the runner times the reconnect from their end; then run `desktop-calls quiet-hours off`",
                 script: Some(quiet_hours_soon),
+                lands_with: &[],
+            },
+            Step {
+                id: "6.7",
+                needs: &[TEST_NUMBER],
+                title: "With calls off, open the Dialer, type the Test Number, and press Enter: the Pixel connects and the Call is placed; hang up, and the Pixel disconnects again within a few seconds with `desktop-calls status` still saying calls are off",
+                script: Some(call_while_calls_off),
                 lands_with: &[],
             },
         ],

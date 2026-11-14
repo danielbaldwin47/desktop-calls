@@ -408,6 +408,16 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
     let harness = connected(Harness::builder().headless_screen());
     let (path, call) = answered_here(&harness);
     let active_since = harness.app_state().calls[0].active_since_ms;
+    // The keybinding gives the Call Window the keyboard, which keeps it
+    // expanded past the 5 s after which it would collapse to the Call Pill,
+    // so its notice can be read.
+    let keybinding = harness.cli(&[]);
+    assert!(keybinding.status.success(), "{keybinding:?}");
+    harness.wait_for_app("the Call Window has the keyboard", DEADLINE, |state| {
+        state
+            .surface("call-window")
+            .is_some_and(|window| window.get("focused").map(String::as_str) == Some("true"))
+    });
 
     harness
         .simulated_phone()

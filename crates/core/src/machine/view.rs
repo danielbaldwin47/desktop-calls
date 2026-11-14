@@ -64,6 +64,10 @@ pub enum RingingCaller {
 
 /// The Call Window's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent fact about what the Call Window shows, not a mode"
+)]
 pub struct CallWindowView {
     /// The Call shown, or `None` for a Call placed here that the Phone
     /// hasn't reported yet, or couldn't place.
@@ -89,6 +93,9 @@ pub struct CallWindowView {
     /// the Phone: nothing in the window acts on them, and Hang up says to
     /// hang up on the Phone.
     pub connection_lost: bool,
+    /// The Call Window shows as the Call Pill: the caller, the timer, Mute
+    /// and Hang up, in a strip in the bottom-right corner.
+    pub collapsed: bool,
 }
 
 /// What the Banner offers for a Waiting Call, besides Decline.
@@ -204,6 +211,7 @@ impl State {
             }),
             waiting_first: false,
             connection_lost: true,
+            collapsed: self.form.collapsed(),
         })
     }
 
@@ -267,6 +275,7 @@ impl State {
                     held: None,
                     waiting_first: false,
                     connection_lost: false,
+                    collapsed: self.form.collapsed(),
                 })
             })
             .or_else(|| {
@@ -281,6 +290,7 @@ impl State {
                     held: None,
                     waiting_first: false,
                     connection_lost: false,
+                    collapsed: self.form.collapsed(),
                 })
             })
             .or_else(|| {
@@ -297,6 +307,7 @@ impl State {
                     held: None,
                     waiting_first: false,
                     connection_lost: false,
+                    collapsed: self.form.collapsed(),
                 })
             })
             .or_else(|| {
@@ -311,6 +322,7 @@ impl State {
                     held: None,
                     waiting_first: false,
                     connection_lost: false,
+                    collapsed: self.form.collapsed(),
                 })
             });
         Surfaces {
@@ -347,6 +359,7 @@ impl State {
             }),
             waiting_first: self.has_waiting_call() && self.has_held_call(),
             connection_lost: false,
+            collapsed: self.form.collapsed(),
         })
     }
 

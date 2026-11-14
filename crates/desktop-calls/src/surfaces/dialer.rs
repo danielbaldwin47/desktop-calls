@@ -42,7 +42,7 @@ impl Dialer {
             "dialer",
             Layer::Overlay,
             KeyboardMode::Exclusive,
-            Input::CloseDialer,
+            Some(Input::CloseDialer),
             intents,
             report,
         );

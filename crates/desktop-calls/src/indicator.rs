@@ -362,15 +362,13 @@ impl Item {
         OwnedObjectPath::try_from(MENU_PATH).unwrap_or_default()
     }
 
-    /// A left click opens the Dialer.
+    /// A left click expands the collapsed Call Window during a Call, and
+    /// otherwise opens the Dialer: the Call state machine decides which.
     fn activate(&self, x: i32, y: i32) {
         let _ = (x, y);
         // The decision loop outlives the Indicator; a closed channel only
         // means the app is stopping.
-        let _ = self.intents.unbounded_send(Input::OpenDialer {
-            query: String::new(),
-            select_call: None,
-        });
+        let _ = self.intents.unbounded_send(Input::IndicatorActivated);
     }
 
     /// A middle click does nothing.

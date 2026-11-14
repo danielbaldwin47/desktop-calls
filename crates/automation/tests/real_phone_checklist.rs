@@ -505,7 +505,7 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
     for said in [
         "The Call went to the Test Number",
         "The Pixel connected and the Call to the Test Number was placed, with calls going off again after it",
-        "says calls are off",
+        "the app says calls are off",
     ] {
         assert!(says(anyway, said), "{said}: {anyway:#}");
     }

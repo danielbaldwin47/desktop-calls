@@ -725,6 +725,9 @@ fn blocked_as_asked(state: &mut State, address: &str, blocked: bool, effects: &m
         state.calls_off = CallsOff::On;
         effects.push(Effect::KeepCallsOff(state.calls_on_record()));
         connect_again_at_once(state, effects);
+        // A Call placed while calls were off, then kept on: it still waits
+        // only so long for the Phone.
+        super::dialling::wait_for_phone(state, effects);
         return;
     }
     // For a Call placed while calls were off: the turn-off kept waits for

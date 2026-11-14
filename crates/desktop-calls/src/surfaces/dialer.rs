@@ -196,7 +196,6 @@ impl Dialer {
         // that Enter calls anyway.
         let calls_off = view
             .calls_off
-            .filter(|_| notice.is_none())
             .map(|off| messages::dialer_calls_off(off.until));
         if let Some(notice) = notice {
             self.notice_icon.set(Icon::Warning);

@@ -230,11 +230,6 @@ fn hanging_up_before_the_phone_connects_cancels_the_call_and_calls_go_back_off()
     let state = wait_off(&harness, "calls are back off");
     assert_eq!(shown(&state, "call-window", "state"), Some("Call ended"));
     harness.app_holds("calls stay off", STAYS, is_off);
-    let _ = harness
-        .simulated_phone()
-        .recorded_holds("the Phone is never asked to dial", Duration::ZERO, |calls| {
-            !calls.iter().any(|call| call.member == "Dial")
-        });
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
 }
 

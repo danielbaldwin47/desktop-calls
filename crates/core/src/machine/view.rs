@@ -38,7 +38,8 @@ pub struct DialerView {
     /// now.
     pub keys: Vec<DialerKey>,
     /// While calls are off: Enter calls anyway, and calls go off again
-    /// after (ticket #206).
+    /// after (ticket #206). Not while `notice` says why Enter can't Call:
+    /// the strip shows that instead.
     pub calls_off: Option<DialerCallsOff>,
     /// Where the Phone is, as the footer shows it at the right.
     pub phone: PhoneStatus,
@@ -649,7 +650,8 @@ impl State {
                 selected,
                 notice: dialer.notice,
                 keys: keys.into_iter().flatten().collect(),
-                calls_off,
+                // Why Enter can't Call takes the strip first.
+                calls_off: calls_off.filter(|_| dialer.notice.is_none()),
                 phone: self.phone_status(),
                 opened: dialer.opened,
             }

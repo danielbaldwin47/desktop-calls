@@ -117,7 +117,7 @@ The Desktop's system-wide setting for silencing notifications, which Desktop Cal
 _Avoid_: DND, quiet mode
 
 **Calls Off**:
-The state, chosen by the user or begun by Quiet Hours, in which the Desktop keeps the Phone disconnected and nothing connects it again.
+The state, chosen by the user or begun by Quiet Hours, in which the Desktop keeps the Phone disconnected and nothing connects it again, except a Call the user places from the Dialer meanwhile: the Phone connects for that one Call, and calls go off again when it ends (the code calls this the exception).
 _Avoid_: paused, offline, disabled, Do Not Disturb (that is the Desktop's setting)
 
 **Quiet Hours**:

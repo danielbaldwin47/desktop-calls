@@ -97,7 +97,7 @@ pub(super) fn call_while_calls_off(sitting: &mut Sitting) -> Result<(), Stop> {
     let took = off_again.at.saturating_duration_since(ended.at);
     sitting.measure("disconnected_again_ms", millis(took));
     sitting.observed(format!(
-        "The Pixel disconnected again {} after the Call ended, and `desktop-calls status` says calls are off.",
+        "The Pixel disconnected again {} after the Call ended, and the app says calls are off, as `desktop-calls status` reports.",
         seconds(took)
     ));
     Ok(())

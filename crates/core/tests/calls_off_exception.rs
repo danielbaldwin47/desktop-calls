@@ -386,6 +386,71 @@ fn keep_calls_on_while_the_phone_is_being_unblocked_leaves_calls_on() {
 }
 
 #[test]
+fn kept_on_while_the_phone_is_being_unblocked_the_call_still_waits_only_15_s() {
+    let (state, effects) = run(entered(None), [Input::KeepCallsOn, blocked(false)]);
+    assert!(connects(&effects), "{effects:?}");
+    assert!(
+        effects.contains(&Effect::StartTimer {
+            timer: Timer::PhoneForDial(1),
+            after_ms: 15_000
+        }),
+        "{effects:?}"
+    );
+
+    let (state, effects) = run(state, [Input::TimerFired(Timer::PhoneForDial(1))]);
+
+    assert!(
+        effects.contains(&Effect::DialProgress(DialProgress::NotPlaced(
+            1,
+            Failure::PhoneOutOfRange
+        )))
+    );
+    let Some(window) = state.surfaces().call_window else {
+        panic!("no Call Window");
+    };
+    assert_eq!(window.notice, Some(Failure::PhoneOutOfRange));
+    assert!(!state.calls_off(), "calls were kept on");
+}
+
+#[test]
+fn bluez_refusing_the_unblock_leaves_calls_off_and_the_call_window_says_why() {
+    let (state, effects) = run(
+        entered(Some(in_an_hour())),
+        [Input::PhoneBlockFailed {
+            address: ADDRESS.to_owned(),
+            blocked: false,
+        }],
+    );
+
+    assert!(state.calls_off());
+    assert_eq!(state.calls_off_until(), Some(in_an_hour()));
+    assert!(
+        effects.contains(&Effect::KeepCallsOff(Some(record_off(Some(in_an_hour()))))),
+        "{effects:?}"
+    );
+    assert!(
+        effects.contains(&Effect::DialProgress(DialProgress::NotPlaced(
+            1,
+            Failure::CallsOnFailed
+        )))
+    );
+    // Said once, as the Call not placed.
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| **effect == Effect::ReportError(Failure::CallsOnFailed))
+            .count(),
+        1,
+        "{effects:?}"
+    );
+    let Some(window) = state.surfaces().call_window else {
+        panic!("no Call Window");
+    };
+    assert_eq!(window.phase, CallWindowPhase::NotPlaced);
+    assert_eq!(window.notice, Some(Failure::CallsOnFailed));
+}
+
+#[test]
 fn a_call_that_rings_during_the_exception_keeps_calls_on_until_it_ends_too() {
     let (state, _) = run(
         placed(None),

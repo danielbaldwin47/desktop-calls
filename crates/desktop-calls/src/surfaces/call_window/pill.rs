@@ -18,7 +18,9 @@ use super::{
     hang_up_button, keycap, report_mute, seconds_since, set_class, status_label,
 };
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute, StateLine};
+use desktop_calls_core::{
+    AudioLocation, CallPillLead, CallWindowPhase, CallWindowView, Input, Mute, StateLine,
+};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
 use gtk4_layer_shell::{KeyboardMode, Layer};
@@ -42,8 +44,8 @@ pub(super) struct CallPill {
     /// The live dot, the state icon or, under the pointer, the chevron.
     lead: gtk::Stack,
     state_icon: IconView,
-    /// What leads the strip while the pointer isn't over it, if anything.
-    at_rest: Rc<Cell<Option<&'static str>>>,
+    /// Whether the pointer is over the body, and what leads at rest.
+    pointer: Rc<Pointer>,
     caller: gtk::Label,
     tag: gtk::Label,
     status: gtk::Label,
@@ -132,13 +134,13 @@ impl CallPill {
         row.append(&hang_up);
         surface.window.set_child(Some(&row));
         expand_on_click(&surface.window, intents);
-        let at_rest = Rc::new(Cell::new(Some(LIVE_DOT)));
-        chevron_on_hover(&surface.window, &lead, &at_rest);
+        let pointer = Rc::new(Pointer::default());
+        chevron_on_hover(&body, &surface.window, &lead, &pointer);
         Self {
             surface,
             lead,
             state_icon,
-            at_rest,
+            pointer,
             caller,
             tag,
             status,
@@ -165,9 +167,7 @@ impl CallPill {
             _ => None,
         };
         let status = status(view);
-        // Once the Call has ended, or contact with it is lost, nothing on
-        // the strip would act: it says only who and what happened.
-        let quiet = view.connection_lost || view.phase == CallWindowPhase::Ended;
+        let quiet = view.call_pill_quiet();
         set_class(&self.surface.window, "quiet", quiet);
         // Monospace only for a time on its own.
         set_class(&self.status, class::WORDS, mute.is_none());
@@ -180,7 +180,7 @@ impl CallPill {
             && view
                 .audio
                 .is_some_and(|audio| audio.location == AudioLocation::Phone);
-        self.show_lead(quiet, mute == Some(Mute::On), audio_on_phone);
+        self.show_lead(view.call_pill_lead());
 
         self.muted.set(mute == Some(Mute::On));
         let mute_label = if self.muted.get() {
@@ -262,31 +262,30 @@ impl CallPill {
         }
     }
 
-    /// What leads the strip: nothing once it is quiet; the crossed
-    /// microphone while muted; the Phone while the audio is there;
-    /// otherwise the live dot. The chevron takes its place under the
-    /// pointer.
-    fn show_lead(&self, quiet: bool, muted: bool, audio_on_phone: bool) {
-        let at_rest = if quiet {
-            None
-        } else if muted {
-            self.state_icon.set(Icon::MicrophoneMuted);
-            Some(STATE_ICON)
-        } else if audio_on_phone {
-            self.state_icon.set(Icon::Phone);
-            Some(STATE_ICON)
-        } else {
-            Some(LIVE_DOT)
+    /// Shows what leads the strip at rest, or nothing once it is quiet.
+    /// The chevron takes its place while the pointer is over the body.
+    fn show_lead(&self, lead: Option<CallPillLead>) {
+        let icon = match lead {
+            Some(CallPillLead::Muted) => Some(Icon::MicrophoneMuted),
+            Some(CallPillLead::OnPhone) => Some(Icon::Phone),
+            Some(CallPillLead::OnHold) => Some(Icon::OnHold),
+            Some(CallPillLead::Live) | None => None,
         };
-        set_class(&self.state_icon.area, class::MUTED, muted);
-        self.at_rest.set(at_rest);
-        self.lead.set_visible(at_rest.is_some());
-        let hovered = self.lead.visible_child_name().as_deref() == Some(CHEVRON);
-        if let Some(at_rest) = at_rest
-            && !hovered
-        {
-            self.lead.set_visible_child_name(at_rest);
+        if let Some(icon) = icon {
+            self.state_icon.set(icon);
         }
+        set_class(
+            &self.state_icon.area,
+            class::MUTED,
+            lead == Some(CallPillLead::Muted),
+        );
+        let at_rest = lead.map(|lead| match lead {
+            CallPillLead::Live => LIVE_DOT,
+            CallPillLead::Muted | CallPillLead::OnPhone | CallPillLead::OnHold => STATE_ICON,
+        });
+        self.pointer.at_rest.set(at_rest);
+        self.lead.set_visible(at_rest.is_some());
+        self.pointer.show(&self.lead);
     }
 
     /// Hides the Call Pill, or takes back the report of it shown ahead.
@@ -320,7 +319,7 @@ fn status(view: &CallWindowView) -> String {
         // Its timer would mislead: the Desktop can't tell whether the Call
         // still goes on.
         _ if view.connection_lost => messages::label(Label::OnYourPhone).to_owned(),
-        CallWindowPhase::Live { active_since, .. } | CallWindowPhase::OnHold { active_since } => {
+        CallWindowPhase::Live { active_since, .. } => {
             messages::elapsed(seconds_since(active_since))
         }
         CallWindowPhase::Ended => {
@@ -361,23 +360,48 @@ fn icon_button(icon: &IconView, class: &str) -> gtk::Button {
     button
 }
 
-/// While the pointer is over the Call Pill, its lead shows the chevron:
-/// a click expands it upwards.
+/// Whether the pointer is over the Call Pill's body, and what leads the
+/// strip when it isn't.
+#[derive(Default)]
+struct Pointer {
+    over_body: Cell<bool>,
+    at_rest: Cell<Option<&'static str>>,
+}
+
+impl Pointer {
+    /// Shows the chevron in `lead` while the pointer is over the body,
+    /// otherwise what leads at rest.
+    fn show(&self, lead: &gtk::Stack) {
+        if let Some(at_rest) = self.at_rest.get() {
+            lead.set_visible_child_name(if self.over_body.get() {
+                CHEVRON
+            } else {
+                at_rest
+            });
+        }
+    }
+}
+
+/// While the pointer is over the Call Pill's body, not its buttons, the
+/// lead shows the chevron, and the strip lightens: a click expands it
+/// upwards.
 fn chevron_on_hover(
+    body: &gtk::Box,
     window: &gtk::Window,
     lead: &gtk::Stack,
-    at_rest: &Rc<Cell<Option<&'static str>>>,
+    pointer: &Rc<Pointer>,
 ) {
-    let pointer = gtk::EventControllerMotion::new();
-    let shown = lead.clone();
-    pointer.connect_enter(move |_, _, _| shown.set_visible_child_name(CHEVRON));
-    let (shown, at_rest) = (lead.clone(), at_rest.clone());
-    pointer.connect_leave(move |_| {
-        if let Some(at_rest) = at_rest.get() {
-            shown.set_visible_child_name(at_rest);
-        }
-    });
-    window.add_controller(pointer);
+    let motion = gtk::EventControllerMotion::new();
+    let hovered = move |pointer: &Pointer, window: &gtk::Window, lead: &gtk::Stack, over: bool| {
+        pointer.over_body.set(over);
+        set_class(window, "hovered", over);
+        pointer.show(lead);
+    };
+    let (shown, strip, state) = (lead.clone(), window.clone(), pointer.clone());
+    motion.connect_enter(move |_, _, _| hovered(&state, &strip, &shown, true));
+    let (shown, strip, state) = (lead.clone(), window.clone(), pointer.clone());
+    motion.connect_leave(move |_| hovered(&state, &strip, &shown, false));
+    body.add_controller(motion);
 }
 
 /// A click on the Call Pill's body, not on one of its buttons, expands the

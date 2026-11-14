@@ -14,7 +14,7 @@ use super::{
 };
 
 /// How many temporary captures [`hold_call_window_expanded`] and
-/// [`point_at_hang_up`] have taken.
+/// [`point_at`] have taken.
 static HOVER_CAPTURES: AtomicUsize = AtomicUsize::new(0);
 
 /// The gap the Call Pill keeps from the screen's edges, in layout pixels.
@@ -47,11 +47,28 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             connect(harness);
             on_a_call(harness);
             wait_until_collapsed(harness);
-            point_at_hang_up(harness);
+            point_at(harness, HANG_UP_FROM_RIGHT);
         },
         // The tooltip shows above Hang up.
         shown: |screenshot, look| {
             shows(screenshot, look.red())
+                && app_region(screenshot).is_some_and(|region| region.bottom - region.top > 60.0)
+        },
+    },
+    State {
+        name: "call-pill-hover-body",
+        title: "The Call Pill with the pointer over its body: the chevron, a lighter strip, and Show Call",
+        still: collapsed,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            on_a_call(harness);
+            wait_until_collapsed(harness);
+            point_at(harness, BODY_FROM_RIGHT);
+        },
+        // The tooltip shows above the body; Hang up stays neutral.
+        shown: |screenshot, look| {
+            !shows(screenshot, look.red())
                 && app_region(screenshot).is_some_and(|region| region.bottom - region.top > 60.0)
         },
     },
@@ -106,7 +123,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     State {
         name: "call-pill-on-your-phone",
         title: "The Call Pill, collapsed by hand after contact with the Call was lost: On your phone, in place of the timer",
-        still: collapsed,
+        still: |state| collapsed(state) && !pill_has(state, "hang-up"),
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -131,7 +148,8 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .is_some_and(|status| status == "On your phone")
             });
         },
-        // Mute and Hang up go: they would do nothing.
+        // Mute and Hang up go: they would do nothing. The screen can't tell
+        // a neutral Hang up apart, so the app's report says so.
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
     State {
@@ -156,6 +174,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                 .surface("call-pill")
                 .and_then(|pill| pill.get("status"))
                 .is_some_and(|status| status.starts_with("Call ended · "))
+                && !pill_has(state, "hang-up")
         },
         prepare: as_is,
         reach: |harness| {
@@ -171,7 +190,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .is_some_and(|status| status.starts_with("Call ended · "))
             });
         },
-        // Mute and Hang up go once the Call has ended.
+        // Mute and Hang up go once the Call has ended, as the app reports.
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
 ];
@@ -250,9 +269,15 @@ pub(super) fn hold_call_window_expanded(harness: &Harness) {
         .move_to(window.left + 6.0, window.top + 6.0);
 }
 
-/// Rests the pointer on the Call Pill's Hang up: 6 px of padding and a
-/// 1 px border in from its right edge, and 32 px wide.
-fn point_at_hang_up(harness: &Harness) {
+/// From the Call Pill's right edge to the middle of Hang up: 6 px of
+/// padding and a 1 px border, and half its 32 px; and to its body, on the
+/// caller.
+const HANG_UP_FROM_RIGHT: f64 = 23.0;
+const BODY_FROM_RIGHT: f64 = 220.0;
+
+/// Rests the pointer `from_right` in from the Call Pill's right edge,
+/// halfway down.
+fn point_at(harness: &Harness, from_right: f64) {
     let unique = HOVER_CAPTURES.fetch_add(1, Ordering::Relaxed);
     let screenshot = harness.screenshot(&format!("call-pill-before-hover-{unique}"));
     let pill = app_region(&screenshot);
@@ -260,7 +285,8 @@ fn point_at_hang_up(harness: &Harness) {
     let Some(pill) = pill else {
         panic!("the Call Pill isn't on screen");
     };
-    harness
-        .pointer()
-        .move_to(pill.right - 23.0, f64::midpoint(pill.top, pill.bottom));
+    harness.pointer().move_to(
+        pill.right - from_right,
+        f64::midpoint(pill.top, pill.bottom),
+    );
 }

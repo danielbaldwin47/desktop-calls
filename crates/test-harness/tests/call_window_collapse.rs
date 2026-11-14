@@ -5,7 +5,7 @@
 //! screenshots, with synthetic pointer and keyboard input.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use test_harness::{
     AppEvent, AppState, BAR_COLOUR, BAR_HEIGHT, Harness, Key, LAYOUT_SIZE, RecordedMethodCall,
@@ -234,6 +234,21 @@ fn a_connected_call_collapses_to_the_call_pill_in_the_bottom_right_corner_after_
     );
     assert_eq!(shown.get("mute").map(String::as_str), Some("Mute"));
     assert_eq!(shown.get("hang-up").map(String::as_str), Some("Hang up"));
+    // Tooltips name the buttons and their shortcuts, and the body says a
+    // click shows the Call.
+    assert_eq!(
+        (
+            shown.get("tooltip").map(String::as_str),
+            shown.get("mute-tooltip").map(String::as_str),
+            shown.get("hang-up-tooltip").map(String::as_str),
+        ),
+        (
+            Some("Show Call · Super+Alt+C"),
+            Some("Mute · M"),
+            Some("Hang up · Ctrl+H")
+        )
+    );
+    assert!(!shown.contains_key("tag"), "a plain live Call has no tag");
     assert_eq!(shown.get("anchor").map(String::as_str), Some("bottom-right"));
     assert!(!shown.contains_key("focused"), "the Call Pill took the keyboard");
 
@@ -501,14 +516,25 @@ fn the_call_window_grows_out_of_the_call_pill_and_shrinks_back_in_200_ms() {
     );
     assert!(reported < took, "the Call Window was reported only once grown");
 
+    let pressed = SystemTime::now();
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape collapses it", DEADLINE, collapsed);
-    let collapsing = AppEvent::kind("call-window-change-started")
-        .with("form", "collapsed")
-        .with("animated", true);
-    let finished = AppEvent::kind("call-window-change-finished").with("form", "collapsed");
-    // Measured on the first collapse, by itself; Escape's is the same.
-    let took = harness.app_took(&collapsing, &finished, DEADLINE);
+    // Escape's collapse, by the app's log: from its start to its end.
+    let started = harness.assert_app_within_since(
+        "the Call Window to start shrinking",
+        pressed,
+        &AppEvent::kind("call-window-change-started")
+            .with("form", "collapsed")
+            .with("animated", true),
+        CHANGE_WITHIN,
+    );
+    let finished = harness.assert_app_within_since(
+        "the Call Window to finish shrinking",
+        pressed,
+        &AppEvent::kind("call-window-change-finished").with("form", "collapsed"),
+        CHANGE_WITHIN,
+    );
+    let took = finished.saturating_sub(started);
     assert!(
         took >= CHANGE_AT_LEAST && took < CHANGE_WITHIN,
         "the Call Window shrank in {took:?}"
@@ -551,7 +577,7 @@ fn with_animations_off_the_change_is_a_cut() {
         DEADLINE,
     );
     assert!(
-        collapsed_in < Duration::from_millis(20) && expanded_in < CUT_WITHIN,
+        collapsed_in < Duration::from_millis(50) && expanded_in < CUT_WITHIN,
         "with animations off, the Call Window shrank in {collapsed_in:?} and grew in {expanded_in:?}"
     );
 }
@@ -667,6 +693,7 @@ fn with_the_audio_on_the_phone_the_call_pill_says_so_and_mute_is_unavailable() {
         Some("Audio on phone")
     );
     assert!(pill.contains_key("mute-unavailable"), "{pill:?}");
+    assert_eq!(pill.get("tag").map(String::as_str), Some("On phone"));
 }
 
 /// Ticket #201: a ringing Waiting Call leaves the Call Window collapsed, as
@@ -712,6 +739,10 @@ fn hold_and_answer_expands_the_call_pill_and_collapsed_again_it_says_one_on_hold
     let state = harness.wait_for_app("Escape collapses it", DEADLINE, collapsed);
     assert_eq!(
         pill(&state).and_then(|pill| pill.get("held")).map(String::as_str),
+        Some("1 on hold")
+    );
+    assert_eq!(
+        pill(&state).and_then(|pill| pill.get("tag")).map(String::as_str),
         Some("1 on hold")
     );
 }

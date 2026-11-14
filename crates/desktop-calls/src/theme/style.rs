@@ -202,7 +202,7 @@ window.call-pill.muted .pill-tag { color: var(--dc-warning-text); font-weight: 6
     min-width: 8px; min-height: 8px; border-radius: 4px; background: var(--dc-answer);
 }
 .pill-divider { min-width: 1px; margin: 4px 2px; background: var(--dc-border); }
-window.call-pill:hover { background-color: var(--dc-selection); }
+window.call-pill.hovered { background-color: var(--dc-selection); }
 window.call-pill.muted { background-color: var(--dc-warning-tint); }
 .desktop-calls-surface.call-pill button.pill-button {
     min-width: 32px; min-height: 32px; padding: 0;

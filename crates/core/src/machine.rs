@@ -53,8 +53,8 @@ pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
 pub use view::{
-    BannerView, CallAudio, CallPillTag, CallWindowPhase, CallWindowView, DialerView, HeldCall,
-    Mute, RingingCaller, StateLine, Surfaces, WaitingOptions,
+    BannerView, CallAudio, CallPillLead, CallPillTag, CallWindowPhase, CallWindowView, DialerView,
+    HeldCall, Mute, RingingCaller, StateLine, Surfaces, WaitingOptions,
 };
 
 /// How many recent Calls the Desktop remembers the other party of, so

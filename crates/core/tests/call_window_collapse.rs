@@ -3,8 +3,8 @@
 //! #200).
 
 use desktop_calls_core::{
-    AudioLocation, CallId, CallPillTag, CallState, Caller, Effect, Input, Phone, PhoneCommand,
-    State, SyncFailure, Timer, Timestamp, Transport, step,
+    AudioLocation, CallId, CallPillLead, CallPillTag, CallState, Caller, Effect, Input, Phone,
+    PhoneCommand, State, SyncFailure, Timer, Timestamp, Transport, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -694,6 +694,14 @@ fn tag(state: &State) -> Option<CallPillTag> {
     window.call_pill_tag()
 }
 
+/// Ticket #225: what leads the Call Pill, and whether it is quiet.
+fn lead(state: &State) -> (Option<CallPillLead>, bool) {
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    (window.call_pill_lead(), window.call_pill_quiet())
+}
+
 fn muted(state: State) -> State {
     run(
         state,
@@ -769,4 +777,40 @@ fn muted_outranks_a_held_call_and_lost_contact_has_no_tag() {
         ],
     );
     assert_eq!(tag(&lost), None, "the Call Pill says On your phone instead");
+}
+
+#[test]
+fn the_call_pill_leads_with_its_state_and_goes_quiet_once_nothing_on_it_would_act() {
+    assert_eq!(lead(&live()), (Some(CallPillLead::Live), false));
+    assert_eq!(lead(&muted(live())), (Some(CallPillLead::Muted), false));
+    let (on_phone, _) = run(
+        ringing(),
+        [Input::CallChanged {
+            call: CALL,
+            state: CallState::Active,
+            at: Timestamp(2_000),
+        }],
+    );
+    assert_eq!(lead(&on_phone), (Some(CallPillLead::OnPhone), false));
+    let (held, _) = run(
+        live(),
+        [Input::CallChanged {
+            call: CALL,
+            state: CallState::Held,
+            at: Timestamp(4_000),
+        }],
+    );
+    assert_eq!(
+        lead(&held),
+        (Some(CallPillLead::OnHold), false),
+        "a lone Call on hold doesn't look live"
+    );
+    let (ended, _) = run(
+        live(),
+        [Input::CallEnded {
+            call: CALL,
+            at: Timestamp(90_000),
+        }],
+    );
+    assert_eq!(lead(&ended), (None, true));
 }

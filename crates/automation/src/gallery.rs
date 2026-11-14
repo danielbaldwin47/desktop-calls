@@ -134,7 +134,12 @@ const STATES: &[State] = &[
     State {
         name: "call-window-keypad",
         title: "The Call Window with the keypad open and tones sent: the tone entry and the keypad above the tiles, so Hang up stays put",
-        still: |_| true,
+        still: |state| {
+            state.surface("call-window").is_some_and(|window| {
+                window.contains_key("keypad")
+                    && window.get("tones").is_some_and(|tones| tones == "123#")
+            })
+        },
         prepare: as_is,
         reach: |harness| {
             live_here(harness);

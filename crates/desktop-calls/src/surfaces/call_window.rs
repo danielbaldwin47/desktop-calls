@@ -40,6 +40,10 @@ use change::{CHANGE_MS, Change, SMALLEST_CONTENT};
 use held::HeldRow;
 use pill::CallPill;
 
+/// The style class GTK gives a button between its activation from the
+/// keyboard and its click, 250 ms later.
+const KEYBOARD_ACTIVATING: &str = "keyboard-activating";
+
 /// Each shortcut as the window shows it, by the action's report key, with
 /// the keycap that shows it.
 type Shortcuts = BTreeMap<String, (String, Option<gtk::Widget>)>;
@@ -399,9 +403,14 @@ impl CallWindow {
     }
 
     /// Opens the keypad if tones can be sent, and returns whether they can.
+    /// After K, the Keypad tile's click is still to come (GTK presses a
+    /// button activated from the keyboard for 250 ms, then clicks it), and
+    /// that click opens the keypad; opening it here too would let the click
+    /// close it again (#267). The tones typed meanwhile wait in the entry.
     fn open_keypad(&self) -> bool {
         let can = self.tones.is_sensitive() && shows(&self.keypad_shown.button);
-        if can && !self.keypad_shown.button.is_active() {
+        let clicking = self.keypad_shown.button.has_css_class(KEYBOARD_ACTIVATING);
+        if can && !clicking && !self.keypad_shown.button.is_active() {
             self.keypad_shown.button.set_active(true);
         }
         can

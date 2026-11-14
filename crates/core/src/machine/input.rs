@@ -111,6 +111,24 @@ pub enum Input {
     Activate,
     /// The user let go of the surface that has keyboard focus (Escape).
     ReleaseFocus,
+    /// Escape on the Call Window: collapse it to the Call Pill and give the
+    /// keyboard back.
+    CollapseCallWindow,
+    /// The user clicked the Call Pill: expand the Call Window, with the
+    /// keyboard.
+    ExpandCallWindow,
+    /// The user clicked the Indicator: expand the Call Window, collapsed
+    /// during a Call, or otherwise open the Dialer.
+    IndicatorActivated,
+    /// The pointer moved over the Call Window (`true`) or left it.
+    PointerOverCallWindow(bool),
+    /// The Call Window got the keyboard (`true`) or lost it, however it
+    /// did.
+    CallWindowKeyboard(bool),
+    /// The user clicked in the Call Window, or pressed a key in it.
+    CallWindowUsed,
+    /// The Call Window's keypad opened (`true`) or closed.
+    KeypadShown(bool),
     /// Open the Dialer with `query` typed, selecting the Call History row of
     /// Call `select_call` if it has one.
     OpenDialer {
@@ -371,6 +389,9 @@ pub enum Timer {
     /// Time to check again the Desktop's Problems that can't be followed as
     /// they change.
     CheckDesktop,
+    /// Collapse the Call Window to the Call Pill, if this collapse timer,
+    /// by number, is still the one that counts.
+    CollapseCallWindow(u32),
 }
 
 /// Something the shell adapters must do.

@@ -312,7 +312,18 @@ fn answered_on_the_phone_the_desktop_leaves_the_audio_there() {
         }],
     );
 
-    assert_eq!(effects, [Effect::StopRinging]);
+    // The Call Window collapses to the Call Pill by itself a few seconds
+    // later, as it does for a Call answered here.
+    assert_eq!(
+        effects,
+        [
+            Effect::StopRinging,
+            Effect::StartTimer {
+                timer: Timer::CollapseCallWindow(1),
+                after_ms: 5_000,
+            },
+        ]
+    );
     assert_eq!(state.surfaces().banner, None);
     assert_eq!(state.audio_location(), Some(AudioLocation::Phone));
     let window = state.surfaces().call_window.expect("the Call Window shows");

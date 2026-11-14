@@ -201,7 +201,8 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
 }
 
 #[test]
-fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_leaves_the_call_live() {
+fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_collapses_it_leaving_the_call_live()
+{
     let (harness, _client) = connected_with_a_focused_window();
     let (_, call) = ring_until_banner(&harness);
     harness.answer(call);
@@ -219,9 +220,9 @@ fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_leaves_t
     harness.keyboard().press(Key::Escape);
 
     harness.wait_for_app(
-        "the Call Window lets go of the keyboard",
+        "the Call Window collapses to the Call Pill, letting go of the keyboard",
         DEADLINE,
-        |state| state.surface("call-window").is_some() && !focused(state, "call-window"),
+        |state| state.surface("call-pill").is_some() && state.surface("call-window").is_none(),
     );
     harness.app_holds("the Call stays live", Duration::from_millis(500), |state| {
         is_live(state, call)

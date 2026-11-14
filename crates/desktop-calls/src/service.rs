@@ -559,6 +559,10 @@ fn requested(input: &Input) {
         // The Indicator, its menu, `desktop-calls dialer` and the control
         // interface open the Dialer this way: the Dialer's first frame is
         // timed from here too (ticket #125).
+        Input::IndicatorActivated => tracing::info!(
+            event_kind = %EventKind::ActivateRequested,
+            "Asked to activate, as a click on the Indicator does"
+        ),
         Input::OpenDialer { .. } => tracing::info!(
             event_kind = %EventKind::ActivateRequested,
             "Asked to open the Dialer"

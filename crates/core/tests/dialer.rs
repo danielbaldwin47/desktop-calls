@@ -353,13 +353,34 @@ fn a_new_sync_while_open_updates_the_rows() {
 
 #[test]
 fn the_footer_names_only_the_keys_that_work_now() {
-    use desktop_calls_core::DialerKey::{Call, Close, Move};
-    // The Call History: Enter Calls, and Up and Down move.
-    assert_eq!(dialer(&open(connected(), "")).keys, [Call, Move, Close]);
+    use desktop_calls_core::DialerKey::{Call, Close, Move, QuietHours};
+    // The Call History: Enter Calls, and Up and Down move. Alt+Q always
+    // opens the Quiet Hours Window (ticket #279).
+    assert_eq!(
+        dialer(&open(connected(), "")).keys,
+        [Call, Move, QuietHours, Close]
+    );
     // One match: nothing to move to.
-    assert_eq!(dialer(&open(connected(), "alice")).keys, [Call, Close]);
-    // Nothing matches and nothing can be dialled: only Escape does anything.
-    assert_eq!(dialer(&open(connected(), "zed")).keys, [Close]);
+    assert_eq!(
+        dialer(&open(connected(), "alice")).keys,
+        [Call, QuietHours, Close]
+    );
+    // Nothing matches and nothing can be dialled: no Enter, no moving.
+    assert_eq!(dialer(&open(connected(), "zed")).keys, [QuietHours, Close]);
+    assert_eq!(
+        desktop_calls_core::messages::dialer_key(QuietHours),
+        (&["Alt", "Q"][..], "Quiet Hours")
+    );
+}
+
+/// Asked for from the Dialer, the Quiet Hours Window opens and the Dialer
+/// closes, so the window has the keyboard (ticket #279).
+#[test]
+fn opening_the_quiet_hours_window_closes_the_dialer() {
+    let (state, _) = run(open(connected(), "al"), [Input::OpenQuietHoursWindow]);
+    let surfaces = state.surfaces();
+    assert_eq!(surfaces.dialer, None);
+    assert!(surfaces.quiet_hours_window.is_some());
 }
 
 fn my_pixel() -> Phone {
@@ -436,7 +457,8 @@ fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
         dialer_phone(&PhoneStatus::ConnectionLost(my_pixel())),
         "Reconnecting…"
     );
-    // Calls off in the Indicator's words, with when they come back on.
+    // Calls off in the Indicator's words, without when they come back on:
+    // the strip above the rows says that (ticket #279).
     let off = PhoneStatus::CallsOff {
         until: None,
         quiet_hours: false,
@@ -445,6 +467,11 @@ fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
         dialer_phone(&off),
         desktop_calls_core::messages::indicator_status(&off.into())
     );
+    let until_morning = PhoneStatus::CallsOff {
+        until: desktop_calls_core::TimeOfDay::parse("07:00"),
+        quiet_hours: true,
+    };
+    assert_eq!(dialer_phone(&until_morning), "Calls off");
     assert_eq!(
         dialer_key(desktop_calls_core::DialerKey::Call),
         (&["Enter"][..], "Call")

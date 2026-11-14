@@ -65,6 +65,8 @@ pub enum DialerKey {
     CallAnyway,
     /// Up and Down move the selection.
     Move,
+    /// Alt+Q opens the Quiet Hours Window (ticket #279).
+    QuietHours,
     /// Escape closes the Dialer.
     Close,
 }
@@ -655,6 +657,7 @@ impl State {
             let keys = [
                 selected.map(|_| call),
                 (dialer.rows.len() > 1).then_some(DialerKey::Move),
+                Some(DialerKey::QuietHours),
                 Some(DialerKey::Close),
             ];
             DialerView {

@@ -97,7 +97,7 @@ The guided window that pairs the Phone with the Desktop and walks through granti
 _Avoid_: first-run wizard, onboarding, "Connect your phone" window
 
 **Quiet Hours Window**:
-The small window, opened from the Indicator's menu, where the user turns Quiet Hours on or off and sets their start and end.
+The small window, opened from the Indicator's menu, Alt+Q in the Dialer or `desktop-calls quiet-hours`, where the user turns Quiet Hours on or off and sets their start and end.
 _Avoid_: settings window, preferences, schedule dialog
 
 **Problem**:

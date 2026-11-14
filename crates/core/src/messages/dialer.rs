@@ -6,13 +6,14 @@ use crate::indicator::PhoneStatus;
 use crate::machine::DialerKey;
 
 /// The keycaps for `key`, as shown, and what pressing it does: Enter Call,
-/// Up Down Move, Esc Close.
+/// Up Down Move, Alt Q Quiet Hours, Esc Close.
 #[must_use]
 pub fn dialer_key(key: DialerKey) -> (&'static [&'static str], &'static str) {
     match key {
         DialerKey::Call => (&["Enter"], "Call"),
         DialerKey::CallAnyway => (&["Enter"], "Call anyway"),
         DialerKey::Move => (&["↑", "↓"], "Move"),
+        DialerKey::QuietHours => (&["Alt", "Q"], "Quiet Hours"),
         DialerKey::Close => (&["Esc"], "Close"),
     }
 }
@@ -30,16 +31,15 @@ pub fn dialer_calls_off(until: Option<TimeOfDay>) -> (String, &'static str) {
 
 /// Where the Phone is, at the right of the Dialer's footer: its name while
 /// it is connected, which the footer marks with a live dot, otherwise its
-/// state, and while calls are off, the Indicator's words for it.
+/// state, and while calls are off, the Indicator's words for it, without
+/// when they come back on: the strip above the rows says that, and with it
+/// the footer's keys and the words wouldn't fit (ticket #279).
 #[must_use]
 pub fn dialer_phone(status: &PhoneStatus) -> String {
     match status {
         PhoneStatus::Connected(phone) => phone.name.clone(),
         PhoneStatus::NoPhone => "Not set up".to_owned(),
-        // The Indicator's words, with when calls come back on.
-        PhoneStatus::CallsOff { until, quiet_hours } => {
-            super::calls_off::calls_off(*until, *quiet_hours)
-        }
+        PhoneStatus::CallsOff { .. } => super::calls_off::calls_off(None, false),
         PhoneStatus::NotConnected(_) => "Not connected".to_owned(),
         PhoneStatus::OutOfRange(_) => "Out of range".to_owned(),
         PhoneStatus::ConnectionLost(_) => "Reconnecting…".to_owned(),

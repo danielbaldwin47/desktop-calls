@@ -138,6 +138,10 @@ impl Dialer {
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let pressed = intents.clone();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if is_alt_q(key, modifiers) {
+                let _ = pressed.unbounded_send(Input::OpenQuietHoursWindow);
+                return glib::Propagation::Stop;
+            }
             if has_command_modifier(modifiers) {
                 return glib::Propagation::Proceed;
             }
@@ -353,6 +357,15 @@ impl Dialer {
 fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRowText {
     let when = row.at.map(|at| messages::when(at, now, offset));
     messages::dialer_row(row, when.as_deref())
+}
+
+/// Alt+Q, which opens the Quiet Hours Window, with no other command
+/// modifier and whatever the Caps Lock.
+fn is_alt_q(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+    let held = modifiers
+        & (ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK);
+    held == ModifierType::ALT_MASK && key.to_lower() == gtk::gdk::Key::q
 }
 
 /// The notice strip, hidden: an icon beside the notice's words.

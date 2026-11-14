@@ -38,14 +38,17 @@ const KEYMAP: &str = "xkb_keymap {\n\
 /// `wl_keyboard.keymap_format.xkb_v1`.
 const KEYMAP_FORMAT_XKB_V1: u32 = 1;
 
-/// The Shift, Control and Super (Mod4) modifiers' bits in the keymap above.
+/// The Shift, Control, Alt (Mod1) and Super (Mod4) modifiers' bits in the
+/// keymap above.
 const SHIFT_MASK: u32 = 1;
 const CONTROL_MASK: u32 = 4;
+const ALT_MASK: u32 = 8;
 const SUPER_MASK: u32 = 64;
 
 /// Key codes from `linux/input-event-codes.h`.
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_LEFTCTRL: u32 = 29;
+const KEY_LEFTALT: u32 = 56;
 const KEY_LEFTMETA: u32 = 125;
 const BTN_LEFT: u32 = 0x110;
 
@@ -190,6 +193,12 @@ impl SyntheticInput {
     /// Shift too where the character needs it: `'H'` is Ctrl+Shift+H.
     pub fn press_with_control(&mut self, character: char) -> Result<(), String> {
         self.press_with(KEY_LEFTCTRL, CONTROL_MASK, character)
+    }
+
+    /// Presses and releases `character`'s key while holding Alt, and Shift
+    /// too where the character needs it.
+    pub fn press_with_alt(&mut self, character: char) -> Result<(), String> {
+        self.press_with(KEY_LEFTALT, ALT_MASK, character)
     }
 
     /// Presses and releases `character`'s key while holding Super, the key

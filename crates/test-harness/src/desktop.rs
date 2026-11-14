@@ -475,6 +475,19 @@ impl Keyboard<'_> {
         }
     }
 
+    /// Presses `character`'s key while holding Alt, such as Alt+Q.
+    ///
+    /// # Panics
+    ///
+    /// If the US layout has no key for `character`, the screen doesn't
+    /// finish redrawing, or the compositor is gone.
+    pub fn press_with_alt(&self, character: char) {
+        self.harness.wait_for_redraw();
+        if let Err(error) = self.harness.screen().input().press_with_alt(character) {
+            panic!("press Alt+{character}: {error}");
+        }
+    }
+
     /// Presses `character`'s key while holding Super, such as Super+W.
     ///
     /// # Panics

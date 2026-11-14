@@ -24,6 +24,8 @@ pub(super) enum Icon {
     Incoming,
     OnHold,
     Warning,
+    /// What a click on the Call Pill's body does: it expands upwards.
+    ChevronUp,
 }
 
 /// An icon, 16 px square, that can be changed in place.
@@ -151,6 +153,11 @@ fn draw(cr: &cairo::Context, icon: Icon) -> Result<(), cairo::Error> {
         Icon::OnHold => {
             line(cr, (6.0, 4.0), (6.0, 12.0));
             line(cr, (10.0, 4.0), (10.0, 12.0));
+        }
+        Icon::ChevronUp => {
+            cr.move_to(4.0, 10.0);
+            cr.line_to(8.0, 6.0);
+            cr.line_to(12.0, 10.0);
         }
         Icon::Warning => {
             cr.move_to(8.0, 2.2);

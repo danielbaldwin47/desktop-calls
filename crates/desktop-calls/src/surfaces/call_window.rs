@@ -30,11 +30,13 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+mod change;
 mod held;
 mod icons;
 mod pill;
 mod render;
 
+use change::{CHANGE_MS, Change, SMALLEST_CONTENT};
 use held::HeldRow;
 use icons::{Icon, IconView};
 use pill::CallPill;
@@ -81,6 +83,13 @@ pub(super) struct CallWindow {
     view: Rc<RefCell<Option<CallWindowView>>>,
     /// What the window shows as while it is collapsed.
     pill: CallPill,
+    /// Holds everything the window shows, and grows and shrinks it for the
+    /// change between the Call Window and the Call Pill.
+    reveal: gtk::Revealer,
+    /// That change, while it is under way.
+    change: Cell<Option<Change>>,
+    /// The fade and widening that go with it.
+    fade: RefCell<Option<adw::TimedAnimation>>,
 }
 
 /// The state line: an icon, what it says, and the HD mark.
@@ -196,7 +205,15 @@ impl CallWindow {
         content.append(&tiles);
         content.append(&resume);
         content.append(&hang_up);
-        surface.window.set_child(Some(&content));
+        let reveal = gtk::Revealer::new();
+        // Anchored at the bottom, the content stays put as the window's top
+        // edge rises over it, and Hang up shows first.
+        reveal.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+        reveal.set_transition_duration(CHANGE_MS);
+        reveal.set_reveal_child(true);
+        reveal.set_size_request(-1, SMALLEST_CONTENT);
+        reveal.set_child(Some(&content));
+        surface.window.set_child(Some(&reveal));
         for button in [&resume, &hang_up] {
             // Clicking leaves the keyboard with the tone entry.
             button.set_focus_on_click(false);
@@ -225,6 +242,9 @@ impl CallWindow {
             lost_timer: RefCell::default(),
             view: Rc::default(),
             pill: CallPill::new(intents, report),
+            reveal,
+            change: Cell::new(None),
+            fade: RefCell::default(),
         });
         window.connect();
         window
@@ -285,6 +305,18 @@ impl CallWindow {
         }
         self.connect_shortcuts();
         self.connect_typing();
+        let weak = Rc::downgrade(self);
+        self.reveal.connect_child_revealed_notify(move |reveal| {
+            if let Some(window) = weak.upgrade() {
+                window.change_finished(reveal.is_child_revealed());
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.surface.window.connect_map(move |_| {
+            if let Some(window) = weak.upgrade() {
+                window.mapped();
+            }
+        });
     }
 
     /// Each action's shortcut. A control that is hidden or disabled

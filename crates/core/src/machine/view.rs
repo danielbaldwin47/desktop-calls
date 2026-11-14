@@ -102,6 +102,45 @@ pub struct CallWindowView {
     pub collapsed: bool,
 }
 
+/// The one tag the Call Pill shows beside the caller, where one applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallPillTag {
+    /// The microphone is muted: the other party can't hear the user.
+    Muted,
+    /// The audio is on the Phone, so Mute works only there.
+    OnPhone,
+    /// Another Call is on hold.
+    OneOnHold,
+}
+
+impl CallWindowView {
+    /// The tag the Call Pill shows. Muted comes first, since talking while
+    /// unheard is the costliest mistake; then a Held Call, which nothing
+    /// else on the Call Pill shows; then the audio on the Phone, which its
+    /// icon and a disabled Mute also show. None while contact with the Call
+    /// is lost: the Call Pill says "On your phone" in place of the timer.
+    #[must_use]
+    pub fn call_pill_tag(&self) -> Option<CallPillTag> {
+        if self.connection_lost {
+            return None;
+        }
+        let live = matches!(self.phase, CallWindowPhase::Live { .. });
+        if matches!(self.phase, CallWindowPhase::Live { mute: Mute::On, .. }) {
+            Some(CallPillTag::Muted)
+        } else if self.held.is_some() {
+            Some(CallPillTag::OneOnHold)
+        } else if live
+            && self
+                .audio
+                .is_some_and(|audio| audio.location == AudioLocation::Phone)
+        {
+            Some(CallPillTag::OnPhone)
+        } else {
+            None
+        }
+    }
+}
+
 /// What the Banner offers for a Waiting Call, besides Decline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitingOptions {

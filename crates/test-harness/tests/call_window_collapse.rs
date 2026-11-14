@@ -36,6 +36,23 @@ const AUDIO_GATEWAY: &str = "org.pipewire.Telephony.AudioGateway1";
 const RED: [u8; 3] = [0xc0, 0x1c, 0x28];
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
 const WARNING: [u8; 3] = [0xe5, 0xa5, 0x0a];
+/// How much of the warning colour the muted Call Pill's strip mixes into
+/// its fill, in percent.
+const WARNING_TINT_PERCENT: u16 = 14;
+
+/// The Call Pill's size, in layout pixels, and from its right edge to the
+/// middle of Hang up, and of Mute: 6 px of padding and a 1 px border, then
+/// 32 px buttons 8 px apart.
+const PILL_SIZE: (f64, f64) = (320.0, 44.0);
+const TO_HANG_UP: f64 = 7.0 + 16.0;
+const TO_MUTE: f64 = TO_HANG_UP + 32.0 + 8.0;
+/// The change between the Call Window and the Call Pill takes 200 ms. Its
+/// lower bound leaves room for frames dropped at the start; its upper bound
+/// is one a CI runner's software renderer meets.
+const CHANGE_AT_LEAST: Duration = Duration::from_millis(150);
+const CHANGE_WITHIN: Duration = Duration::from_secs(2);
+/// A cut: no animation at all, only the time to map the window.
+const CUT_WITHIN: Duration = Duration::from_millis(150);
 
 fn connected() -> Harness {
     let harness = Harness::builder().headless_screen().omarchy_bar().start();
@@ -108,14 +125,56 @@ fn app_region(screenshot: &Screenshot) -> Option<Region> {
     screenshot.region_where(|pixel| pixel != [0, 0, 0] && pixel != BAR_COLOUR)
 }
 
-/// Where the Call Pill is on screen, once it is drawn with its red Hang up,
-/// with nothing else of the app shown.
+/// Whether the app's only surface on screen is a strip the Call Pill's size
+/// in the bottom-right corner.
+fn pill_shown(screenshot: &Screenshot) -> bool {
+    let (width, height) = LAYOUT_SIZE;
+    app_region(screenshot).is_some_and(|region| {
+        (width - GAP - region.right).abs() <= 2.0
+            && (height - GAP - region.bottom).abs() <= 2.0
+            && (region.right - region.left - PILL_SIZE.0).abs() <= 4.0
+            && (region.bottom - region.top - PILL_SIZE.1).abs() <= 4.0
+    })
+}
+
+/// Where the Call Pill is on screen, once it is drawn, with nothing else of
+/// the app shown. The pointer is moved off it first.
 fn pill_on_screen(harness: &Harness, name: &str) -> (Region, Screenshot) {
-    let screenshot = harness.screenshot_when(name, SCREEN_DEADLINE, |screenshot| {
-        find(screenshot, RED).is_some()
-    });
+    harness
+        .pointer()
+        .move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
+    let screenshot = harness.screenshot_when(name, SCREEN_DEADLINE, pill_shown);
     let region = app_region(&screenshot).unwrap_or_else(|| panic!("the Call Pill left the screen"));
     (region, screenshot)
+}
+
+/// Where Hang up and Mute are on the Call Pill: the middle of each.
+fn pill_buttons(pill: Region) -> ((f64, f64), (f64, f64)) {
+    let middle = f64::midpoint(pill.top, pill.bottom);
+    ((pill.right - TO_HANG_UP, middle), (pill.right - TO_MUTE, middle))
+}
+
+/// Whether any pixel in `region` of `screenshot` is close to `colour`.
+fn region_shows(screenshot: &Screenshot, region: Region, colour: [u8; 3]) -> bool {
+    find(screenshot, colour).is_some_and(|found| {
+        found.left >= region.left - 1.0
+            && found.right <= region.right + 1.0
+            && found.top >= region.top - 1.0
+            && found.bottom <= region.bottom + 1.0
+    })
+}
+
+/// `bottom` with `percent` of `top` mixed in, as the theme mixes a tint.
+fn mixed(bottom: [u8; 3], top: [u8; 3], percent: u16) -> [u8; 3] {
+    let channel = |bottom: u8, top: u8| {
+        let mixed = (u16::from(bottom) * (100 - percent) + u16::from(top) * percent + 50) / 100;
+        u8::try_from(mixed).unwrap_or(u8::MAX)
+    };
+    [
+        channel(bottom[0], top[0]),
+        channel(bottom[1], top[1]),
+        channel(bottom[2], top[2]),
+    ]
 }
 
 /// Clicks the Call Pill's body: the caller's name, at its left end.
@@ -191,6 +250,16 @@ fn a_connected_call_collapses_to_the_call_pill_in_the_bottom_right_corner_after_
         "the Call Pill is no small strip: {region:?} in {}",
         screenshot.path.display()
     );
+    // At rest, nothing on it is red: Hang up is neutral until pointed at.
+    assert!(
+        !shows_anywhere(&screenshot, RED),
+        "the Call Pill shows red at rest: {}",
+        screenshot.path.display()
+    );
+}
+
+fn shows_anywhere(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
+    find(screenshot, colour).is_some()
 }
 
 #[test]
@@ -331,38 +400,53 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
     harness.wait_for_app("Escape collapses it again", DEADLINE, collapsed);
 }
 
+/// Ticket #225: Hang up is neutral until the pointer is over it, and then
+/// red; one click on it ends the Call. Mute tints the whole strip in the
+/// warning colour, with a warning border.
 #[test]
 fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
     let harness = connected();
     harness.simulated_phone().set_microphone_volume(9);
     live_on_desktop(&harness);
     wait_until_collapsed(&harness);
-    let (_, screenshot) = pill_on_screen(&harness, "call-pill");
-    let hang_up = find(&screenshot, RED).unwrap_or_else(|| panic!("Hang up is on screen"));
-    let middle = f64::midpoint(hang_up.top, hang_up.bottom);
+    let (pill_region, at_rest) = pill_on_screen(&harness, "call-pill");
+    assert!(
+        !region_shows(&at_rest, pill_region, RED),
+        "the Call Pill shows red at rest: {}",
+        at_rest.path.display()
+    );
+    // The strip's fill, in its left padding, before it is pointed at.
+    let fill_at = (pill_region.left + 5.0, f64::midpoint(pill_region.top, pill_region.bottom));
+    let fill = at_rest.colour_at(fill_at.0, fill_at.1);
+    let (hang_up, mute) = pill_buttons(pill_region);
 
-    // Mute sits just left of Hang up.
-    harness.pointer().click(hang_up.left - 20.0, middle);
+    // Pointed at, Hang up is the theme's red.
+    harness.pointer().move_to(hang_up.0, hang_up.1);
+    let _hovered = harness.screenshot_when("call-pill-hang-up-hovered", SCREEN_DEADLINE, |screenshot| {
+        close_to(screenshot.colour_at(hang_up.0 - 12.0, hang_up.1 - 12.0), RED)
+    });
+
+    harness.pointer().click(mute.0, mute.1);
 
     let state = harness.wait_for_app(
         "Muted is true and the Call Pill shows it",
         DEADLINE,
         |state| state.muted && pill(state).is_some_and(|pill| pill.contains_key("muted")),
     );
-    assert_eq!(
-        pill(&state).and_then(|pill| pill.get("mute")).map(String::as_str),
-        Some("Unmute")
-    );
+    let shown = pill(&state).cloned().unwrap_or_default();
+    assert_eq!(shown.get("mute").map(String::as_str), Some("Unmute"));
+    assert_eq!(shown.get("tag").map(String::as_str), Some("Muted"));
     assert!(collapsed(&state), "a click on Mute doesn't expand it");
-    // Mute, just left of Hang up, takes the warning colour, and so does
-    // the Call Pill's border.
-    let on_mute = (hang_up.left - 11.0, middle);
+    // The whole strip takes the warning tint, and its border the warning
+    // colour.
+    let tint = mixed(fill, WARNING, WARNING_TINT_PERCENT);
     let muted = harness.screenshot_when("call-pill-muted", SCREEN_DEADLINE, |screenshot| {
-        close_to(screenshot.colour_at(on_mute.0, on_mute.1), WARNING)
+        close_to(screenshot.colour_at(fill_at.0, fill_at.1), tint)
     });
     let marked = find(&muted, WARNING).unwrap_or_else(|| panic!("the warning colour is on screen"));
     assert!(
-        marked.right > hang_up.right && marked.bottom > hang_up.bottom,
+        (marked.right - pill_region.right).abs() <= 2.0
+            && (marked.left - pill_region.left).abs() <= 2.0,
         "the Call Pill's border isn't in the warning colour: {marked:?}; see {}",
         muted.path.display()
     );
@@ -372,9 +456,8 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
         |recorded| microphone_volumes_set(recorded) == 1,
     );
 
-    harness
-        .pointer()
-        .click(f64::midpoint(hang_up.left, hang_up.right), middle);
+    // One click.
+    harness.pointer().click(hang_up.0, hang_up.1);
 
     harness.wait_for_app("Hang up on the Call Pill ends the Call", DEADLINE, |state| {
         state.calls.is_empty()
@@ -384,6 +467,93 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
         .wait_for_recorded("the Call is hung up", DEADLINE, |recorded| {
             recorded.iter().any(|recorded| recorded.member == "Hangup")
         });
+}
+
+/// Ticket #225: the Call Window grows out of the Call Pill, and shrinks back
+/// into it, in 200 ms, as the app's log shows; the control interface
+/// reports the end of each change as soon as it starts.
+#[test]
+fn the_call_window_grows_out_of_the_call_pill_and_shrinks_back_in_200_ms() {
+    let harness = connected();
+    live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    let (pill_region, _) = pill_on_screen(&harness, "call-pill");
+
+    click_pill_body(&harness, pill_region);
+
+    harness.wait_for_app("the click expands the Call Window", DEADLINE, expanded_with_keyboard);
+    let expanding = AppEvent::kind("call-window-change-started")
+        .with("form", "expanded")
+        .with("animated", true);
+    let took = harness.app_took(
+        &expanding,
+        &AppEvent::kind("call-window-change-finished").with("form", "expanded"),
+        DEADLINE,
+    );
+    assert!(
+        took >= CHANGE_AT_LEAST && took < CHANGE_WITHIN,
+        "the Call Window grew in {took:?}"
+    );
+    let reported = harness.app_took(
+        &expanding,
+        &AppEvent::kind("surface-mapped").with("surface", "call-window"),
+        DEADLINE,
+    );
+    assert!(reported < took, "the Call Window was reported only once grown");
+
+    harness.keyboard().press(Key::Escape);
+    harness.wait_for_app("Escape collapses it", DEADLINE, collapsed);
+    let collapsing = AppEvent::kind("call-window-change-started")
+        .with("form", "collapsed")
+        .with("animated", true);
+    let finished = AppEvent::kind("call-window-change-finished").with("form", "collapsed");
+    // Measured on the first collapse, by itself; Escape's is the same.
+    let took = harness.app_took(&collapsing, &finished, DEADLINE);
+    assert!(
+        took >= CHANGE_AT_LEAST && took < CHANGE_WITHIN,
+        "the Call Window shrank in {took:?}"
+    );
+    pill_on_screen(&harness, "call-pill-again");
+}
+
+/// Ticket #225: where the Desktop asks for reduced motion, the change is a
+/// cut.
+#[test]
+fn with_animations_off_the_change_is_a_cut() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .omarchy_bar()
+        .reduced_motion()
+        .start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    let collapsed_in = harness.app_took(
+        &AppEvent::kind("call-window-change-started")
+            .with("form", "collapsed")
+            .with("animated", false),
+        &AppEvent::kind("call-window-change-finished").with("form", "collapsed"),
+        DEADLINE,
+    );
+    let (pill_region, _) = pill_on_screen(&harness, "call-pill");
+
+    click_pill_body(&harness, pill_region);
+
+    harness.wait_for_app("the click expands the Call Window", DEADLINE, expanded_with_keyboard);
+    let expanded_in = harness.app_took(
+        &AppEvent::kind("call-window-change-started")
+            .with("form", "expanded")
+            .with("animated", false),
+        &AppEvent::kind("call-window-change-finished").with("form", "expanded"),
+        DEADLINE,
+    );
+    assert!(
+        collapsed_in < Duration::from_millis(20) && expanded_in < CUT_WITHIN,
+        "with animations off, the Call Window shrank in {collapsed_in:?} and grew in {expanded_in:?}"
+    );
 }
 
 #[test]
@@ -411,10 +581,15 @@ fn a_waiting_calls_banner_takes_its_usual_place_while_the_call_pill_shows() {
         "the Banner isn't at the top: {hold_and_answer:?} in {}",
         screenshot.path.display()
     );
-    let red = find(&screenshot, RED).unwrap_or_else(|| panic!("no Hang up on the Call Pill"));
-    assert!(
-        red.bottom > LAYOUT_SIZE.1 / 2.0,
-        "the Call Pill moved: {red:?}"
+    let hang_up = (
+        LAYOUT_SIZE.0 - GAP - TO_HANG_UP,
+        LAYOUT_SIZE.1 - GAP - PILL_SIZE.1 / 2.0,
+    );
+    assert_ne!(
+        screenshot.colour_at(hang_up.0, hang_up.1),
+        [0, 0, 0],
+        "the Call Pill moved; see {}",
+        screenshot.path.display()
     );
 }
 
@@ -592,7 +767,7 @@ fn a_call_ended_while_collapsed_says_call_ended_on_the_call_pill_then_goes() {
     harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
         pill(state)
             .and_then(|pill| pill.get("status"))
-            .is_some_and(|status| status == "Call ended")
+            .is_some_and(|status| status.starts_with("Call ended · "))
     });
     harness.wait_for_app("the Call Pill goes", DEADLINE, |state| {
         pill(state).is_none() && state.surface("call-window").is_none()

@@ -160,15 +160,15 @@ pub(super) fn call_pill(sitting: &mut Sitting) -> Result<(), Stop> {
     );
     sitting.observed("The Call Window collapsed to the Call Pill.".to_owned());
     let looks_right = sitting.ask(
-        "Is the Call Pill in the bottom-right corner, showing the caller, the timer, Mute and Hang up?",
+        "Is the Call Pill in the bottom-right corner, showing the caller, the timer, Mute and Hang up, with nothing red on it until the pointer is over Hang up?",
     )?;
     sitting.check(
         looks_right,
         if looks_right {
-            "The Call Pill sat bottom right with the caller, the timer, Mute and Hang up."
+            "The Call Pill sat bottom right with the caller, the timer, Mute and Hang up, red only under the pointer."
                 .to_owned()
         } else {
-            "The Call Pill was out of place, or missing the caller, the timer, Mute or Hang up."
+            "The Call Pill was out of place, missing the caller, the timer, Mute or Hang up, or red at rest."
                 .to_owned()
         },
     );
@@ -184,13 +184,12 @@ pub(super) fn call_pill(sitting: &mut Sitting) -> Result<(), Stop> {
     )?;
     if expanded {
         let in_place = sitting.ask(
-            "Did the Call Window open where the Call Pill was, in the bottom-right corner, with its bottom-right corner where the Call Pill's was?",
+            "Did the Call Window grow out of the Call Pill, quickly and smoothly, with its bottom-right corner where the Call Pill's was?",
         )?;
         sitting.check(
             in_place,
             if in_place {
-                "The Call Window opened where the Call Pill was, in the bottom-right corner."
-                    .to_owned()
+                "The Call Window grew out of the Call Pill, in the bottom-right corner.".to_owned()
             } else {
                 "The Call Window didn't open where the Call Pill was.".to_owned()
             },

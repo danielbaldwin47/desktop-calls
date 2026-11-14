@@ -3,8 +3,8 @@
 //! #200).
 
 use desktop_calls_core::{
-    AudioLocation, CallId, CallState, Caller, Effect, Input, Phone, State, SyncFailure, Timer,
-    Timestamp, Transport, step,
+    AudioLocation, CallId, CallPillTag, CallState, Caller, Effect, Input, Phone, PhoneCommand,
+    State, SyncFailure, Timer, Timestamp, Transport, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -684,4 +684,89 @@ fn a_new_problem_leaves_it_collapsed() {
     assert!(!state.problems().is_empty(), "a Problem shows");
     assert!(collapsed(&state));
     assert_eq!(collapse_timers(&effects), []);
+}
+
+/// Ticket #225: the Call Pill's tag, from the Call Window's view.
+fn tag(state: &State) -> Option<CallPillTag> {
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    window.call_pill_tag()
+}
+
+fn muted(state: State) -> State {
+    run(
+        state,
+        [
+            Input::SetMuted(true),
+            Input::PhoneCommandDone(PhoneCommand::SetMicrophoneVolume(0)),
+        ],
+    )
+    .0
+}
+
+/// A Waiting Call answered with Hold & Answer, so the first Call is on hold.
+fn holding(state: State) -> State {
+    run(
+        state,
+        [
+            waiting_call(),
+            Input::HoldAndAnswer,
+            Input::CallChanged {
+                call: CALL,
+                state: CallState::Held,
+                at: Timestamp(4_000),
+            },
+            Input::CallChanged {
+                call: SECOND,
+                state: CallState::Active,
+                at: Timestamp(4_000),
+            },
+        ],
+    )
+    .0
+}
+
+#[test]
+fn the_call_pill_is_tagged_muted_on_phone_or_one_on_hold_and_untagged_otherwise() {
+    assert_eq!(tag(&live()), None, "a plain live Call has no tag");
+    assert_eq!(tag(&muted(live())), Some(CallPillTag::Muted));
+    let (on_phone, _) = run(
+        ringing(),
+        [Input::CallChanged {
+            call: CALL,
+            state: CallState::Active,
+            at: Timestamp(2_000),
+        }],
+    );
+    assert_eq!(tag(&on_phone), Some(CallPillTag::OnPhone));
+    assert_eq!(tag(&holding(live())), Some(CallPillTag::OneOnHold));
+}
+
+#[test]
+fn muted_outranks_a_held_call_and_lost_contact_has_no_tag() {
+    let state = muted(holding(live()));
+    assert!(state.muted());
+    assert_eq!(
+        tag(&state),
+        Some(CallPillTag::Muted),
+        "talking unheard is the costlier thing to miss"
+    );
+
+    let (lost, _) = run(
+        live(),
+        [
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
+    );
+    assert_eq!(tag(&lost), None, "the Call Pill says On your phone instead");
 }

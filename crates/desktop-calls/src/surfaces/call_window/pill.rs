@@ -1,17 +1,24 @@
 //! The Call Pill: the strip the Call Window collapses to during a Call, in
-//! the bottom-right corner, with the caller, the timer, Mute and Hang up. It
-//! shares its bottom-right corner with the expanded Call Window.
+//! the bottom-right corner, 320 px wide and 44 high. From the left: a live
+//! dot or a state icon, the caller, a tag where one applies, the timer, a
+//! divider, then Mute and Hang up as icon buttons with tooltips. It shares
+//! its bottom-right corner with the expanded Call Window.
+//!
+//! Nothing on it is red until the pointer is over Hang up, or Hang up has
+//! keyboard focus; one click still hangs up. Muted, the whole strip takes
+//! the warning tint and border. Once the Call has ended, or contact with it
+//! is lost, it shows only who and what happened.
 //!
 //! It is on the top layer, like the Call Window, and never takes the
 //! keyboard. A click on its body expands the Call Window, which takes the
 //! keyboard as it does for the keybinding; its buttons act directly.
 
 use super::{
-    Anchor, SharedReport, Surface, Who, class, hang_up_button, report_mute, seconds_since,
-    set_class, status_label,
+    Anchor, HANG_UP_SHORTCUT, Icon, IconView, MUTE_SHORTCUT, SharedReport, Surface, Who, class,
+    hang_up_button, keycap, report_mute, seconds_since, set_class, status_label,
 };
 use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute};
+use desktop_calls_core::{AudioLocation, CallWindowPhase, CallWindowView, Input, Mute, StateLine};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::prelude::*;
 use gtk4_layer_shell::{KeyboardMode, Layer};
@@ -19,19 +26,37 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-/// The narrowest the Call Pill is. A caller written out in full makes it
-/// wider, about 330 px for an international number.
-const PILL_WIDTH: i32 = 280;
+/// The Call Pill's width. The caller takes what the rest leaves.
+pub(super) const PILL_WIDTH: i32 = 320;
+/// Mute's and Hang up's size: 32 px squares.
+const BUTTON_SIZE: i32 = 32;
+
+/// What leads the strip at rest, by its name in the lead's stack.
+const LIVE_DOT: &str = "live";
+const STATE_ICON: &str = "state";
+const CHEVRON: &str = "chevron";
 
 /// The Call Pill.
 pub(super) struct CallPill {
     pub(super) surface: Surface,
+    /// The live dot, the state icon or, under the pointer, the chevron.
+    lead: gtk::Stack,
+    state_icon: IconView,
+    /// What leads the strip while the pointer isn't over it, if anything.
+    at_rest: Rc<Cell<Option<&'static str>>>,
     caller: gtk::Label,
+    tag: gtk::Label,
     status: gtk::Label,
+    divider: gtk::Separator,
     mute: gtk::Button,
+    mute_icon: IconView,
     /// Whether Mute shows the microphone muted, so a click unmutes.
     muted: Rc<Cell<bool>>,
     hang_up: gtk::Button,
+    /// Mute's and Hang up's shortcuts in the expanded Call Window, as
+    /// shown.
+    mute_shortcut: String,
+    hang_up_shortcut: String,
 }
 
 impl CallPill {
@@ -48,87 +73,129 @@ impl CallPill {
         );
         surface.window.add_css_class("call-pill");
         surface.window.set_default_size(PILL_WIDTH, -1);
+
+        let (lead, state_icon) = lead();
         let caller = gtk::Label::new(None);
         caller.add_css_class("pill-caller");
         caller.set_xalign(0.0);
+        caller.set_hexpand(true);
         caller.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        // Room for a number written out in full, and most names.
-        caller.set_width_chars(15);
-        caller.set_max_width_chars(15);
+        // Asks for little, so the strip stays 320 px wide; the caller then
+        // takes all the room the rest leaves.
+        caller.set_width_chars(4);
+        caller.set_max_width_chars(4);
+        let tag = gtk::Label::new(None);
+        tag.add_css_class("pill-tag");
         let status = gtk::Label::new(None);
         status.add_css_class(class::TIMER);
-        status.set_xalign(0.0);
-        // The caller over the timer, so the strip stays narrow and one row
-        // of controls high.
-        let who = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        who.set_hexpand(true);
-        who.set_valign(gtk::Align::Center);
-        who.append(&caller);
-        who.append(&status);
-        let mute = gtk::Button::with_label(messages::label(Label::Mute));
-        mute.add_css_class("mute");
+        status.set_xalign(1.0);
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        body.set_hexpand(true);
+        body.set_tooltip_text(Some(&messages::show_call_tooltip()));
+        for part in [
+            lead.upcast_ref::<gtk::Widget>(),
+            caller.upcast_ref(),
+            tag.upcast_ref(),
+            status.upcast_ref(),
+        ] {
+            part.set_valign(gtk::Align::Center);
+            body.append(part);
+        }
+
+        let divider = gtk::Separator::new(gtk::Orientation::Vertical);
+        divider.add_css_class("pill-divider");
+        let mute_icon = IconView::new(Icon::Microphone);
+        let mute = icon_button(&mute_icon, "mute");
         let muted = Rc::new(Cell::new(false));
         let (shown_muted, mute_intents) = (muted.clone(), intents.clone());
         mute.connect_clicked(move |_| {
             let _ = mute_intents.unbounded_send(Input::SetMuted(!shown_muted.get()));
         });
         let hang_up = hang_up_button(&surface, intents);
-        hang_up.set_child(Some(&gtk::Label::new(Some(messages::label(Label::HangUp)))));
-        for button in [&mute, &hang_up] {
-            button.set_valign(gtk::Align::Center);
-        }
+        hang_up.add_css_class("pill-button");
+        hang_up.set_child(Some(&IconView::new(Icon::HangUp).area));
+        hang_up.set_valign(gtk::Align::Center);
+        hang_up.set_focus_on_click(false);
+        let hang_up_shortcut = keycap(HANG_UP_SHORTCUT).1;
+        hang_up.set_tooltip_text(Some(&messages::call_pill_tooltip(
+            Label::HangUp,
+            &hang_up_shortcut,
+        )));
+
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.append(&who);
+        // As high as Mute and Hang up, so the Call Pill stays 44 px high
+        // once they go.
+        row.set_size_request(-1, BUTTON_SIZE);
+        row.append(&body);
+        row.append(&divider);
         row.append(&mute);
         row.append(&hang_up);
         surface.window.set_child(Some(&row));
         expand_on_click(&surface.window, intents);
+        let at_rest = Rc::new(Cell::new(Some(LIVE_DOT)));
+        chevron_on_hover(&surface.window, &lead, &at_rest);
         Self {
             surface,
+            lead,
+            state_icon,
+            at_rest,
             caller,
+            tag,
             status,
+            divider,
             mute,
+            mute_icon,
             muted,
             hang_up,
+            mute_shortcut: keycap(MUTE_SHORTCUT).1,
+            hang_up_shortcut,
         }
     }
 
-    /// Shows the Call Pill for `view`, or brings it up to date.
-    pub(super) fn render(&self, view: &CallWindowView) {
+    /// Brings the Call Pill up to date with `view`, and shows it if
+    /// `on_screen`; otherwise only reports it as shown, while the Call
+    /// Window shrinks into it.
+    pub(super) fn render(&self, view: &CallWindowView, on_screen: bool) {
         self.surface.call.set(view.call);
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
         set_class(&self.caller, class::NUMBER, who.bare_number);
-        let (status, mute) = match view.phase {
-            // Its timer would mislead: the Desktop can't tell whether the
-            // Call still goes on.
-            _ if view.connection_lost => (messages::label(Label::OnYourPhone).to_owned(), None),
-            CallWindowPhase::Live {
-                active_since, mute, ..
-            } => (messages::elapsed(seconds_since(active_since)), Some(mute)),
-            phase => (messages::label(status_label(&phase)).to_owned(), None),
+        let mute = match view.phase {
+            CallWindowPhase::Live { mute, .. } if !view.connection_lost => Some(mute),
+            _ => None,
         };
+        let status = status(view);
+        // Once the Call has ended, or contact with it is lost, nothing on
+        // the strip would act: it says only who and what happened.
+        let quiet = view.connection_lost || view.phase == CallWindowPhase::Ended;
+        set_class(&self.surface.window, "quiet", quiet);
+        // Monospace only for a time on its own.
+        set_class(&self.status, class::WORDS, mute.is_none());
+        self.status.set_text(&status);
+        let tag = view.call_pill_tag();
+        self.tag
+            .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
+        self.tag.set_visible(tag.is_some());
         let audio_on_phone = !view.connection_lost
             && view
                 .audio
                 .is_some_and(|audio| audio.location == AudioLocation::Phone);
-        let mut line = vec![status.clone()];
-        if audio_on_phone {
-            line.push(messages::label(Label::AudioOnPhone).to_owned());
-        }
-        if view.held.is_some() {
-            line.push(messages::label(Label::OneOnHold).to_owned());
-        }
-        // Monospace only for a time on its own.
-        set_class(&self.status, class::WORDS, mute.is_none() || line.len() > 1);
-        self.status.set_text(&line.join(" · "));
-        let mute_text = messages::label(if mute == Some(Mute::On) {
+        self.show_lead(quiet, mute == Some(Mute::On), audio_on_phone);
+
+        self.muted.set(mute == Some(Mute::On));
+        let mute_label = if self.muted.get() {
             Label::Unmute
         } else {
             Label::Mute
+        };
+        let mute_text = messages::label(mute_label);
+        let mute_tooltip = messages::call_pill_tooltip(mute_label, &self.mute_shortcut);
+        self.mute.set_tooltip_text(Some(&mute_tooltip));
+        self.mute_icon.set(if self.muted.get() {
+            Icon::MicrophoneMuted
+        } else {
+            Icon::Microphone
         });
-        self.mute.set_label(mute_text);
-        self.muted.set(mute == Some(Mute::On));
         set_class(&self.mute, class::MUTED, self.muted.get());
         set_class(&self.surface.window, class::MUTED, self.muted.get());
         set_class(
@@ -139,26 +206,39 @@ impl CallPill {
         self.mute
             .set_sensitive(matches!(mute, Some(Mute::Off | Mute::On)));
         self.hang_up.set_sensitive(
-            !view.waiting_first
-                && !view.connection_lost
-                && !matches!(
-                    view.phase,
-                    CallWindowPhase::Ended | CallWindowPhase::NotPlaced
-                ),
+            !quiet && !view.waiting_first && view.phase != CallWindowPhase::NotPlaced,
         );
+        for control in [
+            self.divider.upcast_ref::<gtk::Widget>(),
+            self.mute.upcast_ref(),
+            self.hang_up.upcast_ref(),
+        ] {
+            control.set_visible(!quiet);
+        }
 
         let mut content = BTreeMap::from([
             ("status".to_owned(), status),
             ("call-window".to_owned(), "collapsed".to_owned()),
-            (
-                "hang-up".to_owned(),
-                messages::label(Label::HangUp).to_owned(),
-            ),
+            ("caller".to_owned(), who.caller.clone()),
+            ("tooltip".to_owned(), messages::show_call_tooltip()),
         ]);
         if let Some(call) = view.call {
             content.insert("call".to_owned(), call.to_string());
         }
-        content.insert("caller".to_owned(), who.caller.clone());
+        if !quiet {
+            content.insert(
+                "hang-up".to_owned(),
+                messages::label(Label::HangUp).to_owned(),
+            );
+            content.insert(
+                "hang-up-tooltip".to_owned(),
+                messages::call_pill_tooltip(Label::HangUp, &self.hang_up_shortcut),
+            );
+            content.insert("mute-tooltip".to_owned(), mute_tooltip);
+        }
+        if let Some(tag) = tag {
+            content.insert("tag".to_owned(), messages::call_pill_tag(tag).to_owned());
+        }
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
@@ -175,12 +255,46 @@ impl CallPill {
             );
         }
         self.report_geometry(&mut content);
-        self.surface.show(content);
+        if on_screen {
+            self.surface.show(content);
+        } else {
+            self.surface.report_ahead(content);
+        }
     }
 
+    /// What leads the strip: nothing once it is quiet; the crossed
+    /// microphone while muted; the Phone while the audio is there;
+    /// otherwise the live dot. The chevron takes its place under the
+    /// pointer.
+    fn show_lead(&self, quiet: bool, muted: bool, audio_on_phone: bool) {
+        let at_rest = if quiet {
+            None
+        } else if muted {
+            self.state_icon.set(Icon::MicrophoneMuted);
+            Some(STATE_ICON)
+        } else if audio_on_phone {
+            self.state_icon.set(Icon::Phone);
+            Some(STATE_ICON)
+        } else {
+            Some(LIVE_DOT)
+        };
+        set_class(&self.state_icon.area, class::MUTED, muted);
+        self.at_rest.set(at_rest);
+        self.lead.set_visible(at_rest.is_some());
+        let hovered = self.lead.visible_child_name().as_deref() == Some(CHEVRON);
+        if let Some(at_rest) = at_rest
+            && !hovered
+        {
+            self.lead.set_visible_child_name(at_rest);
+        }
+    }
+
+    /// Hides the Call Pill, or takes back the report of it shown ahead.
     pub(super) fn hide(&self) {
         if self.surface.window.is_visible() {
             self.surface.hide();
+        } else {
+            self.surface.report_gone();
         }
     }
 
@@ -196,6 +310,74 @@ impl CallPill {
             content.insert(key.to_owned(), value);
         }
     }
+}
+
+/// What the Call Pill shows in place of a timer, or the timer: while
+/// contact is lost, where the Call goes on; once it has ended, "Call ended"
+/// and how long it lasted, as the Call Window says it.
+fn status(view: &CallWindowView) -> String {
+    match view.phase {
+        // Its timer would mislead: the Desktop can't tell whether the Call
+        // still goes on.
+        _ if view.connection_lost => messages::label(Label::OnYourPhone).to_owned(),
+        CallWindowPhase::Live { active_since, .. } | CallWindowPhase::OnHold { active_since } => {
+            messages::elapsed(seconds_since(active_since))
+        }
+        CallWindowPhase::Ended => {
+            let line = view.state_line.unwrap_or(StateLine::Ended { lasted: None });
+            messages::state_line(line, &view.caller, view.contact.as_ref())
+        }
+        phase => messages::label(status_label(&phase)).to_owned(),
+    }
+}
+
+/// The strip's lead, 16 px square: the live dot, the state icon, or the
+/// chevron. Returns it and the state icon.
+fn lead() -> (gtk::Stack, IconView) {
+    let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    dot.add_css_class("live-dot");
+    dot.set_halign(gtk::Align::Center);
+    dot.set_valign(gtk::Align::Center);
+    let state_icon = IconView::new(Icon::Phone);
+    state_icon.area.add_css_class("pill-state");
+    let chevron = IconView::new(Icon::ChevronUp);
+    chevron.area.add_css_class("pill-state");
+    let lead = gtk::Stack::new();
+    lead.set_size_request(16, 16);
+    lead.add_named(&dot, Some(LIVE_DOT));
+    lead.add_named(&state_icon.area, Some(STATE_ICON));
+    lead.add_named(&chevron.area, Some(CHEVRON));
+    (lead, state_icon)
+}
+
+/// A 32 px square button showing `icon`, with `class`.
+fn icon_button(icon: &IconView, class: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class(class);
+    button.add_css_class("pill-button");
+    button.set_child(Some(&icon.area));
+    button.set_valign(gtk::Align::Center);
+    button.set_focus_on_click(false);
+    button
+}
+
+/// While the pointer is over the Call Pill, its lead shows the chevron:
+/// a click expands it upwards.
+fn chevron_on_hover(
+    window: &gtk::Window,
+    lead: &gtk::Stack,
+    at_rest: &Rc<Cell<Option<&'static str>>>,
+) {
+    let pointer = gtk::EventControllerMotion::new();
+    let shown = lead.clone();
+    pointer.connect_enter(move |_, _, _| shown.set_visible_child_name(CHEVRON));
+    let (shown, at_rest) = (lead.clone(), at_rest.clone());
+    pointer.connect_leave(move |_| {
+        if let Some(at_rest) = at_rest.get() {
+            shown.set_visible_child_name(at_rest);
+        }
+    });
+    window.add_controller(pointer);
 }
 
 /// A click on the Call Pill's body, not on one of its buttons, expands the

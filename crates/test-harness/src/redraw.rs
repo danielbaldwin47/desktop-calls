@@ -24,8 +24,8 @@
 //! compositor had already scheduled (it renders on a 60 Hz timer) is
 //! rendered within it, and counts as activity.
 //!
-//! The text cursor's blinking is off in every scenario (`still_cursor` in
-//! `lib.rs`), or a focused entry would redraw for 10 s after each key.
+//! The text cursor's blinking is off in every scenario (`desktop_settings` in
+//! `builder.rs`), or a focused entry would redraw for 10 s after each key.
 
 use std::fs;
 use std::thread;

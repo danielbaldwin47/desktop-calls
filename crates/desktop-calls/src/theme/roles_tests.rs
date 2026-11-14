@@ -135,6 +135,20 @@ fn secondary_text_reads_on_the_surface_a_raised_control_and_a_selected_row() {
     }
 }
 
+/// The muted Call Pill takes the warning strip's fill, and keeps its timer
+/// in secondary text (#225).
+#[test]
+fn secondary_text_reads_on_the_warning_strip() {
+    for (theme, roles) in every_theme() {
+        assert_reads(
+            theme,
+            "secondary text",
+            roles.secondary,
+            &[("warning strip", roles.warning_tint)],
+        );
+    }
+}
+
 #[test]
 fn secondary_text_is_weaker_than_text_where_the_text_reads_well_above_the_floor() {
     for (theme, colors_toml) in [

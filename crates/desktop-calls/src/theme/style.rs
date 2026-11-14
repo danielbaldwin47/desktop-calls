@@ -191,6 +191,31 @@ entry.tones {
     font-family: monospace; font-size: 15px; font-weight: 500; min-height: 34px; padding: 0;
 }
 
+.pill-caller { font-size: 13.5px; font-weight: 600; }
+.pill-tag {
+    font-family: monospace; font-size: 11px; font-weight: 500; color: var(--dc-secondary);
+}
+.pill-state { color: var(--dc-secondary); }
+.pill-state.muted,
+window.call-pill.muted .pill-tag { color: var(--dc-warning-text); font-weight: 600; }
+.live-dot {
+    min-width: 8px; min-height: 8px; border-radius: 4px; background: var(--dc-answer);
+}
+.pill-divider { min-width: 1px; margin: 4px 2px; background: var(--dc-border); }
+window.call-pill:hover { background-color: var(--dc-selection); }
+window.call-pill.muted { background-color: var(--dc-warning-tint); }
+.desktop-calls-surface.call-pill button.pill-button {
+    min-width: 32px; min-height: 32px; padding: 0;
+}
+.desktop-calls-surface.call-pill button.hang-up {
+    background: transparent; color: var(--dc-text);
+    box-shadow: inset 0 0 0 1px var(--dc-border);
+}
+.desktop-calls-surface.call-pill button.hang-up:hover,
+.desktop-calls-surface.call-pill button.hang-up:focus-visible {
+    background: var(--dc-end); color: var(--dc-call-label); box-shadow: none;
+}
+
 .desktop-calls-surface row:selected,
 .desktop-calls-surface row:selected:hover {
     background: var(--dc-selection); color: inherit;

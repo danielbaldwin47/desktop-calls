@@ -635,15 +635,24 @@ fn losing_contact_and_getting_it_back_puts_the_controls_back_where_they_were() {
     });
     let hang_up = working_hang_up(&live).expect("Hang up on screen");
     let background = live.colour_at(hang_up.left - 3.0, hang_up.top - ROW_GAP / 2.0);
-    assert_three_tiles(&tiles(&live, hang_up, background), hang_up, "with contact");
+    let with_contact = tiles(&live, hang_up, background);
+    assert_three_tiles(&with_contact, hang_up, "with contact");
+    let narrowest = with_contact
+        .iter()
+        .map(|(left, right)| right - left)
+        .fold(f64::INFINITY, f64::min);
 
     harness.simulated_phone().disconnect();
     wait_lost(&harness);
     let lost = harness.screenshot_when("call-window-lost", SCREEN_DEADLINE, |screenshot| {
         working_hang_up(screenshot).is_none()
     });
-    let left = tiles(&lost, hang_up, background);
-    assert!(left.is_empty(), "controls show while contact is lost: {left:?}");
+    // The notice's text may cross that row; only a run as wide as a tile is one.
+    let left: Vec<_> = tiles(&lost, hang_up, background)
+        .into_iter()
+        .filter(|(left, right)| right - left >= narrowest - SAME_PLACE)
+        .collect();
+    assert!(left.is_empty(), "tiles show while contact is lost: {left:?}");
 
     harness.simulated_phone().return_to_range();
     wait_contact_back(&harness);

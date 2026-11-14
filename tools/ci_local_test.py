@@ -626,6 +626,9 @@ class Queued(unittest.TestCase):
             [sys.executable, "-c", "import time; time.sleep(60)", "ci_local.py"],
         )
         self.children.append(child)
+        deadline = time.monotonic() + 10
+        while not ci_local.is_ci_local(child.pid) and time.monotonic() < deadline:
+            time.sleep(0.02)  # until the child has exec'd, so its command line is its own
         claim = ci_local.Claim(directory)
         ci_local.CLAIMS.mkdir(parents=True, exist_ok=True)
         claim.path.write_text(
@@ -674,7 +677,7 @@ class Queued(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             status = ci_local.cancel("/work/here")
         self.assertEqual(status, ci_local.EXIT_PASSED)
-        self.assertIsNotNone(mine.poll())
+        mine.wait(timeout=5)  # it has exited, if only just: its command line empties first
         self.assertIsNone(theirs.poll())
         self.assertIn(f"process {mine.pid}", printed.getvalue())
 

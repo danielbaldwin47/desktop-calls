@@ -404,8 +404,16 @@ pub enum Effect {
     DetachPhone,
     /// Ask BlueZ to connect the Phone with this address. Each ends in
     /// [`Input::ConnectPhoneDone`] or [`Input::ConnectPhoneFailed`], echoing
-    /// the attempt so its result belongs only to this operation.
-    ConnectPhone { address: String, attempt: u32 },
+    /// the attempt so its result belongs only to this operation. With
+    /// `away`, the Desktop last heard that the Phone has no Bluetooth
+    /// connection: if BlueZ has it connected after all, that comes back as
+    /// [`Input::PhonePresent`] before the result, and the Phone isn't paged
+    /// (ticket #212).
+    ConnectPhone {
+        address: String,
+        attempt: u32,
+        away: bool,
+    },
     /// Ask the Phone to do something. The Phone commands of one step run in
     /// order, and stop at the first that fails.
     Phone(PhoneCommand),

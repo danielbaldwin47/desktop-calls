@@ -26,6 +26,7 @@ Standing instructions for an agent reviewing a PR in this repo before the chief 
 ## Don't
 
 - Don't push, comment, approve or request changes on GitHub. Report to the chief of staff only.
+- Follow [Shared machine](shared-machine.md): run no `just ci-local` (the author's run is the CI), never `pkill`, never sleep or poll.
 - Don't flag style the standards don't ask for, or rewrite the design. Name defects, not preferences.
 - Never write the Test Number or real Contact data anywhere.
 

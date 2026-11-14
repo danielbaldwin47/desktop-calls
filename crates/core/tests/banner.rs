@@ -332,3 +332,49 @@ fn with_the_keyboard_the_footer_says_escape_gives_it_back() {
         Some("Esc gives the keyboard back; the Call keeps ringing")
     );
 }
+
+/// Alice on hold and a Call to José being placed when a stranger calls:
+/// nothing live to hold, so End & Answer names the Call being placed.
+#[test]
+fn with_a_call_on_hold_and_one_being_placed_end_and_answer_names_the_one_being_placed() {
+    let state = run(
+        connected(),
+        [
+            added(FIRST, CallState::Ringing, ALICE, 1_000),
+            changed(FIRST, CallState::Active, 2_000),
+            changed(FIRST, CallState::Held, 3_000),
+            added(SECOND, CallState::Dialing, JOSE, 4_000),
+            changed(SECOND, CallState::Alerting, 4_500),
+            added(THIRD, CallState::Waiting, STRANGER, 5_000),
+        ],
+    );
+    let view = banner(&state);
+
+    assert_eq!(view.waiting, Some(WaitingOptions::End));
+    assert_eq!(
+        consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
+        Some("Ends the Call with José")
+    );
+}
+
+#[test]
+fn the_tile_shows_a_contacts_initial_and_hash_otherwise() {
+    let contact = banner(&waiting_during(ALICE, JOSE));
+    assert_eq!(messages::banner_initial(&contact.caller), "J");
+    let stranger = banner(&waiting_during(ALICE, STRANGER));
+    assert_eq!(messages::banner_initial(&stranger.caller), "#");
+}
+
+#[test]
+fn each_choice_has_one_key_shown_on_its_keycap_and_in_the_footer() {
+    let keys: Vec<&str> = [
+        BannerChoice::Answer,
+        BannerChoice::Decline,
+        BannerChoice::HoldAndAnswer,
+        BannerChoice::EndAndAnswer,
+    ]
+    .into_iter()
+    .map(messages::banner_key)
+    .collect();
+    assert_eq!(keys, ["A", "D", "H", "E"]);
+}

@@ -59,17 +59,7 @@ impl BannerView {
     /// keys.
     #[must_use]
     pub fn choices(&self) -> Vec<BannerChoice> {
-        match self.waiting {
-            None | Some(WaitingOptions::Answer) => {
-                vec![BannerChoice::Answer, BannerChoice::Decline]
-            }
-            Some(WaitingOptions::HoldOrEnd) => vec![
-                BannerChoice::HoldAndAnswer,
-                BannerChoice::EndAndAnswer,
-                BannerChoice::Decline,
-            ],
-            Some(WaitingOptions::End) => vec![BannerChoice::EndAndAnswer, BannerChoice::Decline],
-        }
+        BannerChoice::offered(self.waiting)
     }
 }
 
@@ -80,6 +70,21 @@ pub enum BannerChoice {
     Decline,
     HoldAndAnswer,
     EndAndAnswer,
+}
+
+impl BannerChoice {
+    /// The choices a Banner offers, in order, given what a Waiting Call
+    /// allows (`None` for the only Call ringing).
+    #[must_use]
+    pub fn offered(waiting: Option<WaitingOptions>) -> Vec<Self> {
+        match waiting {
+            None | Some(WaitingOptions::Answer) => vec![Self::Answer, Self::Decline],
+            Some(WaitingOptions::HoldOrEnd) => {
+                vec![Self::HoldAndAnswer, Self::EndAndAnswer, Self::Decline]
+            }
+            Some(WaitingOptions::End) => vec![Self::EndAndAnswer, Self::Decline],
+        }
+    }
 }
 
 /// The user's other Call, which a Waiting Call's choices act on.

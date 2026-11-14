@@ -262,9 +262,16 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
 
     harness.keyboard().press(Key::Escape);
 
-    let state = harness.wait_for_app("the Banner lets go of the keyboard", DEADLINE, |state| {
-        state.surface("banner").is_some() && !focused(state, "banner")
-    });
+    let state = harness.wait_for_app(
+        "the Banner lets go of the keyboard and hides its keycaps",
+        DEADLINE,
+        |state| {
+            state
+                .surface("banner")
+                .is_some_and(|banner| !banner.contains_key("keycaps"))
+                && !focused(state, "banner")
+        },
+    );
     assert!(state.ringing);
     // Typing reaches the user's window again, and A answers nothing.
     harness.keyboard().type_text("a");

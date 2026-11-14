@@ -64,7 +64,7 @@ impl Choice {
         let label = label_of(choice);
         let button = surface.button(label, class, intents, make);
         let text = gtk::Label::new(Some(messages::label(label)));
-        let keycap = gtk::Label::new(Some(letter(choice)));
+        let keycap = gtk::Label::new(Some(messages::banner_key(choice)));
         keycap.add_css_class(class::KEYCAP);
         keycap.set_visible(false);
         let line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
@@ -123,16 +123,6 @@ fn name_of(choice: BannerChoice) -> &'static str {
         BannerChoice::Decline => "decline",
         BannerChoice::HoldAndAnswer => "hold-and-answer",
         BannerChoice::EndAndAnswer => "end-and-answer",
-    }
-}
-
-/// The key that makes `choice` while the Banner has the keyboard.
-fn letter(choice: BannerChoice) -> &'static str {
-    match choice {
-        BannerChoice::Answer => "A",
-        BannerChoice::Decline => "D",
-        BannerChoice::HoldAndAnswer => "H",
-        BannerChoice::EndAndAnswer => "E",
     }
 }
 
@@ -251,21 +241,25 @@ impl Banner {
             self.waiting.clone(),
         );
         keys.connect_key_pressed(move |_, key, _, modifiers| {
-            let make: fn(CallId) -> Input = match key.to_lower() {
-                gtk::gdk::Key::a => Input::Answer,
-                gtk::gdk::Key::d => Input::Decline,
-                gtk::gdk::Key::h if waiting.get() == Some(WaitingOptions::HoldOrEnd) => {
-                    |_| Input::HoldAndAnswer
-                }
-                gtk::gdk::Key::e
-                    if matches!(
-                        waiting.get(),
-                        Some(WaitingOptions::HoldOrEnd | WaitingOptions::End)
-                    ) =>
-                {
-                    |_| Input::EndAndAnswer
-                }
-                _ => return glib::Propagation::Proceed,
+            // Only the keys of the choices on offer act; their letters come
+            // from the core, as the keycaps and the footer's do.
+            let typed = key.to_lower().to_unicode();
+            let Some(choice) = BannerChoice::offered(waiting.get())
+                .into_iter()
+                .find(|&choice| {
+                    messages::banner_key(choice)
+                        .chars()
+                        .flat_map(char::to_lowercase)
+                        .eq(typed)
+                })
+            else {
+                return glib::Propagation::Proceed;
+            };
+            let make: fn(CallId) -> Input = match choice {
+                BannerChoice::Answer => Input::Answer,
+                BannerChoice::Decline => Input::Decline,
+                BannerChoice::HoldAndAnswer => |_| Input::HoldAndAnswer,
+                BannerChoice::EndAndAnswer => |_| Input::EndAndAnswer,
             };
             if has_command_modifier(modifiers) {
                 return glib::Propagation::Proceed;
@@ -330,7 +324,10 @@ impl Banner {
         for choice in [&self.decline, &self.answer, &self.end_and_answer] {
             set_class(&choice.button, class::TWO_LINE, tall);
         }
-        let letters: Vec<&str> = choices.iter().map(|&choice| letter(choice)).collect();
+        let letters: Vec<&str> = choices
+            .iter()
+            .map(|&choice| messages::banner_key(choice))
+            .collect();
         // The keycaps the buttons show, read back from the buttons.
         let shown: Vec<String> = choices
             .iter()
@@ -392,14 +389,7 @@ impl Banner {
         if self.meta.is_visible() {
             content.insert("meta".to_owned(), self.meta.text().to_string());
         }
-        let initial = if who.detail.is_some() {
-            who.caller
-                .chars()
-                .next()
-                .map_or_else(|| "#".to_owned(), |first| first.to_uppercase().collect())
-        } else {
-            "#".to_owned()
-        };
+        let initial = messages::banner_initial(&view.caller);
         self.initial.set_text(&initial);
         content.insert("initial".to_owned(), initial);
         who.report(content);

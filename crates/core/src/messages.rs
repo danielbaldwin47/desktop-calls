@@ -21,7 +21,9 @@ mod checks;
 mod problems;
 mod setup;
 mod when;
-pub use banner::{FooterPart, banner_consequence, banner_footer, footer_text};
+pub use banner::{
+    FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
+};
 pub use call_pill::{call_pill_tag, call_pill_tooltip, show_call_tooltip};
 pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{

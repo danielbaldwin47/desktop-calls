@@ -2,7 +2,9 @@
 //! Call choice does to the user's other Call, and its footer.
 
 use super::{caller_name, setup::shown_keys};
-use crate::machine::{BannerChoice, BannerFooter, BannerView, OtherCall, WaitingOptions};
+use crate::machine::{
+    BannerChoice, BannerFooter, BannerView, OtherCall, RingingCaller, WaitingOptions,
+};
 
 /// One piece of the Banner's footer line: a key, in a keycap, or words
 /// between keys.
@@ -10,6 +12,33 @@ use crate::machine::{BannerChoice, BannerFooter, BannerView, OtherCall, WaitingO
 pub enum FooterPart {
     Key(String),
     Words(&'static str),
+}
+
+/// The key that makes `choice`, shown on its keycap and in the footer.
+#[must_use]
+pub fn banner_key(choice: BannerChoice) -> &'static str {
+    match choice {
+        BannerChoice::Answer => "A",
+        BannerChoice::Decline => "D",
+        BannerChoice::HoldAndAnswer => "H",
+        BannerChoice::EndAndAnswer => "E",
+    }
+}
+
+/// What the Banner's initial tile shows: a Contact's initial, the first
+/// letter of their name, or `#` for a number, or a name with no letter.
+#[must_use]
+pub fn banner_initial(caller: &RingingCaller) -> String {
+    let name = match caller {
+        RingingCaller::Known {
+            contact: Some(contact),
+            ..
+        } => contact.name.as_str(),
+        _ => "",
+    };
+    name.chars()
+        .find(|character| character.is_alphabetic())
+        .map_or_else(|| "#".to_owned(), |first| first.to_uppercase().collect())
 }
 
 /// What `choice` does to the user's other Call, said under its label: "Alice

@@ -50,8 +50,9 @@ pub(super) struct CallWindowForm {
     pending: Option<u32>,
     /// How many collapse timers have started.
     timers: u32,
-    /// What the Call Window showed after the last step, of what expands it
-    /// by itself once it arises; `None` before it shows.
+    /// What the Call Window showed after the last step, compared after the
+    /// next to see whether something arose that expands it by itself; `None`
+    /// before it shows.
     shown: Option<Shown>,
 }
 

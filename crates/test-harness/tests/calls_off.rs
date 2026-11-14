@@ -411,7 +411,8 @@ fn turning_calls_off_for_an_hour_gives_the_end_time_the_menu_showed() {
 #[test]
 fn turning_calls_off_until_a_time_from_the_control_interface_says_when() {
     let harness = connected();
-    let until = now() + 3_600;
+    // Two hours: an hour would be "for 1 hour".
+    let until = now() + 7_200;
 
     harness.turn_calls_off(until).expect("calls turn off");
 
@@ -461,4 +462,19 @@ fn a_turn_off_that_changes_nothing_sends_no_notification() {
     confirmation(&harness, "Calls on");
 
     assert_eq!(summaries(&harness), ["Calls off", "Calls on"]);
+}
+
+#[test]
+fn turning_calls_off_for_1h_from_the_cli_says_for_1_hour() {
+    let harness = connected();
+
+    cli_ok(&harness, &["calls", "off", "--for", "1h"]);
+
+    wait_off(&harness);
+    let summaries = summaries(&harness);
+    assert_eq!(summaries.len(), 1, "{summaries:?}");
+    assert!(
+        summaries[0].starts_with("Calls off for 1 hour (until "),
+        "{summaries:?}"
+    );
 }

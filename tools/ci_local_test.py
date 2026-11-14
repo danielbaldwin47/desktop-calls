@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import pathlib
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -554,6 +556,8 @@ class Choosing(unittest.TestCase):
                 mock.patch("sys.argv", ["ci_local.py", *arguments]), \
                 mock.patch.object(ci_local, "require_online"), \
                 mock.patch.object(ci_local, "require_clean_head", return_value=self.SHA), \
+                mock.patch.object(ci_local, "worktree", return_value="/work/here"), \
+                mock.patch.object(ci_local, "Claim"), \
                 mock.patch.object(ci_local, "take_turn"), \
                 mock.patch.object(ci_local, "Log"), \
                 mock.patch.object(ci_local, "clear_stale_test_folders", return_value=[]), \
@@ -591,6 +595,114 @@ class Choosing(unittest.TestCase):
         text = ci_local.status_description("success", 40, [], log, docs_only=True)
         self.assertIn("docs only, lint alone", text)
         self.assertLessEqual(len(text), 140)
+
+
+class Queued(unittest.TestCase):
+    """A run waits its turn; `--cancel` and the refusal of a second run touch
+    only the run started from the same worktree. On 2026-11-13 an agent ran
+    `pkill -f 'tools/ci_local.py'` to replace its own queued run and killed
+    two other agents' runs, one at 346 of 348 scenarios."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = pathlib.Path(directory.name)
+        for name, value in (("ROOT", root), ("CLAIMS", root / "claims"), ("LOCK", root / "lock")):
+            patcher = mock.patch.object(ci_local, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.children: list[subprocess.Popen] = []
+        self.addCleanup(self.stop_children)
+
+    def stop_children(self):
+        for child in self.children:
+            child.kill()
+            child.wait()
+
+    def run_in(self, directory: str) -> tuple[ci_local.Claim, subprocess.Popen]:
+        """A stand-in for a ci-local run, which `is_ci_local` takes for one
+        by its command line, with its claim on `directory`."""
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)", "ci_local.py"],
+        )
+        self.children.append(child)
+        claim = ci_local.Claim(directory)
+        ci_local.CLAIMS.mkdir(parents=True, exist_ok=True)
+        claim.path.write_text(
+            json.dumps({"pid": child.pid, "worktree": directory, "sha": "a" * 40,
+                        "state": "waiting", "since": "20:41:00 UTC"})
+        )
+        return claim, child
+
+    def test_a_second_run_from_a_worktree_is_refused_naming_the_first(self):
+        _, child = self.run_in("/work/here")
+        with self.assertRaises(ci_local.Refused) as raised:
+            ci_local.Claim("/work/here").take("b" * 40)
+        message = str(raised.exception)
+        self.assertIn(f"process {child.pid}", message)
+        self.assertIn("waiting since 20:41:00 UTC", message)
+        self.assertIn("just ci-local --cancel", message)
+
+    def test_a_run_from_another_worktree_is_not_refused(self):
+        self.run_in("/work/elsewhere")
+        ci_local.Claim("/work/here").take("b" * 40)
+
+    def test_a_claim_whose_run_is_gone_is_replaced(self):
+        claim, child = self.run_in("/work/here")
+        child.kill()
+        child.wait()
+        claim.take("b" * 40)
+        self.assertEqual(json.loads(claim.path.read_text())["pid"], os.getpid())
+
+    def test_a_process_id_that_is_not_a_ci_local_run_is_not_a_claim(self):
+        claim = ci_local.Claim("/work/here")
+        ci_local.CLAIMS.mkdir(parents=True)
+        claim.path.write_text(json.dumps({"pid": os.getpid(), "worktree": "/work/here",
+                                          "sha": "a" * 40, "state": "running", "since": "now"}))
+        self.assertIsNone(claim.read())
+
+    def test_a_finished_run_gives_its_claim_up(self):
+        claim = ci_local.Claim("/work/here")
+        with mock.patch.object(ci_local, "is_ci_local", return_value=True):
+            claim.take("a" * 40)
+            claim.release()
+        self.assertFalse(claim.path.exists())
+
+    def test_cancel_stops_this_worktrees_run_and_no_other(self):
+        _, mine = self.run_in("/work/here")
+        _, theirs = self.run_in("/work/elsewhere")
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            status = ci_local.cancel("/work/here")
+        self.assertEqual(status, ci_local.EXIT_PASSED)
+        self.assertIsNotNone(mine.poll())
+        self.assertIsNone(theirs.poll())
+        self.assertIn(f"process {mine.pid}", printed.getvalue())
+
+    def test_cancel_with_nothing_queued_stops_nothing(self):
+        _, theirs = self.run_in("/work/elsewhere")
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            status = ci_local.cancel("/work/here")
+        self.assertEqual(status, ci_local.EXIT_PASSED)
+        self.assertIsNone(theirs.poll())
+        self.assertIn("No ci-local run is queued or running", printed.getvalue())
+
+    def test_a_run_that_must_wait_says_it_tests_head_as_it_is_when_its_turn_comes(self):
+        holder = ci_local.take_turn()
+        threading.Timer(0.5, holder.close).start()
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            ci_local.take_turn().close()
+        text = printed.getvalue()
+        self.assertIn("tests HEAD as it is when its turn comes", text)
+        self.assertIn("committing while it waits is fine", text)
+        self.assertIn("just ci-local --cancel", text)
+
+    def test_the_wait_names_the_run_that_has_the_lock(self):
+        claim, child = self.run_in("/work/elsewhere")
+        claim.path.write_text(
+            json.dumps({"pid": child.pid, "worktree": "/work/elsewhere", "sha": "a" * 40,
+                        "state": "running", "since": "20:41:00 UTC"})
+        )
+        self.assertIn(f"/work/elsewhere, process {child.pid}", ci_local.running_elsewhere())
 
 
 if __name__ == "__main__":

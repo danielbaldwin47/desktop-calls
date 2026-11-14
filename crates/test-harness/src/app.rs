@@ -55,6 +55,9 @@ pub struct AppState {
     pub problems: Vec<AppProblem>,
     /// `CallsOff`'s state: `"on"` or `"off"`.
     pub calls_off: String,
+    /// `CallsOff`'s deadline: the Unix time in seconds calls come back on,
+    /// or 0 for until they are turned on.
+    pub calls_off_until: u64,
 }
 
 /// The app's `ContactsState`: how far Contacts and Call History are synced.
@@ -204,7 +207,8 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
             action,
         })
         .collect();
-    let (calls_off, _until, _pending) = <(String, u64, bool)>::try_from(property("CallsOff")?)?;
+    let (calls_off, calls_off_until, _pending) =
+        <(String, u64, bool)>::try_from(property("CallsOff")?)?;
     Ok(AppState {
         connection_state,
         phone: (!address.is_empty()).then_some(PhoneIdentity { name, address }),
@@ -225,6 +229,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         },
         problems,
         calls_off,
+        calls_off_until,
     })
 }
 

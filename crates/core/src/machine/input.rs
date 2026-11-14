@@ -4,6 +4,7 @@
 use super::calls_off::CallsOffRecord;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
+use crate::clock::{Deadline, WallClock};
 use crate::connection::Phone;
 use crate::contacts::{CallHistory, Contacts, SyncFailure, SyncProgress};
 use crate::earlier_run::EarlierRun;
@@ -49,6 +50,10 @@ pub enum Input {
     Suspending,
     /// The Desktop resumed from suspend.
     Resumed,
+    /// The wall clock, as the shell read it: at startup, on the minute, on
+    /// resume, and at each instant [`Effect::ReadClockAt`] asked for.
+    /// Monotonic timers stop while the Desktop is suspended; this doesn't.
+    ClockTicked(WallClock),
     /// The Phone has a Call it didn't have before.
     CallAdded {
         call: CallId,
@@ -202,9 +207,10 @@ pub enum Input {
     /// What an earlier run kept of Calls Off, at startup and before any
     /// Phone is reported.
     CallsOffKept(CallsOffRecord),
-    /// The user turned calls off until they turn them on: from the
-    /// Indicator, the control interface or the command line.
-    TurnCallsOff,
+    /// The user turned calls off, from the Indicator, the control interface
+    /// or the command line: until `until`, or with `None` until they turn
+    /// them on.
+    TurnCallsOff { until: Option<Deadline> },
     /// The user turned calls on.
     TurnCallsOn,
     /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
@@ -503,4 +509,10 @@ pub enum Effect {
     /// Ends in [`Input::PhoneBlocked`] or
     /// [`Input::PhoneBlockFailed`].
     BlockPhone { address: String, blocked: bool },
+    /// Report [`Input::ClockTicked`] again at this instant, by the wall
+    /// clock, besides on the minute.
+    ReadClockAt(Timestamp),
+    /// The deadline of calls off for the Phone with this address passed:
+    /// calls come back on. For the log.
+    CallsOffDeadlinePassed { address: String },
 }

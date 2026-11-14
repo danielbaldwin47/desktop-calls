@@ -3,10 +3,11 @@
 //! blocking or unblocking the Phone is put right at the next start.
 //!
 //! It is one JSON file, `$XDG_STATE_HOME/desktop-calls/calls-off.json`,
-//! holding the state ("off", or "on" while the Phone is being unblocked)
-//! and the address of the Phone the app blocked. It is written before the
-//! Phone is blocked or unblocked, and removed once calls are on with the
-//! Phone unblocked. The directory is 0700 and the file 0600; the file is
+//! holding the state ("off", or "on" while the Phone is being unblocked),
+//! the address of the Phone the app blocked, and, for calls off until a
+//! deadline, `until`: the Unix time in seconds they come back on. It is
+//! written before the Phone is blocked or unblocked, and removed once
+//! calls are on with the Phone unblocked. The directory is 0700 and the file 0600; the file is
 //! written whole to a temporary file and renamed over the old one, so a
 //! crash leaves one or the other. A file that can't be read, or isn't one
 //! this version wrote, counts as none: the app logs it and leaves the
@@ -17,14 +18,14 @@ use std::io::{self, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::PathBuf;
 
-use desktop_calls_core::{CallsOffRecord, Input};
+use desktop_calls_core::{CallsOffRecord, Input, Timestamp};
 use futures_channel::mpsc::UnboundedSender;
 use glib::MainContext;
 use serde_json::{Value, json};
 use zbus::Connection;
 
-use crate::bluez;
 use crate::logging::{self, EventKind};
+use crate::{bluez, clock};
 
 /// Bumped when the file's shape changes; other versions are ignored.
 const VERSION: u64 = 1;
@@ -56,14 +57,25 @@ pub fn load() -> Option<CallsOffRecord> {
         failed("calls-off-unreadable", "not a file this version wrote");
         return None;
     };
-    let (state, address) = parts(&record);
+    let (state, address, until) = parts(&record);
     tracing::info!(
         event_kind = %EventKind::CallsOffLoaded,
         phone_address = %address,
         state,
+        until,
         "Picking up Calls Off as the run before left it"
     );
     Some(record)
+}
+
+/// Logs that the deadline of calls off for the Phone with `address` passed,
+/// so calls come back on.
+pub fn deadline_passed(address: &str) {
+    tracing::info!(
+        event_kind = %EventKind::CallsOffDeadlinePassed,
+        phone_address = %address,
+        "Calls off: the deadline passed, turning calls on"
+    );
 }
 
 /// Keeps `record` for the next run, replacing what was kept; with `None`,
@@ -113,8 +125,11 @@ fn write(record: &CallsOffRecord) -> io::Result<bool> {
         .mode(0o600)
         .open(&temporary)?;
     writer.set_permissions(Permissions::from_mode(0o600))?;
-    let (state, address) = parts(record);
-    let document = json!({ "version": VERSION, "state": state, "address": address });
+    let (state, address, until) = parts(record);
+    let mut document = json!({ "version": VERSION, "state": state, "address": address });
+    if let Some(until) = until {
+        document["until"] = json!(until);
+    }
     writer.write_all(&serde_json::to_vec(&document).map_err(io::Error::other)?)?;
     writer.sync_all()?;
     drop(writer);
@@ -160,10 +175,13 @@ pub fn block(system: Connection, inputs: UnboundedSender<Input>, address: String
     });
 }
 
-fn parts(record: &CallsOffRecord) -> (&'static str, &str) {
+/// The record's state, Phone address, and deadline in Unix seconds.
+fn parts(record: &CallsOffRecord) -> (&'static str, &str, Option<u64>) {
     match record {
-        CallsOffRecord::Off { address } => ("off", address),
-        CallsOffRecord::TurningOn { address } => ("on", address),
+        CallsOffRecord::Off { address, until } => {
+            ("off", address, until.map(|until| until.at.0 / 1_000))
+        }
+        CallsOffRecord::TurningOn { address } => ("on", address, None),
     }
 }
 
@@ -185,8 +203,14 @@ fn from_json(document: &Value) -> Option<CallsOffRecord> {
         return None;
     }
     let address = address.to_owned();
+    let until = match document.get("until") {
+        None => None,
+        Some(until) => Some(clock::deadline(Timestamp(
+            until.as_u64()?.checked_mul(1_000)?,
+        ))),
+    };
     match document.get("state")?.as_str()? {
-        "off" => Some(CallsOffRecord::Off { address }),
+        "off" => Some(CallsOffRecord::Off { address, until }),
         "on" => Some(CallsOffRecord::TurningOn { address }),
         _ => None,
     }

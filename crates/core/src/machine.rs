@@ -4,6 +4,7 @@
 use crate::call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Request, Transport,
 };
+use crate::clock::WallClock;
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, Unavailable};
 use crate::earlier_run::{EarlierCall, EarlierRun};
@@ -344,6 +345,9 @@ pub struct State {
     form: CallWindowForm,
     /// Whether calls are on or off. It outlives the Phone being unpaired.
     calls_off: CallsOff,
+    /// The wall clock as the shell last reported it, while the Desktop was
+    /// awake.
+    clock: Option<WallClock>,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -597,7 +601,7 @@ impl State {
             return Some(Failure::ConnectionLost);
         }
         match input {
-            Input::TurnCallsOff => self.calls_off_refusal(),
+            Input::TurnCallsOff { until } => self.calls_off_refusal(*until),
             Input::SetMuted(true) if !self.muted() => match self.audio_location() {
                 None => Some(Failure::NoLiveCall),
                 Some(AudioLocation::Phone) => Some(Failure::MuteUnavailable),
@@ -841,7 +845,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),
         Input::FixFailed(failure) => desktop::fix_failed(&mut state, failure),
         input @ (Input::CallsOffKept(_)
-        | Input::TurnCallsOff
+        | Input::TurnCallsOff { .. }
+        | Input::ClockTicked(_)
         | Input::TurnCallsOn
         | Input::PhoneBlocked { .. }
         | Input::PhoneBlockFailed { .. }) => {

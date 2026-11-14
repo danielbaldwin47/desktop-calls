@@ -447,7 +447,9 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
                 IndicatorEntry::HangUpOnPhone => 7,
                 IndicatorEntry::TurnCallsOff { .. } => 8,
                 IndicatorEntry::TurnCallsOn => 9,
-                IndicatorEntry::CallsOffUntilTurnedOn => CALLS_OFF_UNTIL_TURNED_ON,
+                choice @ (IndicatorEntry::CallsOffUntilTurnedOn
+                | IndicatorEntry::CallsOffForAnHour(_)
+                | IndicatorEntry::CallsOffUntilMorning(_)) => choice_id(choice),
                 IndicatorEntry::Separator => {
                     separators += 1;
                     9 + separators
@@ -505,13 +507,14 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
         .collect()
 }
 
-/// The id of the choice under Turn calls off: until turned on.
-const CALLS_OFF_UNTIL_TURNED_ON: i32 = 900;
-
-/// A choice's id, beneath its entry: how long to turn calls off for.
+/// A choice's id, beneath its entry: how long to turn calls off for. A
+/// timed choice keeps its id as its end time moves on with the clock, and
+/// a click turns calls off until the end time the menu shows when clicked.
 fn choice_id(choice: &IndicatorEntry) -> i32 {
     match choice {
-        IndicatorEntry::CallsOffUntilTurnedOn => CALLS_OFF_UNTIL_TURNED_ON,
+        IndicatorEntry::CallsOffUntilTurnedOn => 900,
+        IndicatorEntry::CallsOffForAnHour(_) => 901,
+        IndicatorEntry::CallsOffUntilMorning(_) => 902,
         _ => 0,
     }
 }

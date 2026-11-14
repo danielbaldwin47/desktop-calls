@@ -100,11 +100,21 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     for (index, icon) in icons.iter().enumerate() {
         assert!(!icons[..index].contains(icon), "each state looks different");
     }
+    indicator_menus_are_listed(&output, &index);
+}
 
+/// The menu of the Indicator in `state`, as the gallery at `output` lists it.
+fn menu(output: &Path, state: &str) -> String {
+    let path = output.join(format!("indicator-{state}-menu.txt"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("the {state} menu is listed at {}: {error}", path.display()))
+}
+
+/// The Indicator's menus in the gallery at `output`, whose page is `index`.
+fn indicator_menus_are_listed(output: &Path, index: &str) {
     // Each state's menu, listed beneath its icon: calls off offers Turn
     // calls on, and calls on offers Turn calls off, until I turn them on.
-    let off_menu = std::fs::read_to_string(output.join("indicator-off-menu.txt"))
-        .expect("the off menu is listed");
+    let off_menu = menu(output, "off");
     assert_eq!(
         off_menu,
         "Calls off\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
@@ -113,10 +123,23 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         index.contains("<pre>Calls off\nOpen Dialer\nTurn calls on\n"),
         "{index}"
     );
-    let connected_menu = std::fs::read_to_string(output.join("indicator-connected-menu.txt"))
-        .expect("the connected menu is listed");
+    let connected_menu = menu(output, "connected");
     assert!(
-        connected_menu.contains("Turn calls off\n    Until I turn them on\n"),
+        connected_menu.contains("Turn calls off\n    Until I turn them on\n    For 1 hour (until "),
         "{connected_menu}"
     );
+    assert!(
+        connected_menu.contains(")\n    Until tomorrow morning (07:00)\n"),
+        "{connected_menu}"
+    );
+    // Calls off until a time: the menu's first line says until when.
+    let timed_menu = menu(output, "off-until-morning");
+    assert_eq!(
+        timed_menu,
+        "Calls off until 07:00\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
+    );
+    for look in ["omarchy-light", "omarchy-dark"] {
+        let file = format!("indicator-off-until-morning-{look}.png");
+        assert!(index.contains(&file), "the index shows {file}: {index}");
+    }
 }

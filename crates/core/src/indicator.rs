@@ -3,6 +3,7 @@
 //! its menu, with what each menu entry asks for.
 
 use crate::call::{AudioLocation, CallId, Caller};
+use crate::clock::{Deadline, TimeOfDay};
 use crate::connection::{ConnectionState, Phone};
 use crate::machine::{CallWindowPhase, Input, Mute, RingingCaller, State, Surfaces};
 use crate::matching::ContactMatch;
@@ -47,8 +48,11 @@ pub enum IndicatorLook {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndicatorStatus {
     NoPhone,
-    /// Calls are off until the user turns them on.
-    CallsOff,
+    /// Calls are off until this local time, or until the user turns them
+    /// on.
+    CallsOff {
+        until: Option<TimeOfDay>,
+    },
     /// Paired, and not yet connected since the Desktop started.
     NotConnected(Phone),
     Connected(Phone),
@@ -97,12 +101,21 @@ pub enum IndicatorEntry {
     /// A Problem, with its explanation beneath.
     Problem(ProblemKind),
     /// Turns calls off, with [`IndicatorEntry::choices`] for how long;
-    /// disabled during a Call, with none.
+    /// disabled during a Call, with none. The timed choices end at
+    /// `for_an_hour` and `until_morning`, once the wall clock has been
+    /// read.
     TurnCallsOff {
         enabled: bool,
+        for_an_hour: Option<Deadline>,
+        until_morning: Option<Deadline>,
     },
     /// The choice under Turn calls off: until the user turns them on.
     CallsOffUntilTurnedOn,
+    /// The choice under Turn calls off: for an hour, until this deadline.
+    CallsOffForAnHour(Deadline),
+    /// The choice under Turn calls off: until the next morning, this
+    /// deadline.
+    CallsOffUntilMorning(Deadline),
     /// Turns calls on.
     TurnCallsOn,
 }
@@ -131,7 +144,12 @@ impl IndicatorEntry {
             Self::Mute(Mute::Off) => Some(Input::SetMuted(true)),
             Self::Mute(Mute::On) => Some(Input::SetMuted(false)),
             Self::MoveAudio { to, moving: false } => Some(Input::MoveAudio(*to)),
-            Self::CallsOffUntilTurnedOn => Some(Input::TurnCallsOff),
+            Self::CallsOffUntilTurnedOn => Some(Input::TurnCallsOff { until: None }),
+            Self::CallsOffForAnHour(until) | Self::CallsOffUntilMorning(until) => {
+                Some(Input::TurnCallsOff {
+                    until: Some(*until),
+                })
+            }
             Self::TurnCallsOn => Some(Input::TurnCallsOn),
             Self::Status
             | Self::Separator
@@ -152,7 +170,7 @@ impl IndicatorEntry {
             Self::HangUpOnPhone
                 | Self::Mute(Mute::Unavailable)
                 | Self::MoveAudio { moving: true, .. }
-                | Self::TurnCallsOff { enabled: false }
+                | Self::TurnCallsOff { enabled: false, .. }
         )
     }
 
@@ -161,7 +179,18 @@ impl IndicatorEntry {
     #[must_use]
     pub fn choices(&self) -> Vec<Self> {
         match self {
-            Self::TurnCallsOff { enabled: true } => vec![Self::CallsOffUntilTurnedOn],
+            Self::TurnCallsOff {
+                enabled: true,
+                for_an_hour,
+                until_morning,
+            } => [Some(Self::CallsOffUntilTurnedOn)]
+                .into_iter()
+                .chain([
+                    for_an_hour.map(Self::CallsOffForAnHour),
+                    until_morning.map(Self::CallsOffUntilMorning),
+                ])
+                .flatten()
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -175,9 +204,19 @@ impl State {
         if self.calls_off() {
             Some(IndicatorEntry::TurnCallsOn)
         } else {
+            let clock = self.wall_clock();
             has_phone.then(|| IndicatorEntry::TurnCallsOff {
                 enabled: !self.call_keeps_calls_on() && !self.calls_turning_on(),
+                for_an_hour: clock.map(|clock| clock.for_an_hour),
+                until_morning: clock.map(|clock| clock.until_morning),
             })
+        }
+    }
+
+    /// What the Indicator's status says while calls are off.
+    fn calls_off_status(&self) -> IndicatorStatus {
+        IndicatorStatus::CallsOff {
+            until: self.calls_off_until().map(|until| until.shown),
         }
     }
 
@@ -216,7 +255,7 @@ impl State {
                 },
             )
         } else if self.calls_off() {
-            (IndicatorLook::Off, IndicatorStatus::CallsOff)
+            (IndicatorLook::Off, self.calls_off_status())
         } else {
             match (self.connection_state(), phone) {
                 (ConnectionState::Connected, Some(phone)) => (

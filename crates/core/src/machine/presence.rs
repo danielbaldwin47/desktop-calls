@@ -71,6 +71,11 @@ struct Reconnect {
 }
 
 impl State {
+    /// Whether the Desktop is suspending, or suspended.
+    pub(super) fn suspended(&self) -> bool {
+        self.presence.suspended
+    }
+
     /// Whether the Desktop should be connecting the Phone: it is paired,
     /// away or without hands-free, the Desktop is awake with its Bluetooth
     /// on, the Phone still has it paired, and calls are on with the Phone

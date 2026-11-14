@@ -20,8 +20,8 @@ mod problems;
 mod setup;
 pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{
-    calls_off_status, calls_off_until_unknown, calls_turned, phone_left_blocked_by_removal,
-    phone_unblocked_for_removal,
+    calls_off_for_too_long, calls_off_status, calls_off_until_unreadable, calls_turned,
+    phone_left_blocked_by_removal, phone_unblocked_for_removal,
 };
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
@@ -125,6 +125,8 @@ pub enum Failure {
     /// Calls turned off while a Call rings, is live, held, waiting or being
     /// placed, until a turn-off can wait for it (ticket #204).
     CallsOffDuringCall,
+    /// Calls turned off until a time that has already passed.
+    CallsOffUntilPassed,
     /// BlueZ didn't block the Phone, so calls are still on.
     CallsOffFailed,
     /// BlueZ didn't unblock the Phone, so calls are still off.
@@ -177,6 +179,7 @@ impl Failure {
             Self::NothingToHoldOrEnd => "nothing-to-hold-or-end",
             Self::CallsOff => "calls-off",
             Self::CallsOffDuringCall => "calls-off-during-call",
+            Self::CallsOffUntilPassed => "calls-off-until-passed",
             Self::CallsOffFailed => "calls-off-failed",
             Self::CallsOnFailed => "calls-on-failed",
         }
@@ -338,6 +341,7 @@ pub fn failure(failure: Failure) -> Message {
             "Calls can't be turned off during a Call; turn them off once it has ended.",
             None,
         ),
+        Failure::CallsOffUntilPassed => (calls_off::UNTIL_PASSED, None),
         Failure::CallsOffFailed => (
             "Calls couldn't be turned off: Bluetooth didn't disconnect your phone. Try again.",
             None,
@@ -356,7 +360,7 @@ pub fn failure(failure: Failure) -> Message {
 pub fn indicator_status(status: &IndicatorStatus) -> String {
     match status {
         IndicatorStatus::NoPhone => "No Phone set up".to_owned(),
-        IndicatorStatus::CallsOff => calls_off::CALLS_OFF.to_owned(),
+        IndicatorStatus::CallsOff { until } => calls_off::calls_off(*until),
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),
         IndicatorStatus::OutOfRange(phone) => format!("{} out of range", phone.name),
@@ -402,6 +406,8 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::TurnCallsOff { .. } => calls_off::TURN_CALLS_OFF.to_owned(),
         IndicatorEntry::CallsOffUntilTurnedOn => calls_off::UNTIL_TURNED_ON.to_owned(),
+        IndicatorEntry::CallsOffForAnHour(until) => calls_off::for_an_hour(until.shown),
+        IndicatorEntry::CallsOffUntilMorning(until) => calls_off::until_morning(until.shown),
         IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),

@@ -8,6 +8,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 
 mod call;
+pub mod clock;
 mod connection;
 mod contacts;
 mod earlier_run;
@@ -22,6 +23,7 @@ mod number;
 pub use call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,
 };
+pub use clock::{Deadline, TimeOfDay, WallClock};
 pub use connection::{ConnectionState, Phone, UnknownConnectionState};
 pub use contacts::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Contact, ContactNumber, Contacts,

@@ -714,6 +714,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     setup::follow_connection(&mut state, &mut effects);
     setup::follow_contacts(&mut state, &mut effects);
     follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
+    calls_off::apply_pending(&mut state, &mut effects);
     calls_off::hold_back_connects(&state, &mut effects);
     (state, effects)
 }
@@ -848,6 +849,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::TurnCallsOff { .. }
         | Input::ClockTicked(_)
         | Input::TurnCallsOn
+        | Input::KeepCallsOn
         | Input::PhoneBlocked { .. }
         | Input::PhoneBlockFailed { .. }) => {
             calls_off::calls_off_input(&mut state, input, &mut effects);

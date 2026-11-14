@@ -368,6 +368,20 @@ fn step_3_1_sees_two_handoffs_to_the_phone_and_back_and_asks_about_the_earpiece_
     ] {
         assert!(says(pill, seen), "{seen}: {pill:#}");
     }
+
+    // 3.5: calls turned off during the Call wait for it, then the Phone
+    // disconnects within a few seconds of the helper hanging up.
+    let off = step(&result, "3.5");
+    assert_eq!(off["result"], "pass", "{off:#}");
+    assert!(
+        off["measurements"]["disconnect_after_call_ms"]
+            .as_u64()
+            .is_some_and(|ms| ms <= 5_000),
+        "{off:#}"
+    );
+    for seen in ["the turn-off waits", "The Call carried on, connected"] {
+        assert!(says(off, seen), "{seen}: {off:#}");
+    }
 }
 
 #[test]

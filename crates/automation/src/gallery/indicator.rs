@@ -62,6 +62,24 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         tooltip: "In a Call with +44 7700 900123",
     },
     IndicatorState {
+        name: "calls-off-pending",
+        title: "The Indicator, in a Call, with calls turning off when it ends",
+        reach: |harness| {
+            connect(harness);
+            let _path = harness.simulated_phone().ring(NUMBER);
+            let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+            harness.answer(state.calls.first().map_or(0, |call| call.id));
+            harness.wait_for_app("the Call is live", DEADLINE, |state| {
+                state
+                    .calls
+                    .first()
+                    .is_some_and(|call| call.state == "active")
+            });
+            let _output = harness.cli(&["calls", "off"]);
+        },
+        tooltip: "Calls turn off when this Call ends",
+    },
+    IndicatorState {
         name: "problem",
         title: "The Indicator, a Problem: Contacts not shared",
         reach: |harness| {

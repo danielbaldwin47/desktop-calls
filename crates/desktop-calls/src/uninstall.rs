@@ -48,8 +48,14 @@ async fn turn_calls_on(runtime: &GlibRuntime) -> ExitCode {
         return ExitCode::SUCCESS;
     };
     // An "on" record is a turn-on stopped halfway: the Phone is blocked
-    // still, and by the app.
-    let (CallsOffRecord::Off { address, .. } | CallsOffRecord::TurningOn { address }) = record;
+    // still, and by the app. A waiting turn-off blocked nothing: it is
+    // cancelled, through the service so it doesn't apply it meanwhile.
+    let (CallsOffRecord::Off { address, .. } | CallsOffRecord::TurningOn { address }) = record
+    else {
+        service_turned_calls_on(runtime).await;
+        calls_off::save(None);
+        return ExitCode::SUCCESS;
+    };
     if service_turned_calls_on(runtime).await {
         println!("{}", messages::phone_unblocked_for_removal());
         return ExitCode::SUCCESS;

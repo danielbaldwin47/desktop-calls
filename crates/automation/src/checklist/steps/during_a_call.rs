@@ -1,19 +1,26 @@
-//! Group 3's scripts: Mute, keypad tones and the Call Pill during a Call.
+//! Group 3's scripts: Mute, keypad tones, the Call Pill, and turning calls
+//! off, during a Call.
 
 use std::time::Duration;
 
 use super::incoming::audio_reaches_the_desktop;
 use super::{
-    ACT_DEADLINE, CALL_DEADLINE, EXPAND_FIRST, call_ends, handled_on_desktop, helper_calls,
-    no_call_left, stopped_ringing,
+    ACT_DEADLINE, APP_DEADLINE, CALL_DEADLINE, EXPAND_FIRST, TALK_DEADLINE, call_ends,
+    handled_on_desktop, helper_calls, millis, no_call_left, stopped_ringing,
 };
-use crate::checklist::sitting::{Sitting, Stop, seconds};
+use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
 use crate::checklist::watch::AppState;
 
 /// How long after a Call connects the Call Window may take to collapse to
 /// the Call Pill, while the user moves the pointer off it: 5 s, and time
 /// to read the instruction.
 const COLLAPSE_DEADLINE: Duration = Duration::from_secs(30);
+/// How long the Call must carry on, connected, once calls are turned off
+/// during it.
+const CARRIES_ON: Duration = Duration::from_secs(10);
+/// How soon after the last Call ends the Pixel must be disconnected, once
+/// a turn-off waited for it: "within a few seconds" (ticket #204).
+const DISCONNECT_TARGET: Duration = Duration::from_secs(5);
 
 /// 3.2: mute and unmute on a Call answered on the Desktop; the helper says
 /// whether they heard silence, which decides #51.
@@ -257,4 +264,119 @@ fn acts_on_call_window(sitting: &mut Sitting, call: u32, act: Act) -> Result<boo
         },
     );
     Ok(worked)
+}
+
+/// 3.5: calls turned off from the Indicator during a Call with the helper:
+/// the Call carries on, connected, with the turn-off waiting; once the
+/// helper hangs up, the Pixel is disconnected within a few seconds. Calls
+/// are turned on again after, for the steps that follow.
+pub(super) fn calls_off_during_a_call(sitting: &mut Sitting) -> Result<(), Stop> {
+    let call = helper_calls(sitting, "Ask your helper to call you.")?;
+    sitting.say("Click Answer on the Banner.", &["answer"]);
+    let answered = sitting.wait_for("Answer on the Desktop", ACT_DEADLINE, |state| {
+        handled_on_desktop(state, call) || stopped_ringing(state, call)
+    })?;
+    if !handled_on_desktop(&answered.state, call) {
+        sitting.check(
+            false,
+            "The Call stopped ringing without Answer on the Desktop.".to_owned(),
+        );
+        return Ok(());
+    }
+    if !audio_reaches_the_desktop(sitting, call, &answered)? {
+        return Ok(());
+    }
+    sitting.say(
+        "Click the Indicator, choose Turn calls off, then Until I turn them on.",
+        &["calls-off"],
+    );
+    let waiting = sitting.wait_for("calls turning off", ACT_DEADLINE, |state| {
+        state.calls_off_pending || state.calls_off == "off" || state.call(call).is_none()
+    })?;
+    if !waiting.state.calls_off_pending {
+        sitting.check(
+            false,
+            if waiting.state.calls_off == "off" {
+                "Calls went off at once, during the Call.".to_owned()
+            } else {
+                "The Call ended before calls were turned off.".to_owned()
+            },
+        );
+        return Ok(());
+    }
+    sitting.observed("Calls turn off when this Call ends: the turn-off waits.".to_owned());
+    let mark = sitting.mark();
+    sitting.pause(CARRIES_ON)?;
+    let cut = sitting
+        .seen_since(mark, |state| {
+            state.call(call).is_none_or(|known| known.state != "active")
+                || state.connection_state != "connected"
+                || state.calls_off == "off"
+        })
+        .is_some();
+    sitting.check(
+        !cut,
+        if cut {
+            "The Call didn't carry on: it ended, or the Pixel disconnected, after calls were turned off.".to_owned()
+        } else {
+            format!(
+                "The Call carried on, connected, for {} after calls were turned off.",
+                seconds(CARRIES_ON)
+            )
+        },
+    );
+    let heard = sitting.ask("Can you and your helper still hear each other?")?;
+    sitting.check(
+        heard,
+        if heard {
+            "You and your helper still heard each other.".to_owned()
+        } else {
+            "You and your helper couldn't hear each other after calls were turned off.".to_owned()
+        },
+    );
+    let ended = call_ends(
+        sitting,
+        call,
+        "Ask your helper to hang up.",
+        &["hang-up-on-phone"],
+    )?;
+    disconnects_after_the_call(sitting, &ended)?;
+    sitting.say(
+        "Click the Indicator and choose Turn calls on.",
+        &["calls-on"],
+    );
+    sitting.wait_for("the Pixel connected again", TALK_DEADLINE, |state| {
+        state.calls_off == "on" && state.connection_state == "connected"
+    })?;
+    Ok(())
+}
+
+/// 3.5's end: the Pixel disconnects within [`DISCONNECT_TARGET`] of the
+/// last Call ending, `ended`, timed and recorded.
+fn disconnects_after_the_call(sitting: &mut Sitting, ended: &Seen) -> Result<(), Stop> {
+    let off = sitting.happens_within("the Pixel disconnecting", APP_DEADLINE, |state| {
+        state.calls_off == "off" && state.connection_state != "connected"
+    })?;
+    match off {
+        Some(off) => {
+            let took = off.at.saturating_duration_since(ended.at);
+            sitting.measure("disconnect_after_call_ms", millis(took));
+            sitting.check(
+                took <= DISCONNECT_TARGET,
+                format!(
+                    "The Pixel disconnected {} after the Call ended (target {}).",
+                    seconds(took),
+                    seconds(DISCONNECT_TARGET)
+                ),
+            );
+        }
+        None => sitting.check(
+            false,
+            format!(
+                "The Pixel was still connected, or calls on, {} after the Call ended.",
+                seconds(APP_DEADLINE)
+            ),
+        ),
+    }
+    Ok(())
 }

@@ -21,7 +21,7 @@ mod missed_calls;
 mod range_and_power;
 
 use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
-use during_a_call::{call_pill, keypad_tones, mute};
+use during_a_call::{call_pill, calls_off_during_a_call, keypad_tones, mute};
 use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
@@ -228,6 +228,13 @@ pub const GROUPS: &[Group] = &[
                 needs: &[HELPER, KEYBINDING],
                 title: "On a real Call, the Call Window collapses to the Call Pill about 5 s after it connects; click the Call Pill to expand it where the Call Pill was, in the bottom-right corner; press Escape to collapse it; press the keybinding to expand it again",
                 script: Some(call_pill),
+                lands_with: &[],
+            },
+            Step {
+                id: "3.5",
+                needs: &[HELPER],
+                title: "During a Call with the helper, turn calls off from the Indicator: the Call carries on; when the helper hangs up, the Pixel disconnects within a few seconds",
+                script: Some(calls_off_during_a_call),
                 lands_with: &[],
             },
         ],

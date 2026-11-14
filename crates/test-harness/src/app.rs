@@ -58,6 +58,9 @@ pub struct AppState {
     /// `CallsOff`'s deadline: the Unix time in seconds calls come back on,
     /// or 0 for until they are turned on.
     pub calls_off_until: u64,
+    /// `CallsOff`'s pending flag: a turn-off waits for the last Call to
+    /// end, while calls are `"on"`.
+    pub calls_off_pending: bool,
 }
 
 /// The app's `ContactsState`: how far Contacts and Call History are synced.
@@ -207,7 +210,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
             action,
         })
         .collect();
-    let (calls_off, calls_off_until, _pending) =
+    let (calls_off, calls_off_until, calls_off_pending) =
         <(String, u64, bool)>::try_from(property("CallsOff")?)?;
     Ok(AppState {
         connection_state,
@@ -230,6 +233,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
         problems,
         calls_off,
         calls_off_until,
+        calls_off_pending,
     })
 }
 

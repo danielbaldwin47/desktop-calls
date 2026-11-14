@@ -211,8 +211,12 @@ pub enum Input {
     /// or the command line: until `until`, or with `None` until they turn
     /// them on.
     TurnCallsOff { until: Option<Deadline> },
-    /// The user turned calls on.
+    /// The user turned calls on; a turn-off waiting for the last Call to
+    /// end is cancelled.
     TurnCallsOn,
+    /// The user chose Keep calls on: a turn-off waiting for the last Call
+    /// to end is cancelled.
+    KeepCallsOn,
     /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
     /// as [`Effect::BlockPhone`] asked.
     PhoneBlocked { address: String, blocked: bool },
@@ -515,4 +519,10 @@ pub enum Effect {
     /// The deadline of calls off for the Phone with this address passed:
     /// calls come back on. For the log.
     CallsOffDeadlinePassed { address: String },
+    /// Calls were turned off during a Call, for the Phone with this
+    /// address: they go off once no Call is left. For the log.
+    CallsOffPending { address: String },
+    /// The turn-off waiting for the last Call to end, for the Phone with
+    /// this address, was cancelled: calls stay on. For the log.
+    CallsKeptOn { address: String },
 }

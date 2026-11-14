@@ -68,8 +68,8 @@ pub enum Refused {
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
-    /// `TurnCallsOff` refused: during a Call, with no Phone set up, or
-    /// until a time that has passed.
+    /// `TurnCallsOff` refused: with no Phone set up, or until a time that
+    /// has passed.
     CallsNotTurnedOff(String),
 
     /// `MoveAudio` was given something other than `"desktop"` or `"phone"`.
@@ -296,7 +296,8 @@ impl ControlInterface {
 
     /// Calls Off: `"on"` or `"off"`, the Unix time in seconds calls come
     /// back on (0 for until the user turns them on), and whether a turn-off
-    /// waits for a Call to end (never yet: ticket #204).
+    /// waits for the last Call to end. While one waits, calls are `"on"`,
+    /// with the time they would come back on once off.
     #[zbus(property)]
     fn calls_off(&self) -> (String, u64, bool) {
         calls_off(&self.state())
@@ -305,25 +306,35 @@ impl ControlInterface {
     /// Turns calls off until `until`, a Unix time in seconds, or with 0
     /// until the user turns them on. The Desktop blocks the Phone, which
     /// disconnects it, and connects it again once calls are on: when the
-    /// user turns them on, or at `until`. Refused during a Call, with no
-    /// Phone set up, and until a time that has passed.
-    fn turn_calls_off(&self, until: u64) -> Result<(), Refused> {
+    /// user turns them on, or at `until`. During a Call it waits for the
+    /// last Call to end, and returns `true`; if the Call outlasts `until`,
+    /// calls stay on. Refused with no Phone set up, and until a time that
+    /// has passed.
+    fn turn_calls_off(&self, until: u64) -> Result<bool, Refused> {
         let until = (until != 0).then(|| clock::deadline(Timestamp(until.saturating_mul(1_000))));
         let input = Input::TurnCallsOff { until };
-        let refusal = self.state().refusal(&input);
-        if let Some(failure) = refusal {
+        let state = self.state();
+        if let Some(failure) = state.refusal(&input) {
             return Err(Refused::CallsNotTurnedOff(
                 messages::failure(failure).text.to_owned(),
             ));
         }
         let _ = self.intents.unbounded_send(input);
-        Ok(())
+        Ok(state.calls_off_would_wait())
     }
 
     /// Turns calls on: the Desktop unblocks the Phone and connects it at
-    /// once. Does nothing while calls are on.
+    /// once. A turn-off waiting for the last Call to end is cancelled.
+    /// Does nothing while calls are on.
     fn turn_calls_on(&self) {
         let _ = self.intents.unbounded_send(Input::TurnCallsOn);
+    }
+
+    /// Keeps calls on, as the Indicator's Keep calls on does: a turn-off
+    /// waiting for the last Call to end is cancelled. Does nothing while
+    /// none waits.
+    fn keep_calls_on(&self) {
+        let _ = self.intents.unbounded_send(Input::KeepCallsOn);
     }
 
     /// Opens the Setup Window, to pair a Phone, pair it again or switch to
@@ -476,7 +487,7 @@ fn calls_off(state: &State) -> (String, u64, bool) {
     let until = state
         .calls_off_until()
         .map_or(0, |until| until.at.0 / 1_000);
-    (off.to_owned(), until, false)
+    (off.to_owned(), until, state.calls_off_pending())
 }
 
 fn contacts_state(state: &State) -> (String, u32, u32, u64, String) {

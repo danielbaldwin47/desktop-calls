@@ -155,6 +155,9 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
         state.surface("dialer")
     );
     assert_eq!(shown(&state, "dialer", "notice"), None);
+    // The strip says calls are off, so the footer's words for the Phone
+    // leave out until when, and fit beside its keys (ticket #279).
+    assert_eq!(shown(&state, "dialer", "phone"), Some("Calls off"));
 
     harness.keyboard().press(Key::Return);
     answered(&harness);

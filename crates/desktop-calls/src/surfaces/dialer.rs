@@ -138,6 +138,10 @@ impl Dialer {
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let pressed = intents.clone();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if is_alt_q(key, modifiers) {
+                let _ = pressed.unbounded_send(Input::OpenQuietHoursWindow);
+                return glib::Propagation::Stop;
+            }
             if has_command_modifier(modifiers) {
                 return glib::Propagation::Proceed;
             }
@@ -231,7 +235,9 @@ impl Dialer {
         if let Some((off, enter)) = calls_off {
             content.insert("calls-off".to_owned(), format!("{off} {enter}"));
         }
-        self.footer.show(&view.keys, &view.phone, &mut content);
+        let strip_says_off = notice.is_none() && content.contains_key("calls-off");
+        self.footer
+            .show(&view.keys, &view.phone, strip_says_off, &mut content);
         let (now, offset) = (now(), utc_offset_seconds());
         for (index, row) in view.rows.iter().enumerate() {
             let text = row_text(row, now, offset);
@@ -355,6 +361,15 @@ fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRow
     messages::dialer_row(row, when.as_deref())
 }
 
+/// Alt+Q, which opens the Quiet Hours Window, with no other command
+/// modifier and whatever the Caps Lock.
+fn is_alt_q(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+    let held = modifiers
+        & (ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK);
+    held == ModifierType::ALT_MASK && key.to_lower() == gtk::gdk::Key::q
+}
+
 /// The notice strip, hidden: an icon beside the notice's words.
 fn notice_strip() -> (gtk::Box, IconView, gtk::Label) {
     let icon = IconView::new(Icon::Warning);
@@ -413,11 +428,12 @@ impl Footer {
 
     /// Shows `keys` and where the Phone is, and adds what it shows to
     /// `content`: `keys`, `phone`, and `phone-live` while the live dot
-    /// shows.
+    /// shows. `strip_says_off` while the strip says calls are off.
     fn show(
         &self,
         keys: &[DialerKey],
         phone: &PhoneStatus,
+        strip_says_off: bool,
         content: &mut BTreeMap<String, String>,
     ) {
         let words: Vec<String> = keys
@@ -450,7 +466,7 @@ impl Footer {
             *self.shown_keys.borrow_mut() = keys.to_vec();
         }
         let live = matches!(phone, PhoneStatus::Connected(_));
-        let words = messages::dialer_phone(phone);
+        let words = messages::dialer_phone(phone, strip_says_off);
         self.phone.set_text(&words);
         self.live_dot.set_visible(live);
         content.insert("phone".to_owned(), words);

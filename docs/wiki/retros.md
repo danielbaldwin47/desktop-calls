@@ -46,3 +46,10 @@ Retros on subagent sessions, with what was pursued. Per chief-of-staff practice,
 - 4 failures, none from load. One failed lint in 4 s and the other jobs still ran for 205 s (head `8b3c277`).
 - 31 sleep or poll loops were written in the evening to wait on CI or reviewers. One agent ran `pkill -f 'tools/ci_local.py'` to replace its own queued run and killed two other agents' runs, one at 346 of 348 scenarios.
 - Applied: a docs-only run is lint alone and a failed lint ends the run (#239, PR #242); [Shared machine](../agents/shared-machine.md) and `just ci-local --cancel` (#240); the checkpoint rule on [chief-of-staff-practice](chief-of-staff-practice.md).
+
+## 2026-11-14, the disk filled (build caches)
+
+- Source: the chief of staff's account to the author, and `df` on 2026-11-14; not a transcript analysis.
+- What happened: `/home` reached 100% from 34 agent worktrees' `target/` folders (about 134 GB; 23 of the worktrees were for merged PRs, 5 to 6 GB each). All work stopped on ENOSPC, including this checkpoint's own first wiki edit.
+- Why it got that far: nothing removed a worktree's `target/` once its PR merged, and each worktree builds its own. The brief said nothing about cleaning up after a merge.
+- Applied: Finishing step 6 of the [implementer brief](../agents/implementer-brief.md) (clear the cache, say so in the report); 23 merged worktrees removed; #277 asks `just land` to clear the worktree's `target/` after a merge. Not applied: any alert before the disk fills, or a cap on `target/`; neither is ticketed.

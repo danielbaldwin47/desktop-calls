@@ -3,13 +3,17 @@
 //! blocking or unblocking the Phone is put right at the next start.
 //!
 //! It is one JSON file, `$XDG_STATE_HOME/desktop-calls/calls-off.json`,
-//! holding the state ("off", "on" while the Phone is being unblocked, or
-//! "pending" while a turn-off waits for the last Call to end), the address
-//! of the Phone the app blocked or is to block, and, for calls off until a
-//! deadline, `until`: the Unix time in seconds they come back on. It is
-//! written before the Phone is blocked or unblocked, and removed once
-//! calls are on with the Phone unblocked, or a waiting turn-off is
-//! cancelled. The directory is 0700 and the file 0600; the file is
+//! holding the state ("off", "on" while the Phone is being unblocked,
+//! "pending" while a turn-off waits for the last Call to end, or
+//! "kept-on" while calls stay on through Quiet Hours the user turned them
+//! on in), the address of the Phone the app blocked or is to block (none
+//! for "kept-on"), and, for calls off until a deadline, `until`: the Unix
+//! time in seconds they come back on; for "on" and "kept-on", when the
+//! Quiet Hours they stay on through next begin. `"quiet_hours": true`
+//! marks calls off, or waiting to go off, for Quiet Hours. It is written
+//! before the Phone is blocked or unblocked, and removed once calls are on
+//! with the Phone unblocked, or a waiting turn-off is cancelled, with
+//! nothing to keep. The directory is 0700 and the file 0600; the file is
 //! written whole to a temporary file and renamed over the old one, so a
 //! crash leaves one or the other. A file that can't be read, or isn't one
 //! this version wrote, counts as none: the app logs it and leaves the
@@ -20,7 +24,7 @@ use std::io::{self, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::PathBuf;
 
-use desktop_calls_core::{CallsOffRecord, Input, Timestamp};
+use desktop_calls_core::{CallsOffRecord, Deadline, Input, Timestamp};
 use futures_channel::mpsc::UnboundedSender;
 use glib::MainContext;
 use serde_json::{Value, json};
@@ -36,9 +40,22 @@ fn file() -> Option<PathBuf> {
     Some(logging::state_directory()?.join("calls-off.json"))
 }
 
-/// Whether a record is kept now, readable or not.
-pub fn is_kept() -> bool {
-    file().is_some_and(|path| path.exists())
+/// Whether a record that may have the Phone blocked is kept now: any
+/// unreadable one, or one that isn't of calls kept on through Quiet Hours,
+/// which blocks nothing.
+pub fn may_block_phone() -> bool {
+    let Some(path) = file() else {
+        return false;
+    };
+    match fs::read(&path) {
+        Err(error) => error.kind() != io::ErrorKind::NotFound,
+        Ok(text) => !matches!(
+            serde_json::from_slice(&text)
+                .ok()
+                .and_then(|document| from_json(&document)),
+            Some(CallsOffRecord::KeptOn { .. })
+        ),
+    }
 }
 
 /// What an earlier run kept, if anything, and the file can be read.
@@ -59,10 +76,10 @@ pub fn load() -> Option<CallsOffRecord> {
         failed("calls-off-unreadable", "not a file this version wrote");
         return None;
     };
-    let (state, address, until) = parts(&record);
+    let (state, address, until, _) = parts(&record);
     tracing::info!(
         event_kind = %EventKind::CallsOffLoaded,
-        phone_address = %address,
+        phone_address = address.unwrap_or_default(),
         state,
         until,
         "Picking up Calls Off as the run before left it"
@@ -146,10 +163,16 @@ fn write(record: &CallsOffRecord) -> io::Result<bool> {
         .mode(0o600)
         .open(&temporary)?;
     writer.set_permissions(Permissions::from_mode(0o600))?;
-    let (state, address, until) = parts(record);
-    let mut document = json!({ "version": VERSION, "state": state, "address": address });
+    let (state, address, until, quiet_hours) = parts(record);
+    let mut document = json!({ "version": VERSION, "state": state });
+    if let Some(address) = address {
+        document["address"] = json!(address);
+    }
     if let Some(until) = until {
         document["until"] = json!(until);
+    }
+    if quiet_hours {
+        document["quiet_hours"] = json!(true);
     }
     writer.write_all(&serde_json::to_vec(&document).map_err(io::Error::other)?)?;
     writer.sync_all()?;
@@ -196,16 +219,41 @@ pub fn block(system: Connection, inputs: UnboundedSender<Input>, address: String
     });
 }
 
-/// The record's state, Phone address, and deadline in Unix seconds.
-fn parts(record: &CallsOffRecord) -> (&'static str, &str, Option<u64>) {
+/// The record's state, Phone address, deadline in Unix seconds, and
+/// whether it is for Quiet Hours.
+fn parts(record: &CallsOffRecord) -> (&'static str, Option<&str>, Option<u64>, bool) {
+    let seconds = |until: &Deadline| until.at.0 / 1_000;
     match record {
-        CallsOffRecord::Off { address, until } => {
-            ("off", address, until.map(|until| until.at.0 / 1_000))
-        }
-        CallsOffRecord::TurningOn { address } => ("on", address, None),
-        CallsOffRecord::Pending { address, until } => {
-            ("pending", address, until.map(|until| until.at.0 / 1_000))
-        }
+        CallsOffRecord::Off {
+            address,
+            until,
+            quiet_hours,
+        } => (
+            "off",
+            Some(address),
+            until.as_ref().map(seconds),
+            *quiet_hours,
+        ),
+        CallsOffRecord::TurningOn {
+            address,
+            kept_on_until,
+        } => (
+            "on",
+            Some(address),
+            kept_on_until.as_ref().map(seconds),
+            false,
+        ),
+        CallsOffRecord::Pending {
+            address,
+            until,
+            quiet_hours,
+        } => (
+            "pending",
+            Some(address),
+            until.as_ref().map(seconds),
+            *quiet_hours,
+        ),
+        CallsOffRecord::KeptOn { until } => ("kept-on", None, Some(seconds(until)), false),
     }
 }
 
@@ -222,21 +270,40 @@ fn from_json(document: &Value) -> Option<CallsOffRecord> {
     if document.get("version")?.as_u64()? != VERSION {
         return None;
     }
-    let address = document.get("address")?.as_str()?;
-    if !crate::chosen_phone::is_address(address) {
-        return None;
-    }
-    let address = address.to_owned();
     let until = match document.get("until") {
         None => None,
         Some(until) => Some(clock::deadline(Timestamp(
             until.as_u64()?.checked_mul(1_000)?,
         ))),
     };
-    match document.get("state")?.as_str()? {
-        "off" => Some(CallsOffRecord::Off { address, until }),
-        "on" => Some(CallsOffRecord::TurningOn { address }),
-        "pending" => Some(CallsOffRecord::Pending { address, until }),
+    let state = document.get("state")?.as_str()?;
+    if state == "kept-on" {
+        return Some(CallsOffRecord::KeptOn { until: until? });
+    }
+    let address = document.get("address")?.as_str()?;
+    if !crate::chosen_phone::is_address(address) {
+        return None;
+    }
+    let address = address.to_owned();
+    let quiet_hours = match document.get("quiet_hours") {
+        None => false,
+        Some(quiet_hours) => quiet_hours.as_bool()?,
+    };
+    match state {
+        "off" => Some(CallsOffRecord::Off {
+            address,
+            until,
+            quiet_hours,
+        }),
+        "on" => Some(CallsOffRecord::TurningOn {
+            address,
+            kept_on_until: until,
+        }),
+        "pending" => Some(CallsOffRecord::Pending {
+            address,
+            until,
+            quiet_hours,
+        }),
         _ => None,
     }
 }

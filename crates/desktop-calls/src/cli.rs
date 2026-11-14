@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use desktop_calls_core::clock::MORNING;
 use desktop_calls_core::messages::{self, Failure, NextAction};
-use desktop_calls_core::{AudioLocation, ConnectionState, Phone, TimeOfDay, Timestamp};
+use desktop_calls_core::{AudioLocation, ConnectionState, Phone, QuietHours, TimeOfDay, Timestamp};
 use glib::MainContext;
 use zbus::fdo::PropertiesProxy;
 use zbus::names::InterfaceName;
@@ -24,6 +24,8 @@ struct Status {
     hands_free_lost: bool,
     /// Calls Off, as the control interface's `CallsOff` has it.
     calls_off: (String, u64, bool),
+    /// The Quiet Hours set, if any.
+    quiet_hours: Option<QuietHours>,
 }
 
 /// `desktop-calls status [--json]`: prints whether the Phone is connected.
@@ -41,6 +43,7 @@ pub fn status(json: bool) -> ExitCode {
                 "connection_state": status.connection_state.as_str(),
                 "phone": phone,
                 "calls_off": { "state": state, "until": until, "pending": pending },
+                "quiet_hours": status.quiet_hours.map(|hours| hours.to_string()),
             });
             println!("{printed}");
             ExitCode::SUCCESS
@@ -63,6 +66,9 @@ pub fn status(json: bool) -> ExitCode {
             }
             if *pending {
                 println!("{}", messages::calls_off_pending_status(until));
+            }
+            if let Some(hours) = status.quiet_hours {
+                println!("{}", messages::quiet_hours_status(hours));
             }
             ExitCode::SUCCESS
         }
@@ -92,8 +98,19 @@ pub fn connect_phone() -> ExitCode {
 /// `desktop-calls calls off [--for LENGTH | --until HH:MM |
 /// --until-morning]`: turns calls off until the user turns them on, or
 /// until the deadline asked for. The local times become an instant here,
-/// by the Desktop's clock; the app decides the rest.
+/// by the Desktop's clock; the app decides the rest. The morning is when
+/// Quiet Hours end, when they are set (spec #198).
 pub fn calls_off(length: Option<&str>, until: Option<&str>, until_morning: bool) -> ExitCode {
+    let morning = if until_morning {
+        let context = MainContext::default();
+        context
+            .block_on(read_status(GlibRuntime::new(context.clone())))
+            .ok()
+            .and_then(|status| status.quiet_hours)
+            .map_or(MORNING, |hours| hours.end())
+    } else {
+        MORNING
+    };
     let now = clock::now();
     let deadline = if let Some(length) = length {
         let Some(length) = length_ms(length) else {
@@ -108,7 +125,7 @@ pub fn calls_off(length: Option<&str>, until: Option<&str>, until_morning: bool)
         };
         Some(clock::next(until, now))
     } else {
-        until_morning.then(|| clock::next(MORNING, now))
+        until_morning.then(|| clock::next(morning, now))
     };
     let seconds = deadline.map_or(0, |deadline| deadline.0 / 1_000);
     let shown = deadline.map(|_| clock::local_time(Timestamp(seconds * 1_000)));
@@ -140,6 +157,25 @@ pub fn calls_on() -> ExitCode {
     })
 }
 
+/// `desktop-calls quiet-hours HH:MM-HH:MM | off`: sets Quiet Hours, or
+/// turns them off.
+pub fn quiet_hours(hours: &str) -> ExitCode {
+    if hours == "off" {
+        return turn_calls("ClearQuietHours", &(), |_| {
+            messages::quiet_hours_cleared().to_owned()
+        });
+    }
+    let Some(hours) = QuietHours::parse(hours) else {
+        eprintln!("{}", messages::quiet_hours_unreadable());
+        return ExitCode::FAILURE;
+    };
+    turn_calls(
+        "SetQuietHours",
+        &(hours.start().minutes(), hours.end().minutes()),
+        |_| messages::quiet_hours_set(hours),
+    )
+}
+
 /// The milliseconds `length` names, such as `90m` or `2h`: a whole number
 /// of minutes or hours, from 1 minute to 24 hours.
 fn length_ms(length: &str) -> Option<u64> {
@@ -156,8 +192,9 @@ fn length_ms(length: &str) -> Option<u64> {
     (1..=24 * 3_600_000).contains(&length).then_some(length)
 }
 
-/// Calls `method` with `body` to turn calls off or on, and prints what
-/// `said` makes of the reply once the app took it, or why it didn't.
+/// Calls `method` with `body` to turn calls off or on, or set Quiet
+/// Hours, and prints what `said` makes of the reply once the app took it,
+/// or why it didn't.
 fn turn_calls<B>(method: &str, body: &B, said: impl FnOnce(&zbus::Message) -> String) -> ExitCode
 where
     B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
@@ -395,11 +432,26 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         .cloned()
         .and_then(|value| <(String, u64, bool)>::try_from(value).ok())
         .unwrap_or_else(|| ("on".to_owned(), 0, false));
+    // Nor does one from before ticket #205.
+    let quiet_hours = properties
+        .get("QuietHours")
+        .cloned()
+        .and_then(|value| <(bool, u16, u16)>::try_from(value).ok())
+        .and_then(|(set, start, end)| {
+            set.then(|| {
+                QuietHours::new(
+                    TimeOfDay::from_minutes(start)?,
+                    TimeOfDay::from_minutes(end)?,
+                )
+            })
+            .flatten()
+        });
     Ok(Status {
         connection_state,
         phone: (!address.is_empty()).then_some(Phone { name, address }),
         hands_free_lost,
         calls_off,
+        quiet_hours,
     })
 }
 

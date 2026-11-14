@@ -14,7 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use desktop_calls_core::matching::{self, DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure};
 use desktop_calls_core::{
-    AudioLocation, CallId, Caller, ContactsState, Input, MissedCallNotice, State, Timestamp,
+    AudioLocation, CallId, Caller, ContactsState, Input, MissedCallNotice, QuietHours, State,
+    TimeOfDay, Timestamp,
 };
 use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
@@ -71,6 +72,10 @@ pub enum Refused {
     /// `TurnCallsOff` refused: with no Phone set up, or until a time that
     /// has passed.
     CallsNotTurnedOff(String),
+
+    /// `SetQuietHours` refused: a time past 23:59, or the same start and
+    /// end.
+    QuietHoursNotSet(String),
 
     /// `MoveAudio` was given something other than `"desktop"` or `"phone"`.
     UnknownAudioLocation(String),
@@ -337,6 +342,34 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::KeepCallsOn);
     }
 
+    /// Quiet Hours: whether they are set, and when they start and end, in
+    /// minutes after midnight on the Desktop's clock (0 and 0 when not
+    /// set). A start later than the end crosses midnight.
+    #[zbus(property)]
+    fn quiet_hours(&self) -> (bool, u16, u16) {
+        quiet_hours(&self.state())
+    }
+
+    /// Sets Quiet Hours from `start` to `end`, in minutes after midnight:
+    /// calls are off between them every day, and on again after. Kept for
+    /// the next run. Refused for a time past 23:59, or the same start and
+    /// end.
+    fn set_quiet_hours(&self, start: u16, end: u16) -> Result<(), Refused> {
+        let hours = TimeOfDay::from_minutes(start)
+            .zip(TimeOfDay::from_minutes(end))
+            .and_then(|(start, end)| QuietHours::new(start, end))
+            .ok_or_else(|| {
+                Refused::QuietHoursNotSet(messages::quiet_hours_unreadable().to_owned())
+            })?;
+        let _ = self.intents.unbounded_send(Input::SetQuietHours(hours));
+        Ok(())
+    }
+
+    /// Turns Quiet Hours off: calls off for them come back on.
+    fn clear_quiet_hours(&self) {
+        let _ = self.intents.unbounded_send(Input::ClearQuietHours);
+    }
+
     /// Opens the Setup Window, to pair a Phone, pair it again or switch to
     /// another, as the Indicator's "Connect your phone…" does.
     fn open_connect_window(&self) {
@@ -488,6 +521,13 @@ fn calls_off(state: &State) -> (String, u64, bool) {
         .calls_off_until()
         .map_or(0, |until| until.at.0 / 1_000);
     (off.to_owned(), until, state.calls_off_pending())
+}
+
+/// The `QuietHours` property: whether set, start and end in minutes.
+fn quiet_hours(state: &State) -> (bool, u16, u16) {
+    state.quiet_hours().map_or((false, 0, 0), |hours| {
+        (true, hours.start().minutes(), hours.end().minutes())
+    })
 }
 
 fn contacts_state(state: &State) -> (String, u32, u32, u64, String) {
@@ -658,6 +698,9 @@ impl Publisher {
         }
         if calls_off(&old) != calls_off(state) {
             published.calls_off_changed(emitter).await?;
+        }
+        if old.quiet_hours() != state.quiet_hours() {
+            published.quiet_hours_changed(emitter).await?;
         }
         Ok(())
     }

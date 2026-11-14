@@ -3,13 +3,16 @@
 //! monotonic timers stop while the Desktop is suspended. It also converts
 //! between instants and local times of day in the Desktop's time zone
 //! (`TZ`, or `/etc/localtime`), across daylight-saving changes. It only
-//! converts: which times to ask for is the core's choice.
+//! converts: which times to ask for is the core's choice, such as when the
+//! Quiet Hours it names next begin and end.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use desktop_calls_core::clock::{FOR_AN_HOUR_MS, MORNING};
-use desktop_calls_core::{Deadline, Input, TimeOfDay, Timestamp, WallClock};
+use desktop_calls_core::{
+    Deadline, Input, QuietHours, QuietHoursClock, TimeOfDay, Timestamp, WallClock,
+};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
@@ -25,6 +28,9 @@ pub enum Wake {
     At(Timestamp),
     /// The Desktop resumed: timers were held while it slept.
     Resumed,
+    /// The core asked for when these Quiet Hours next begin and end, or
+    /// for none.
+    QuietHours(Option<QuietHours>),
 }
 
 /// The wall clock now.
@@ -35,12 +41,18 @@ pub fn now() -> Timestamp {
     Timestamp(u64::try_from(now).unwrap_or(u64::MAX))
 }
 
-/// The wall clock at `now`, with the deadlines of the timed choices.
-pub fn wall_clock(now: Timestamp) -> WallClock {
+/// The wall clock at `now`, with the deadlines of the timed choices, and
+/// when `quiet_hours` next begin and end.
+pub fn wall_clock(now: Timestamp, quiet_hours: Option<QuietHours>) -> WallClock {
     WallClock {
         now,
         for_an_hour: deadline(Timestamp(now.0.saturating_add(FOR_AN_HOUR_MS))),
         until_morning: deadline(next(MORNING, now)),
+        quiet_hours: quiet_hours.map(|hours| QuietHoursClock {
+            hours,
+            next_start: deadline(next(hours.start(), now)),
+            next_end: deadline(next(hours.end(), now)),
+        }),
     }
 }
 
@@ -124,30 +136,42 @@ fn seconds(at: Timestamp) -> Option<i64> {
 }
 
 /// Reports the wall clock to `inputs` on each minute, at each instant
-/// `wakes` asks for, and at once on each resume, until either closes.
-/// Every instant asked for is kept until it passes, so an earlier one,
-/// such as a deadline since replaced, can't hide a later one.
-pub async fn run(mut wakes: UnboundedReceiver<Wake>, inputs: UnboundedSender<Input>) {
+/// `wakes` asks for, when the Quiet Hours begin and end, at once on each
+/// resume, and at once when the Quiet Hours to read change (from
+/// `quiet_hours`, as kept at startup), until either closes. Every instant asked for is kept until it passes, so an
+/// earlier one, such as a deadline since replaced, can't hide a later one.
+pub async fn run(
+    mut wakes: UnboundedReceiver<Wake>,
+    inputs: UnboundedSender<Input>,
+    mut quiet_hours: Option<QuietHours>,
+) {
     let mut wake_at: BTreeSet<Timestamp> = BTreeSet::new();
     loop {
         let now = now();
         wake_at.retain(|at| *at > now);
-        if inputs
-            .unbounded_send(Input::ClockTicked(wall_clock(now)))
-            .is_err()
-        {
+        let clock = wall_clock(now, quiet_hours);
+        if inputs.unbounded_send(Input::ClockTicked(clock)).is_err() {
             return;
         }
-        let next_minute = now.0 - now.0 % MINUTE_MS + MINUTE_MS;
+        // The Quiet Hours' edges are on the minute by the local clock,
+        // which needn't be on the minute by UTC's.
+        let edges = clock
+            .quiet_hours
+            .map(|quiet| [quiet.next_start.at, quiet.next_end.at]);
+        let next_minute = Timestamp(now.0 - now.0 % MINUTE_MS + MINUTE_MS);
         let until = wake_at
-            .first()
-            .map_or(next_minute, |at| at.0.min(next_minute));
+            .iter()
+            .copied()
+            .chain(edges.into_iter().flatten())
+            .fold(next_minute, Timestamp::min)
+            .0;
         let timer = glib::timeout_future(Duration::from_millis(until.saturating_sub(now.0)));
         match select(timer, wakes.next()).await {
             Either::Left(_) | Either::Right((Some(Wake::Resumed), _)) => {}
             Either::Right((Some(Wake::At(at)), _)) => {
                 wake_at.insert(at);
             }
+            Either::Right((Some(Wake::QuietHours(hours)), _)) => quiet_hours = hours,
             Either::Right((None, _)) => return,
         }
     }

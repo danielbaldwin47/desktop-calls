@@ -25,7 +25,8 @@ pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{
     calls_kept_on, calls_off_for_too_long, calls_off_pending_status, calls_off_status,
     calls_off_until_unreadable, calls_off_waits, calls_turned, phone_left_blocked_by_removal,
-    phone_unblocked_for_removal,
+    phone_unblocked_for_removal, quiet_hours_cleared, quiet_hours_set, quiet_hours_status,
+    quiet_hours_unreadable,
 };
 pub use checks::{command_copied, copy_command_label, fix_failed, fix_label, fixing};
 pub use problems::{ProblemKind, problem, problem_heading};
@@ -357,7 +358,9 @@ pub fn failure(failure: Failure) -> Message {
 pub fn indicator_status(status: &IndicatorStatus) -> String {
     match status {
         IndicatorStatus::NoPhone => "No Phone set up".to_owned(),
-        IndicatorStatus::CallsOff { until } => calls_off::calls_off(*until),
+        IndicatorStatus::CallsOff { until, quiet_hours } => {
+            calls_off::calls_off(*until, *quiet_hours)
+        }
         IndicatorStatus::CallsOffPending => calls_off::PENDING.to_owned(),
         IndicatorStatus::NotConnected(phone) => format!("{} not connected", phone.name),
         IndicatorStatus::Connected(phone) => format!("{} connected", phone.name),

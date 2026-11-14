@@ -106,6 +106,17 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off until 07:00",
     },
+    IndicatorState {
+        name: "off-quiet-hours",
+        title: "The Indicator, calls off for Quiet Hours",
+        // Under way at any time but the day's last minute, in whichever
+        // time zone the gallery runs.
+        reach: |harness| {
+            connect(harness);
+            let _output = harness.cli(&["quiet-hours", "00:00-23:59"]);
+        },
+        tooltip: "Calls off until 23:59 (quiet hours)",
+    },
 ];
 
 /// Where the menu of the Indicator in `state` is listed.

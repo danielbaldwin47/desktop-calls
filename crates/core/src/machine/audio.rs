@@ -11,7 +11,7 @@ use super::{
     DEFAULT_MICROPHONE_VOLUME, Focus, HANDOFF_NOT_STARTED_MS, HANDOFF_TIMEOUT_MS,
     HANDOFF_TO_PHONE_TIMEOUT_MS, MAX_MICROPHONE_VOLUME, MovingAudio, MovingToPhone, Muting, State,
 };
-use crate::call::{AudioLocation, Transport};
+use crate::call::{AudioLocation, CallId, Transport};
 use crate::connection::ConnectionState;
 use crate::messages::Failure;
 
@@ -148,7 +148,7 @@ pub(super) fn move_audio(state: &mut State, location: AudioLocation, effects: &m
     match (location, state.audio_location()) {
         (AudioLocation::Desktop, Some(AudioLocation::Phone)) => {
             state.audio_notice = None;
-            bring_audio_here(state, effects);
+            bring_audio_here(state, None, effects);
         }
         (AudioLocation::Phone, Some(AudioLocation::Desktop)) => {
             state.audio_notice = None;
@@ -290,14 +290,20 @@ pub(super) fn to_phone_timed_out(state: &mut State, handoff: u32, effects: &mut 
 
 /// Starts a Handoff to the Desktop: asks the Phone to bring the audio here,
 /// and starts its overall limit. The check that the audio link has started
-/// waits for the Phone to carry out `Activate()`.
-pub(super) fn bring_audio_here(state: &mut State, effects: &mut Vec<Effect>) {
+/// waits for the Phone to carry out `Activate()`. `answering` is the Call
+/// whose Answer the Handoff follows, if any.
+pub(super) fn bring_audio_here(
+    state: &mut State,
+    answering: Option<CallId>,
+    effects: &mut Vec<Effect>,
+) {
     effects.push(Effect::Phone(PhoneCommand::MoveAudioToDesktop));
     state.handoffs += 1;
     let handoff = state.handoffs;
     state.moving_audio = Some(MovingAudio {
         handoff,
         retried: false,
+        answering,
     });
     effects.push(Effect::StartTimer {
         timer: Timer::HandoffTimedOut(handoff),
@@ -311,6 +317,7 @@ pub(super) fn activated(state: &State, effects: &mut Vec<Effect>) {
     if let Some(MovingAudio {
         handoff,
         retried: false,
+        ..
     }) = state.moving_audio
     {
         effects.push(Effect::StartTimer {

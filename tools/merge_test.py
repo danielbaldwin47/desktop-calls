@@ -28,6 +28,22 @@ def worktrees(*branches: tuple[str, str]) -> str:
     return "\n".join(f"worktree {path}\nHEAD {'b' * 40}\nbranch refs/heads/{branch}\n" for path, branch in branches)
 
 
+def no_real_git(*args, **_):
+    raise AssertionError(
+        f"`git {' '.join(args)}` ran for real: a test must stub merge.git. On GitHub the "
+        "checkout belongs to another user, so git refuses it (\"dubious ownership\")."
+    )
+
+
+def setUpModule():
+    """Every test runs against a merge.git that fails loudly, so one that
+    forgets to stub git fails on any machine, not only where the checkout's
+    owner differs from the user (#196). A test's own patch replaces it."""
+    patcher = mock.patch.object(merge, "git", no_real_git)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
 def git_stub(listing: str):
     def git(*args, **_):
         return listing if args[0] == "worktree" else HERE + "\n"
@@ -102,7 +118,8 @@ class BehindMain(unittest.TestCase):
     def test_a_docs_only_gap_is_still_let_through(self):
         with mock.patch.object(merge, "gh", return_value=compare(1, ["docs/wiki/index.md"])):
             with mock.patch.object(merge, "docs_named_by_code", return_value={}):
-                allowed = merge.require_contains_base(PR)
+                with mock.patch.object(merge, "git", git_stub(worktrees())):
+                    allowed = merge.require_contains_base(PR)
         self.assertIn("Letting through 1 docs-only commit", allowed)
 
 

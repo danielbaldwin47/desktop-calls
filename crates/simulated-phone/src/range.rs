@@ -361,16 +361,20 @@ type Ended = (Option<&'static str>, Option<Change>, Option<Change>);
 ///
 /// The Phone can forget the pairing while a connect to it is under way: the
 /// link key is checked as the link comes up, so that connect fails too, and
-/// never brings the Phone back (ticket #171).
+/// never brings the Phone back (ticket #171). Nor can the Phone going out of
+/// range while the connect finishes: it fails as a page timeout, rather than
+/// bringing back a Phone that has just left (ticket #196).
 fn end_connect(world: &SharedWorld, failure: Option<&'static str>) -> zbus::Result<Ended> {
     let mut world = lock(world);
     world.range.connecting = false;
-    let failure = failure.or_else(|| {
-        world
-            .range
-            .forgot_pairing
-            .then_some("br-connection-key-missing")
-    });
+    let failure = failure
+        .or_else(|| {
+            world
+                .range
+                .forgot_pairing
+                .then_some("br-connection-key-missing")
+        })
+        .or_else(|| (!world.range.reachable).then_some("br-connection-page-timeout"));
     if failure.is_some() {
         return Ok((failure, None, None));
     }

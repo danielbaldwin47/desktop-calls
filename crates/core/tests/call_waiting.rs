@@ -3,8 +3,9 @@
 //! Swap, and the Phone refusing them.
 
 use desktop_calls_core::{
-    CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone, PhoneCommand,
-    RingingCaller, State, Timestamp, Transport, WaitingOptions, messages::Failure, step,
+    AudioLocation, CallId, CallState, CallWindowPhase, Caller, Codec, Effect, Input, Phone,
+    PhoneCommand, RingingCaller, State, Timestamp, Transport, WaitingOptions, messages::Failure,
+    step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -649,4 +650,82 @@ fn if_the_phone_refuses_answer_beside_a_held_call_the_waiting_call_is_offered_ag
     );
     let banner = state.surfaces().banner.expect("the Banner is back");
     assert_eq!(banner.waiting, Some(WaitingOptions::Answer));
+}
+
+/// On a Call with Bob, answered on the Phone, so its audio is there, and
+/// Alice's Call waiting.
+fn waiting_with_audio_on_the_phone() -> State {
+    run(
+        State::default(),
+        [
+            Input::PhonePaired(Phone {
+                name: "My Pixel".to_owned(),
+                address: ADDRESS.to_owned(),
+            }),
+            Input::PhoneConnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneCommandDone(PhoneCommand::KeepAudioOnPhone),
+            Input::CallAdded {
+                call: FIRST,
+                state: CallState::Active,
+                caller: bob(),
+                at: Timestamp(1_000),
+            },
+            Input::CallAdded {
+                call: SECOND,
+                state: CallState::Waiting,
+                caller: alice(),
+                at: Timestamp(3_000),
+            },
+        ],
+    )
+    .0
+}
+
+fn audio_moving(state: &State) -> Option<AudioLocation> {
+    state
+        .surfaces()
+        .call_window
+        .and_then(|window| window.audio)
+        .and_then(|audio| audio.moving)
+}
+
+#[test]
+fn a_waiting_call_answered_that_ends_unconnected_ends_the_handoff_its_answer_asked_for() {
+    let (state, _) = run(waiting_with_audio_on_the_phone(), [Input::HoldAndAnswer]);
+    assert_eq!(audio_moving(&state), Some(AudioLocation::Desktop));
+
+    let (state, effects) = run(state, [Input::CallEnded { call: SECOND }]);
+
+    assert_eq!(audio_moving(&state), None);
+    assert!(
+        effects.contains(&Effect::Phone(PhoneCommand::KeepAudioOnPhone)),
+        "{effects:?}"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ReportError(_))),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn a_waiting_call_answered_that_ends_unconnected_leaves_the_users_own_move_audio_here() {
+    let (state, _) = run(
+        waiting_with_audio_on_the_phone(),
+        [
+            Input::MoveAudio(AudioLocation::Desktop),
+            Input::HoldAndAnswer,
+        ],
+    );
+
+    let (state, effects) = run(state, [Input::CallEnded { call: SECOND }]);
+
+    assert_eq!(audio_moving(&state), Some(AudioLocation::Desktop));
+    assert!(
+        !effects.contains(&Effect::Phone(PhoneCommand::KeepAudioOnPhone)),
+        "{effects:?}"
+    );
 }

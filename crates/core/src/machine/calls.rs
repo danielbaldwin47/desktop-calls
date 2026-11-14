@@ -237,7 +237,7 @@ pub(super) fn answer(state: &mut State, call: CallId, effects: &mut Vec<Effect>)
         Some(known) if known.rings_here() => {
             known.request = Request::Answer;
             effects.push(Effect::Phone(PhoneCommand::Answer(call)));
-            bring_audio_here(state, effects);
+            bring_audio_here(state, Some(call), effects);
         }
         Some(known) if known.request == Request::Answer => {}
         Some(_) => effects.push(Effect::ReportError(Failure::CallNotRinging)),
@@ -361,5 +361,20 @@ fn end_call(state: &mut State, call: CallId, effects: &mut Vec<Effect>) {
         state.restore_audio = None;
         state.audio_notice = None;
         effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+    } else if ended.active_since.is_none()
+        && state
+            .moving_audio
+            .is_some_and(|moving| moving.answering == Some(call))
+    {
+        // The user answered a Call that ended before it connected, so the
+        // Handoff that followed its Answer is moot. The Phone link drops a
+        // plain Answer whose Call is gone, with the commands behind it, and
+        // reports nothing; Hold & Answer and the like are still sent, and
+        // their refusal comes later. The Call still live keeps its audio
+        // where it is.
+        state.moving_audio = None;
+        if !state.has_desktop_audio() {
+            effects.push(Effect::Phone(PhoneCommand::KeepAudioOnPhone));
+        }
     }
 }

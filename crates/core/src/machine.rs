@@ -197,6 +197,9 @@ struct MovingAudio {
     handoff: u32,
     /// The Phone has already been asked a second time.
     retried: bool,
+    /// The Call whose Answer asked for this Handoff, if one did. Its Answer
+    /// comes first in the same batch of Phone commands.
+    answering: Option<CallId>,
 }
 
 /// The Desktop asked to move the audio to the Phone, by dropping hands-free

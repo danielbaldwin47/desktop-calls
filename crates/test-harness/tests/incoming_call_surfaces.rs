@@ -86,10 +86,19 @@ fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
         .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
 }
 
-/// Takes screenshots until one shows `colour`, and returns where.
+/// Takes screenshots until one shows `colour`, and returns where its
+/// lowest button is: the bottom 20 px of what is in that colour, since the
+/// Banner's ringing dot, above Answer, is the same green.
 fn find_on_screen(harness: &Harness, name: &str, colour: [u8; 3]) -> Region {
     let found = |screenshot: &test_harness::Screenshot| {
-        screenshot.region_where(|pixel| close_to(pixel, colour))
+        let all = screenshot.region_where(|pixel| close_to(pixel, colour))?;
+        screenshot.region_within(
+            Region {
+                top: (all.bottom - 20.0).max(all.top),
+                ..all
+            },
+            |pixel| close_to(pixel, colour),
+        )
     };
     let screenshot =
         harness.screenshot_when(name, DEADLINE, |screenshot| found(screenshot).is_some());
@@ -189,6 +198,12 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
     let state = wait_for_banner(&harness);
     let banner = state.surface("banner").expect("the Banner shows");
     assert_eq!(banner.get("caller").map(String::as_str), Some(FORMATTED));
+    // A number not in Contacts: a # tile, and the meta line says so.
+    assert_eq!(banner.get("initial").map(String::as_str), Some("#"));
+    assert_eq!(
+        banner.get("meta").map(String::as_str),
+        Some("Not in Contacts")
+    );
     assert!(state.ringing);
     assert_eq!(call_window(&state), None);
 }

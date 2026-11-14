@@ -289,6 +289,9 @@ pub enum Input {
     /// Nothing was written: the file changed since the line was offered,
     /// and holds this now.
     KeybindingConfigChanged(HyprlandConfig),
+    /// What the Desktop's Hyprland config holds: at startup and on every
+    /// change, so the Banner names the keybinding actually set.
+    KeybindingRead(HyprlandConfig),
 }
 
 /// Why pairing with a Phone didn't happen.

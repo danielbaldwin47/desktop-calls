@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use test_harness::{AppState, Harness, Key, Screenshot, TestClient};
+use test_harness::{AppState, DESKTOP_CALLS_BINDING, Harness, Key, Screenshot, TestClient};
 
 /// How long the app may take to notice a change.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -29,6 +29,9 @@ const ROUND_TRIP: Duration = Duration::from_secs(3);
 const HOLD: Duration = Duration::from_millis(300);
 
 const NUMBER: &str = "+447700900123";
+
+/// The Banner's footer on a Desktop with no Desktop Calls keybinding.
+const NO_KEYBINDING: &str = "No keybinding set. Add one in Connect your phone…";
 
 /// The Answer button's green.
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
@@ -121,6 +124,37 @@ fn while_ringing_the_keybinding_focuses_the_banner_and_a_answers_on_the_desktop(
         });
 }
 
+/// Enter on the Banner with the keyboard can only answer: Answer holds the
+/// focus, however the buttons are built.
+#[test]
+fn enter_on_the_banner_with_the_keyboard_answers_and_never_declines() {
+    let (harness, _client) = connected_with_a_focused_window();
+    let (path, call) = ring_until_banner(&harness);
+
+    press_the_keybinding(&harness);
+    harness.wait_for_app("the Banner has keyboard focus", DEADLINE, |state| {
+        focused(state, "banner")
+    });
+    harness.keyboard().press(Key::Return);
+
+    harness.wait_for_app("the Call is live", ROUND_TRIP, |state| {
+        is_live(state, call)
+    });
+    let recorded = harness
+        .simulated_phone()
+        .wait_for_recorded("the Call is answered", DEADLINE, |recorded| {
+            recorded
+                .iter()
+                .any(|recorded| recorded.path == path && recorded.member == "Answer")
+        });
+    assert!(
+        !recorded
+            .iter()
+            .any(|recorded| recorded.path == path && recorded.member == "Hangup"),
+        "{recorded:#?}"
+    );
+}
+
 #[test]
 fn while_ringing_the_keybinding_focuses_the_banner_and_d_declines() {
     let (harness, _client) = connected_with_a_focused_window();
@@ -150,6 +184,50 @@ fn while_ringing_the_keybinding_focuses_the_banner_and_d_declines() {
     );
 }
 
+fn banner_footer(state: &AppState) -> Option<&str> {
+    state
+        .surface("banner")
+        .and_then(|banner| banner.get("footer"))
+        .map(String::as_str)
+}
+
+fn write_bindings(harness: &Harness, bindings: &str) {
+    let file = harness.directory().join("config/hypr/bindings.lua");
+    let written = file
+        .parent()
+        .map(std::fs::create_dir_all)
+        .and_then(Result::ok)
+        .and_then(|()| std::fs::write(&file, bindings).ok());
+    assert!(written.is_some(), "write {}", file.display());
+}
+
+/// The Banner's footer names the keybinding actually set, and follows the
+/// Hyprland config as it changes while a Call rings: from none, with no
+/// `hypr` folder yet, to the Desktop Calls one, to one taken by another app.
+#[test]
+fn the_banner_names_the_keybinding_set_and_follows_the_config_as_it_changes() {
+    let (harness, _client) = connected_with_a_focused_window();
+    ring_until_banner(&harness);
+    harness.wait_for_app("the footer says no keybinding is set", DEADLINE, |state| {
+        banner_footer(state) == Some(NO_KEYBINDING)
+    });
+
+    write_bindings(&harness, DESKTOP_CALLS_BINDING);
+    harness.wait_for_app("the footer names the keybinding", DEADLINE, |state| {
+        banner_footer(state) == Some("Super Alt C then A or D")
+    });
+
+    write_bindings(
+        &harness,
+        &format!("{DESKTOP_CALLS_BINDING}o.bind(\"SUPER + ALT + C\", \"Calendar\", \"calendar\")\n"),
+    );
+    harness.wait_for_app(
+        "the footer says no keybinding is set once another app takes the keys",
+        DEADLINE,
+        |state| banner_footer(state) == Some(NO_KEYBINDING),
+    );
+}
+
 #[test]
 fn escape_gives_focus_back_and_the_call_keeps_ringing() {
     let (harness, client) = connected_with_a_focused_window();
@@ -161,22 +239,39 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
     client.wait_for("the test client lost keyboard focus", DEADLINE, |line| {
         line == "keyboard-leave"
     });
-    let state = harness.app_state();
+    let state = harness.wait_for_app(
+        "the focused Banner shows its keys and how to give the keyboard back",
+        DEADLINE,
+        |state| {
+            state.surface("banner").is_some_and(|banner| {
+                banner.get("keycaps").map(String::as_str) == Some("A, D")
+                    && banner.get("footer").map(String::as_str)
+                        == Some("Esc gives the keyboard back; the Call keeps ringing")
+            })
+        },
+    );
     assert_eq!(
         state
             .surface("banner")
             .and_then(|banner| banner.get("heading"))
             .map(String::as_str),
-        Some("Press A to answer or D to decline"),
-        "the focused Banner says which keys work"
+        Some("Incoming call"),
+        "the eyebrow stays put; the keys are on the buttons"
     );
     let _ = harness.screenshot("banner-focused");
 
     harness.keyboard().press(Key::Escape);
 
-    let state = harness.wait_for_app("the Banner lets go of the keyboard", DEADLINE, |state| {
-        state.surface("banner").is_some() && !focused(state, "banner")
-    });
+    let state = harness.wait_for_app(
+        "the Banner lets go of the keyboard and hides its keycaps",
+        DEADLINE,
+        |state| {
+            state
+                .surface("banner")
+                .is_some_and(|banner| !banner.contains_key("keycaps"))
+                && !focused(state, "banner")
+        },
+    );
     assert!(state.ringing);
     // Typing reaches the user's window again, and A answers nothing.
     harness.keyboard().type_text("a");

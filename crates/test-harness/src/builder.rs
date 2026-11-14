@@ -57,6 +57,8 @@ pub struct Builder {
     /// The Desktop's `WirePlumber` drop-ins, or `None` for audio set up for
     /// Calls.
     wireplumber: Option<Vec<WirePlumberEntry>>,
+    /// What Omarchy's `hypr/bindings.lua` holds, if the Desktop has one.
+    hyprland_bindings: Option<String>,
 }
 
 /// One entry in the Desktop's `WirePlumber` drop-in folder.
@@ -405,6 +407,15 @@ impl Builder {
         self
     }
 
+    /// Puts Omarchy's personal keybindings file, `hypr/bindings.lua`,
+    /// holding `text`, in the scenario's config folder before the app
+    /// starts. Without it, the Desktop has no Hyprland config, so no
+    /// keybinding.
+    pub fn hyprland_bindings(mut self, text: &str) -> Self {
+        self.hyprland_bindings = Some(text.to_owned());
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -413,8 +424,8 @@ impl Builder {
     }
 
     /// Sets up the scenario's home and config folders under `directory`:
-    /// the Omarchy theme, the notification daemon's state and the
-    /// `WirePlumber` drop-ins.
+    /// the Omarchy theme, the notification daemon's state, the
+    /// `WirePlumber` drop-ins and the Hyprland bindings.
     fn set_up_home(&mut self, directory: &Path) {
         if let Some(theme) = self.omarchy_theme {
             stand_ins::switch_omarchy_theme(&directory.join("home"), theme)
@@ -422,6 +433,12 @@ impl Builder {
         }
         self.notification_state.set_up(&directory.join("home"));
         write_wireplumber(&directory.join("config"), self.wireplumber.take());
+        if let Some(text) = self.hyprland_bindings.take() {
+            let hypr = directory.join("config/hypr");
+            fs::create_dir_all(&hypr)
+                .and_then(|()| fs::write(hypr.join("bindings.lua"), text))
+                .expect("write the Hyprland bindings");
+        }
     }
 
     /// Starts private buses, the compositor if asked for, the Simulated Phone

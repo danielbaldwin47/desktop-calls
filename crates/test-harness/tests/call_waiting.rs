@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
 use test_harness::{
-    AppState, BAR_COLOUR, BAR_HEIGHT, Bus, Harness, LAYOUT_SIZE, RecordedMethodCall, Region,
+    AppState, BAR_COLOUR, BAR_HEIGHT, Bus, Harness, Key, LAYOUT_SIZE, RecordedMethodCall, Region,
     Screenshot,
 };
 
@@ -292,12 +292,22 @@ fn a_call_during_a_live_one_waits_with_three_options_and_the_desktop_stays_silen
     );
     assert_eq!(
         shown.get("heading").map(String::as_str),
-        Some("Waiting Call")
+        Some("Waiting call")
     );
     assert_eq!(
         shown.get("caller").map(String::as_str),
         Some("+44 7700 900456")
     );
+    // Each choice says what happens to the Call with Bob.
+    assert_eq!(
+        shown.get("hold-and-answer-consequence").map(String::as_str),
+        Some("+44\u{a0}7700\u{a0}900123 waits on hold")
+    );
+    assert_eq!(
+        shown.get("end-and-answer-consequence").map(String::as_str),
+        Some("Ends the Call with +44\u{a0}7700\u{a0}900123")
+    );
+    assert_eq!(shown.get("decline-consequence"), None);
     assert!(state.surface("call-window").is_some());
     harness.app_holds("the Desktop doesn't ring", HOLD, |state| !state.ringing);
     assert!(
@@ -407,6 +417,11 @@ fn a_waiting_call_left_to_ring_out_raises_a_missed_call_notification() {
     });
     on_a_call(&harness);
     let (alice_path, _) = alice_waits(&harness);
+    harness.wait_for_app("the Banner shows Alice's initial, label and number", DEADLINE, |state| {
+        let field = |key| banner(state).and_then(|banner| banner.get(key)).cloned();
+        field("initial").as_deref() == Some("A")
+            && field("meta").as_deref() == Some("mobile · +44 7700 900456")
+    });
     let mut history = vcards::call(CallKind::Missed, Some(ALICE), "20261105T100000");
     history.push_str(&vcards::call(
         CallKind::Received,
@@ -484,19 +499,16 @@ fn app_region(screenshot: &Screenshot) -> Option<Region> {
 
 /// The keybinding gives the Banner the keyboard; waits until it has it.
 fn focus_banner(harness: &Harness) {
-    focus_banner_saying(
-        harness,
-        "Press H to Hold & Answer, E to End & Answer, or D to decline",
-    );
+    focus_banner_showing(harness, "H, E, D");
 }
 
-/// [`focus_banner`], for a Banner whose heading then says `heading`.
-fn focus_banner_saying(harness: &Harness, heading: &str) {
+/// [`focus_banner`], for a Banner whose buttons then show `keycaps`.
+fn focus_banner_showing(harness: &Harness, keycaps: &str) {
     harness.activate();
     harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
         banner(state).is_some_and(|banner| {
             banner.get("focused").map(String::as_str) == Some("true")
-                && banner.get("heading").map(String::as_str) == Some(heading)
+                && banner.get("keycaps").map(String::as_str) == Some(keycaps)
         })
     });
 }
@@ -863,10 +875,12 @@ fn with_a_call_on_hold_a_third_call_offers_only_end_and_answer_which_ends_only_t
         DEADLINE,
         |_| true,
     ));
-    focus_banner_saying(&harness, "Press E to End & Answer, or D to decline");
+    focus_banner_showing(&harness, "E, D");
     harness.keyboard().type_text("ha");
+    // Enter has no Answer to press here, and must not end or decline.
+    harness.keyboard().press(Key::Return);
     harness.simulated_phone().recorded_holds(
-        "neither H nor A asks the Phone anything",
+        "neither H, A nor Enter asks the Phone anything",
         HOLD,
         |recorded| asked(recorded) == before,
     );
@@ -955,6 +969,12 @@ fn with_only_a_held_call_answer_answers_the_waiting_call_and_keeps_the_held_one(
         },
     );
     let carol = state.calls[1].id;
+    assert_eq!(
+        banner(&state)
+            .and_then(|banner| banner.get("answer-consequence"))
+            .map(String::as_str),
+        Some("+44\u{a0}7700\u{a0}900123 stays on hold")
+    );
     assert_eq!(call_window(&state, "swap"), None);
     for refused in [harness.hold_and_answer(), harness.end_and_answer()] {
         let error = refused.expect_err("nothing is live to hold or end");

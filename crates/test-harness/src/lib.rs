@@ -127,6 +127,12 @@ const SYSTEM_PYTHON: &str = "/usr/bin/python3";
 /// number from Ofcom's drama range.
 pub const TEST_NUMBER: &str = "+447700900456";
 
+/// Omarchy's `bindings.lua` with the Desktop Calls keybinding on its
+/// usual keys, as the Setup Window adds it, for
+/// [`Builder::hyprland_bindings`].
+pub const DESKTOP_CALLS_BINDING: &str =
+    "o.bind(\"SUPER + ALT + C\", \"Desktop Calls\", \"/usr/bin/desktop-calls\")\n";
+
 /// The script `just install` runs.
 const INSTALL_SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/install.py");
 

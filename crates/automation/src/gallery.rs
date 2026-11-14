@@ -3,7 +3,8 @@
 //! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
 //! Each surface ticket adds its states to [`STATES`], or to a list of its
-//! own in a module here, such as [`call_pill::CALL_PILL_STATES`]. The Indicator's
+//! own in a module here, such as [`call_pill::CALL_PILL_STATES`] or
+//! [`banner::BANNER_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark.
 
@@ -17,11 +18,13 @@ use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
 
+mod banner;
 mod call_pill;
 mod indicator;
 mod look;
 mod page;
 
+use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, draw_indicator, indicator_path,
@@ -72,60 +75,6 @@ const STATES: &[State] = &[
         prepare: as_is,
         reach: connect,
         shown: |_, _| true,
-    },
-    State {
-        name: "incoming-call-banner",
-        title: "The Incoming Call Banner, ringing",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            ring(harness);
-        },
-        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
-    },
-    State {
-        name: "incoming-call-banner-keyboard",
-        title: "The Incoming Call Banner, ringing, given the keyboard by the keybinding: an accent border",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            ring(harness);
-            harness.activate();
-            harness.wait_for_app("the Banner has the keyboard", DEADLINE, |state| {
-                state
-                    .surface("banner")
-                    .and_then(|banner| banner.get("focused"))
-                    .is_some_and(|focused| focused == "true")
-            });
-        },
-        shown: |screenshot, look| {
-            shows(screenshot, look.green())
-                && shows(screenshot, look.red())
-                && bordered(screenshot, look.accent())
-        },
-    },
-    State {
-        name: "incoming-call-banner-identifying",
-        title: "The Incoming Call Banner, ringing with no number yet, which may still come",
-        // The Banner identifies the caller for only 2 s, so a capture on a
-        // slow runner could show "Withheld number" under this caption.
-        still: identifying,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            // A withheld number: the Banner identifies the caller for as long
-            // as the Phone may still report one, longer than the
-            // `late-line-identification` quirk's number takes.
-            let _path = harness.simulated_phone().ring("");
-            harness.wait_for_app(
-                "the Banner is identifying the caller",
-                DEADLINE,
-                identifying,
-            );
-        },
-        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
         name: "call-window-live",
@@ -269,19 +218,6 @@ const STATES: &[State] = &[
         shown: without_controls,
     },
     State {
-        name: "call-waiting-banner",
-        title: "A Waiting Call: the Banner, with Hold & Answer, flush top right, and the Call Window flush bottom right",
-        still: expanded,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            on_a_call(harness);
-            hold_call_window_expanded(harness);
-            waiting(harness);
-        },
-        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
-    },
-    State {
         name: "call-window-held",
         title: "The Call Window with two Calls: the answered one live, the first on hold in the row above it",
         still: |_| true,
@@ -310,7 +246,8 @@ const STATES: &[State] = &[
                 },
             );
         },
-        shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
+        // The Banner's ringing dot is the only green on the screen.
+        shown: |screenshot, look| shows(screenshot, look.red()) && shows(screenshot, look.green()),
     },
     State {
         name: "call-window-connection-lost",
@@ -697,14 +634,6 @@ fn connect(harness: &Harness) {
     });
 }
 
-/// Whether the Banner's caller line says the caller is being identified.
-fn identifying(state: &AppState) -> bool {
-    state
-        .surface("banner")
-        .and_then(|banner| banner.get("caller"))
-        .is_some_and(|caller| caller == "Identifying caller…")
-}
-
 /// Rings the Phone, waits for the Banner and returns the Call's id.
 fn ring(harness: &Harness) -> u32 {
     let _path = harness.simulated_phone().ring(NUMBER);
@@ -925,7 +854,7 @@ pub fn run(options: &Options) -> ExitCode {
 
 /// Every state the gallery shows, in order.
 fn all_states() -> impl Iterator<Item = &'static State> {
-    STATES.iter().chain(CALL_PILL_STATES)
+    STATES.iter().chain(BANNER_STATES).chain(CALL_PILL_STATES)
 }
 
 /// Renders each of `shots` into `output`, several at a time: `workers`, or

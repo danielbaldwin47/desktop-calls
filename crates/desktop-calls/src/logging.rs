@@ -132,6 +132,9 @@ pub enum EventKind {
     DoNotDisturbChanged,
     DoNotDisturbUnreadable,
     DoNotDisturbUnwatched,
+    /// The Hyprland config can't be watched for the keybinding the Banner
+    /// names.
+    KeybindingUnwatched,
     RoundingUnknown,
     EdgeGapUnknown,
     IndicatorRegistered,
@@ -251,6 +254,7 @@ impl EventKind {
             Self::DoNotDisturbChanged => "do-not-disturb-changed",
             Self::DoNotDisturbUnreadable => "do-not-disturb-unreadable",
             Self::DoNotDisturbUnwatched => "do-not-disturb-unwatched",
+            Self::KeybindingUnwatched => "keybinding-unwatched",
             Self::RoundingUnknown => "rounding-unknown",
             Self::EdgeGapUnknown => "edge-gap-unknown",
             Self::IndicatorRegistered => "indicator-registered",

@@ -39,11 +39,19 @@ pub(crate) mod class {
     /// colour at full strength, so it reads at 4.5:1 like any text.
     pub(crate) const KEYCAP: &str = "type-keycap";
     /// One row of keycaps with what each does, at a surface's foot.
-    #[expect(
-        dead_code,
-        reason = "for the surfaces spec #221 rebuilds; the CSS is in place"
-    )]
     pub(crate) const FOOTER_LINE: &str = "footer-line";
+    /// With [`FOOTER_LINE`]: one run of keys and words, with no rule above
+    /// it, as the Banner's.
+    pub(crate) const RUN: &str = "run";
+    /// The Banner's ringing dot: 8 across, in the answer colour, ringed.
+    pub(crate) const RINGING_DOT: &str = "ringing-dot";
+    /// The square beside who is calling: their initial, or `#`, 40 across.
+    pub(crate) const INITIAL_TILE: &str = "initial-tile";
+    /// A button with a second line under its label, 48 high.
+    pub(crate) const TWO_LINE: &str = "two-line";
+    /// The second line of a [`TWO_LINE`] button: what the choice does,
+    /// 11/500.
+    pub(crate) const CONSEQUENCE: &str = "consequence";
     /// On a surface: it has the keyboard, so its border takes the accent.
     pub(crate) const HAS_KEYBOARD: &str = "has-keyboard";
     /// On a surface: the microphone is muted, so its border takes the
@@ -96,6 +104,9 @@ pub(crate) mod space {
 /// The largest corner radius a control takes, and a keycap.
 const CONTROL_RADIUS: u32 = 8;
 const KEYCAP_RADIUS: u32 = 3;
+/// The largest corner radius the Banner's initial tile takes: round, at 40
+/// across.
+const INITIAL_TILE_RADIUS: u32 = 20;
 
 /// The roles, types and pieces that don't depend on the theme. Colours come
 /// only from the `--dc-*` variables [`css`] defines.
@@ -128,6 +139,26 @@ const STATIC: &str = r#"
     font-size: 11.5px; color: var(--dc-secondary);
 }
 .footer-line > box { border-spacing: 6px; }
+.footer-line.run { border-spacing: 5px; padding-top: 0; border-top: none; }
+.footer-line.run > box { border-spacing: 2px; }
+.ringing-dot {
+    min-width: 8px; min-height: 8px; border-radius: 4px; margin: 0 2px;
+    background: var(--dc-answer); box-shadow: 0 0 0 3px var(--dc-answer-ring);
+}
+.initial-tile {
+    min-width: 40px; min-height: 40px; background: var(--dc-raised);
+    font-family: monospace; font-size: 16px; font-weight: 600; color: var(--dc-secondary);
+}
+.desktop-calls-surface button.two-line { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+.consequence { font-size: 11px; font-weight: 500; }
+.desktop-calls-surface button.end-and-answer {
+    background: transparent; color: var(--dc-missed);
+    box-shadow: inset 0 0 0 1px var(--dc-end);
+}
+.desktop-calls-surface button.end-and-answer:hover,
+.desktop-calls-surface button.end-and-answer:focus-visible {
+    background: var(--dc-end); color: var(--dc-call-label); box-shadow: none;
+}
 
 .dim-label { opacity: 1; color: var(--dc-secondary); }
 .missed { color: var(--dc-missed); }
@@ -244,6 +275,7 @@ pub(super) fn css(
         ("accent", roles.accent),
         ("accent-label", roles.accent_label),
         ("answer", roles.answer),
+        ("answer-ring", roles.answer_ring),
         ("end", roles.end),
         ("call-label", roles.call_label),
         ("missed", roles.missed),
@@ -267,12 +299,14 @@ pub(super) fn css(
     );
     if let Some(rounding) = rounding {
         let control = rounding.min(CONTROL_RADIUS);
+        let tile = rounding.min(INITIAL_TILE_RADIUS);
         let _ = writeln!(
             css,
             ".desktop-calls-surface {{ border-radius: {rounding}px; }}\n\
              .desktop-calls-surface button,\n\
              .desktop-calls-surface entry,\n\
-             .desktop-calls-surface .notice {{ border-radius: {control}px; }}"
+             .desktop-calls-surface .notice {{ border-radius: {control}px; }}\n\
+             .initial-tile {{ border-radius: {tile}px; }}"
         );
     }
     css

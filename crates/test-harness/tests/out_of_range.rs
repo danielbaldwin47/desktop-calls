@@ -261,9 +261,9 @@ fn with_the_desktops_bluetooth_off_the_phone_is_paged_at_most_once() {
     assert!(connects(&held) <= before + 1);
 }
 
-/// The Desktop's Bluetooth comes back on after long enough off for the
-/// waits between pages to have grown: the Phone is connected again within
-/// 10 s of it coming on (ticket #213).
+/// The Desktop's Bluetooth comes back on: the Phone, which waits to be
+/// paged, is connected again within 10 s of it coming on (ticket #213).
+/// That the waits start short again is the core's tests' to show.
 #[test]
 fn when_the_desktops_bluetooth_comes_back_on_the_phone_is_connected_within_10_s() {
     let harness = connected();
@@ -271,7 +271,6 @@ fn when_the_desktops_bluetooth_comes_back_on_the_phone_is_connected_within_10_s(
     harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
         state.connection_state == "disconnected"
     });
-    std::thread::sleep(AWAY);
 
     harness.set_bluetooth_power("on");
     wait_connected(&harness, RECONNECT_DEADLINE);

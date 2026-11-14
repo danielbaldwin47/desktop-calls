@@ -48,7 +48,7 @@ pub fn status(json: bool) -> ExitCode {
         Ok(status) => {
             // While calls are off the Phone is disconnected by the user's
             // choice, not out of range: that is all the status says.
-            let (state, until, _) = &status.calls_off;
+            let (state, until, pending) = &status.calls_off;
             let until = (*until != 0).then(|| clock::local_time(Timestamp(until * 1_000)));
             match messages::calls_off_status(state == "off", until) {
                 Some(line) => println!("{line}"),
@@ -60,6 +60,9 @@ pub fn status(json: bool) -> ExitCode {
                         status.hands_free_lost
                     )
                 ),
+            }
+            if *pending {
+                println!("{}", messages::calls_off_pending_status(until));
             }
             ExitCode::SUCCESS
         }
@@ -109,16 +112,32 @@ pub fn calls_off(length: Option<&str>, until: Option<&str>, until_morning: bool)
     };
     let seconds = deadline.map_or(0, |deadline| deadline.0 / 1_000);
     let shown = deadline.map(|_| clock::local_time(Timestamp(seconds * 1_000)));
-    turn_calls(
-        "TurnCallsOff",
-        &(seconds,),
-        &messages::calls_turned(true, shown),
-    )
+    turn_calls("TurnCallsOff", &(seconds,), |reply| {
+        // An app from before ticket #204 answers nothing.
+        if reply.body().deserialize::<bool>().unwrap_or(false) {
+            messages::calls_off_waits(shown)
+        } else {
+            messages::calls_turned(true, shown)
+        }
+    })
 }
 
-/// `desktop-calls calls on`: turns calls on.
+/// `desktop-calls calls on`: turns calls on, or keeps them on while a
+/// turn-off waits for the last Call to end. It always sends `TurnCallsOn`,
+/// which does both, so a Call ending between the status read and the
+/// request still leaves calls on; the status only picks what is said.
 pub fn calls_on() -> ExitCode {
-    turn_calls("TurnCallsOn", &(), &messages::calls_turned(false, None))
+    let context = MainContext::default();
+    let pending = context
+        .block_on(read_status(GlibRuntime::new(context.clone())))
+        .is_ok_and(|status| status.calls_off.2);
+    turn_calls("TurnCallsOn", &(), move |_| {
+        if pending {
+            messages::calls_kept_on().to_owned()
+        } else {
+            messages::calls_turned(false, None)
+        }
+    })
 }
 
 /// The milliseconds `length` names, such as `90m` or `2h`: a whole number
@@ -137,9 +156,9 @@ fn length_ms(length: &str) -> Option<u64> {
     (1..=24 * 3_600_000).contains(&length).then_some(length)
 }
 
-/// Calls `method` with `body` to turn calls off or on, and prints `said`
-/// once the app took it, or why it didn't.
-fn turn_calls<B>(method: &str, body: &B, said: &str) -> ExitCode
+/// Calls `method` with `body` to turn calls off or on, and prints what
+/// `said` makes of the reply once the app took it, or why it didn't.
+fn turn_calls<B>(method: &str, body: &B, said: impl FnOnce(&zbus::Message) -> String) -> ExitCode
 where
     B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
 {
@@ -158,7 +177,7 @@ where
             )
             .await;
         match reply {
-            Ok(_) => Ok(()),
+            Ok(reply) => Ok(reply),
             Err(zbus::Error::MethodError(name, Some(text), _))
                 if name.starts_with(control::ERROR_PREFIX) =>
             {
@@ -168,8 +187,8 @@ where
         }
     });
     match turned {
-        Ok(()) => {
-            println!("{said}");
+        Ok(reply) => {
+            println!("{}", said(&reply));
             ExitCode::SUCCESS
         }
         Err(Refusal::Failure(failure)) => report(failure),

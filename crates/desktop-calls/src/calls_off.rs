@@ -3,11 +3,13 @@
 //! blocking or unblocking the Phone is put right at the next start.
 //!
 //! It is one JSON file, `$XDG_STATE_HOME/desktop-calls/calls-off.json`,
-//! holding the state ("off", or "on" while the Phone is being unblocked),
-//! the address of the Phone the app blocked, and, for calls off until a
+//! holding the state ("off", "on" while the Phone is being unblocked, or
+//! "pending" while a turn-off waits for the last Call to end), the address
+//! of the Phone the app blocked or is to block, and, for calls off until a
 //! deadline, `until`: the Unix time in seconds they come back on. It is
 //! written before the Phone is blocked or unblocked, and removed once
-//! calls are on with the Phone unblocked. The directory is 0700 and the file 0600; the file is
+//! calls are on with the Phone unblocked, or a waiting turn-off is
+//! cancelled. The directory is 0700 and the file 0600; the file is
 //! written whole to a temporary file and renamed over the old one, so a
 //! crash leaves one or the other. A file that can't be read, or isn't one
 //! this version wrote, counts as none: the app logs it and leaves the
@@ -74,7 +76,26 @@ pub fn deadline_passed(address: &str) {
     tracing::info!(
         event_kind = %EventKind::CallsOffDeadlinePassed,
         phone_address = %address,
-        "Calls off: the deadline passed, turning calls on"
+        "Calls off: the deadline passed, so calls are on"
+    );
+}
+
+/// Logs that calls were turned off during a Call, for the Phone with
+/// `address`: they go off once no Call is left.
+pub fn pending(address: &str) {
+    tracing::info!(
+        event_kind = %EventKind::CallsOffPending,
+        phone_address = %address,
+        "Calls off: waiting for the last Call to end"
+    );
+}
+
+/// Logs that the turn-off waiting for the last Call to end was cancelled.
+pub fn kept_on(address: &str) {
+    tracing::info!(
+        event_kind = %EventKind::CallsKeptOn,
+        phone_address = %address,
+        "Calls kept on: the waiting turn-off is cancelled"
     );
 }
 
@@ -182,6 +203,9 @@ fn parts(record: &CallsOffRecord) -> (&'static str, &str, Option<u64>) {
             ("off", address, until.map(|until| until.at.0 / 1_000))
         }
         CallsOffRecord::TurningOn { address } => ("on", address, None),
+        CallsOffRecord::Pending { address, until } => {
+            ("pending", address, until.map(|until| until.at.0 / 1_000))
+        }
     }
 }
 
@@ -212,6 +236,7 @@ fn from_json(document: &Value) -> Option<CallsOffRecord> {
     match document.get("state")?.as_str()? {
         "off" => Some(CallsOffRecord::Off { address, until }),
         "on" => Some(CallsOffRecord::TurningOn { address }),
+        "pending" => Some(CallsOffRecord::Pending { address, until }),
         _ => None,
     }
 }

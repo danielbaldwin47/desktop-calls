@@ -262,6 +262,27 @@ fn uninstalling_while_staging_a_package_makes_no_bluez_call() {
 }
 
 #[test]
+fn uninstalling_during_a_call_with_a_turn_off_waiting_cancels_it_and_blocks_nothing() {
+    let harness = calls_on_with_phone();
+    let call = harness.simulated_phone().ring("+447700900123");
+    harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    let output = harness.cli(&["calls", "off"]);
+    assert!(output.status.success(), "{output:?}");
+    harness.wait_for_app("a turn-off waits", DEADLINE, |state| state.calls_off_pending);
+
+    let output = harness.uninstall_command().output().expect("run install.py");
+
+    assert!(output.status.success(), "{}", said(&output));
+    assert_eq!(said(&output), "");
+    assert!(!record(&harness).exists(), "the record is gone");
+    harness.wait_for_app("nothing waits", DEADLINE, |state| !state.calls_off_pending);
+    harness.simulated_phone().caller_hangs_up(&call);
+    harness.app_holds("calls stay on", SETTLE, |state| state.calls_off == "on");
+    assert!(!harness.simulated_phone().blocked());
+    assert_eq!(unblocks_asked(&harness), 0, "BlueZ was asked to unblock");
+}
+
+#[test]
 fn the_removal_flag_only_goes_with_calls_on() {
     let harness = calls_on_with_phone();
 

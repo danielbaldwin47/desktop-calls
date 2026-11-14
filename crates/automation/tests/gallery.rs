@@ -142,4 +142,17 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
         let file = format!("indicator-off-until-morning-{look}.png");
         assert!(index.contains(&file), "the index shows {file}: {index}");
     }
+    // Turned off during a Call: the menu says calls turn off when it ends,
+    // and offers Keep calls on where Turn calls off was.
+    let pending_menu = menu(output, "calls-off-pending");
+    assert!(
+        pending_menu.starts_with(
+            "Calls turn off when this Call ends\nOpen Dialer\nKeep calls on\nConnect your phone…\n"
+        ),
+        "{pending_menu}"
+    );
+    for look in ["omarchy-light", "omarchy-dark"] {
+        let file = format!("indicator-calls-off-pending-{look}.png");
+        assert!(index.contains(&file), "the index shows {file}: {index}");
+    }
 }

@@ -5,7 +5,7 @@
 //! is blocked. Turning calls on connects it within 10 s, even when the
 //! first `Connect` fails busy. A record a killed app left halfway is put
 //! right at the next start, and a Phone blocked with no record is left
-//! alone.
+//! alone. During a Call, see `calls_off_pending.rs`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -23,7 +23,6 @@ const RECONNECT_DEADLINE: Duration = Duration::from_secs(10);
 /// over: anything that would connect it has had its chance.
 const STAYS_OFF: Duration = Duration::from_secs(8);
 const PHONE_NAME: &str = "My Pixel";
-const NUMBER: &str = "+447700900123";
 
 fn connected() -> Harness {
     let harness = Harness::builder().phone_name(PHONE_NAME).start();
@@ -183,29 +182,6 @@ fn calls_on_connects_within_10_s_when_the_first_connect_fails_busy() {
 
     assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after unblocking");
     harness.wait_for_app_log("br-connection-busy", DEADLINE);
-}
-
-#[test]
-fn calls_cant_be_turned_off_during_a_call() {
-    let harness = connected();
-    let _call = harness.simulated_phone().ring(NUMBER);
-    harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
-
-    let output = harness.cli(&["calls", "off"]);
-
-    assert!(!output.status.success(), "{output:?}");
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "Calls can't be turned off during a Call; turn them off once it has ended.\n"
-    );
-    let menu = harness.tray().menu();
-    assert!(
-        menu.iter()
-            .any(|entry| entry.label == "Turn calls off" && !entry.enabled),
-        "{menu:?}"
-    );
-    assert!(!harness.simulated_phone().blocked());
-    assert_eq!(harness.app_state().calls_off, "on");
 }
 
 #[test]

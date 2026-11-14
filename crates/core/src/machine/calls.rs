@@ -85,7 +85,10 @@ fn forget_earlier_run(state: &mut State, effects: &mut Vec<Effect>) {
 
 pub(super) fn timer_fired(state: &mut State, timer: Timer, effects: &mut Vec<Effect>) {
     match timer {
-        Timer::ForgetEarlierRun => forget_earlier_run(state, effects),
+        Timer::ForgetEarlierRun => {
+            forget_earlier_run(state, effects);
+            super::calls_off::earlier_run_over(state);
+        }
         Timer::Reconnect(wait) => reconnect_due(state, wait, effects),
         Timer::ConnectionLost(loss) => connection_lost_over(state, loss),
         Timer::SetupStep(wait) => setup_timer(state, wait, effects),

@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use test_harness::{AppState, Harness, RecordedMethodCall, TrayItem};
+use test_harness::{AppState, Bus, Harness, RecordedMethodCall, TrayItem};
 
 /// How long the app may take to notice a change on the Phone.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -16,6 +16,8 @@ const RECONNECT_DEADLINE: Duration = Duration::from_secs(10);
 const AWAY: Duration = Duration::from_secs(12);
 const SYNC_DEADLINE: Duration = Duration::from_secs(15);
 const PHONE_NAME: &str = "My Pixel";
+/// The Phone's side of hands-free.
+const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
 const NUMBER: &str = "07700900123";
 
 fn connected() -> Harness {
@@ -274,6 +276,99 @@ fn when_the_desktops_bluetooth_comes_back_on_the_phone_is_connected_within_10_s(
 
     harness.set_bluetooth_power("on");
     wait_connected(&harness, RECONNECT_DEADLINE);
+}
+
+/// Another app drops hands-free alone, and the Phone stays connected with
+/// its media: the app connects hands-free again within 10 s (ticket #216).
+#[test]
+fn hands_free_dropped_with_the_phone_still_connected_comes_back_within_10_s() {
+    let harness = connected();
+    drop_hands_free_from_elsewhere(&harness);
+    harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+
+    wait_connected(&harness, RECONNECT_DEADLINE);
+}
+
+/// Hands-free stays down with the Phone still connected: neither the
+/// Indicator nor `desktop-calls status` says the Phone is out of range
+/// (ticket #216).
+#[test]
+fn a_connected_phone_without_hands_free_is_not_called_out_of_range() {
+    let harness = connected();
+    harness.simulated_phone().enable_quirk("connect-profile-fails");
+    drop_hands_free_from_elsewhere(&harness);
+    harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+
+    indicator_shows(&harness, "Active", "Connection to My Pixel lost");
+    let printed = harness.cli(&["status"]);
+    let status = String::from_utf8_lossy(&printed.stdout);
+    assert!(
+        status.contains("is in range, but not connected for Calls"),
+        "{printed:?}"
+    );
+}
+
+/// BlueZ never answers the connect the app sends as the Phone leaves: the
+/// Phone back in range is still connected within 10 s (ticket #216).
+#[test]
+fn after_a_connect_that_is_never_answered_the_phone_back_in_range_is_connected_within_10_s() {
+    let harness = connected();
+    let phone = harness.simulated_phone();
+    phone.enable_quirk("connect-never-answers-once");
+    let before = connects(&recorded(&harness));
+    out_of_range(&harness);
+    phone.wait_for_recorded("the app pages the Phone", DEADLINE, |recorded| {
+        connects(recorded) > before
+    });
+
+    phone.return_to_range();
+
+    wait_connected(&harness, RECONNECT_DEADLINE);
+}
+
+/// BlueZ never answers a connect the app sent while the Phone was away, and
+/// the Phone came back by itself meanwhile: hands-free dropped later, with
+/// the Phone still connected, still comes back within 10 s (ticket #216).
+#[test]
+fn after_a_connect_that_is_never_answered_hands_free_dropped_comes_back_within_10_s() {
+    let harness = connected();
+    let phone = harness.simulated_phone();
+    phone.enable_quirk("connect-never-answers-once");
+    let before = connects(&recorded(&harness));
+    out_of_range(&harness);
+    phone.wait_for_recorded("the app pages the Phone", DEADLINE, |recorded| {
+        connects(recorded) > before
+    });
+    phone.connect();
+    wait_connected(&harness, DEADLINE);
+
+    drop_hands_free_from_elsewhere(&harness);
+    harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
+        state.connection_state == "disconnected"
+    });
+
+    wait_connected(&harness, RECONNECT_DEADLINE);
+}
+
+/// `DisconnectProfile` for the Phone's hands-free, as any BlueZ client can
+/// send it: the Phone stays connected.
+fn drop_hands_free_from_elsewhere(harness: &Harness) {
+    let device = format!(
+        "/org/bluez/hci0/dev_{}",
+        harness.phone().address.replace(':', "_")
+    );
+    harness.call_phone_method(
+        Bus::System,
+        "org.bluez",
+        &device,
+        "org.bluez.Device1",
+        "DisconnectProfile",
+        &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
+    );
 }
 
 /// Scenario 18.

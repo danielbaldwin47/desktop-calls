@@ -23,6 +23,8 @@
 //!   `org.bluez.Error.Failed` `"br-connection-already-connected"`: the real
 //!   Desktop logged that 15 times from 2026-11-08 to 11-13 (ticket #212),
 //!   and `org.bluez.Error.AlreadyConnected` never.
+//! - With the quirk `connect-never-answers-once`, the next `Connect` for
+//!   the Phone is never answered and changes nothing (ticket #216).
 
 use std::time::{Duration, Instant};
 
@@ -467,6 +469,18 @@ fn connect(
     };
     if let Some(reply) = refused {
         return zbus::block_on(reply.send(system, &message.header()));
+    }
+    {
+        let mut world = lock(world);
+        if world
+            .behaviour
+            .quirks
+            .remove(&telephony::Quirk::ConnectNeverAnswersOnce)
+        {
+            // No reply, ever; BlueZ is free to connect the Phone again.
+            world.range.connecting = false;
+            return Ok(());
+        }
     }
     let paging = Instant::now();
     while !lock(world).range.reachable && paging.elapsed() < PAGE_TIMEOUT {

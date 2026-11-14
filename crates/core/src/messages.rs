@@ -417,14 +417,24 @@ pub fn mute_toggled(muted: bool) -> &'static str {
 }
 
 /// One sentence saying whether the Phone is connected.
+/// `hands_free_lost`: the Phone is in range without hands-free, which the
+/// Desktop is connecting again (ticket #216).
 #[must_use]
-pub fn status(connection_state: &ConnectionState, phone: Option<&Phone>) -> String {
+pub fn status(
+    connection_state: &ConnectionState,
+    phone: Option<&Phone>,
+    hands_free_lost: bool,
+) -> String {
     match (connection_state, phone) {
         (ConnectionState::NotSetUp, _) | (_, None) => "No Phone is set up yet.".to_owned(),
         (ConnectionState::Connecting, Some(phone)) => {
             format!("Connecting to {}.", describe(phone))
         }
         (ConnectionState::Connected, Some(phone)) => format!("Connected to {}.", describe(phone)),
+        (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
+            "{} is in range, but not connected for Calls: connecting it again.",
+            describe(phone)
+        ),
         (ConnectionState::Disconnected, Some(phone)) => {
             format!("{} is out of range or has Bluetooth off.", describe(phone))
         }

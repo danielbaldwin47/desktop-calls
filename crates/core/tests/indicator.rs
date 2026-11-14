@@ -72,12 +72,19 @@ fn live_on_desktop() -> State {
     )
 }
 
+/// Out of range: hands-free drops, then BlueZ reports the Phone's
+/// Bluetooth connection down.
 fn out_of_range() -> State {
     run(
         connected(),
-        [Input::PhoneDisconnected {
-            address: ADDRESS.to_owned(),
-        }],
+        [
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+        ],
     )
 }
 

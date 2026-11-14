@@ -104,6 +104,7 @@ impl CallPill {
         self.surface.call.set(view.call);
         let who = Who::of(&view.caller, view.contact.as_ref());
         self.caller.set_text(&who.caller);
+        set_class(&self.caller, class::NUMBER, who.bare_number);
         let (status, mute) = match view.phase {
             CallWindowPhase::Live {
                 active_since, mute, ..
@@ -111,6 +112,7 @@ impl CallPill {
             phase => (messages::label(status_label(&phase)).to_owned(), None),
         };
         self.status.set_text(&status);
+        set_class(&self.status, class::WORDS, mute.is_none());
         let mute = mute.filter(|_| !view.connection_lost);
         let mute_text = messages::label(if mute == Some(Mute::On) {
             Label::Unmute

@@ -13,7 +13,8 @@ pub(crate) mod class {
     /// Who the Call is with: sans 20/650. With [`NUMBER`] too, a bare
     /// number in monospace 18.
     pub(crate) const WHO: &str = "type-who";
-    /// With [`WHO`]: the caller is a bare number.
+    /// A bare number where a name would be: monospace with tabular figures,
+    /// at the size its other classes give.
     pub(crate) const NUMBER: &str = "number";
     /// A window's title: sans 18/650.
     pub(crate) const HEADING: &str = "type-heading";
@@ -27,8 +28,11 @@ pub(crate) mod class {
     /// figures, in secondary text.
     pub(crate) const META: &str = "type-meta";
     /// A Call's running time: monospace 18/500 with tabular figures; 13 in
-    /// secondary text on the Call Pill.
+    /// secondary text on the Call Pill. With [`WORDS`] too, the same line
+    /// says something other than a time, in sans, so it keeps its height.
     pub(crate) const TIMER: &str = "type-timer";
+    /// With [`TIMER`]: the line holds words, not a time.
+    pub(crate) const WORDS: &str = "words";
     /// A small heading over a group: monospace 10.5/600 in capitals.
     #[expect(
         dead_code,
@@ -77,11 +81,9 @@ const KEYCAP_RADIUS: u32 = 3;
 /// The roles, types and pieces that don't depend on the theme. Colours come
 /// only from the `--dc-*` variables [`css`] defines.
 const STATIC: &str = r#"
+.number { font-family: monospace; font-feature-settings: "tnum"; }
 .type-who { font-size: 20px; font-weight: 650; }
-.type-who.number {
-    font-family: monospace; font-size: 18px; font-weight: 500;
-    font-feature-settings: "tnum";
-}
+.type-who.number { font-size: 18px; font-weight: 500; }
 .type-heading { font-size: 18px; font-weight: 650; }
 .type-body { font-size: 13.5px; font-weight: 400; }
 .type-meta {
@@ -92,6 +94,7 @@ const STATIC: &str = r#"
     font-family: monospace; font-size: 18px; font-weight: 500;
     font-feature-settings: "tnum";
 }
+.type-timer.words { font-family: unset; font-feature-settings: unset; }
 .call-pill .type-timer { font-size: 13px; color: var(--dc-secondary); }
 .type-eyebrow {
     font-family: monospace; font-size: 10.5px; font-weight: 600;

@@ -597,6 +597,7 @@ impl CallWindow {
             ),
         };
         self.status.set_text(&status);
+        set_class(&self.status, class::WORDS, mute.is_none());
         let audio_location = view.audio.map(|audio| {
             messages::label(match audio.location {
                 AudioLocation::Desktop => Label::AudioOnDesktop,

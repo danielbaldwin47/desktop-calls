@@ -121,7 +121,8 @@ mod tests {
 
     #[test]
     fn the_weakest_readable_mix_of_black_on_white_is_about_54_percent() {
-        // #767676 is the lightest grey that reads on white: 4.54 to 1.
+        // #767676 is the lightest grey that reads on white, 4.54 to 1; in
+        // whole percent the first step past it is #757575.
         let mixed = WHITE.weakest_readable_mix(BLACK, &[WHITE]);
         assert_eq!(mixed, Some(Rgb(0x75, 0x75, 0x75)));
     }

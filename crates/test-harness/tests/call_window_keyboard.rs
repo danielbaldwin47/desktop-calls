@@ -164,6 +164,12 @@ fn clicking_mute_mutes_the_microphone_and_the_window_shows_it_unmistakably() {
         marked.right - marked.left >= hang_up.right - hang_up.left - 2.0,
         "the muted mark is too small to miss: {marked:?}"
     );
+    // Hang up sits in the window's 16 px padding; the border is beyond it.
+    assert!(
+        marked.left < hang_up.left - 12.0 && marked.right > hang_up.right + 12.0,
+        "the Call Window's border isn't in the warning colour: {marked:?}; see {}",
+        screenshot.path.display()
+    );
     harness.simulated_phone().wait_for_recorded(
         "MicrophoneVolume is set to 0",
         DEADLINE,

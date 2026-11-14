@@ -101,6 +101,10 @@ const SLOW_RETURN: Duration = Duration::from_secs(4);
 /// the runner to see it and the demo to suspend before it passes.
 const CALLS_OFF_SOON: Duration = Duration::from_secs(5);
 
+/// How far ahead, at least, `quiet-hours-soon` sets Quiet Hours to begin:
+/// long enough for the runner to see calls still on when they are set.
+const QUIET_HOURS_SETTLE: Duration = Duration::from_secs(10);
+
 /// How long Telephony is off the bus when the demo restarts `WirePlumber`.
 const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
 
@@ -183,6 +187,22 @@ impl Demo {
         self.calls_off_until = (now + CALLS_OFF_SOON).as_secs();
         if let Err(error) = self.harness.turn_calls_off(self.calls_off_until) {
             panic!("calls didn't turn off: {error:?}");
+        }
+    }
+
+    /// As `desktop-calls quiet-hours`, from the next minute (on the demo's
+    /// UTC clock) at least [`QUIET_HOURS_SETTLE`] ahead, for a minute: the
+    /// shortest Quiet Hours there are, to keep the demo short.
+    fn quiet_hours_soon(&self) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let minute_of_day = |at: Duration| at.as_secs() % 86_400 / 60;
+        let start = minute_of_day(now + QUIET_HOURS_SETTLE) + 1;
+        let start = u16::try_from(start % 1_440).unwrap_or(0);
+        let end = (start + 1) % 1_440;
+        if let Err(error) = self.harness.set_quiet_hours(start, end) {
+            panic!("Quiet Hours weren't set: {error:?}");
         }
     }
 
@@ -376,6 +396,12 @@ impl Demo {
             // takes whole minutes, too long for a demo.
             "calls-off-soon" => self.calls_off_soon(),
             "resume-past-calls-off-deadline" => self.resume_past_calls_off_deadline(),
+            "quiet-hours-soon" => self.quiet_hours_soon(),
+            "quiet-hours-off" => {
+                if let Err(error) = self.harness.clear_quiet_hours() {
+                    panic!("Quiet Hours didn't turn off: {error:?}");
+                }
+            }
             // The Phone, blocked and out of the Desktop's hands, pages it as
             // its Bluetooth comes back on: BlueZ refuses it.
             "bluetooth-off-on" => {

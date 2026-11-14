@@ -1,7 +1,7 @@
 //! What the user reads about Calls Off: the Indicator's status and menu
 //! entries, and what the command line says.
 
-use crate::clock::TimeOfDay;
+use crate::clock::{QuietHours, TimeOfDay};
 
 /// The menu entry that turns calls off, over its choices.
 pub(super) const TURN_CALLS_OFF: &str = "Turn calls off";
@@ -18,12 +18,45 @@ pub(super) const UNTIL_PASSED: &str =
     "That time has already passed, so calls stay on; choose a time ahead.";
 
 /// The Indicator's status while calls are off: until `until`, or until the
-/// user turns them on.
-pub(super) fn calls_off(until: Option<TimeOfDay>) -> String {
-    match until {
-        Some(until) => format!("Calls off until {until}"),
-        None => "Calls off".to_owned(),
+/// user turns them on; for Quiet Hours, until they end.
+pub(super) fn calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> String {
+    match (until, quiet_hours) {
+        (Some(until), true) => format!("Calls off until {until} (quiet hours)"),
+        (Some(until), false) => format!("Calls off until {until}"),
+        (None, _) => "Calls off".to_owned(),
     }
+}
+
+/// What `desktop-calls quiet-hours` said once Quiet Hours were set.
+#[must_use]
+pub fn quiet_hours_set(hours: QuietHours) -> String {
+    format!(
+        "Quiet Hours are {} to {}: calls are off then every day, and on again after.",
+        hours.start(),
+        hours.end()
+    )
+}
+
+/// What `desktop-calls quiet-hours off` said.
+#[must_use]
+pub fn quiet_hours_cleared() -> &'static str {
+    "Quiet Hours are off."
+}
+
+/// The line `desktop-calls status` adds while Quiet Hours are set.
+#[must_use]
+pub fn quiet_hours_status(hours: QuietHours) -> String {
+    format!(
+        "Quiet Hours: calls are off every day from {} to {}.",
+        hours.start(),
+        hours.end()
+    )
+}
+
+/// Why `desktop-calls quiet-hours` or `SetQuietHours` refused the times.
+#[must_use]
+pub fn quiet_hours_unreadable() -> &'static str {
+    "Give Quiet Hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them."
 }
 
 /// The choice under Turn calls off that turns them off for an hour, ending

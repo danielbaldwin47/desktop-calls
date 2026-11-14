@@ -48,9 +48,10 @@ async fn turn_calls_on(runtime: &GlibRuntime) -> ExitCode {
         return ExitCode::SUCCESS;
     };
     // An "on" record is a turn-on stopped halfway: the Phone is blocked
-    // still, and by the app. A waiting turn-off blocked nothing: it is
-    // cancelled, through the service so it doesn't apply it meanwhile.
-    let (CallsOffRecord::Off { address, .. } | CallsOffRecord::TurningOn { address }) = record
+    // still, and by the app. A waiting turn-off, or calls kept on through
+    // Quiet Hours, blocked nothing: a waiting turn-off is cancelled, through
+    // the service so it doesn't apply it meanwhile.
+    let (CallsOffRecord::Off { address, .. } | CallsOffRecord::TurningOn { address, .. }) = record
     else {
         service_turned_calls_on(runtime).await;
         calls_off::save(None);
@@ -108,7 +109,7 @@ async fn service_turned_calls_on(runtime: &GlibRuntime) -> bool {
     }
     let looks = SERVICE_DEADLINE.as_millis() / LOOK_EVERY.as_millis();
     for _ in 0..looks {
-        if !calls_off::is_kept() {
+        if !calls_off::may_block_phone() {
             return true;
         }
         glib::timeout_future(LOOK_EVERY).await;

@@ -142,6 +142,16 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
         let file = format!("indicator-off-until-morning-{look}.png");
         assert!(index.contains(&file), "the index shows {file}: {index}");
     }
+    // Calls off for Quiet Hours: the menu says so, and until when.
+    let quiet_menu = menu(output, "off-quiet-hours");
+    assert_eq!(
+        quiet_menu,
+        "Calls off until 23:59 (quiet hours)\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
+    );
+    for look in ["omarchy-light", "omarchy-dark"] {
+        let file = format!("indicator-off-quiet-hours-{look}.png");
+        assert!(index.contains(&file), "the index shows {file}: {index}");
+    }
     // Turned off during a Call: the menu says calls turn off when it ends,
     // and offers Keep calls on where Turn calls off was.
     let pending_menu = menu(output, "calls-off-pending");

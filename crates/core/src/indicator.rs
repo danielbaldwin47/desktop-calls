@@ -49,9 +49,10 @@ pub enum IndicatorLook {
 pub enum IndicatorStatus {
     NoPhone,
     /// Calls are off until this local time, or until the user turns them
-    /// on.
+    /// on; with `quiet_hours`, for Quiet Hours, until they end.
     CallsOff {
         until: Option<TimeOfDay>,
+        quiet_hours: bool,
     },
     /// Calls turn off when the last Call ends. Said instead of the Call's
     /// other party, which the Call Window shows, but not over a ringing
@@ -218,7 +219,7 @@ impl State {
             has_phone.then(|| IndicatorEntry::TurnCallsOff {
                 enabled: !self.calls_turning_on(),
                 for_an_hour: clock.map(|clock| clock.for_an_hour),
-                until_morning: clock.map(|clock| clock.until_morning),
+                until_morning: self.until_morning(),
             })
         }
     }
@@ -227,6 +228,7 @@ impl State {
     fn calls_off_status(&self) -> IndicatorStatus {
         IndicatorStatus::CallsOff {
             until: self.calls_off_until().map(|until| until.shown),
+            quiet_hours: self.calls_off_for_quiet_hours(),
         }
     }
 

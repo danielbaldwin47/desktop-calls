@@ -107,12 +107,14 @@ fn record_off() -> CallsOffRecord {
     CallsOffRecord::Off {
         address: ADDRESS.to_owned(),
         until: None,
+        quiet_hours: false,
     }
 }
 
 fn record_turning_on() -> CallsOffRecord {
     CallsOffRecord::TurningOn {
         address: ADDRESS.to_owned(),
+        kept_on_until: None,
     }
 }
 
@@ -171,7 +173,13 @@ fn while_calls_are_off_the_indicator_shows_the_off_look_and_turn_calls_on() {
     let view = state.indicator(&state.surfaces());
 
     assert_eq!(view.look, IndicatorLook::Off);
-    assert_eq!(view.status, IndicatorStatus::CallsOff { until: None });
+    assert_eq!(
+        view.status,
+        IndicatorStatus::CallsOff {
+            until: None,
+            quiet_hours: false,
+        }
+    );
     assert!(!view.needs_attention);
     assert_eq!(messages::indicator_tooltip(&view), "Calls off");
     assert!(view.menu.contains(&IndicatorEntry::TurnCallsOn));

@@ -202,7 +202,9 @@ impl World {
 
     /// The app against the Simulated Phone, in a compositor of its own.
     fn demo(headless: bool) -> Option<Self> {
-        let builder = Harness::builder().phone_connected();
+        // UTC, so the demo can tell the local clock from the Unix time: 6.6
+        // sets Quiet Hours a minute ahead by it.
+        let builder = Harness::builder().phone_connected().time_zone("UTC");
         let builder = match super::demo::desktop_socket() {
             Some(socket) if !headless => builder.nested_screen(socket),
             _ => builder.headless_screen(),

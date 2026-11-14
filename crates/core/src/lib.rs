@@ -23,7 +23,7 @@ mod number;
 pub use call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,
 };
-pub use clock::{Deadline, TimeOfDay, WallClock};
+pub use clock::{Deadline, QuietHours, QuietHoursClock, TimeOfDay, WallClock};
 pub use connection::{ConnectionState, Phone, UnknownConnectionState};
 pub use contacts::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Contact, ContactNumber, Contacts,

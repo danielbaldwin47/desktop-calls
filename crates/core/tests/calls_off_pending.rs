@@ -52,6 +52,7 @@ fn clock(minutes: u64) -> Input {
             at: Timestamp(NOW + 630 * MINUTE),
             shown,
         },
+        quiet_hours: None,
     })
 }
 
@@ -112,6 +113,7 @@ fn record_pending(until: Option<Deadline>) -> CallsOffRecord {
     CallsOffRecord::Pending {
         address: ADDRESS.to_owned(),
         until,
+        quiet_hours: false,
     }
 }
 
@@ -119,6 +121,7 @@ fn record_off(until: Option<Deadline>) -> CallsOffRecord {
     CallsOffRecord::Off {
         address: ADDRESS.to_owned(),
         until,
+        quiet_hours: false,
     }
 }
 

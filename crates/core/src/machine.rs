@@ -4,7 +4,7 @@
 use crate::call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Request, Transport,
 };
-use crate::clock::WallClock;
+use crate::clock::{Deadline, QuietHours, WallClock};
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, Unavailable};
 use crate::earlier_run::{EarlierCall, EarlierRun};
@@ -23,6 +23,7 @@ mod input;
 mod missed_calls;
 mod phone;
 mod presence;
+mod quiet_hours;
 mod setup;
 mod view;
 
@@ -348,6 +349,11 @@ pub struct State {
     /// The wall clock as the shell last reported it, while the Desktop was
     /// awake.
     clock: Option<WallClock>,
+    /// The Quiet Hours the user set, if any.
+    quiet_hours: Option<QuietHours>,
+    /// While calls are on through Quiet Hours the user turned them on in:
+    /// when those Quiet Hours next begin.
+    kept_on_until: Option<Deadline>,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -715,6 +721,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     setup::follow_contacts(&mut state, &mut effects);
     follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
     calls_off::apply_pending(&mut state, &mut effects);
+    quiet_hours::apply(&mut state, &mut effects);
     calls_off::hold_back_connects(&state, &mut effects);
     (state, effects)
 }
@@ -854,6 +861,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PhoneBlockFailed { .. }) => {
             calls_off::calls_off_input(&mut state, input, &mut effects);
         }
+        input @ (Input::QuietHoursKept(_) | Input::SetQuietHours(_) | Input::ClearQuietHours) => {
+            quiet_hours::quiet_hours_input(&mut state, &input, &mut effects);
+        }
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
@@ -928,6 +938,9 @@ fn forget_phone_keeping_desktop(state: &State) -> State {
         paired_phones: state.paired_phones.clone(),
         nearby_phones: state.nearby_phones.clone(),
         desktop: state.desktop.clone(),
+        clock: state.clock,
+        quiet_hours: state.quiet_hours,
+        kept_on_until: state.kept_on_until,
         ..forget_phone(state)
     }
 }

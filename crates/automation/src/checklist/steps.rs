@@ -33,7 +33,7 @@ use keyboard_and_look::{
 use missed_calls::{ring_out, withheld_ring_out};
 use range_and_power::{
     calls_off_until_past_a_suspend, calls_off_until_turned_on, out_of_range_and_back,
-    suspend_and_resume, wireplumber_restart,
+    quiet_hours_soon, suspend_and_resume, wireplumber_restart,
 };
 
 /// A step's script. It returns once the step is done; whether it passed is
@@ -344,6 +344,13 @@ pub const GROUPS: &[Group] = &[
                 needs: &[],
                 title: "Run `desktop-calls calls off --until HH:MM` two minutes ahead, suspend the Desktop past that time, and resume: calls come back on at the resume, and the runner times the reconnect from it",
                 script: Some(calls_off_until_past_a_suspend),
+                lands_with: &[],
+            },
+            Step {
+                id: "6.6",
+                needs: &[],
+                title: "Run `desktop-calls quiet-hours HH:MM-HH:MM` from one minute ahead to three minutes ahead: the Pixel disconnects when they begin, and the runner times the reconnect from their end; then run `desktop-calls quiet-hours off`",
+                script: Some(quiet_hours_soon),
                 lands_with: &[],
             },
         ],

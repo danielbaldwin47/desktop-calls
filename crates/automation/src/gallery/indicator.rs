@@ -1,9 +1,12 @@
 //! The Indicator's states in the gallery, drawn as Omarchy's bar draws
-//! its icon, light and dark.
+//! its icon, light and dark, each with its menu as the app publishes it.
+//! The menu is listed as text, a stand-in until the gallery draws it in
+//! Omarchy's menu style (ticket #229).
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use test_harness::{Harness, OmarchyTheme, draw_tray_icon};
+use test_harness::{Harness, MenuEntry, OmarchyTheme, draw_tray_icon};
 
 use super::{DEADLINE, Look, NUMBER, connect};
 
@@ -67,7 +70,38 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Simulated Pixel connected · Contacts not shared",
     },
+    IndicatorState {
+        name: "off",
+        title: "The Indicator, calls off",
+        reach: |harness| {
+            connect(harness);
+            let _output = harness.cli(&["calls", "off"]);
+        },
+        tooltip: "Calls off",
+    },
 ];
+
+/// Where the menu of the Indicator in `state` is listed.
+pub(super) fn menu_path(state: &IndicatorState, output: &std::path::Path) -> PathBuf {
+    output.join(format!("indicator-{}-menu.txt", state.name))
+}
+
+/// `entries` as text, one line each: a submenu's entries indented under
+/// it, a separator as a rule, and a disabled entry in brackets.
+fn menu_text(entries: &[MenuEntry], depth: usize, text: &mut String) {
+    for entry in entries {
+        let indent = "    ".repeat(depth);
+        let line = if entry.separator {
+            "────────".to_owned()
+        } else if entry.enabled {
+            entry.label.clone()
+        } else {
+            format!("[{}]", entry.label)
+        };
+        let _ = writeln!(text, "{indent}{line}");
+        menu_text(&entry.children, depth + 1, text);
+    }
+}
 
 /// Where the Indicator in `state` under `theme` is drawn.
 pub(super) fn indicator_path(
@@ -97,6 +131,10 @@ pub(super) fn draw_indicator(
                 .any(|item| item.tooltip.as_deref() == Some(state.tooltip))
         },
     );
+    let mut menu = String::new();
+    menu_text(&harness.tray().menu(), 0, &mut menu);
+    std::fs::write(menu_path(state, output), menu)
+        .map_err(|error| format!("write the menu of {}: {error}", state.name))?;
     let path = indicator_path(state, theme, output);
     let item = items.first().ok_or("no tray item")?;
     draw_tray_icon(

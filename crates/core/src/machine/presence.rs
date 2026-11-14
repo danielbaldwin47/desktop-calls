@@ -73,7 +73,8 @@ struct Reconnect {
 impl State {
     /// Whether the Desktop should be connecting the Phone: it is paired,
     /// away or without hands-free, the Desktop is awake with its Bluetooth
-    /// on, and the Phone still has it paired.
+    /// on, the Phone still has it paired, and calls are on with the Phone
+    /// unblocked.
     fn wants_phone(&self) -> bool {
         let presence = &self.presence;
         self.phone.is_some()
@@ -81,6 +82,7 @@ impl State {
             && !presence.suspended
             && !self.desktop.bluetooth_off()
             && !presence.pairing_lost
+            && self.calls_on()
     }
 
     /// Whether the Calls are out of the Desktop's reach: the Phone is away,
@@ -407,9 +409,10 @@ fn connect_now(state: &mut State, effects: &mut Vec<Effect>) {
 }
 
 /// Asks BlueZ to connect the Phone now, wherever it is: it was just
-/// paired. A connect already under way does instead.
+/// paired. A connect already under way does instead. Not while calls are
+/// off: a blocked Phone answers a connect only by failing slowly.
 pub(super) fn connect_phone_now(state: &mut State, effects: &mut Vec<Effect>) {
-    if state.phone.is_none() || state.presence.reconnect.connecting {
+    if state.phone.is_none() || state.presence.reconnect.connecting || !state.calls_on() {
         return;
     }
     state.presence.reconnect.wait += 1;
@@ -501,9 +504,9 @@ fn resumed(state: &mut State, effects: &mut Vec<Effect>) {
     connect_now(state, effects);
 }
 
-/// The Desktop's Bluetooth came back on: the Phone is connected again at
-/// once, without the waits of before.
-pub(super) fn bluetooth_on(state: &mut State, effects: &mut Vec<Effect>) {
+/// The Desktop's Bluetooth came back on, or calls were turned on: the Phone
+/// is connected again at once, without the waits of before.
+pub(super) fn connect_again_at_once(state: &mut State, effects: &mut Vec<Effect>) {
     state.presence.reconnect.failures = 0;
     connect_now(state, effects);
 }

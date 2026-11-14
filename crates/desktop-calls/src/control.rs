@@ -67,6 +67,10 @@ pub enum Refused {
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
+    /// `TurnCallsOff` refused: during a Call, with no Phone set up, or for a
+    /// time other than until calls are turned on.
+    CallsNotTurnedOff(String),
+
     /// `MoveAudio` was given something other than `"desktop"` or `"phone"`.
     UnknownAudioLocation(String),
     Failed(String),
@@ -90,6 +94,7 @@ impl From<Failure> for Refused {
             | Failure::PhoneConnecting
             | Failure::PhoneOutOfRange
             | Failure::CallInProgress
+            | Failure::CallsOff
             | Failure::NumberRefused
             | Failure::PhoneBusy
             | Failure::DialNotSupported
@@ -286,6 +291,45 @@ impl ControlInterface {
             .iter()
             .map(search_row)
             .collect()
+    }
+
+    /// Calls Off: `"on"` or `"off"`, the Unix time calls come back on (0
+    /// for until the user turns them on), and whether a turn-off waits for
+    /// a Call to end (never yet: ticket #204).
+    #[zbus(property)]
+    fn calls_off(&self) -> (String, u64, bool) {
+        let state = if self.state().calls_off() {
+            "off"
+        } else {
+            "on"
+        };
+        (state.to_owned(), 0, false)
+    }
+
+    /// Turns calls off until `until`, a Unix time; only 0, for until the
+    /// user turns them on, for now. The Desktop blocks the Phone, which
+    /// disconnects it, and connects it again only once calls are on.
+    /// Refused during a Call, and with no Phone set up.
+    fn turn_calls_off(&self, until: u64) -> Result<(), Refused> {
+        if until != 0 {
+            return Err(Refused::CallsNotTurnedOff(
+                messages::calls_off_until_unknown().to_owned(),
+            ));
+        }
+        let refusal = self.state().refusal(&Input::TurnCallsOff);
+        if let Some(failure) = refusal {
+            return Err(Refused::CallsNotTurnedOff(
+                messages::failure(failure).text.to_owned(),
+            ));
+        }
+        let _ = self.intents.unbounded_send(Input::TurnCallsOff);
+        Ok(())
+    }
+
+    /// Turns calls on: the Desktop unblocks the Phone and connects it at
+    /// once. Does nothing while calls are on.
+    fn turn_calls_on(&self) {
+        let _ = self.intents.unbounded_send(Input::TurnCallsOn);
     }
 
     /// Opens the Setup Window, to pair a Phone, pair it again or switch to
@@ -596,6 +640,9 @@ impl Publisher {
         }
         if old.problems() != state.problems() {
             published.problems_changed(emitter).await?;
+        }
+        if old.calls_off() != state.calls_off() {
+            published.calls_off_changed(emitter).await?;
         }
         Ok(())
     }

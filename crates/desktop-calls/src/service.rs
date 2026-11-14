@@ -36,7 +36,9 @@ use crate::ringer::Ringer;
 use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
-use crate::{bluez, chosen_phone, contacts, earlier_run, keybinding, logind, pairing, phone_link};
+use crate::{
+    bluez, calls_off, chosen_phone, contacts, earlier_run, keybinding, logind, pairing, phone_link,
+};
 
 /// Why the service could not run.
 #[derive(Clone, Copy, Debug)]
@@ -145,6 +147,9 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     // one followed.
     if let Some(address) = chosen_phone::load() {
         let _ = input_sender.unbounded_send(Input::ChosenPhoneKept { address });
+    }
+    if let Some(record) = calls_off::load() {
+        let _ = input_sender.unbounded_send(Input::CallsOffKept(record));
     }
 
     let (command_sender, commands) = unbounded();
@@ -343,6 +348,10 @@ impl Shell {
                     });
                 }
                 Effect::KeepChosenPhone { address } => chosen_phone::save(&address),
+                Effect::KeepCallsOff(record) => calls_off::save(record.as_ref()),
+                Effect::BlockPhone { address, blocked } => {
+                    calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
+                }
                 Effect::SyncContacts => self.contacts_command(contacts::Command::Sync),
                 Effect::RefreshCallHistory => {
                     self.contacts_command(contacts::Command::RefreshCallHistory);

@@ -797,7 +797,22 @@ impl TrayWatcher {
             (service, DEFAULT_ITEM_PATH.to_owned())
         };
         let registered = format!("{bus_name}{path}");
-        self.shared.records().tray_items.push((bus_name, path));
+        // As Omarchy's watcher does, an item whose owner has left the bus,
+        // such as an app restarted since, is gone.
+        let dbus = zbus::fdo::DBusProxy::new(emitter.connection()).await?;
+        let earlier = self.shared.records().tray_items.clone();
+        let mut kept = Vec::new();
+        for (name, item_path) in earlier {
+            let owned = match zbus::names::BusName::try_from(name.as_str()) {
+                Ok(owner) => dbus.name_has_owner(owner).await.unwrap_or(false),
+                Err(_) => false,
+            };
+            if owned {
+                kept.push((name, item_path));
+            }
+        }
+        kept.push((bus_name, path));
+        self.shared.records().tray_items = kept;
         self.shared.changed.notify_all();
         Self::status_notifier_item_registered(&emitter, &registered).await?;
         Ok(())

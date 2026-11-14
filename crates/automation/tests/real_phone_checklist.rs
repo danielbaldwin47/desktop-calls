@@ -398,7 +398,7 @@ fn group_5_records_where_the_audio_goes_with_the_earbuds_connected() {
 }
 
 #[test]
-fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_restart() {
+fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_and_calls_on() {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["6"], results.path());
     runner.play(|_| "y".to_owned());
@@ -408,6 +408,7 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_rest
         ("6.1", "reconnect_ms"),
         ("6.2", "reconnect_after_resume_ms"),
         ("6.3", "reconnect_after_wireplumber_ms"),
+        ("6.4", "reconnect_after_calls_on_ms"),
     ] {
         let record = step(&result, id);
         assert_eq!(record["result"], "pass", "{record:#}");
@@ -436,6 +437,25 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_and_a_wireplumber_rest
         says(step(&result, "6.3"), "Telephony go with"),
         "{result:#}"
     );
+    // Calls off: nothing connected the Phone, and the app made no Connect.
+    let off = step(&result, "6.4");
+    assert_eq!(
+        off["measurements"]["connects_while_calls_off"], 0,
+        "{off:#}"
+    );
+    // The runner's own Connect on the blocked Phone, and BlueZ's answer.
+    assert_eq!(
+        off["measurements"]["blocked_connect_answer"],
+        "org.bluez.Error.Failed: br-connection-profile-unavailable",
+        "{off:#}"
+    );
+    for said in [
+        "stayed disconnected",
+        "read that calls are off",
+        "After the restart calls are off",
+    ] {
+        assert!(says(off, said), "{said}: {off:#}");
+    }
 }
 
 /// What the runner listed under "Before you start", in order.

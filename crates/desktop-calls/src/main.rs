@@ -1,6 +1,7 @@
 //! `desktop-calls`: the long-running per-user process and its CLI.
 
 mod bluez;
+mod calls_off;
 mod chosen_phone;
 mod cli;
 mod contacts;
@@ -77,9 +78,25 @@ enum Command {
         #[arg(value_enum)]
         to: AudioTarget,
     },
+    /// Turn calls off, so your phone stays disconnected from this computer
+    /// until you turn them on, or turn them on.
+    Calls {
+        /// Off or on.
+        #[arg(value_enum)]
+        turn: CallsTurn,
+    },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
     Service,
+}
+
+/// What `desktop-calls calls` does.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum CallsTurn {
+    /// Turn calls off until you turn them on.
+    Off,
+    /// Turn calls on.
+    On,
 }
 
 /// Where `desktop-calls audio` moves the audio.
@@ -109,6 +126,7 @@ fn main() -> ExitCode {
         Some(Command::Mute) => cli::mute(),
         Some(Command::Connect) => cli::connect_phone(),
         Some(Command::Audio { to }) => cli::audio(to.into()),
+        Some(Command::Calls { turn }) => cli::calls(turn == CallsTurn::Off),
         Some(Command::Service) => service::run(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.

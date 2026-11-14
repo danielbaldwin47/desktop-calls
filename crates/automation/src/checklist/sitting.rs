@@ -422,6 +422,40 @@ impl Sitting {
         Ok(report)
     }
 
+    /// Asks BlueZ, as any program on the Desktop could, to connect the
+    /// Phone with `address` (`Device1.Connect`), waiting up to `deadline`
+    /// for the answer, and returns what BlueZ said: `Ok` if it connected,
+    /// else its error, such as `org.bluez.Error.Failed:
+    /// br-connection-profile-unavailable`. Under the Simulated Phone, it
+    /// asks the demo's BlueZ.
+    pub fn connect_the_phone(&self, address: &str, deadline: Duration) -> Result<(), String> {
+        let connected = match &self.demo {
+            Some(demo) => demo.connect_the_phone(address),
+            None => zbus::block_on(async {
+                let system = zbus::connection::Builder::system()
+                    .method_timeout(deadline)
+                    .build()
+                    .await?;
+                let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+                system
+                    .call_method(
+                        Some("org.bluez"),
+                        path.as_str(),
+                        Some("org.bluez.Device1"),
+                        "Connect",
+                        &(),
+                    )
+                    .await
+                    .map(drop)
+            }),
+        };
+        connected.map_err(|error| match error {
+            zbus::Error::MethodError(name, Some(text), _) => format!("{name}: {text}"),
+            zbus::Error::MethodError(name, None, _) => name.to_string(),
+            other => other.to_string(),
+        })
+    }
+
     /// The app's log lines from `from_us` until now.
     pub fn log_since(&self, from_us: u64) -> Vec<LogLine> {
         self.log.lines(from_us, super::results::unix_micros())

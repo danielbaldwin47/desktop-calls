@@ -34,6 +34,7 @@ pub const INTERFACE: &str = "io.github.danielbaldwin47.DesktopCalls1";
 pub struct AppState {
     pub connection_state: String,
     pub phone_name: String,
+    pub phone_address: String,
     pub calls: Vec<AppCall>,
     pub audio_location: String,
     pub ringing: bool,
@@ -44,6 +45,8 @@ pub struct AppState {
     pub surfaces: BTreeMap<String, BTreeMap<String, String>>,
     /// Every `MissedCall` signal since watching began, oldest first.
     pub missed_calls: Vec<AppMissedCall>,
+    /// "off" while calls are off, else "on".
+    pub calls_off: String,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -105,7 +108,9 @@ impl AppState {
     fn apply(&mut self, name: &str, value: OwnedVariant) -> zbus::Result<()> {
         match name {
             "ConnectionState" => self.connection_state = String::try_from(value)?,
-            "Phone" => self.phone_name = <(String, String)>::try_from(value)?.0,
+            "Phone" => {
+                (self.phone_name, self.phone_address) = <(String, String)>::try_from(value)?;
+            }
             "Calls" => {
                 self.calls = <Vec<(u32, String, String, String, String, u64)>>::try_from(value)?
                     .into_iter()
@@ -123,6 +128,7 @@ impl AppState {
             "Muted" => self.muted = bool::try_from(value)?,
             "Codec" => (self.codec, self.wideband) = <(String, bool)>::try_from(value)?,
             "Surfaces" => self.surfaces = BTreeMap::try_from(value)?,
+            "CallsOff" => self.calls_off = <(String, u64, bool)>::try_from(value)?.0,
             _ => {}
         }
         Ok(())

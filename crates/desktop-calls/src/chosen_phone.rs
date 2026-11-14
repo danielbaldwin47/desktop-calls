@@ -117,7 +117,7 @@ fn from_json(document: &Value) -> Option<String> {
 
 /// Whether `text` is a Bluetooth address: six pairs of hexadecimal digits
 /// separated by colons.
-fn is_address(text: &str) -> bool {
+pub(crate) fn is_address(text: &str) -> bool {
     let pairs: Vec<&str> = text.split(':').collect();
     pairs.len() == 6
         && pairs

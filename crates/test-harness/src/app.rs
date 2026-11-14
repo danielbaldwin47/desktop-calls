@@ -53,6 +53,8 @@ pub struct AppState {
     pub contacts: AppContactsState,
     /// `Problems`, in the order the app lists them.
     pub problems: Vec<AppProblem>,
+    /// `CallsOff`'s state: `"on"` or `"off"`.
+    pub calls_off: String,
 }
 
 /// The app's `ContactsState`: how far Contacts and Call History are synced.
@@ -202,6 +204,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
             action,
         })
         .collect();
+    let (calls_off, _until, _pending) = <(String, u64, bool)>::try_from(property("CallsOff")?)?;
     Ok(AppState {
         connection_state,
         phone: (!address.is_empty()).then_some(PhoneIdentity { name, address }),
@@ -221,6 +224,7 @@ pub(super) async fn read_app_state(session: &Connection) -> zbus::Result<AppStat
             reason,
         },
         problems,
+        calls_off,
     })
 }
 

@@ -187,6 +187,10 @@ pub enum Quirk {
     /// changes nothing: as the real Desktop's app seemed to wait on one for
     /// good (ticket #216, inferred).
     ConnectNeverAnswersOnce,
+    /// The first `Device1.Connect` after the Desktop unblocks the Phone
+    /// fails with `org.bluez.Error.Failed` `"br-connection-busy"`, as BlueZ
+    /// may while the unblocked device settles (ticket #202, not yet seen).
+    ConnectBusyAfterUnblock,
 }
 
 /// How long [`Quirk::SlowServiceLevel`] takes to bring hands-free up.
@@ -230,6 +234,7 @@ impl Quirk {
             "calls-listed-late" => Some(Self::CallsListedLate),
             "connected-unannounced" => Some(Self::ConnectedUnannounced),
             "connect-never-answers-once" => Some(Self::ConnectNeverAnswersOnce),
+            "connect-busy-after-unblock" => Some(Self::ConnectBusyAfterUnblock),
             _ => None,
         }
     }

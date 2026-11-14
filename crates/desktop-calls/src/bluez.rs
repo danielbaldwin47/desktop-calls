@@ -456,6 +456,66 @@ async fn device_path(system: &Connection, address: &str) -> Result<String, Bounc
         })
 }
 
+/// Why the Phone couldn't be blocked or unblocked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockError {
+    /// BlueZ has no device with the Phone's address.
+    PhoneNotFound,
+    /// BlueZ refused to set `Blocked`.
+    Refused,
+}
+
+impl BlockError {
+    /// The kind, for the log's `error_kind` field.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PhoneNotFound => "phone-not-found",
+            Self::Refused => "bluez-refused",
+        }
+    }
+}
+
+/// Blocks (`blocked`) or unblocks the Phone with `address` with BlueZ's
+/// `Device1.Blocked`, for Calls Off (ADR-0008): blocked, BlueZ drops it at
+/// once and refuses its connections.
+///
+/// # Errors
+///
+/// BlueZ has no device for the Phone, or refused; the raw BlueZ error is
+/// logged here.
+pub async fn set_blocked(
+    system: &Connection,
+    address: &str,
+    blocked: bool,
+) -> Result<(), BlockError> {
+    let refused = |error: zbus::Error| {
+        tracing::warn!(
+            event_kind = %EventKind::PhoneBlockFailed,
+            phone_address = %address,
+            blocked,
+            error_kind = BlockError::Refused.as_str(),
+            detail = %error,
+            "BlueZ didn't block or unblock the Phone"
+        );
+        BlockError::Refused
+    };
+    let Some(device) = find_device(system, address).await.map_err(refused)? else {
+        return Err(BlockError::PhoneNotFound);
+    };
+    system
+        .call_method(
+            Some(SERVICE),
+            device.as_str(),
+            Some("org.freedesktop.DBus.Properties"),
+            "Set",
+            &(DEVICE, "Blocked", zbus::Variant::from(blocked)),
+        )
+        .await
+        .map(drop)
+        .map_err(refused)
+}
+
 /// The object path of BlueZ's device with `address`, if it has one.
 pub(crate) async fn find_device(
     system: &Connection,

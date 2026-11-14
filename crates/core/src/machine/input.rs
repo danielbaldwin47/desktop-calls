@@ -1,6 +1,7 @@
 //! What the Call state machine takes in and gives out: inputs from the shell
 //! adapters, and the commands, timers and effects it asks them for.
 
+use super::calls_off::CallsOffRecord;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
 use crate::connection::Phone;
@@ -198,6 +199,20 @@ pub enum Input {
     OpenSetupWindow,
     /// The user closed the Setup Window.
     CloseSetupWindow,
+    /// What an earlier run kept of Calls Off, at startup and before any
+    /// Phone is reported.
+    CallsOffKept(CallsOffRecord),
+    /// The user turned calls off until they turn them on: from the
+    /// Indicator, the control interface or the command line.
+    TurnCallsOff,
+    /// The user turned calls on.
+    TurnCallsOn,
+    /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
+    /// as [`Effect::BlockPhone`] asked.
+    PhoneBlocked { address: String, blocked: bool },
+    /// BlueZ couldn't block (`blocked`) or unblock the Phone with this
+    /// address.
+    PhoneBlockFailed { address: String, blocked: bool },
     /// The Desktop is looking for Phones and is discoverable, as
     /// [`Effect::StartSetup`] asked, and shows on Phones as `desktop_name`.
     SetupReady { desktop_name: String },
@@ -481,4 +496,11 @@ pub enum Effect {
         seen: String,
         added: String,
     },
+    /// Keep `record` of Calls Off for the next run, replacing what was
+    /// kept; with `None`, keep nothing.
+    KeepCallsOff(Option<CallsOffRecord>),
+    /// Have BlueZ block (`blocked`) or unblock the Phone with this address.
+    /// Ends in [`Input::PhoneBlocked`] or
+    /// [`Input::PhoneBlockFailed`].
+    BlockPhone { address: String, blocked: bool },
 }

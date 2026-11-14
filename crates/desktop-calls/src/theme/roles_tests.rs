@@ -221,6 +221,13 @@ fn a_red_that_already_reads_stays_the_themes_red() {
 }
 
 #[test]
+fn a_green_and_red_that_already_read_under_the_call_label_stay_the_themes_own() {
+    let roles = Roles::omarchy(&palette(TOKYO_NIGHT));
+    assert_eq!(roles.answer, Rgb(0x9e, 0xce, 0x6a));
+    assert_eq!(roles.end, Rgb(0xf7, 0x76, 0x8e));
+}
+
+#[test]
 fn without_omarchy_the_roles_are_stock_adwaitas() {
     let light = Roles::stock(false);
     assert_eq!(light.surface, Rgb(0xfa, 0xfa, 0xfb));
@@ -232,10 +239,15 @@ fn without_omarchy_the_roles_are_stock_adwaitas() {
 #[test]
 fn keycaps_read_at_full_strength_on_every_control_they_sit_on() {
     // A keycap is drawn in its label's colour with no fade (#222), so it
-    // reads wherever that label does. On Answer and End it reads as their
-    // shared label does, which a theme's green and red can hold below 4.5:1
-    // (stock white on Adwaita's green is 3.25:1).
+    // reads wherever that label does: on Answer, Decline, End and Hang up
+    // it is their shared label.
     for (theme, roles) in every_theme() {
+        assert_reads(
+            theme,
+            "a keycap on Answer, End or Hang up",
+            roles.call_label,
+            &[("Answer", roles.answer), ("End", roles.end)],
+        );
         assert_reads(
             theme,
             "a keycap",

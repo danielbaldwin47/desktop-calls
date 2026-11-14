@@ -182,11 +182,13 @@ pub(super) struct Roles {
     pub(super) accent: Rgb,
     /// A label on the accent.
     pub(super) accent_label: Rgb,
-    /// Answer.
+    /// Answer: the green, in the least deeper or paler shade, if need be,
+    /// that the call label reads on.
     pub(super) answer: Rgb,
-    /// Decline, Hang up and End.
+    /// Decline, Hang up and End: the red, shaded as Answer's green is.
     pub(super) end: Rgb,
-    /// One label for both Answer and End, so the pair looks alike.
+    /// One label for both Answer and End, so the pair looks alike: whichever
+    /// of the theme's light and dark contrasts more on its green and red.
     pub(super) call_label: Rgb,
     /// "Missed", and any red text: the red, made readable on the surface
     /// and on a selected row.
@@ -264,6 +266,7 @@ impl Roles {
             .weakest_readable_mix(text, &backgrounds)
             .unwrap_or_else(|| labels.on(&backgrounds));
         let warning_tint = surface.under(warning, WARNING_TINT_PERCENT);
+        let call_label = call_label.unwrap_or_else(|| labels.on(&[answer, end]));
         Self {
             surface,
             raised,
@@ -272,9 +275,9 @@ impl Roles {
             border: surface.under(text, BORDER_PERCENT),
             accent,
             accent_label: labels.on(&[accent]),
-            answer,
-            end,
-            call_label: call_label.unwrap_or_else(|| labels.on(&[answer, end])),
+            answer: under_label(answer, call_label),
+            end: under_label(end, call_label),
+            call_label,
             missed: labels.readable(end, &[surface, selection]),
             warning,
             warning_label: labels.on(&[warning]),
@@ -283,6 +286,15 @@ impl Roles {
             selection,
         }
     }
+}
+
+/// `fill` as a button under `label`: itself if the label reads on it, else
+/// the least shade of it, away from the label, that the label reads on.
+/// Few greens and reds read at 4.5:1 under any one label, so Answer and End
+/// keep one label and give way in shade instead.
+fn under_label(fill: Rgb, label: Rgb) -> Rgb {
+    let away = if label.is_dark() { WHITE } else { BLACK };
+    fill.weakest_readable_mix(away, &[label]).unwrap_or(fill)
 }
 
 /// What the roles are computed from.

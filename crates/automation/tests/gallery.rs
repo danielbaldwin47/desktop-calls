@@ -67,6 +67,9 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         "call-pill-on-your-phone",
         "call-pill-held",
         "call-pill-ended",
+        "quiet-hours-window-off",
+        "quiet-hours-window-on",
+        "quiet-hours-window-refused",
     ];
     let files = states.iter().flat_map(|state| {
         ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))
@@ -122,7 +125,7 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
     let off_menu = menu(output, "off");
     assert_eq!(
         off_menu,
-        "Calls off\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
+        "Calls off\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
     );
     assert!(
         index.contains("<pre>Calls off\nOpen Dialer\nTurn calls on\n"),
@@ -141,7 +144,7 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
     let timed_menu = menu(output, "off-until-morning");
     assert_eq!(
         timed_menu,
-        "Calls off until 07:00\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
+        "Calls off until 07:00\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
     );
     for look in ["omarchy-light", "omarchy-dark"] {
         let file = format!("indicator-off-until-morning-{look}.png");
@@ -151,7 +154,7 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
     let quiet_menu = menu(output, "off-quiet-hours");
     assert_eq!(
         quiet_menu,
-        "Calls off until 23:59 (quiet hours)\nOpen Dialer\nTurn calls on\nConnect your phone…\n"
+        "Calls off until 23:59 (quiet hours)\nOpen Dialer\nTurn calls on\nQuiet Hours…\nConnect your phone…\n"
     );
     for look in ["omarchy-light", "omarchy-dark"] {
         let file = format!("indicator-off-quiet-hours-{look}.png");
@@ -162,7 +165,7 @@ fn indicator_menus_are_listed(output: &Path, index: &str) {
     let pending_menu = menu(output, "calls-off-pending");
     assert!(
         pending_menu.starts_with(
-            "Calls turn off when this Call ends\nOpen Dialer\nKeep calls on\nConnect your phone…\n"
+            "Calls turn off when this Call ends\nOpen Dialer\nKeep calls on\nQuiet Hours…\nConnect your phone…\n"
         ),
         "{pending_menu}"
     );

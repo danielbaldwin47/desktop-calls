@@ -3,6 +3,7 @@
 
 use super::calls_off::CallsOffRecord;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
+use super::quiet_hours_window::QuietHoursField;
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
 use crate::clock::{Deadline, QuietHours, WallClock};
 use crate::connection::Phone;
@@ -225,6 +226,21 @@ pub enum Input {
     SetQuietHours(QuietHours),
     /// The user turned Quiet Hours off.
     ClearQuietHours,
+    /// The user asked for the Quiet Hours Window, from the Indicator.
+    OpenQuietHoursWindow,
+    /// The user closed the Quiet Hours Window.
+    CloseQuietHoursWindow,
+    /// The user switched Quiet Hours on (`true`) or off in their window.
+    SwitchQuietHours(bool),
+    /// Up (`later`) or Down on one of the Quiet Hours Window's times.
+    QuietHoursStep { field: QuietHoursField, later: bool },
+    /// A digit, 0 to 9, typed into one of the Quiet Hours Window's times.
+    QuietHoursDigit { field: QuietHoursField, digit: u8 },
+    /// Backspace in one of the Quiet Hours Window's times.
+    QuietHoursErase(QuietHoursField),
+    /// Keyboard focus left one of the Quiet Hours Window's times, or Enter
+    /// was pressed in it: what was typed there is read.
+    QuietHoursFieldLeft(QuietHoursField),
     /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
     /// as [`Effect::BlockPhone`] asked.
     PhoneBlocked { address: String, blocked: bool },

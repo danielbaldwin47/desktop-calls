@@ -214,7 +214,7 @@ def is_ci_local(pid: int) -> bool:
         command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return False
-    return b"ci_local.py" in command
+    return any(argument.endswith(b"ci_local.py") for argument in command.split(b"\0"))
 
 
 class Claim:
@@ -850,6 +850,7 @@ def main() -> int:
         prune_old_runs()
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
+        claim.write("running", sha)
         if every_job and not args.full and is_docs_only(sha, log):
             docs_only, jobs = True, ["lint"]
             log.line("Docs only: lint alone, as GitHub CI skips the test jobs for such a change.")

@@ -691,8 +691,16 @@ class Queued(unittest.TestCase):
 
     def test_a_run_that_must_wait_says_it_tests_head_as_it_is_when_its_turn_comes(self):
         holder = ci_local.take_turn()
-        threading.Timer(0.5, holder.close).start()
-        with contextlib.redirect_stdout(io.StringIO()) as printed:
+        printed = io.StringIO()
+
+        def release_once_it_has_said_so() -> None:
+            deadline = time.monotonic() + 10
+            while not printed.getvalue() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            holder.close()
+
+        threading.Thread(target=release_once_it_has_said_so).start()
+        with contextlib.redirect_stdout(printed):
             ci_local.take_turn().close()
         text = printed.getvalue()
         self.assertIn("tests HEAD as it is when its turn comes", text)

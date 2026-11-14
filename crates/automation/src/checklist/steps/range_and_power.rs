@@ -416,3 +416,84 @@ fn turned_on_and_connected(sitting: &mut Sitting, on_us: u64) -> Result<(), Stop
     });
     Ok(())
 }
+
+/// 6.5: calls off until a time two minutes ahead, from the CLI, and the
+/// Desktop suspended past that time. Calls come back on only once it
+/// resumes, and the reconnect is timed from the app's `desktop-resumed`
+/// line against the scorecard's 10 s.
+pub(super) fn calls_off_until_past_a_suspend(sitting: &mut Sitting) -> Result<(), Stop> {
+    no_call_left(sitting)?;
+    let from_us = unix_micros();
+    sitting.say(
+        "In a terminal, run `desktop-calls calls off --until HH:MM`, with HH:MM two minutes from now.",
+        &["calls-off-soon"],
+    );
+    let off = sitting.wait_for("calls turning off until a time", MENU_DEADLINE, |state| {
+        state.calls_off == "off" && state.calls_off_until != 0
+    })?;
+    let until_us = off.state.calls_off_until.saturating_mul(1_000_000);
+    let left = Duration::from_micros(until_us.saturating_sub(unix_micros()));
+    sitting.observed(format!(
+        "Calls are off until the time given, {} from now.",
+        seconds(left)
+    ));
+    sitting.say(
+        &format!(
+            "Suspend the Desktop now, and wake it once that time has passed: wait at least {}.",
+            seconds(left + Duration::from_secs(30))
+        ),
+        &["suspend-phone-stays", "resume-past-calls-off-deadline"],
+    );
+    sitting.ready("Press Enter once the Desktop is awake again.")?;
+    let suspended = logged(sitting, from_us, |line| {
+        line.event_kind == "desktop-suspending"
+    })?;
+    let Some(resumed) = logged(sitting, from_us, |line| {
+        line.event_kind == "desktop-resumed"
+    })?
+    else {
+        sitting.check(
+            false,
+            "The app's log has no desktop-resumed line: it didn't see the Desktop suspend and resume."
+                .to_owned(),
+        );
+        return Ok(());
+    };
+    let slept_through =
+        suspended.is_some_and(|line| line.at_us < until_us) && resumed.at_us >= until_us;
+    sitting.check(
+        slept_through,
+        if slept_through {
+            "The Desktop slept through the time calls were off until.".to_owned()
+        } else {
+            "The Desktop didn't sleep through the time calls were off until: suspend before it and wake after it."
+                .to_owned()
+        },
+    );
+    let Some(passed) = logged(sitting, from_us, |line| {
+        line.event_kind == "calls-off-deadline-passed"
+    })?
+    else {
+        sitting.check(
+            false,
+            "The app logged no calls-off-deadline-passed line: calls didn't come back on."
+                .to_owned(),
+        );
+        return Ok(());
+    };
+    sitting.check(
+        passed.at_us >= resumed.at_us,
+        if passed.at_us >= resumed.at_us {
+            "Calls came back on once the Desktop resumed.".to_owned()
+        } else {
+            "Calls came back on before the Desktop resumed.".to_owned()
+        },
+    );
+    connected_again(
+        sitting,
+        &resumed,
+        resumed.at_us,
+        "reconnect_after_deadline_resume_ms",
+        "the Desktop resuming past the deadline",
+    )
+}

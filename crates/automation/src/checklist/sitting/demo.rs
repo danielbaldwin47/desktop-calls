@@ -64,6 +64,8 @@ pub struct Demo {
     missed: Vec<String>,
     /// How many of the app's Dial requests the demo's Phone has placed.
     dials_placed: usize,
+    /// The Unix time in seconds the demo last turned calls off until.
+    calls_off_until: u64,
 }
 
 /// The number the demo's helper calls from: an Ofcom drama number.
@@ -94,6 +96,10 @@ const AUDIO_DEADLINE: Duration = Duration::from_secs(10);
 /// `resume-slowly`: longer than the runner reads the log for a line the
 /// app logs at once.
 const SLOW_RETURN: Duration = Duration::from_secs(4);
+
+/// How far ahead `calls-off-soon` turns calls off until: long enough for
+/// the runner to see it and the demo to suspend before it passes.
+const CALLS_OFF_SOON: Duration = Duration::from_secs(5);
 
 /// How long Telephony is off the bus when the demo restarts `WirePlumber`.
 const WIREPLUMBER_GAP: Duration = Duration::from_millis(500);
@@ -165,7 +171,29 @@ impl Demo {
             calling_from: None,
             missed: Vec::new(),
             dials_placed: 0,
+            calls_off_until: 0,
         }
+    }
+
+    /// Turns calls off until [`CALLS_OFF_SOON`] from now.
+    fn calls_off_soon(&mut self) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        self.calls_off_until = (now + CALLS_OFF_SOON).as_secs();
+        if let Err(error) = self.harness.turn_calls_off(self.calls_off_until) {
+            panic!("calls didn't turn off: {error:?}");
+        }
+    }
+
+    /// Waits out the rest of the time calls are off until, as the Desktop
+    /// sleeps through it, then resumes it. The Phone is still in range.
+    fn resume_past_calls_off_deadline(&self) {
+        let until = SystemTime::UNIX_EPOCH + Duration::from_secs(self.calls_off_until);
+        if let Ok(left) = until.duration_since(SystemTime::now()) {
+            std::thread::sleep(left + Duration::from_secs(1));
+        }
+        self.harness.simulated_phone().prepare_for_sleep(false);
     }
 
     /// The Phone places the Call the app asked it to dial, as a real Phone
@@ -344,6 +372,10 @@ impl Demo {
             "return-to-range" => self.harness.simulated_phone().return_to_range(),
             "calls-off" => self.harness.tray().click("Until I turn them on"),
             "calls-on" => self.harness.tray().click("Turn calls on"),
+            // As `desktop-calls calls off --until` a moment ahead: the CLI
+            // takes whole minutes, too long for a demo.
+            "calls-off-soon" => self.calls_off_soon(),
+            "resume-past-calls-off-deadline" => self.resume_past_calls_off_deadline(),
             // The Phone, blocked and out of the Desktop's hands, pages it as
             // its Bluetooth comes back on: BlueZ refuses it.
             "bluetooth-off-on" => {

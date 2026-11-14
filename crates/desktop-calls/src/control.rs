@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use desktop_calls_core::matching::{self, DialerRow, DialerRowKind};
 use desktop_calls_core::messages::{self, Failure};
 use desktop_calls_core::{
-    AudioLocation, CallId, Caller, ContactsState, Input, MissedCallNotice, State,
+    AudioLocation, CallId, Caller, ContactsState, Input, MissedCallNotice, State, Timestamp,
 };
 use futures_channel::mpsc::UnboundedSender;
 use futures_channel::oneshot;
@@ -22,6 +22,7 @@ use zbus::fdo::RequestNameFlags;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{Connection, DBusError, interface};
 
+use crate::clock;
 use crate::logging::EventKind;
 
 pub const BUS_NAME: &str = "io.github.danielbaldwin47.DesktopCalls";
@@ -67,8 +68,8 @@ pub enum Refused {
     /// A Call the user asked to place wasn't; the sentence says why.
     CallNotPlaced(String),
 
-    /// `TurnCallsOff` refused: during a Call, with no Phone set up, or for a
-    /// time other than until calls are turned on.
+    /// `TurnCallsOff` refused: during a Call, with no Phone set up, or
+    /// until a time that has passed.
     CallsNotTurnedOff(String),
 
     /// `MoveAudio` was given something other than `"desktop"` or `"phone"`.
@@ -293,36 +294,29 @@ impl ControlInterface {
             .collect()
     }
 
-    /// Calls Off: `"on"` or `"off"`, the Unix time calls come back on (0
-    /// for until the user turns them on), and whether a turn-off waits for
-    /// a Call to end (never yet: ticket #204).
+    /// Calls Off: `"on"` or `"off"`, the Unix time in seconds calls come
+    /// back on (0 for until the user turns them on), and whether a turn-off
+    /// waits for a Call to end (never yet: ticket #204).
     #[zbus(property)]
     fn calls_off(&self) -> (String, u64, bool) {
-        let state = if self.state().calls_off() {
-            "off"
-        } else {
-            "on"
-        };
-        (state.to_owned(), 0, false)
+        calls_off(&self.state())
     }
 
-    /// Turns calls off until `until`, a Unix time; only 0, for until the
-    /// user turns them on, for now. The Desktop blocks the Phone, which
-    /// disconnects it, and connects it again only once calls are on.
-    /// Refused during a Call, and with no Phone set up.
+    /// Turns calls off until `until`, a Unix time in seconds, or with 0
+    /// until the user turns them on. The Desktop blocks the Phone, which
+    /// disconnects it, and connects it again once calls are on: when the
+    /// user turns them on, or at `until`. Refused during a Call, with no
+    /// Phone set up, and until a time that has passed.
     fn turn_calls_off(&self, until: u64) -> Result<(), Refused> {
-        if until != 0 {
-            return Err(Refused::CallsNotTurnedOff(
-                messages::calls_off_until_unknown().to_owned(),
-            ));
-        }
-        let refusal = self.state().refusal(&Input::TurnCallsOff);
+        let until = (until != 0).then(|| clock::deadline(Timestamp(until.saturating_mul(1_000))));
+        let input = Input::TurnCallsOff { until };
+        let refusal = self.state().refusal(&input);
         if let Some(failure) = refusal {
             return Err(Refused::CallsNotTurnedOff(
                 messages::failure(failure).text.to_owned(),
             ));
         }
-        let _ = self.intents.unbounded_send(Input::TurnCallsOff);
+        let _ = self.intents.unbounded_send(input);
         Ok(())
     }
 
@@ -473,6 +467,16 @@ fn search_row(row: &DialerRow) -> SearchRow {
         row.shown_number.clone(),
         row.at.map_or(0, |at| at.0),
     )
+}
+
+/// The `CallsOff` property: `"on"` or `"off"`, the Unix time in seconds
+/// calls come back on (0 for none), and whether a turn-off waits.
+fn calls_off(state: &State) -> (String, u64, bool) {
+    let off = if state.calls_off() { "off" } else { "on" };
+    let until = state
+        .calls_off_until()
+        .map_or(0, |until| until.at.0 / 1_000);
+    (off.to_owned(), until, false)
 }
 
 fn contacts_state(state: &State) -> (String, u32, u32, u64, String) {
@@ -641,7 +645,7 @@ impl Publisher {
         if old.problems() != state.problems() {
             published.problems_changed(emitter).await?;
         }
-        if old.calls_off() != state.calls_off() {
+        if calls_off(&old) != calls_off(state) {
             published.calls_off_changed(emitter).await?;
         }
         Ok(())

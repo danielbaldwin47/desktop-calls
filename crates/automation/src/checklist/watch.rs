@@ -47,6 +47,8 @@ pub struct AppState {
     pub missed_calls: Vec<AppMissedCall>,
     /// "off" while calls are off, else "on".
     pub calls_off: String,
+    /// The Unix time in seconds calls come back on, or 0 for none.
+    pub calls_off_until: u64,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -128,7 +130,9 @@ impl AppState {
             "Muted" => self.muted = bool::try_from(value)?,
             "Codec" => (self.codec, self.wideband) = <(String, bool)>::try_from(value)?,
             "Surfaces" => self.surfaces = BTreeMap::try_from(value)?,
-            "CallsOff" => self.calls_off = <(String, u64, bool)>::try_from(value)?.0,
+            "CallsOff" => {
+                (self.calls_off, self.calls_off_until, _) = <(String, u64, bool)>::try_from(value)?;
+            }
             _ => {}
         }
         Ok(())

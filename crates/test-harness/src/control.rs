@@ -437,6 +437,16 @@ impl Harness {
         self.try_app_method("SetMuted", &(muted,))
     }
 
+    /// Asks the app to turn calls off until `until`, a Unix time in seconds
+    /// (0 for until they are turned on), as the CLI and the Indicator do.
+    ///
+    /// # Errors
+    ///
+    /// The app's refusal: its D-Bus error name and plain-language message.
+    pub fn turn_calls_off(&self, until: u64) -> Result<(), AppError> {
+        self.try_app_method("TurnCallsOff", &(until,))
+    }
+
     /// Asks the app to move the Calls' audio to `location`, `"desktop"` or
     /// `"phone"`, and returns the error the control interface answers with,
     /// if any.

@@ -69,7 +69,10 @@ fn blocked(blocked: bool) -> Input {
 }
 
 fn off() -> State {
-    let (state, _) = run(connected(), [Input::TurnCallsOff, blocked(true)]);
+    let (state, _) = run(
+        connected(),
+        [Input::TurnCallsOff { until: None }, blocked(true)],
+    );
     run(state, dropped()).0
 }
 
@@ -104,6 +107,7 @@ fn reconnect_timers(effects: &[Effect]) -> Vec<Timer> {
 fn record_off() -> CallsOffRecord {
     CallsOffRecord::Off {
         address: ADDRESS.to_owned(),
+        until: None,
     }
 }
 
@@ -122,7 +126,7 @@ fn block_phone(blocked: bool) -> Effect {
 
 #[test]
 fn turning_calls_off_keeps_the_record_before_blocking_the_phone() {
-    let (state, effects) = run(connected(), [Input::TurnCallsOff]);
+    let (state, effects) = run(connected(), [Input::TurnCallsOff { until: None }]);
 
     assert_eq!(
         effects,
@@ -133,7 +137,10 @@ fn turning_calls_off_keeps_the_record_before_blocking_the_phone() {
 
 #[test]
 fn while_calls_are_off_nothing_connects_the_phone() {
-    let (state, effects) = run(connected(), [Input::TurnCallsOff, blocked(true)]);
+    let (state, effects) = run(
+        connected(),
+        [Input::TurnCallsOff { until: None }, blocked(true)],
+    );
     let (state, mut more) = run(state, dropped());
     let mut effects = [effects, std::mem::take(&mut more)].concat();
     // Whatever might connect it otherwise: the Phone's link coming and going
@@ -165,7 +172,7 @@ fn while_calls_are_off_the_indicator_shows_the_off_look_and_turn_calls_on() {
     let view = state.indicator(&state.surfaces());
 
     assert_eq!(view.look, IndicatorLook::Off);
-    assert_eq!(view.status, IndicatorStatus::CallsOff);
+    assert_eq!(view.status, IndicatorStatus::CallsOff { until: None });
     assert!(!view.needs_attention);
     assert_eq!(messages::indicator_tooltip(&view), "Calls off");
     assert!(view.menu.contains(&IndicatorEntry::TurnCallsOn));
@@ -185,7 +192,11 @@ fn while_calls_are_off_the_indicator_shows_the_off_look_and_turn_calls_on() {
 fn while_calls_are_on_turn_calls_off_offers_until_i_turn_them_on() {
     let state = connected();
     let view = state.indicator(&state.surfaces());
-    let entry = IndicatorEntry::TurnCallsOff { enabled: true };
+    let entry = IndicatorEntry::TurnCallsOff {
+        enabled: true,
+        for_an_hour: None,
+        until_morning: None,
+    };
 
     assert_eq!(view.menu[2], entry);
     assert_eq!(messages::indicator_entry(&entry, &view), "Turn calls off");
@@ -196,7 +207,10 @@ fn while_calls_are_on_turn_calls_off_offers_until_i_turn_them_on() {
         messages::indicator_entry(&choices[0], &view),
         "Until I turn them on"
     );
-    assert_eq!(choices[0].intent(), Some(Input::TurnCallsOff));
+    assert_eq!(
+        choices[0].intent(),
+        Some(Input::TurnCallsOff { until: None })
+    );
 }
 
 #[test]
@@ -211,7 +225,7 @@ fn with_no_phone_set_up_there_is_nothing_to_turn_off() {
             .any(|entry| matches!(entry, IndicatorEntry::TurnCallsOff { .. }))
     );
     assert_eq!(
-        state.refusal(&Input::TurnCallsOff),
+        state.refusal(&Input::TurnCallsOff { until: None }),
         Some(Failure::PhoneNotSetUp)
     );
 }
@@ -247,16 +261,19 @@ fn with_call(call_state: CallState) -> State {
 fn refused_during_a_call(state: State) {
     let view = state.indicator(&state.surfaces());
     assert!(
-        view.menu
-            .contains(&IndicatorEntry::TurnCallsOff { enabled: false }),
+        view.menu.contains(&IndicatorEntry::TurnCallsOff {
+            enabled: false,
+            for_an_hour: None,
+            until_morning: None,
+        }),
         "{:?}",
         view.menu
     );
     assert_eq!(
-        state.refusal(&Input::TurnCallsOff),
+        state.refusal(&Input::TurnCallsOff { until: None }),
         Some(Failure::CallsOffDuringCall)
     );
-    let (state, effects) = run(state, [Input::TurnCallsOff]);
+    let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
     assert_eq!(effects, []);
     assert!(!state.calls_off());
 }
@@ -291,16 +308,20 @@ fn turning_calls_off_is_refused_while_a_lost_call_carries_on_on_the_phone() {
 fn during_a_call_turn_calls_off_is_disabled_and_refused() {
     let state = ringing(connected());
     let view = state.indicator(&state.surfaces());
-    let entry = IndicatorEntry::TurnCallsOff { enabled: false };
+    let entry = IndicatorEntry::TurnCallsOff {
+        enabled: false,
+        for_an_hour: None,
+        until_morning: None,
+    };
 
     assert!(view.menu.contains(&entry));
     assert!(!entry.enabled());
     assert_eq!(entry.choices(), []);
     assert_eq!(
-        state.refusal(&Input::TurnCallsOff),
+        state.refusal(&Input::TurnCallsOff { until: None }),
         Some(Failure::CallsOffDuringCall)
     );
-    let (state, effects) = run(state, [Input::TurnCallsOff]);
+    let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
     assert_eq!(effects, []);
     assert!(!state.calls_off());
 }
@@ -436,7 +457,7 @@ fn a_phone_that_bluez_wont_block_leaves_calls_on_and_says_so() {
     let (state, effects) = run(
         connected(),
         [
-            Input::TurnCallsOff,
+            Input::TurnCallsOff { until: None },
             Input::PhoneBlockFailed {
                 address: ADDRESS.to_owned(),
                 blocked: true,
@@ -552,12 +573,15 @@ fn while_calls_are_being_turned_on_turn_calls_off_waits() {
     let view = state.indicator(&state.surfaces());
 
     assert!(
-        view.menu
-            .contains(&IndicatorEntry::TurnCallsOff { enabled: false }),
+        view.menu.contains(&IndicatorEntry::TurnCallsOff {
+            enabled: false,
+            for_an_hour: None,
+            until_morning: None,
+        }),
         "{:?}",
         view.menu
     );
-    let (state, effects) = run(state, [Input::TurnCallsOff]);
+    let (state, effects) = run(state, [Input::TurnCallsOff { until: None }]);
     assert_eq!(effects, []);
     let (state, _) = run(state, [blocked(false)]);
     assert!(!state.calls_off());
@@ -569,7 +593,7 @@ fn while_calls_are_off_a_problem_is_listed_but_asks_for_no_attention() {
         connected(),
         [
             Input::ContactsSyncFailed(SyncFailure::Denied),
-            Input::TurnCallsOff,
+            Input::TurnCallsOff { until: None },
             blocked(true),
         ],
     );

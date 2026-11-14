@@ -37,7 +37,8 @@ use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{
-    bluez, calls_off, chosen_phone, contacts, earlier_run, keybinding, logind, pairing, phone_link,
+    bluez, calls_off, chosen_phone, clock, contacts, earlier_run, keybinding, logind, pairing,
+    phone_link,
 };
 
 /// Why the service could not run.
@@ -148,6 +149,9 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     if let Some(address) = chosen_phone::load() {
         let _ = input_sender.unbounded_send(Input::ChosenPhoneKept { address });
     }
+    // Before Calls Off is picked up, so a deadline that passed while the
+    // app was stopped is seen to have passed.
+    let _ = input_sender.unbounded_send(Input::ClockTicked(clock::wall_clock(clock::now())));
     if let Some(record) = calls_off::load() {
         let _ = input_sender.unbounded_send(Input::CallsOffKept(record));
     }
@@ -168,7 +172,13 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     let setup_checks = SetupChecks::start(system.clone(), session.clone(), input_sender.clone());
     let context = MainContext::default();
     context.spawn_local(watch_bluez(system.clone(), input_sender.clone()));
-    context.spawn_local(watch_sleep(system.clone(), input_sender.clone()));
+    let (clock_sender, clock_wakes) = unbounded();
+    context.spawn_local(clock::run(clock_wakes, input_sender.clone()));
+    context.spawn_local(watch_sleep(
+        system.clone(),
+        input_sender.clone(),
+        clock_sender.clone(),
+    ));
     context.spawn_local(contacts::run(
         session.clone(),
         contacts_commands,
@@ -188,6 +198,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             pairing: pairing::Pairing::new(system.clone(), input_sender.clone()),
             setup_checks,
             inputs: input_sender,
+            clock: clock_sender,
             system,
             commands: command_sender,
             contacts: contacts_sender,
@@ -239,8 +250,12 @@ async fn watch_bluez(system: Connection, inputs: UnboundedSender<Input>) {
     }
 }
 
-async fn watch_sleep(system: Connection, inputs: UnboundedSender<Input>) {
-    if let Err(error) = logind::run(system, inputs).await {
+async fn watch_sleep(
+    system: Connection,
+    inputs: UnboundedSender<Input>,
+    clock: UnboundedSender<clock::Wake>,
+) {
+    if let Err(error) = logind::run(system, inputs, clock).await {
         tracing::warn!(
             event_kind = %EventKind::WatchFailed,
             error_kind = "signals-unavailable",
@@ -287,6 +302,8 @@ enum Announcement {
 struct Shell {
     /// Where timers report back.
     inputs: UnboundedSender<Input>,
+    /// Where the core asks for the wall clock at an instant.
+    clock: UnboundedSender<clock::Wake>,
     /// The system bus, for connecting the Phone through BlueZ.
     system: Connection,
     commands: UnboundedSender<Command>,
@@ -349,6 +366,10 @@ impl Shell {
                 }
                 Effect::KeepChosenPhone { address } => chosen_phone::save(&address),
                 Effect::KeepCallsOff(record) => calls_off::save(record.as_ref()),
+                Effect::ReadClockAt(at) => {
+                    let _ = self.clock.unbounded_send(clock::Wake::At(at));
+                }
+                Effect::CallsOffDeadlinePassed { address } => calls_off::deadline_passed(&address),
                 Effect::BlockPhone { address, blocked } => {
                     calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
                 }

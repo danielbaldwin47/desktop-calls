@@ -79,6 +79,15 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off",
     },
+    IndicatorState {
+        name: "off-until-morning",
+        title: "The Indicator, calls off until tomorrow morning",
+        reach: |harness| {
+            connect(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+        },
+        tooltip: "Calls off until 07:00",
+    },
 ];
 
 /// Where the menu of the Indicator in `state` is listed.

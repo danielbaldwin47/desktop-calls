@@ -38,12 +38,17 @@ pub enum IndicatorLook {
     /// A Problem needs fixing, with the Phone connected, or kept from
     /// connecting by it.
     Problem,
+    /// Calls are off: the Desktop keeps the Phone disconnected. Problems
+    /// don't change it.
+    Off,
 }
 
 /// What the Indicator's status says, before Messages puts it in words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndicatorStatus {
     NoPhone,
+    /// Calls are off until the user turns them on.
+    CallsOff,
     /// Paired, and not yet connected since the Desktop started.
     NotConnected(Phone),
     Connected(Phone),
@@ -91,6 +96,15 @@ pub enum IndicatorEntry {
     },
     /// A Problem, with its explanation beneath.
     Problem(ProblemKind),
+    /// Turns calls off, with [`IndicatorEntry::choices`] for how long;
+    /// disabled during a Call, with none.
+    TurnCallsOff {
+        enabled: bool,
+    },
+    /// The choice under Turn calls off: until the user turns them on.
+    CallsOffUntilTurnedOn,
+    /// Turns calls on.
+    TurnCallsOn,
 }
 
 impl IndicatorEntry {
@@ -117,12 +131,15 @@ impl IndicatorEntry {
             Self::Mute(Mute::Off) => Some(Input::SetMuted(true)),
             Self::Mute(Mute::On) => Some(Input::SetMuted(false)),
             Self::MoveAudio { to, moving: false } => Some(Input::MoveAudio(*to)),
+            Self::CallsOffUntilTurnedOn => Some(Input::TurnCallsOff),
+            Self::TurnCallsOn => Some(Input::TurnCallsOn),
             Self::Status
             | Self::Separator
             | Self::HangUpOnPhone
             | Self::Mute(Mute::Unavailable)
             | Self::MoveAudio { moving: true, .. }
-            | Self::Problem(_) => None,
+            | Self::Problem(_)
+            | Self::TurnCallsOff { .. } => None,
         }
     }
 
@@ -135,11 +152,35 @@ impl IndicatorEntry {
             Self::HangUpOnPhone
                 | Self::Mute(Mute::Unavailable)
                 | Self::MoveAudio { moving: true, .. }
+                | Self::TurnCallsOff { enabled: false }
         )
+    }
+
+    /// The choices beneath the entry, as a submenu: how long to turn calls
+    /// off for. Empty for every other entry.
+    #[must_use]
+    pub fn choices(&self) -> Vec<Self> {
+        match self {
+            Self::TurnCallsOff { enabled: true } => vec![Self::CallsOffUntilTurnedOn],
+            _ => Vec::new(),
+        }
     }
 }
 
 impl State {
+    /// The menu's entry that turns calls on or off: on while they are off,
+    /// else off once there is a Phone, disabled during a Call and while
+    /// calls are being turned on.
+    fn calls_off_entry(&self, has_phone: bool) -> Option<IndicatorEntry> {
+        if self.calls_off() {
+            Some(IndicatorEntry::TurnCallsOn)
+        } else {
+            has_phone.then(|| IndicatorEntry::TurnCallsOff {
+                enabled: !self.call_keeps_calls_on() && !self.calls_turning_on(),
+            })
+        }
+    }
+
     /// What the Indicator shows, given the `surfaces` this state shows.
     /// They are passed in, not worked out again: with thousands of Contacts
     /// the Dialer's search is too slow to run twice per keystroke.
@@ -157,6 +198,7 @@ impl State {
             )
         });
         let phone = self.phone().cloned();
+        let has_phone = phone.is_some();
         let (mut look, status) = if let Some(banner) = &surfaces.banner {
             (
                 IndicatorLook::Ringing,
@@ -173,6 +215,8 @@ impl State {
                     IndicatorStatus::InCall { caller, contact }
                 },
             )
+        } else if self.calls_off() {
+            (IndicatorLook::Off, IndicatorStatus::CallsOff)
         } else {
             match (self.connection_state(), phone) {
                 (ConnectionState::Connected, Some(phone)) => (
@@ -210,11 +254,9 @@ impl State {
             look = IndicatorLook::Problem;
         }
 
-        let mut menu = vec![
-            IndicatorEntry::Status,
-            IndicatorEntry::OpenDialer,
-            IndicatorEntry::ConnectPhone,
-        ];
+        let mut menu = vec![IndicatorEntry::Status, IndicatorEntry::OpenDialer];
+        menu.extend(self.calls_off_entry(has_phone));
+        menu.push(IndicatorEntry::ConnectPhone);
         if call_window.is_some_and(|window| window.connection_lost) {
             // Nothing acts on the Call from here: only where to hang up.
             menu.push(IndicatorEntry::Separator);
@@ -242,7 +284,8 @@ impl State {
 
         IndicatorView {
             look,
-            needs_attention: surfaces.banner.is_some() || !problems.is_empty(),
+            needs_attention: surfaces.banner.is_some()
+                || (!problems.is_empty() && look != IndicatorLook::Off),
             status,
             problems,
             menu,

@@ -104,6 +104,14 @@ _Avoid_: OBEX, PBAP support
 The Desktop's system-wide setting for silencing notifications, which Desktop Calls also obeys.
 _Avoid_: DND, quiet mode
 
+**Calls Off**:
+The state, chosen by the user or begun by Quiet Hours, in which the Desktop keeps the Phone disconnected and nothing connects it again.
+_Avoid_: paused, offline, disabled, Do Not Disturb (that is the Desktop's setting)
+
+**Quiet Hours**:
+The daily times, set by the user, during which calls are off.
+_Avoid_: schedule, night mode, bedtime
+
 ## Testing
 
 **Simulated Phone**:

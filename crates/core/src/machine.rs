@@ -14,6 +14,7 @@ use crate::missed::MissedCalls;
 mod audio;
 mod call_waiting;
 mod calls;
+mod calls_off;
 mod collapse;
 mod desktop;
 mod dialling;
@@ -34,6 +35,8 @@ use calls::{
     answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
     send_tones, timer_fired,
 };
+use calls_off::CallsOff;
+pub use calls_off::CallsOffRecord;
 use collapse::{CallWindowForm, follow_call_window, form_input};
 use desktop::DesktopChecks;
 pub use desktop::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, SetupProblemsView};
@@ -337,6 +340,8 @@ pub struct State {
     /// Whether the Call Window is collapsed to the Call Pill, and what keeps
     /// it expanded.
     form: CallWindowForm,
+    /// Whether calls are on or off. It outlives the Phone being unpaired.
+    calls_off: CallsOff,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -352,9 +357,14 @@ impl State {
         self.phone.as_ref()
     }
 
+    /// Whether the Phone is connected. While calls are off nothing connects
+    /// it, so it is never "connecting".
     #[must_use]
     pub fn connection_state(&self) -> &ConnectionState {
-        &self.connection
+        match self.connection {
+            ConnectionState::Connecting if !self.calls_on() => &ConnectionState::Disconnected,
+            _ => &self.connection,
+        }
     }
 
     /// The Phone's Calls, oldest first.
@@ -499,6 +509,9 @@ impl State {
 impl State {
     /// Why a Call can't be placed now, if it can't.
     fn dial_refusal(&self) -> Option<Failure> {
+        if !self.calls_on() && self.phone.is_some() {
+            return Some(Failure::CallsOff);
+        }
         match self.connection {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
             ConnectionState::Connecting => Some(Failure::PhoneConnecting),
@@ -582,6 +595,7 @@ impl State {
             return Some(Failure::ConnectionLost);
         }
         match input {
+            Input::TurnCallsOff => self.calls_off_refusal(),
             Input::SetMuted(true) if !self.muted() => match self.audio_location() {
                 None => Some(Failure::NoLiveCall),
                 Some(AudioLocation::Phone) => Some(Failure::MuteUnavailable),
@@ -694,6 +708,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     setup::follow_connection(&mut state, &mut effects);
     setup::follow_contacts(&mut state, &mut effects);
     follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
+    calls_off::hold_back_connects(&state, &mut effects);
     (state, effects)
 }
 
@@ -823,6 +838,13 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::Fix(problem) => desktop::fix(&mut state, problem, &mut effects),
         Input::FixDone(fix) => desktop::fix_done(&mut state, fix, &mut effects),
         Input::FixFailed(failure) => desktop::fix_failed(&mut state, failure),
+        input @ (Input::CallsOffKept(_)
+        | Input::TurnCallsOff
+        | Input::TurnCallsOn
+        | Input::PhoneBlocked { .. }
+        | Input::PhoneBlockFailed { .. }) => {
+            calls_off::calls_off_input(&mut state, input, &mut effects);
+        }
         Input::PhonePaired(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
@@ -880,6 +902,7 @@ fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
 fn unpair(state: &State) -> (State, Vec<Effect>) {
     let mut effects = vec![Effect::DetachPhone];
     phone_unpaired(state, &mut effects);
+    calls_off::phone_forgotten(state, &mut effects);
     (forget_phone_keeping_desktop(state), effects)
 }
 

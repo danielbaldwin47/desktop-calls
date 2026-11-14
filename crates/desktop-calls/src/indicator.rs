@@ -33,7 +33,7 @@ const ITEM_PATH: &str = "/StatusNotifierItem";
 const MENU_PATH: &str = "/MenuBar";
 
 /// The icons, by look, as file name stems and their SVG.
-const ICONS: [(IndicatorLook, &str, &str); 5] = [
+const ICONS: [(IndicatorLook, &str, &str); 6] = [
     (
         IndicatorLook::Connected,
         "desktop-calls-connected-symbolic",
@@ -58,6 +58,11 @@ const ICONS: [(IndicatorLook, &str, &str); 5] = [
         IndicatorLook::Problem,
         "desktop-calls-problem-symbolic",
         include_str!("../../../data/icons/desktop-calls-problem-symbolic.svg"),
+    ),
+    (
+        IndicatorLook::Off,
+        "desktop-calls-off-symbolic",
+        include_str!("../../../data/icons/desktop-calls-off-symbolic.svg"),
     ),
 ];
 
@@ -440,6 +445,9 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
                 IndicatorEntry::MoveAudio { .. } => 5,
                 IndicatorEntry::ConnectPhone => 6,
                 IndicatorEntry::HangUpOnPhone => 7,
+                IndicatorEntry::TurnCallsOff { .. } => 8,
+                IndicatorEntry::TurnCallsOn => 9,
+                IndicatorEntry::CallsOffUntilTurnedOn => CALLS_OFF_UNTIL_TURNED_ON,
                 IndicatorEntry::Separator => {
                     separators += 1;
                     9 + separators
@@ -473,7 +481,19 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
                         })
                         .collect()
                 }
-                _ => Vec::new(),
+                _ => entry
+                    .choices()
+                    .iter()
+                    .map(|choice| MenuItem {
+                        id: choice_id(choice),
+                        label: messages::indicator_entry(choice, view),
+                        kind: MenuItemKind::Standard {
+                            enabled: choice.enabled(),
+                            ticked: None,
+                        },
+                        children: Vec::new(),
+                    })
+                    .collect(),
             };
             MenuItem {
                 id,
@@ -483,6 +503,17 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
             }
         })
         .collect()
+}
+
+/// The id of the choice under Turn calls off: until turned on.
+const CALLS_OFF_UNTIL_TURNED_ON: i32 = 900;
+
+/// A choice's id, beneath its entry: how long to turn calls off for.
+fn choice_id(choice: &IndicatorEntry) -> i32 {
+    match choice {
+        IndicatorEntry::CallsOffUntilTurnedOn => CALLS_OFF_UNTIL_TURNED_ON,
+        _ => 0,
+    }
 }
 
 /// A Problem's entry id; the lines of its explanation follow it.
@@ -584,8 +615,16 @@ impl Menu {
     /// The entry `id` names, if it is one choosing does something for.
     fn chosen(&self, id: i32) -> Option<Input> {
         let items = layout(&self.view);
-        let index = items.iter().position(|item| item.id == id)?;
-        self.view.menu.get(index)?.intent()
+        if let Some(index) = items.iter().position(|item| item.id == id) {
+            return self.view.menu.get(index)?.intent();
+        }
+        // A choice beneath an entry, such as how long to turn calls off for.
+        self.view
+            .menu
+            .iter()
+            .flat_map(IndicatorEntry::choices)
+            .find(|choice| choice_id(choice) == id)?
+            .intent()
     }
 }
 

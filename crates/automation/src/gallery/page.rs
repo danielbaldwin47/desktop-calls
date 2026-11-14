@@ -35,10 +35,16 @@ pub(super) fn index_html(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
+        let menu = path
+            .parent()
+            .map(|output| super::indicator::menu_path(state, output))
+            .and_then(|menu| std::fs::read_to_string(menu).ok())
+            .map(|menu| format!("<pre>{}</pre>", escape(&menu)))
+            .unwrap_or_default();
         let _ = writeln!(
             icons,
             "<figure><a href=\"{file}\"><img class=\"icon\" src=\"{file}\" \
-             alt=\"{title}, {look}\"></a><figcaption>{title} ({look})</figcaption></figure>",
+             alt=\"{title}, {look}\"></a><figcaption>{title} ({look})</figcaption>{menu}</figure>",
             title = state.title,
             look = theme.as_str(),
         );
@@ -55,7 +61,16 @@ pub(super) fn index_html(
          <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n\
          <h2>The Indicator in Omarchy's bar</h2>\n\
          <p>Each icon as Omarchy's tray draws it: the SVG the app names, 12 logical pixels \
-         at 2× scale, painted in the bar's foreground through its alpha mask.</p>\n\
+         at 2× scale, painted in the bar's foreground through its alpha mask. Beneath it, \
+         the menu as the app publishes it, listed as text: a stand-in for Omarchy's menu, \
+         with a submenu indented and a disabled entry in brackets.</p>\n\
          <main class=\"indicator\">\n{icons}</main>\n</body>\n</html>\n"
     )
+}
+
+/// `text` with the characters HTML reads as markup escaped.
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

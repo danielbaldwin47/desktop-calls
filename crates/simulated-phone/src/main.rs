@@ -26,6 +26,7 @@
 //! session. Tests can pick the codec, how long the Phone takes to act on
 //! `Activate`, and switch on quirks other Phones show.
 
+mod blocked;
 mod bluez;
 mod desktop;
 mod hands_free;
@@ -37,6 +38,7 @@ mod pairing;
 mod range;
 mod restart;
 mod scenario;
+mod serve;
 mod telephony;
 
 use std::path::PathBuf;
@@ -44,12 +46,10 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use clap::Parser;
-use futures_util::StreamExt as _;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, MessageStream, OwnedObjectPath, interface};
 
-use crate::later::{answer, run_activate_later, run_obex_later};
-use crate::objects::{MethodCall, ObjectTree, PROPERTIES};
+use crate::objects::{MethodCall, ObjectTree};
 use crate::range::other_phone_up;
 use crate::scenario::Step;
 
@@ -130,6 +130,8 @@ struct World {
     behaviour: telephony::Behaviour,
     dialling: telephony::Dialling,
     recorded: Vec<(Bus, MethodCall)>,
+    /// What the Desktop asked while it had the Phone blocked.
+    blocking: blocked::Blocking,
 }
 
 type SharedWorld = Arc<Mutex<World>>;
@@ -183,6 +185,7 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
         behaviour: telephony::Behaviour::default(),
         dialling: telephony::Dialling::default(),
         recorded: Vec::new(),
+        blocking: blocked::Blocking::default(),
     }));
 
     let system = zbus::connection::Builder::system().build().await?;
@@ -222,21 +225,21 @@ async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
     .await?;
 
     futures_util::future::try_join4(
-        serve(
+        serve::serve(
             system,
             system_calls,
             Service::Bluez,
             world.clone(),
             telephony.clone(),
         ),
-        serve(
+        serve::serve(
             session,
             session_calls,
             Service::Telephony,
             world.clone(),
             telephony.clone(),
         ),
-        serve(obex, obex_calls, Service::Obex, world, telephony),
+        serve::serve(obex, obex_calls, Service::Obex, world, telephony),
         act_out(&control, steps),
     )
     .await?;
@@ -256,111 +259,6 @@ async fn act_out(control: &Connection, steps: Vec<Step>) -> zbus::Result<()> {
         match step {
             Step::Connect => control.connect(emitter).await?,
             Step::Disconnect => control.disconnect(emitter).await?,
-        }
-    }
-    Ok(())
-}
-
-/// Answers every method call that arrives for one service, and records it.
-pub(crate) async fn serve(
-    connection: Connection,
-    mut messages: MessageStream,
-    service: Service,
-    world: SharedWorld,
-    telephony: TelephonyConnection,
-) -> zbus::Result<()> {
-    while let Some(message) = messages.next().await {
-        // A Telephony service that left for a restart closed its connection,
-        // as the old process exits.
-        if connection.is_closed() {
-            break;
-        }
-        let message = message?;
-        let Some(call) = MethodCall::from_message(&message) else {
-            continue;
-        };
-        if matches!(service, Service::Bluez) && hands_free::handles(&call) {
-            lock(&world).recorded.push((service.bus(), call.clone()));
-            hands_free::answer(
-                world.clone(),
-                connection.clone(),
-                telephony.clone(),
-                call,
-                message,
-            );
-            continue;
-        }
-        if matches!(service, Service::Bluez) && pairing::handles(&call) {
-            lock(&world).recorded.push((service.bus(), call.clone()));
-            pairing::answer(world.clone(), connection.clone(), call, message);
-            continue;
-        }
-        if matches!(service, Service::Bluez) && range::handles(&call) {
-            lock(&world).recorded.push((service.bus(), call.clone()));
-            range::answer_connect(
-                world.clone(),
-                connection.clone(),
-                telephony.clone(),
-                call,
-                message,
-            );
-            continue;
-        }
-        let (reply, signals, later, activate_later, slow) = {
-            let mut world = lock(&world);
-            world.recorded.push((service.bus(), call.clone()));
-            let world = &mut *world;
-            let slow = matches!(service, Service::Telephony)
-                && call.interface == PROPERTIES
-                && call.member == "Set"
-                && world
-                    .behaviour
-                    .quirks
-                    .contains(&telephony::Quirk::SlowPropertyWrites);
-            match service {
-                Service::Bluez => (
-                    bluez::answer(&world.bluez, &call, &message),
-                    Vec::new(),
-                    None,
-                    None,
-                    slow,
-                ),
-                Service::Telephony => {
-                    let answer = telephony::answer(
-                        &mut world.telephony,
-                        world.audio_gateway.as_ref(),
-                        &mut world.behaviour,
-                        &mut world.dialling,
-                        &call,
-                        &message,
-                    );
-                    (answer.reply, answer.signals, None, answer.later, slow)
-                }
-                Service::Obex => {
-                    let answer =
-                        obex::answer(&mut world.obex, &world.phone_address, &call, &message);
-                    (answer.reply, answer.signals, answer.later, None, slow)
-                }
-            }
-        };
-        if slow {
-            // The calls that follow are answered meanwhile.
-            let connection = connection.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(telephony::SLOW_REPLY);
-                zbus::block_on(answer(&connection, &message, reply, signals))
-            });
-            continue;
-        }
-        match answer(&connection, &message, reply, signals).await {
-            Err(_) if connection.is_closed() => break,
-            result => result?,
-        }
-        if let Some((after, later)) = later {
-            run_obex_later(world.clone(), connection.clone(), message, after, later);
-        }
-        if let Some(later) = activate_later {
-            run_activate_later(world.clone(), connection.clone(), later);
         }
     }
     Ok(())
@@ -390,12 +288,40 @@ impl Control {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
+        self.page_desktop(emitter).await.map(drop)
+    }
+
+    /// Pages the Desktop and connects, as `Connect` does, and returns
+    /// whether the Desktop took the page: not while it has the Phone
+    /// blocked, which BlueZ refuses. The Phone is in range either way.
+    async fn page_desktop(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<bool> {
         let change = {
             let mut world = lock(&self.world);
             world.range.reachable = true;
+            if blocked::page_refused(&mut world) {
+                return Ok(false);
+            }
             range::hands_free_up(&mut world)?
         };
-        self.range_changed(change, &emitter).await
+        self.range_changed(change, &emitter).await?;
+        Ok(true)
+    }
+
+    /// How many `Connect` and `ConnectProfile` calls for the Phone came
+    /// while it was blocked, and how many of the Phone's pages were refused.
+    #[zbus(property)]
+    fn blocked_calls(&self) -> (u32, u32) {
+        let world = lock(&self.world);
+        (world.blocking.connects, world.blocking.pages_refused)
+    }
+
+    /// Whether the Phone is blocked (`Device1.Blocked`).
+    #[zbus(property)]
+    fn blocked(&self) -> bool {
+        blocked::blocked(&lock(&self.world))
     }
 
     /// Goes out of range, as a Phone carried away does: PipeWire unannounces
@@ -710,12 +636,12 @@ impl Control {
     /// `"connect-profile-fails"`, `"connect-profile-fails-once"`,
     /// `"late-line-identification"`, `"chld-unsupported"`,
     /// `"hangup-ignored"`, `"hangup-unanswered-once"`,
-    /// `"slow-service-level"`, `"calls-listed-late"`, `"connected-unannounced"`
-    /// or `"connect-never-answers-once"`.
+    /// `"slow-service-level"`, `"calls-listed-late"`, `"connected-unannounced"`,
+    /// `"connect-never-answers-once"` or `"connect-busy-after-unblock"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, connected-unannounced and connect-never-answers-once"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, connected-unannounced, connect-never-answers-once and connect-busy-after-unblock"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

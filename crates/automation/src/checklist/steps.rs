@@ -31,7 +31,9 @@ use keyboard_and_look::{
     banner_over_a_notification, dialer_first_frame, indicator_in_the_bar, keyboard_only_call,
 };
 use missed_calls::{ring_out, withheld_ring_out};
-use range_and_power::{out_of_range_and_back, suspend_and_resume, wireplumber_restart};
+use range_and_power::{
+    calls_off_until_turned_on, out_of_range_and_back, suspend_and_resume, wireplumber_restart,
+};
 
 /// A step's script. It returns once the step is done; whether it passed is
 /// in the sitting's findings.
@@ -320,6 +322,13 @@ pub const GROUPS: &[Group] = &[
                 needs: &[NO_OTHER_AUDIO],
                 title: "Restart WirePlumber while idle",
                 script: Some(wireplumber_restart),
+                lands_with: &[],
+            },
+            Step {
+                id: "6.4",
+                needs: &[],
+                title: "Turn calls off from the Indicator until you turn them on: the Phone stays disconnected through its Bluetooth going off and on and an app restart; turn calls on and the runner times the reconnect",
+                script: Some(calls_off_until_turned_on),
                 lands_with: &[],
             },
         ],

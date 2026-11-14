@@ -21,6 +21,8 @@ struct Status {
     phone: Option<Phone>,
     /// The Phone is in range, without hands-free.
     hands_free_lost: bool,
+    /// Calls Off, as the control interface's `CallsOff` has it.
+    calls_off: (String, u64, bool),
 }
 
 /// `desktop-calls status [--json]`: prints whether the Phone is connected.
@@ -33,22 +35,29 @@ pub fn status(json: bool) -> ExitCode {
                 serde_json::Value::Null,
                 |phone| serde_json::json!({ "name": phone.name, "address": phone.address }),
             );
+            let (state, until, pending) = &status.calls_off;
             let printed = serde_json::json!({
                 "connection_state": status.connection_state.as_str(),
                 "phone": phone,
+                "calls_off": { "state": state, "until": until, "pending": pending },
             });
             println!("{printed}");
             ExitCode::SUCCESS
         }
         Ok(status) => {
-            println!(
-                "{}",
-                messages::status(
-                    &status.connection_state,
-                    status.phone.as_ref(),
-                    status.hands_free_lost
-                )
-            );
+            // While calls are off the Phone is disconnected by the user's
+            // choice, not out of range: that is all the status says.
+            match messages::calls_off_status(status.calls_off.0 == "off") {
+                Some(line) => println!("{line}"),
+                None => println!(
+                    "{}",
+                    messages::status(
+                        &status.connection_state,
+                        status.phone.as_ref(),
+                        status.hands_free_lost
+                    )
+                ),
+            }
             ExitCode::SUCCESS
         }
         Err(failure) => report(failure),
@@ -72,6 +81,58 @@ pub fn dialer(query: &str) -> ExitCode {
 /// it again, or switch to another.
 pub fn connect_phone() -> ExitCode {
     call_app("OpenConnectWindow", &())
+}
+
+/// `desktop-calls calls off` or `calls on`: turns calls off until the
+/// user turns them on, or turns them on.
+pub fn calls(off: bool) -> ExitCode {
+    let context = MainContext::default();
+    let turned = context.block_on(async {
+        let session = connect(GlibRuntime::new(context.clone()))
+            .await
+            .map_err(Refusal::Failure)?;
+        let reply = if off {
+            session
+                .call_method(
+                    Some(control::BUS_NAME),
+                    control::PATH,
+                    Some(INTERFACE),
+                    "TurnCallsOff",
+                    &(0_u64,),
+                )
+                .await
+        } else {
+            session
+                .call_method(
+                    Some(control::BUS_NAME),
+                    control::PATH,
+                    Some(INTERFACE),
+                    "TurnCallsOn",
+                    &(),
+                )
+                .await
+        };
+        match reply {
+            Ok(_) => Ok(()),
+            Err(zbus::Error::MethodError(name, Some(text), _))
+                if name.starts_with(control::ERROR_PREFIX) =>
+            {
+                Err(Refusal::Refused(text))
+            }
+            Err(error) => Err(Refusal::Failure(failure_of(&error))),
+        }
+    });
+    match turned {
+        Ok(()) => {
+            println!("{}", messages::calls_turned(off));
+            ExitCode::SUCCESS
+        }
+        Err(Refusal::Failure(failure)) => report(failure),
+        Err(Refusal::Refused(text)) => {
+            eprintln!("{text}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Calls `method` on the control interface, for a command with nothing to
@@ -264,10 +325,17 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         .get("HandsFreeLost")
         .and_then(|value| bool::try_from(value).ok())
         .unwrap_or(false);
+    // Nor does one from before ticket #202.
+    let calls_off = properties
+        .get("CallsOff")
+        .cloned()
+        .and_then(|value| <(String, u64, bool)>::try_from(value).ok())
+        .unwrap_or_else(|| ("on".to_owned(), 0, false));
     Ok(Status {
         connection_state,
         phone: (!address.is_empty()).then_some(Phone { name, address }),
         hands_free_lost,
+        calls_off,
     })
 }
 

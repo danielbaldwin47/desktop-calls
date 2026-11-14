@@ -123,6 +123,23 @@ fn setup_window_shows(state: &test_harness::AppState, buttons: &str) -> bool {
 }
 
 impl Demo {
+    /// `Device1.Connect` on the Phone with `address`, through the demo's
+    /// system bus, as [`super::Sitting::connect_the_phone`] does on the
+    /// Desktop's.
+    pub fn connect_the_phone(&self, address: &str) -> zbus::Result<()> {
+        let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+        self.harness
+            .try_call_phone_method(
+                Bus::System,
+                "org.bluez",
+                &path,
+                "org.bluez.Device1",
+                "Connect",
+                &(),
+            )
+            .map(drop)
+    }
+
     pub fn new(harness: Harness) -> Self {
         let window = harness.start_test_client();
         window.wait_for("your window has keyboard focus", FOCUS_DEADLINE, |line| {
@@ -325,6 +342,13 @@ impl Demo {
             "earbuds-on" => self.harness.simulated_phone().set_earbuds(true),
             "out-of-range" => self.harness.simulated_phone().disconnect(),
             "return-to-range" => self.harness.simulated_phone().return_to_range(),
+            "calls-off" => self.harness.tray().click("Until I turn them on"),
+            "calls-on" => self.harness.tray().click("Turn calls on"),
+            // The Phone, blocked and out of the Desktop's hands, pages it as
+            // its Bluetooth comes back on: BlueZ refuses it.
+            "bluetooth-off-on" => {
+                let _refused = self.harness.simulated_phone().page_desktop();
+            }
             // The Desktop's Bluetooth sleeps with it, so the Phone leaves,
             // and comes back only once the Desktop is awake.
             "suspend" => {

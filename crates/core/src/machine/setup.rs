@@ -691,6 +691,7 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
 fn switch_away(state: &mut State, effects: &mut Vec<Effect>) {
     effects.push(Effect::DetachPhone);
     phone_unpaired(state, effects);
+    super::calls_off::phone_forgotten(state, effects);
     *state = forget_phone_keeping_desktop(state);
 }
 

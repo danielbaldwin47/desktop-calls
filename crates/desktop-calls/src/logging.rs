@@ -138,6 +138,11 @@ pub enum EventKind {
     ChosenPhoneLoaded,
     ChosenPhoneKept,
     ChosenPhoneFailed,
+    CallsOffLoaded,
+    CallsOffFailed,
+    CallsTurnedOff,
+    CallsTurnedOn,
+    PhoneBlockFailed,
     MainLoopStalled,
     FirstFramesPrepared,
     FirstFramesUnprepared,
@@ -148,6 +153,10 @@ pub enum EventKind {
 }
 
 impl EventKind {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one line per event kind: splitting the table would hide which string each has"
+    )]
     fn as_str(self) -> &'static str {
         match self {
             Self::ServiceStarted => "service-started",
@@ -238,6 +247,11 @@ impl EventKind {
             Self::ChosenPhoneLoaded => "chosen-phone-loaded",
             Self::ChosenPhoneKept => "chosen-phone-kept",
             Self::ChosenPhoneFailed => "chosen-phone-failed",
+            Self::CallsOffLoaded => "calls-off-loaded",
+            Self::CallsOffFailed => "calls-off-failed",
+            Self::CallsTurnedOff => "calls-turned-off",
+            Self::CallsTurnedOn => "calls-turned-on",
+            Self::PhoneBlockFailed => "phone-block-failed",
             Self::MainLoopStalled => "main-loop-stalled",
             Self::FirstFramesPrepared => "first-frames-prepared",
             Self::FirstFramesUnprepared => "first-frames-unprepared",

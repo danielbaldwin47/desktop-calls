@@ -16,6 +16,7 @@ mod audio;
 mod call_waiting;
 mod calls;
 mod calls_off;
+mod calls_turned;
 mod collapse;
 mod desktop;
 mod dialling;
@@ -41,6 +42,7 @@ use calls::{
 };
 use calls_off::CallsOff;
 pub use calls_off::CallsOffRecord;
+pub use calls_turned::{CallsTurned, CallsTurnedNotice};
 use collapse::{CallWindowForm, follow_call_window, form_input};
 use desktop::DesktopChecks;
 pub use desktop::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, SetupProblemsView};

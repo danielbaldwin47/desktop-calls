@@ -192,6 +192,23 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
         cli_ok(&harness, &["status"])
             .contains("Calls are off until you turn them on: your phone stays disconnected.")
     );
+    // Ticket #231: only the user's own turn-off and turn-on confirm, not
+    // the exception or the return to off. A notification comes in the step
+    // that causes it, in order: one more by hand, and nothing came before.
+    cli_ok(&harness, &["calls", "on"]);
+    harness.notifications().wait_for(
+        "the confirmation that calls are on",
+        DEADLINE,
+        |notification| notification.summary == "Calls on",
+    );
+    let summaries: Vec<String> = harness
+        .notifications()
+        .received()
+        .into_iter()
+        .filter(|notification| notification.app_name == "Desktop Calls")
+        .map(|notification| notification.summary)
+        .collect();
+    assert_eq!(summaries, ["Calls off", "Calls on"]);
 }
 
 #[test]

@@ -127,6 +127,8 @@ pub enum EventKind {
     CallHistoryRefreshFailed,
     MissedCall,
     MissedCallAction,
+    /// The notification that confirms calls turned off or on by hand.
+    CallsTurnedConfirmed,
     NotificationFailed,
     ThemeChanged,
     ThemeShown,
@@ -251,6 +253,7 @@ impl EventKind {
             Self::CallHistoryRefreshFailed => "call-history-refresh-failed",
             Self::MissedCall => "missed-call",
             Self::MissedCallAction => "missed-call-action",
+            Self::CallsTurnedConfirmed => "calls-turned-confirmed",
             Self::NotificationFailed => "notification-failed",
             Self::ThemeChanged => "theme-changed",
             Self::ThemeShown => "theme-shown",

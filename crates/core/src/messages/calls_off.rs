@@ -1,7 +1,9 @@
 //! What the user reads about Calls Off: the Indicator's status and menu
 //! entries, and what the command line says.
 
+use super::{NotificationText, hide_verification_code_keywords};
 use crate::clock::{QuietHours, TimeOfDay};
+use crate::machine::{CallsTurned, CallsTurnedNotice};
 
 /// The menu entry that turns calls off, over its choices.
 pub(super) const TURN_CALLS_OFF: &str = "Turn calls off";
@@ -186,4 +188,54 @@ pub fn phone_left_blocked_by_removal(address: &str) -> String {
     format!(
         "Bluetooth didn't unblock your phone: once it is running, run `bluetoothctl unblock {address}` to let it connect to this computer again."
     )
+}
+
+/// The notification that confirms the user turned calls off or on by hand
+/// (ticket #231): what was turned, then what it means for the Phone. Like
+/// the Missed Call notification, its text can't look like a verification
+/// code to Omarchy, so a Phone's name is passed through
+/// [`hide_verification_code_keywords`].
+#[must_use]
+pub fn calls_turned_notice(notice: &CallsTurnedNotice) -> NotificationText {
+    let phone = &notice.phone;
+    let (summary, body) = match notice.turned {
+        CallsTurned::Off {
+            until: None,
+            for_an_hour: _,
+        } => (
+            "Calls off".to_owned(),
+            format!("{phone} is disconnected. Turn calls on from the bar."),
+        ),
+        CallsTurned::Off {
+            until: Some(until),
+            for_an_hour: true,
+        } => (
+            format!("Calls off for 1 hour (until {})", until.shown),
+            format!("{phone} is disconnected. Turn calls on from the bar."),
+        ),
+        CallsTurned::Off {
+            until: Some(until),
+            for_an_hour: false,
+        } => (
+            format!("Calls off until {}", until.shown),
+            format!("{phone} is disconnected. Turn calls on from the bar."),
+        ),
+        CallsTurned::OffAfterCall { until } => (
+            until.map_or_else(
+                || "Calls off after this Call".to_owned(),
+                |until| format!("Calls off after this Call (until {})", until.shown),
+            ),
+            format!("{phone} stays connected until then. Keep calls on from the bar to cancel."),
+        ),
+        CallsTurned::On { reconnecting: true } => {
+            ("Calls on".to_owned(), format!("{phone} will reconnect."))
+        }
+        CallsTurned::On {
+            reconnecting: false,
+        } => ("Calls on".to_owned(), format!("{phone} stays connected.")),
+    };
+    NotificationText {
+        summary,
+        body: hide_verification_code_keywords(&body),
+    }
 }

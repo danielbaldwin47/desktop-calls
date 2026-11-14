@@ -2,6 +2,7 @@
 //! adapters, and the commands, timers and effects it asks them for.
 
 use super::calls_off::CallsOffRecord;
+use super::calls_turned::CallsTurnedNotice;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use super::quiet_hours_window::QuietHoursField;
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
@@ -489,6 +490,9 @@ pub enum Effect {
     /// Show the Missed Call notification, replacing the one with the same
     /// `notification` id if it is still shown.
     NotifyMissedCall(MissedCallNotice),
+    /// Show the confirmation that the user turned calls off or on by hand
+    /// (ticket #231): a short, transient notification.
+    NotifyCallsTurned(CallsTurnedNotice),
     /// Delete the Contacts and Call History held for the attached Phone,
     /// on disk too.
     ForgetContacts,

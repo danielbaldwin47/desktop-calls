@@ -5,8 +5,9 @@
 //! Indicator shows the Off look and the entries that turn calls off and on.
 
 use desktop_calls_core::{
-    CallsOffRecord, ConnectFailure, ConnectionState, Effect, IndicatorEntry, IndicatorLook,
-    IndicatorStatus, Input, Phone, PhoneCommand, State, SyncFailure, Timer,
+    CallsOffRecord, CallsTurned, CallsTurnedNotice, ConnectFailure, ConnectionState, Effect,
+    IndicatorEntry, IndicatorLook, IndicatorStatus, Input, Phone, PhoneCommand, State, SyncFailure,
+    Timer,
     messages::{self, Failure},
     step,
 };
@@ -75,6 +76,14 @@ fn off() -> State {
     run(state, dropped()).0
 }
 
+/// The confirmation of what the user turned (ticket #231), for the Phone.
+fn calls_turned(turned: CallsTurned) -> Effect {
+    Effect::NotifyCallsTurned(CallsTurnedNotice {
+        phone: "My Pixel".to_owned(),
+        turned,
+    })
+}
+
 /// Every effect that would page or connect the Phone.
 fn connects(effects: &[Effect]) -> Vec<&Effect> {
     effects
@@ -131,7 +140,14 @@ fn turning_calls_off_keeps_the_record_before_blocking_the_phone() {
 
     assert_eq!(
         effects,
-        [Effect::KeepCallsOff(Some(record_off())), block_phone(true)]
+        [
+            Effect::KeepCallsOff(Some(record_off())),
+            block_phone(true),
+            calls_turned(CallsTurned::Off {
+                until: None,
+                for_an_hour: false
+            }),
+        ]
     );
     assert!(state.calls_off());
 }
@@ -245,7 +261,8 @@ fn turning_calls_on_unblocks_then_connects_at_once_and_clears_the_record() {
         effects,
         [
             Effect::KeepCallsOff(Some(record_turning_on())),
-            block_phone(false)
+            block_phone(false),
+            calls_turned(CallsTurned::On { reconnecting: true }),
         ]
     );
     assert!(!state.calls_off());

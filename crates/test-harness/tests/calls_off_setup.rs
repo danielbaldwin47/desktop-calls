@@ -122,6 +122,13 @@ fn while_calls_are_off_the_setup_window_says_so_and_enter_turns_them_on() {
         },
     );
     assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
+    // Ticket #231: Turn calls on confirms, as from the Indicator.
+    let notification = harness.notifications().wait_for(
+        "the confirmation that calls are on",
+        DEADLINE,
+        |notification| notification.summary == "Calls on",
+    );
+    assert_eq!(notification.body, "My Pixel will reconnect.");
     // The window carries on as usual: it still lists to choose from.
     assert_eq!(field(&state, "step"), Some("choose"), "{state:?}");
     assert_eq!(field(&state, "dimmed"), None);

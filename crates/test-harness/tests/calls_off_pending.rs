@@ -302,3 +302,70 @@ fn the_call_pill_is_tagged_too_and_the_tag_goes_when_the_call_ends() {
         tagged(state).is_none()
     });
 }
+
+/// What the app notified, in order: summaries only.
+fn summaries(harness: &Harness) -> Vec<String> {
+    harness
+        .notifications()
+        .received()
+        .into_iter()
+        .filter(|notification| notification.app_name == "Desktop Calls")
+        .map(|notification| notification.summary)
+        .collect()
+}
+
+#[test]
+fn a_turn_off_during_a_call_confirms_when_asked_and_says_nothing_when_it_applies() {
+    let harness = connected();
+    let call = live_call(&harness);
+
+    harness.tray().click("Until I turn them on");
+
+    wait_waiting(&harness);
+    let notification = harness.notifications().wait_for(
+        "the confirmation that calls go off after the Call",
+        DEADLINE,
+        |notification| notification.summary == "Calls off after this Call",
+    );
+    assert_eq!(
+        notification.body,
+        "My Pixel stays connected until then. Keep calls on from the bar to cancel."
+    );
+    assert_eq!(
+        notification.hints.get("transient").map(String::as_str),
+        Some("true")
+    );
+
+    harness.simulated_phone().caller_hangs_up(&call);
+    wait_off(&harness);
+    // The notification of a step comes in that step: one more by hand, and
+    // nothing came between.
+    cli_ok(&harness, &["calls", "on"]);
+    harness.notifications().wait_for(
+        "the confirmation that calls are on",
+        DEADLINE,
+        |notification| notification.summary == "Calls on",
+    );
+
+    assert_eq!(summaries(&harness), ["Calls off after this Call", "Calls on"]);
+}
+
+#[test]
+fn keeping_calls_on_while_a_turn_off_waits_confirms_that_the_phone_stays_connected() {
+    let harness = connected();
+    let call = live_call(&harness);
+    cli_ok(&harness, &["calls", "off"]);
+    wait_waiting(&harness);
+
+    harness.tray().click("Keep calls on");
+
+    let notification = harness.notifications().wait_for(
+        "the confirmation that calls are on",
+        DEADLINE,
+        |notification| notification.summary == "Calls on",
+    );
+    assert_eq!(notification.body, "My Pixel stays connected.");
+    harness.simulated_phone().caller_hangs_up(&call);
+    harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
+    assert_eq!(summaries(&harness), ["Calls off after this Call", "Calls on"]);
+}

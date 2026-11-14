@@ -13,8 +13,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use desktop_calls_core::{
-    AudioLocation, ConnectionState, DialProgress, Effect, Input, MissedCallNotice, State, messages,
-    step,
+    AudioLocation, CallsTurnedNotice, ConnectionState, DialProgress, Effect, Input,
+    MissedCallNotice, State, messages, step,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
@@ -305,6 +305,9 @@ enum Announcement {
     Error(messages::Failure),
     /// A Missed Call: its notification, then its `MissedCall` signal.
     MissedCall(MissedCallNotice),
+    /// The confirmation that the user turned calls off or on by hand: its
+    /// notification.
+    CallsTurned(CallsTurnedNotice),
 }
 
 /// What carries out the Call state machine's effects.
@@ -374,23 +377,14 @@ impl Shell {
                     });
                 }
                 Effect::KeepChosenPhone { address } => chosen_phone::save(&address),
-                Effect::KeepCallsOff(record) => calls_off::save(record.as_ref()),
-                Effect::ReadClockAt(at) => {
-                    let _ = self.clock.unbounded_send(clock::Wake::At(at));
-                }
-                Effect::KeepQuietHours(hours) => {
-                    quiet_hours::save(hours);
-                    let _ = self.clock.unbounded_send(clock::Wake::QuietHours(hours));
-                }
-                Effect::CallsOffDeadlinePassed { address } => calls_off::deadline_passed(&address),
-                Effect::CallsOffPending { address } => calls_off::pending(&address),
-                Effect::CallsKeptOn { address } => calls_off::kept_on(&address),
-                Effect::CallPlacedWhileCallsOff { address } => {
-                    calls_off::placed_while_off(&address);
-                }
-                Effect::BlockPhone { address, blocked } => {
-                    calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
-                }
+                effect @ (Effect::KeepCallsOff(_)
+                | Effect::ReadClockAt(_)
+                | Effect::KeepQuietHours(_)
+                | Effect::CallsOffDeadlinePassed { .. }
+                | Effect::CallsOffPending { .. }
+                | Effect::CallsKeptOn { .. }
+                | Effect::CallPlacedWhileCallsOff { .. }
+                | Effect::BlockPhone { .. }) => self.calls_off_effect(effect),
                 Effect::SyncContacts => self.contacts_command(contacts::Command::Sync),
                 Effect::RefreshCallHistory => {
                     self.contacts_command(contacts::Command::RefreshCallHistory);
@@ -398,6 +392,9 @@ impl Shell {
                 Effect::ForgetContacts => self.contacts_command(contacts::Command::Forget),
                 Effect::NotifyMissedCall(notice) => {
                     announcements.push(Announcement::MissedCall(notice));
+                }
+                Effect::NotifyCallsTurned(notice) => {
+                    announcements.push(Announcement::CallsTurned(notice));
                 }
                 Effect::Phone(command) => phone_commands.push(command),
                 Effect::StartRinging => self.ringer.start(),
@@ -451,6 +448,7 @@ impl Shell {
         for announcement in announcements {
             match announcement {
                 Announcement::MissedCall(notice) => self.notifier.notify(notice, published),
+                Announcement::CallsTurned(notice) => self.notifier.confirm_calls_turned(notice),
                 Announcement::Error(failure) => {
                     tracing::info!(
                         event_kind = %EventKind::ErrorReported,
@@ -463,6 +461,31 @@ impl Shell {
                     }
                 }
             }
+        }
+    }
+
+    /// Carries out an effect of Calls Off or Quiet Hours: what to keep for
+    /// the next run, when to read the clock, what to have BlueZ block, and
+    /// what to log.
+    fn calls_off_effect(&self, effect: Effect) {
+        match effect {
+            Effect::KeepCallsOff(record) => calls_off::save(record.as_ref()),
+            Effect::ReadClockAt(at) => {
+                let _ = self.clock.unbounded_send(clock::Wake::At(at));
+            }
+            Effect::KeepQuietHours(hours) => {
+                quiet_hours::save(hours);
+                let _ = self.clock.unbounded_send(clock::Wake::QuietHours(hours));
+            }
+            Effect::CallsOffDeadlinePassed { address } => calls_off::deadline_passed(&address),
+            Effect::CallsOffPending { address } => calls_off::pending(&address),
+            Effect::CallsKeptOn { address } => calls_off::kept_on(&address),
+            Effect::CallPlacedWhileCallsOff { address } => calls_off::placed_while_off(&address),
+            Effect::BlockPhone { address, blocked } => {
+                calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
+            }
+            // `carry_out` passes on only the effects above.
+            _ => {}
         }
     }
 

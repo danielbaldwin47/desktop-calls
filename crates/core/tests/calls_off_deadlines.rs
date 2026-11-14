@@ -6,8 +6,8 @@
 //! suspend.
 
 use desktop_calls_core::{
-    CallsOffRecord, Deadline, Effect, IndicatorEntry, IndicatorStatus, Input, Phone, PhoneCommand,
-    State, TimeOfDay, Timestamp, WallClock,
+    CallsOffRecord, CallsTurned, CallsTurnedNotice, Deadline, Effect, IndicatorEntry,
+    IndicatorStatus, Input, Phone, PhoneCommand, State, TimeOfDay, Timestamp, WallClock,
     messages::{self, Failure},
     step,
 };
@@ -232,6 +232,13 @@ fn turning_calls_off_for_an_hour_keeps_the_deadline_and_asks_for_the_clock_then(
             Effect::KeepCallsOff(Some(record_off(in_an_hour()))),
             block_phone(true),
             Effect::ReadClockAt(Timestamp(NOW + 60 * MINUTE)),
+            Effect::NotifyCallsTurned(CallsTurnedNotice {
+                phone: "My Pixel".to_owned(),
+                turned: CallsTurned::Off {
+                    until: Some(in_an_hour()),
+                    for_an_hour: true,
+                },
+            }),
         ]
     );
     assert_eq!(state.calls_off_until(), Some(in_an_hour()));

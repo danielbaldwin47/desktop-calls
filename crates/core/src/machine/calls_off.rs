@@ -35,6 +35,7 @@
 //! in. Hang up first, or no connection in time, ends the Call, so calls go
 //! back off at once.
 
+use super::calls_turned;
 use super::input::{Effect, Input, Timer};
 use super::presence::connect_again_at_once;
 use super::{FORGET_EARLIER_RUN_MS, State};
@@ -276,15 +277,24 @@ impl State {
 pub(super) fn calls_off_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
     match input {
         Input::CallsOffKept(record) => kept(state, record, effects),
-        Input::TurnCallsOff { until } => turn_off(state, until, false, effects),
+        Input::TurnCallsOff { until } => {
+            let before = state.calls_off.clone();
+            turn_off(state, until, false, effects);
+            let turned = state.calls_turned_off(&before);
+            calls_turned::confirm(state, turned, effects);
+        }
         Input::TurnCallsOn => {
+            let turned = state.calls_turned_on();
             keep_on_through_quiet_hours(state);
             keep_on(state, effects);
             turn_on(state, effects);
+            calls_turned::confirm(state, turned, effects);
         }
         Input::KeepCallsOn => {
+            let turned = state.calls_kept_on();
             keep_on_through_quiet_hours(state);
             keep_on(state, effects);
+            calls_turned::confirm(state, turned, effects);
         }
         Input::ClockTicked(clock) => clock_ticked(state, clock, effects),
         Input::PhoneBlocked { address, blocked } => {

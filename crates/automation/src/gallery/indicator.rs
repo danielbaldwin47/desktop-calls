@@ -31,6 +31,10 @@ pub(super) struct IndicatorState {
     tooltip: &'static str,
     /// For a menu state, the label of the entry whose submenu is open.
     submenu: Option<&'static str>,
+    /// For a menu state, labels its menu has and the menu before doesn't:
+    /// the Indicator updates its tooltip before its menu, so the drawing
+    /// waits for these.
+    menu_shows: &'static [&'static str],
 }
 
 /// The Indicator is drawn in Omarchy's light and dark themes.
@@ -87,6 +91,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         reach: |harness| harness.simulated_phone().connect(),
         tooltip: "Simulated Pixel connected",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "disconnected",
@@ -98,6 +103,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Simulated Pixel out of range",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "ringing",
@@ -109,6 +115,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Call from +44 7700 900123",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "in-call",
@@ -117,6 +124,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         reach: live,
         tooltip: "In a Call with +44 7700 900123",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "calls-off-pending",
@@ -128,6 +136,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls turn off when this Call ends",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "problem",
@@ -136,6 +145,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         reach: problem,
         tooltip: "Simulated Pixel connected · Contacts not shared",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "off",
@@ -147,6 +157,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "off-until-morning",
@@ -158,6 +169,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off until 07:00",
         submenu: None,
+        menu_shows: &[],
     },
     IndicatorState {
         name: "off-quiet-hours",
@@ -171,6 +183,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off until 23:59 (quiet hours)",
         submenu: None,
+        menu_shows: &[],
     },
 ];
 
@@ -186,6 +199,11 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
         },
         tooltip: "Simulated Pixel connected",
         submenu: None,
+        menu_shows: &[
+            "Simulated Pixel connected",
+            "Turn calls off",
+            QUIET_HOURS_ENTRY,
+        ],
     },
     IndicatorState {
         name: "menu-turn-off-choices",
@@ -194,6 +212,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
         reach: connect,
         tooltip: "Simulated Pixel connected",
         submenu: Some("Turn calls off"),
+        menu_shows: &["Simulated Pixel connected", "Turn calls off"],
     },
     IndicatorState {
         name: "menu-off-problem",
@@ -208,6 +227,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls off · Contacts not shared",
         submenu: None,
+        menu_shows: &["Turn calls on", "Contacts not shared"],
     },
     IndicatorState {
         name: "menu-calls-off-pending",
@@ -219,6 +239,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
         },
         tooltip: "Calls turn off when this Call ends",
         submenu: None,
+        menu_shows: &["Hang up", "Keep calls on"],
     },
 ];
 
@@ -259,7 +280,17 @@ pub(super) fn draw_indicator(
             foreground: theme.colour("foreground"),
             separator: theme.colour("accent"),
         };
-        draw_tray_menu(&harness.tray().menu(), TITLE, state.submenu, colours, &path)
+        let menu = harness.tray().wait_for_menu(
+            &format!("the menu has {:?}", state.menu_shows),
+            DEADLINE,
+            |menu| {
+                state
+                    .menu_shows
+                    .iter()
+                    .all(|label| MenuEntry::find(menu, label).is_some())
+            },
+        );
+        draw_tray_menu(&menu, TITLE, state.submenu, colours, &path)
     } else {
         let item = items.first().ok_or("no tray item")?;
         draw_tray_icon(

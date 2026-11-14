@@ -56,6 +56,9 @@ pub(super) struct SetupProblems {
     first_button: RefCell<Option<(gtk::Button, gtk::Label)>>,
     /// The command last copied, while the same Problems show.
     copied: RefCell<Option<String>>,
+    /// The Problems blocked the step when last shown: when that begins
+    /// again, say as calls turn on, the first button takes focus.
+    blocking: Cell<bool>,
 }
 
 impl SetupProblems {
@@ -89,6 +92,7 @@ impl SetupProblems {
             fix_buttons: RefCell::default(),
             first_button: RefCell::default(),
             copied: RefCell::default(),
+            blocking: Cell::default(),
         });
         problems.connect();
         problems
@@ -154,6 +158,7 @@ impl SetupProblems {
     ) {
         let Some(view) = view else {
             self.shown.replace((Vec::new(), None));
+            self.blocking.set(false);
             self.copied.replace(None);
             self.widget.set_visible(false);
             return;
@@ -163,6 +168,7 @@ impl SetupProblems {
             window.map(|window| (window.opened, window.step.as_str())),
         );
         let changed = *self.shown.borrow() != shown;
+        let blocks_again = view.blocks_step && !self.blocking.replace(view.blocks_step);
         if changed {
             let rebuild = self.shown.borrow().0 != shown.0;
             self.shown.replace(shown);
@@ -196,7 +202,7 @@ impl SetupProblems {
         *self.content.borrow_mut() = self.report_content(view);
         self.set_focused_field();
         self.publish();
-        if changed
+        if (changed || blocks_again)
             && view.blocks_step
             && let Some((button, _)) = self.first_button.borrow().as_ref()
         {
@@ -347,7 +353,7 @@ impl SetupProblems {
 
 /// A button with `label` and, after it, the keycap for the key that presses
 /// it, hidden until it does.
-fn fix_button(label: &str) -> (gtk::Button, gtk::Label) {
+pub(super) fn fix_button(label: &str) -> (gtk::Button, gtk::Label) {
     let keycap = gtk::Label::new(Some(messages::problem_keycap()));
     keycap.add_css_class(class::KEYCAP);
     keycap.set_valign(gtk::Align::Center);

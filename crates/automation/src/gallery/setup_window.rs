@@ -2,11 +2,14 @@
 //! or its command: Bluetooth off (the step is dimmed, and Enter presses
 //! Turn on), Bluetooth blocked, Contacts support missing, audio not set up
 //! and BlueZ's own hands-free on (these three leave the step as it is,
-//! with a Phone listed).
+//! with a Phone listed). With them, calls being off: a neutral card in the
+//! same shape, with Turn calls on and its key.
 
 use test_harness::{AppState, Builder, Harness};
 
-use super::{DEADLINE, PHONE_NAME, State, app_region, fresh_install, setup_window_shows};
+use super::{
+    DEADLINE, PHONE_NAME, State, app_region, as_is, fresh_install, setup_window_shows, sync,
+};
 
 /// Audio settings that leave out hands-free, so Calls' audio isn't set up.
 const ROLES_WITHOUT_HANDS_FREE: &str = "\
@@ -18,6 +21,25 @@ monitor.bluez.properties = {
 ";
 
 pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
+    State {
+        name: "setup-window-calls-off",
+        title: "The Setup Window while calls are off until 07:00: a neutral card with Turn calls on and its key, the steps dimmed, and no Phone to list",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+            harness.wait_for_app("calls are off", DEADLINE, |state| {
+                state.calls_off == "off" && state.connection_state == "disconnected"
+            });
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app("the Setup Window says calls are off", DEADLINE, |state| {
+                setup_window_shows(state, "calls-off", "Calls are off")
+                    && setup_window_shows(state, "focused", "true")
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
     State {
         name: "setup-problem-bluetooth-off",
         title: "The Setup Window with Bluetooth off: one card with Turn on and its key, the steps dimmed, and no Phone to list",

@@ -38,8 +38,8 @@ pub use machine::{
     DesktopFix, DialProgress, DialerCallsOff, DialerKey, DialerView, Effect, FixFailure, HeldCall,
     Input, KeybindingStage, Mute, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem,
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts,
-    RingingCaller, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State, StateLine,
-    Surfaces, Timer, WaitingOptions, keypad_tones, step,
+    RingingCaller, SetupCallsOff, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView,
+    State, StateLine, Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

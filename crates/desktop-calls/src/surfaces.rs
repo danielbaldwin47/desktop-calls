@@ -82,6 +82,7 @@ mod first_frames;
 mod footer;
 mod icons;
 mod quiet_hours_window;
+mod setup_calls_off;
 mod setup_problems;
 mod setup_window;
 

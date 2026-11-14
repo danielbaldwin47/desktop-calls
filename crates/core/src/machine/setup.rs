@@ -30,9 +30,12 @@
 //!    which it offers to add to the Hyprland config, writing nothing until
 //!    the user confirms the exact line.
 
+mod keybinding;
+
 use super::dialling::phone_unpaired;
 use super::input::{Effect, Input, PairingFailure, Timer};
 use super::presence::connect_phone_now;
+use super::setup_calls_off::{SetupCallsOff, keep_on_for_setup};
 use super::{State, forget_phone_keeping_desktop, phone::phone_paired};
 use crate::call::Timestamp;
 use crate::connection::{ConnectionState, Phone};
@@ -184,6 +187,8 @@ pub struct SetupWindowView {
     pub notice: Option<SetupNotice>,
     /// Different each time the window opens.
     pub opened: u32,
+    /// Calls are off: the window says so, with Turn calls on.
+    pub calls_off: Option<SetupCallsOff>,
     /// The Problem whose button has keyboard focus, so Enter presses it
     /// instead of the step's default button.
     pub problem_has_focus: Option<ProblemKind>,
@@ -363,6 +368,7 @@ impl State {
             desktop_name: setup.desktop_name.clone(),
             notice: setup.notice.filter(|_| !said_by_a_problem),
             opened: setup.opened,
+            calls_off: self.setup_calls_off_view(),
             problem_has_focus: self
                 .problem_blocks_step()
                 .then(|| self.desktop.problems().first().copied())
@@ -451,6 +457,12 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
             }
         }
         Input::PhoneNotNearby { address } => not_nearby(state, &address),
+        // Pairing waits while calls are off; a Phone pairing from its own
+        // screen is turned down, as while another pairing is under way.
+        Input::ChoosePhone { .. } if state.pairing_waits_for_calls() => {}
+        Input::PairingCode { .. } if state.pairing_waits_for_calls() => {
+            effects.push(Effect::AnswerPairingCode { confirm: false });
+        }
         Input::ChoosePhone { address } => choose(state, &address, effects),
         Input::PairingCode { phone, code } => pairing_code(state, phone, code, effects),
         Input::ConfirmPairing => answer_code(state, true, effects),
@@ -495,7 +507,7 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
                 finish(setup, phone, effects);
             }
         }
-        input => keybinding_input(state, input, effects),
+        input => keybinding::keybinding_input(state, input, effects),
     }
 }
 
@@ -687,6 +699,7 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
     effects.push(Effect::TrustPhone {
         address: phone.address.clone(),
     });
+    keep_on_for_setup(state, effects);
     if let Some(setup) = state.setup.as_mut() {
         setup.step = Step::Connecting(phone);
         wait(setup, CONNECT_WAIT_MS, effects);
@@ -834,70 +847,6 @@ pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
             setup.just_failed = true;
         }
     }
-}
-
-/// The finish page's keybinding: offered, shown, confirmed and written.
-fn keybinding_input(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
-    let Some(setup) = state.setup.as_mut() else {
-        return;
-    };
-    if !matches!(setup.step, Step::Done(_)) {
-        return;
-    }
-    let adding = setup.adding;
-    let current = std::mem::take(&mut setup.keybinding);
-    setup.keybinding = match (input, current) {
-        (Input::KeybindingChecked(config), _) => {
-            KeybindingStage::Checked(KeybindingCheck::of(&config))
-        }
-        (
-            Input::AddKeybinding,
-            KeybindingStage::Checked(check @ KeybindingCheck::Available { .. }),
-        ) => {
-            setup.notice = None;
-            KeybindingStage::Confirming(check)
-        }
-        (Input::CancelKeybinding, KeybindingStage::Confirming(check)) if !adding => {
-            KeybindingStage::Checked(check)
-        }
-        (Input::ConfirmKeybinding, KeybindingStage::Confirming(check)) => {
-            if let (
-                KeybindingCheck::Available {
-                    file, seen, added, ..
-                },
-                false,
-            ) = (&check, adding)
-            {
-                setup.adding = true;
-                setup.notice = None;
-                effects.push(Effect::AddKeybinding {
-                    file: file.clone(),
-                    seen: seen.clone(),
-                    added: added.clone(),
-                });
-            }
-            KeybindingStage::Confirming(check)
-        }
-        (
-            Input::KeybindingAdded,
-            KeybindingStage::Confirming(KeybindingCheck::Available { keys, file, .. }),
-        ) if adding => {
-            setup.adding = false;
-            KeybindingStage::Checked(KeybindingCheck::Added { keys, file })
-        }
-        (Input::KeybindingNotAdded, KeybindingStage::Confirming(check)) if adding => {
-            setup.adding = false;
-            setup.notice = Some(SetupNotice::KeybindingNotAdded);
-            KeybindingStage::Checked(check)
-        }
-        // Offered afresh from what the file holds now.
-        (Input::KeybindingConfigChanged(config), KeybindingStage::Confirming(_)) if adding => {
-            setup.adding = false;
-            setup.notice = Some(SetupNotice::KeybindingConfigChanged);
-            KeybindingStage::Checked(KeybindingCheck::of(&config))
-        }
-        (_, unchanged) => unchanged,
-    };
 }
 
 /// How far the sync under way has got, for the Setup Window to show.

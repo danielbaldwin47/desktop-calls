@@ -29,10 +29,10 @@ pub use banner::{
 pub use call_pill::{call_pill_tag, call_pill_tooltip, show_call_tooltip};
 pub use call_window::{contact_lost, elapsed, state_line};
 pub use calls_off::{
-    calls_kept_on, calls_off_for_too_long, calls_off_pending_status, calls_off_status,
-    calls_off_until_unreadable, calls_off_waits, calls_turned, phone_left_blocked_by_removal,
-    phone_unblocked_for_removal, quiet_hours_cleared, quiet_hours_set, quiet_hours_status,
-    quiet_hours_unreadable,
+    SetupCallsOffText, calls_kept_on, calls_off_for_too_long, calls_off_pending_status,
+    calls_off_status, calls_off_until_unreadable, calls_off_waits, calls_turned,
+    phone_left_blocked_by_removal, phone_unblocked_for_removal, quiet_hours_cleared,
+    quiet_hours_set, quiet_hours_status, quiet_hours_unreadable, setup_calls_off,
 };
 pub use checks::{
     command_copied, copy_command_label, fix_failed, fix_label, fixing, problem_keycap,

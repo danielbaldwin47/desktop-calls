@@ -1,6 +1,7 @@
 # UI pass: a design review of every surface
 
 Date: 2026-11-13. No ticket: a design proposal for the user to review. It changes no product code and opens no implementation tickets.
+Reviewed by the user the same day: see **User's verdict, 2026-11-13** at the end. The work is specified in #221.
 Sources: `just screenshot` on `40411a0` (the real binary against the Simulated Phone in headless sway: 96 captures of 24 states, plus the Indicator's 5 icons, light and dark); two Setup Window Problem states captured with a temporary, uncommitted gallery change; `crates/desktop-calls/src/surfaces.rs`, `theme.rs` and `crates/core/src/messages.rs`; issues #197 (Call Pill) and #198 (Calls Off and Quiet Hours); Omarchy's shell style (`/usr/share/omarchy/shell/Commons/Style.qml`); `docs/research/2026-11-13-real-call-log.md`. Nothing touched the Phone, Bluetooth or WirePlumber.
 Companion page: the same review with the current screenshots and before-and-after mockups in light and dark is a private artifact, https://claude.ai/artifact/9tnmmuUZBu2PgEP7gh2sWE.
 Legend: **[seen]** = judged from a gallery capture. **[from source]** = read from code, Messages or a spec, not seen rendered. **[inferred]** = computed or reasoned.
@@ -168,3 +169,20 @@ Size: S is one ticket in one surface's view; M touches the view, Messages and sc
 5. **A confirmation when calls go off or on by hand?** Recommended: one transient notification; none when Quiet Hours start or end.
 6. **Quiet Hours times as two fields or four spin buttons?** Recommended: two HH:MM fields with 15-minute arrow steps and typing, plus the saved sentence.
 7. **A lasting Missed Call cue?** Recommended: a menu line and an icon badge until the Dialer is opened, after the sitting.
+
+## User's verdict, 2026-11-13
+
+The user, on reviewing this page and its mockups:
+
+> a lot of this looks great. The one thing I'm not sure on is #1, the placement. Today, the expanded call banner shows up in the top right, but sort of awkwardly in the middle of the screen (which is to make room for notifications). Some ideas, it could stay in the top right, like macos does. Or, if decided to use the bottom right, it could stay there. I just think the placement of the expanded one being not-quite in the top right feels weird.
+
+Decisions, specified in **#221** (tickets #222 to #237):
+
+- **Questions 2 to 7: the recommendations stand.** Names in sans and data in monospace. One-click Hang up on the Call Pill, red only on hover, with a 200 ms change between the Call Window and the Call Pill. Sentence case in the interface, glossary capitals kept in docs. One transient confirmation when calls are turned off or on by hand. Quiet Hours as two HH:MM fields. A lasting Missed Call cue, after the Real-Phone Checklist sitting.
+- **Question 1, placement:** the chief of staff chose between the user's two options, flagged in #221 under "Decided without the user" so the user can overrule it.
+  - A live Call has one home, the bottom-right corner. The Call Pill sits flush in it with the standard gap, and the Call Window grows in place from it, flush in the same corner.
+  - The rule for every surface: centred like a launcher (the Dialer), or flush in a corner with the standard gap. Nothing floats part-way.
+  - The Incoming Call Banner sits flush top-right, drawn above Omarchy's notification cards while it rings.
+    - Pushing the cards aside is impossible: the notification column ignores exclusive zones and has no IPC to reserve space. Verified from Omarchy's source; citations are in #221.
+    - That the Banner draws above the cards is inferred, and is judged at Real-Phone Checklist step 7.2.
+

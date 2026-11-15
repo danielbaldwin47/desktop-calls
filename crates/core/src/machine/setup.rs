@@ -67,7 +67,7 @@ const CONFIRMED_MS: u32 = 30_000;
 const WARNING_MS: u32 = 3_000;
 /// About how long the Phone takes to give each Contact: the Pixel gave 319
 /// in 9.7 s (2026-11-05).
-const CONTACT_READ_MS: u64 = 30;
+pub(crate) const CONTACT_READ_MS: u64 = 30;
 /// How soon after a sync fails the Phone leaving means the failure was the
 /// link dropping: obexd's call fails a moment before hands-free goes down.
 const LINK_DROP_MS: u32 = 2_000;

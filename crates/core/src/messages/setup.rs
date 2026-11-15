@@ -8,6 +8,9 @@ use crate::machine::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupFocus, SetupNotice, SetupStep,
     SetupWindowView,
 };
+use crate::messages::setup_parts::{
+    Instruction, SetupCard, StageMark, SyncText, pin_card, seconds_until, stage_marks, sync,
+};
 use crate::messages::{
     ProblemKind, SetupCallsOffText, copy_command_label, fix_label, setup_calls_off,
 };
@@ -22,21 +25,28 @@ pub type Keys = Vec<(&'static [&'static str], &'static str)>;
 pub struct SetupWindowText {
     /// The window's title.
     pub title: &'static str,
+    /// How each of the four named steps across the top is marked.
+    pub stages: [StageMark; 4],
     pub heading: String,
     /// What the step means, before what to do, if it needs saying.
     pub summary: Option<String>,
-    /// What to do, in order, each one sentence.
-    pub instructions: Vec<String>,
+    /// What to do, in order, each one sentence, with where it is done.
+    pub instructions: Vec<Instruction>,
     /// The six digits both screens show, while confirming.
     pub code: Option<String>,
     /// The seconds left to answer the Phone, while it asks.
     pub countdown: Option<String>,
-    /// How far the sync has got, one line for each part.
-    pub progress: Vec<String>,
+    /// What the countdown counts.
+    pub countdown_label: Option<&'static str>,
+    /// The sync under way.
+    pub sync: Option<SyncText>,
     /// The exact line the keybinding adds, while the user confirms it.
     pub line: Option<String>,
-    /// A tip, on the finish page.
-    pub tip: Option<&'static str>,
+    /// The finish page's card offering the keybinding, or saying how to
+    /// open the Dialer from a key.
+    pub keybinding: Option<SetupCard>,
+    /// The finish page's card on keeping Desktop Calls in the bar.
+    pub tip: Option<SetupCard>,
     /// Why the last attempt didn't work.
     pub notice: Option<String>,
     /// What the list says while no Phone is nearby, while choosing.
@@ -61,13 +71,16 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         .map_or_else(|| "this computer".to_owned(), |name| format!("“{name}”"));
     let mut text = SetupWindowText {
         title: "Connect your phone",
+        stages: stage_marks(&view.step),
         heading: String::new(),
         summary: None,
         instructions: Vec::new(),
         code: None,
         countdown: None,
-        progress: Vec::new(),
+        countdown_label: None,
+        sync: None,
         line: None,
+        keybinding: None,
         tip: None,
         notice: view.notice.as_ref().map(notice),
         empty_list: None,
@@ -77,71 +90,70 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         buttons: Vec::new(),
         keys: Vec::new(),
     };
-    let (heading, instructions, buttons): Page =
-        match &view.step {
-            SetupStep::Choose { .. } => {
-                // Nothing to look for while pairing waits for calls.
-                let waits = view.calls_off.is_some_and(|off| off.blocks_step);
-                text.empty_list = (!waits).then_some("Looking for phones nearby…");
-                choose(&desktop)
-            }
-            SetupStep::Pairing { phone } => (
-                format!("Pairing with {}…", phone.name),
-                vec!["On your phone: keep the Pair new device screen open.".to_owned()],
-                vec!["Cancel"],
-            ),
-            SetupStep::Confirm { phone, code: digits } => {
-                text.code = Some(format!("{digits:06}"));
-                (
-                    "Check the code".to_owned(),
-                    vec![
-                        format!("Check that {} shows this code too.", phone.name),
-                        "On your phone: tap Pair.".to_owned(),
-                        "Then choose Confirm here.".to_owned(),
-                    ],
-                    vec!["Confirm", "Cancel"],
-                )
-            }
-            SetupStep::Confirmed { phone } => (
-                format!("Pairing with {}…", phone.name),
-                vec!["On your phone: tap Pair, if you haven't yet.".to_owned()],
-                vec!["Cancel"],
-            ),
-            SetupStep::Connecting { phone } => (
-                format!("Connecting to {}…", phone.name),
+    let (heading, instructions, buttons): Page = match &view.step {
+        SetupStep::Choose { .. } => {
+            // Nothing to look for while pairing waits for calls.
+            let waits = view.calls_off.is_some_and(|off| off.blocks_step);
+            text.empty_list = (!waits).then_some("Looking for phones nearby…");
+            choose(&desktop)
+        }
+        SetupStep::Pairing { phone } => (
+            format!("Pairing with {}…", phone.name),
+            vec![Instruction::phone("Keep the Pair new device screen open.")],
+            vec!["Cancel"],
+        ),
+        SetupStep::Confirm {
+            phone,
+            code: digits,
+        } => {
+            text.code = Some(format!("{digits:06}"));
+            (
+                "Check the code".to_owned(),
                 vec![
-                    "On your phone: if it asks to share contacts and call history, tap Allow, so Calls show names."
-                        .to_owned(),
+                    // One line per place, so grouping keeps the order:
+                    // check and tap Pair on the Phone, then confirm here.
+                    Instruction::phone(format!(
+                        "Check that {} shows this code too, then tap Pair.",
+                        phone.name
+                    )),
+                    Instruction::here("Then choose Confirm."),
                 ],
-                vec!["Close"],
-            ),
-            SetupStep::PhoneCallsOff { phone } => phone_calls_off(&mut text, phone, &desktop),
-            SetupStep::PhoneUnreachable { phone } => phone_unreachable(&mut text, phone),
-            SetupStep::ContactsWarning { phone } => contacts_warning(&mut text, phone),
-            SetupStep::ContactsPrompt { deadline, .. } => contacts_prompt(&mut text, *deadline, now),
-            SetupStep::ContactsPromptTimedOut { .. } => contacts_prompt_timed_out(&mut text),
-            SetupStep::ContactsSyncing {
-                call_history,
-                contacts,
-                contacts_read,
-                ..
-            } => contacts_syncing(&mut text, *call_history, *contacts, *contacts_read, now),
-            SetupStep::ContactsPhoneAway { phone, back } => phone_away(&mut text, phone, *back),
-            SetupStep::Done {
-                phone,
-                connected,
-                contacts,
-                keybinding,
-            } => done(
-                &mut text,
-                phone,
-                *connected,
-                *contacts,
-                keybinding,
-                &desktop,
-                home,
-            ),
-        };
+                vec!["Confirm", "Cancel"],
+            )
+        }
+        SetupStep::Confirmed { phone } => (
+            format!("Pairing with {}…", phone.name),
+            vec![Instruction::phone("Tap Pair, if you haven't yet.")],
+            vec!["Cancel"],
+        ),
+        SetupStep::Connecting { phone } => (
+            format!("Connecting to {}…", phone.name),
+            vec![Instruction::phone(
+                "If it asks to share contacts and call history, tap Allow, so Calls show names.",
+            )],
+            vec!["Close"],
+        ),
+        SetupStep::PhoneCallsOff { phone } => phone_calls_off(&mut text, phone, &desktop),
+        SetupStep::PhoneUnreachable { phone } => phone_unreachable(&mut text, phone),
+        SetupStep::ContactsWarning { phone } => contacts_warning(&mut text, phone),
+        SetupStep::ContactsPrompt { deadline, .. } => contacts_prompt(&mut text, *deadline, now),
+        SetupStep::ContactsPromptTimedOut { .. } => contacts_prompt_timed_out(&mut text),
+        SetupStep::ContactsSyncing {
+            call_history,
+            contacts,
+            contacts_read,
+            ..
+        } => contacts_syncing(&mut text, *call_history, *contacts, *contacts_read, now),
+        SetupStep::ContactsPhoneAway { phone, back } => phone_away(&mut text, phone, *back),
+        SetupStep::Done {
+            phone,
+            connected,
+            contacts,
+            keybinding,
+        } => done(
+            &mut text, phone, *connected, *contacts, keybinding, &desktop, home,
+        ),
+    };
     text.keys = keys(view, &buttons, text.calls_off.as_ref());
     text.heading = heading;
     text.instructions = instructions;
@@ -150,16 +162,18 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
 }
 
 /// A page's heading, instructions and buttons, the default one first.
-type Page = (String, Vec<String>, Vec<&'static str>);
+type Page = (String, Vec<Instruction>, Vec<&'static str>);
 
 /// The page that lists the Phones nearby to choose from.
 fn choose(desktop: &str) -> Page {
     (
         "Connect your phone".to_owned(),
         vec![
-            "On your phone: open Settings, then Connected devices.".to_owned(),
-            "On your phone: tap Pair new device, and keep that screen open.".to_owned(),
-            format!("Choose your phone below, or on your phone tap {desktop} when it shows."),
+            Instruction::phone("Open Settings, then Connected devices."),
+            Instruction::phone("Tap Pair new device, and keep that screen open."),
+            Instruction::here(format!(
+                "Choose your phone below, or tap {desktop} on your phone when it shows."
+            )),
         ],
         vec!["Cancel"],
     )
@@ -279,8 +293,8 @@ fn phone_unreachable(text: &mut SetupWindowText, phone: &Phone) -> Page {
     (
         format!("Can't reach {}", phone.name),
         vec![
-            "On your phone: turn Bluetooth on, and keep it close to this computer.".to_owned(),
-            "Then choose Try again here.".to_owned(),
+            Instruction::phone("Turn Bluetooth on, and keep it close to this computer."),
+            Instruction::here("Then choose Try again."),
         ],
         vec!["Try again", "Close"],
     )
@@ -294,10 +308,10 @@ fn phone_calls_off(text: &mut SetupWindowText, phone: &Phone, desktop: &str) -> 
     (
         "Turn on Phone calls".to_owned(),
         vec![
-            "On your phone: open Settings, then Connected devices.".to_owned(),
-            format!("On your phone: tap the settings icon next to {desktop}."),
-            "On your phone: switch Phone calls on.".to_owned(),
-            "Then choose Try again here.".to_owned(),
+            Instruction::phone("Open Settings, then Connected devices."),
+            Instruction::phone(format!("Tap the settings icon next to {desktop}.")),
+            Instruction::phone("Switch Phone calls on."),
+            Instruction::here("Then choose Try again."),
         ],
         vec!["Try again", "Close"],
     )
@@ -310,20 +324,24 @@ fn contacts_warning(text: &mut SetupWindowText, phone: &Phone) -> Page {
     ));
     (
         "Your phone is about to ask".to_owned(),
-        vec![
-            "On your phone: when it asks to allow access to contacts and call history, tap Allow."
-                .to_owned(),
-        ],
+        vec![Instruction::phone(
+            "When it asks to allow access to contacts and call history, tap Allow.",
+        )],
         vec!["Close"],
     )
 }
 
+/// What the countdown counts, so it isn't a bare number.
+const COUNTDOWN_LABEL: &str = "left to tap Allow";
+
 fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timestamp) -> Page {
     text.countdown = Some(seconds_until(deadline, now).to_string());
-    text.summary = Some("Seconds left before your phone stops asking.".to_owned());
+    text.countdown_label = Some(COUNTDOWN_LABEL);
     (
         "Tap Allow on your phone".to_owned(),
-        vec!["On your phone: tap Allow, to share contacts and call history.".to_owned()],
+        vec![Instruction::phone(
+            "Tap Allow, to share contacts and call history.",
+        )],
         vec!["Close"],
     )
 }
@@ -331,13 +349,14 @@ fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timesta
 fn contacts_prompt_timed_out(text: &mut SetupWindowText) -> Page {
     // The countdown ran out.
     text.countdown = Some("0".to_owned());
+    text.countdown_label = Some("Time ran out to tap Allow");
     text.summary =
         Some("Nobody answered on your phone in time, so it isn't sharing contacts yet.".to_owned());
     (
         "Your phone stopped asking".to_owned(),
         vec![
-            "Choose Try again, and your phone asks again.".to_owned(),
-            "On your phone: tap Allow.".to_owned(),
+            Instruction::here("Choose Try again, and your phone asks again."),
+            Instruction::phone("Tap Allow."),
         ],
         vec!["Try again", "Skip"],
     )
@@ -355,10 +374,12 @@ fn done(
     home: Option<&str>,
 ) -> Page {
     text.summary = Some(contacts_outcome(contacts, desktop));
-    text.tip = Some(
-        "Tip: in Omarchy, to keep Desktop Calls in the bar, right-click the arrow at the bar's tray and pin Desktop Calls.",
-    );
-    let (instructions, buttons) = finish(keybinding, &mut text.line, home);
+    let (instructions, card, buttons) = finish(keybinding, &mut text.line, home);
+    // While the line is confirmed, the page is about the line alone.
+    if card.is_some() {
+        text.tip = Some(pin_card());
+    }
+    text.keybinding = card;
     let heading = if connected {
         format!("{} is connected", phone.name)
     } else {
@@ -375,14 +396,7 @@ fn contacts_syncing(
     contacts_read: bool,
     now: Timestamp,
 ) -> Page {
-    text.progress = vec![
-        if call_history {
-            "✓ Recent Calls".to_owned()
-        } else {
-            "Recent Calls…".to_owned()
-        },
-        contacts_progress(contacts, contacts_read, now),
-    ];
+    text.sync = Some(sync(call_history, contacts, contacts_read, now));
     (
         "Reading Contacts and recent Calls…".to_owned(),
         Vec::new(),
@@ -396,10 +410,9 @@ fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
         text.summary = Some("Contacts and recent Calls aren't read yet.".to_owned());
         return (
             format!("{} is back", phone.name),
-            vec![
-                "Choose Continue, and your phone asks again whether to share contacts and call history."
-                    .to_owned(),
-            ],
+            vec![Instruction::here(
+                "Choose Continue, and your phone asks again whether to share contacts and call history.",
+            )],
             vec!["Continue", "Close"],
         );
     }
@@ -410,35 +423,11 @@ fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
     (
         format!("{} disconnected", phone.name),
         vec![
-            "On your phone: check that Bluetooth is on, and keep it near this computer.".to_owned(),
-            "Once it connects again, choose Continue here.".to_owned(),
+            Instruction::phone("Check that Bluetooth is on, and keep it near this computer."),
+            Instruction::here("Once it connects again, choose Continue."),
         ],
         vec!["Close"],
     )
-}
-
-/// Whole seconds from `now` until `then`, rounded up; 0 once past.
-fn seconds_until(then: Timestamp, now: Timestamp) -> u64 {
-    then.0.saturating_sub(now.0).div_ceil(1_000)
-}
-
-fn contacts_progress(reading: Option<ReadingContacts>, read: bool, now: Timestamp) -> String {
-    if read {
-        return "✓ Contacts".to_owned();
-    }
-    let Some(ReadingContacts {
-        count: Some(count),
-        done_by,
-    }) = reading
-    else {
-        return "Contacts…".to_owned();
-    };
-    let contacts = plural(count, "Contact", "Contacts");
-    match done_by.map(|done_by| seconds_until(done_by, now)) {
-        Some(0) | None => format!("{contacts}…"),
-        Some(1) => format!("{contacts}… about 1 second left"),
-        Some(seconds) => format!("{contacts}… about {seconds} seconds left"),
-    }
 }
 
 fn plural(count: impl Into<u64>, one: &str, many: &str) -> String {
@@ -469,17 +458,32 @@ fn count(count: usize) -> u64 {
     u64::try_from(count).unwrap_or(u64::MAX)
 }
 
-/// The finish page's invitation to a first Call, and the keybinding. The
-/// Hyprland config's file is named relative to `home`; the line the user
-/// confirms, and the command to bind, are shown exactly as they are written.
+/// The finish page's keybinding: its card, or, while the user confirms it,
+/// the exact line and where it goes. The Hyprland config's file is named
+/// relative to `home`; the line the user confirms, and the command to bind,
+/// are shown exactly as they are written.
 fn finish(
     keybinding: &KeybindingStage,
     line: &mut Option<String>,
     home: Option<&str>,
-) -> (Vec<String>, Vec<&'static str>) {
-    let from_the_bar = "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.".to_owned();
+) -> (Vec<Instruction>, Option<SetupCard>, Vec<&'static str>) {
+    let card = |text: String| {
+        Some(SetupCard {
+            title: "Open the Dialer from anywhere",
+            text,
+        })
+    };
+    // Until a key opens the Dialer, the first Call starts from the bar.
+    let from_the_bar = || {
+        vec![Instruction::here(
+            "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.",
+        )]
+    };
     let check = match keybinding {
-        KeybindingStage::Checking => return (vec![from_the_bar], vec!["Done"]),
+        KeybindingStage::Checking => {
+            let text = "Checking the Hyprland config for a free key…".to_owned();
+            return (from_the_bar(), card(text), vec!["Done"]);
+        }
         KeybindingStage::Confirming(KeybindingCheck::Available {
             file,
             line: shown,
@@ -495,31 +499,31 @@ fn finish(
             };
             return (
                 vec![
-                    place,
-                    "Choose Confirm to add it, or Cancel to leave the file as it is.".to_owned(),
+                    Instruction::here(place),
+                    Instruction::here(
+                        "Choose Confirm to add it, or Cancel to leave the file as it is.",
+                    ),
                 ],
+                None,
                 vec!["Confirm", "Cancel"],
             );
         }
         KeybindingStage::Checked(check) | KeybindingStage::Confirming(check) => check,
     };
-    match check {
+    let (text, buttons) = match check {
         KeybindingCheck::Available { keys, file, .. } => (
-            vec![
-                format!(
-                    "Add a keybinding, and {} opens the Dialer from anywhere: {} doesn't use those keys yet.",
-                    shown_keys(keys),
-                    shown_path(file, home)
-                ),
-                from_the_bar,
-            ],
+            format!(
+                "Add keybinding puts {} in {}, which doesn't use those keys yet. You see the exact line first.",
+                shown_keys(keys),
+                shown_path(file, home)
+            ),
             vec!["Add keybinding", "Done"],
         ),
         KeybindingCheck::Added { keys, .. } => (
-            vec![format!(
+            format!(
                 "Place your first Call: press {} to open the Dialer, type a name or number, then press Enter.",
                 shown_keys(keys)
-            )],
+            ),
             vec!["Done"],
         ),
         KeybindingCheck::Taken {
@@ -527,34 +531,32 @@ fn finish(
             file,
             command,
         } => (
-            vec![
-                format!(
-                    "{} already does something else in {}; to open the Dialer from a key, bind another one to run {command}",
-                    shown_keys(keys),
-                    shown_path(file, home)
-                ),
-                from_the_bar,
-            ],
+            format!(
+                "{} already does something else in {}; to open the Dialer from a key, bind another one to run {command}",
+                shown_keys(keys),
+                shown_path(file, home)
+            ),
             vec!["Done"],
         ),
         KeybindingCheck::Unreadable { file, command } => (
-            vec![
-                format!(
-                    "{} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}",
-                    shown_path(file, home)
-                ),
-                from_the_bar,
-            ],
+            format!(
+                "{} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}",
+                shown_path(file, home)
+            ),
             vec!["Done"],
         ),
         KeybindingCheck::NoConfig { command } => (
-            vec![
-                format!("To open the Dialer from a key, bind one to run {command}"),
-                from_the_bar,
-            ],
+            format!("To open the Dialer from a key, bind one to run {command}"),
             vec!["Done"],
         ),
-    }
+    };
+    let instructions = if matches!(check, KeybindingCheck::Added { .. }) {
+        // The keybinding card says how, with the keys.
+        Vec::new()
+    } else {
+        from_the_bar()
+    };
+    (instructions, card(text), buttons)
 }
 
 /// Keys as Hyprland names them, `SUPER + ALT + C`, as people read them:

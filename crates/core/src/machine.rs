@@ -57,6 +57,7 @@ use quiet_hours_window::QuietHoursWindows;
 pub use quiet_hours_window::{
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView,
 };
+pub(crate) use setup::CONTACT_READ_MS;
 use setup::{ChosenPhone, Setup};
 pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupFocus, SetupNotice, SetupStep,

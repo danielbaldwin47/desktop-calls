@@ -144,6 +144,23 @@ class MergeGate(unittest.TestCase):
         self.assertIn("lands with #22, which this PR closes", str(refused.exception))
         self.assertIn("Next: write those steps' scripts", str(refused.exception))
 
+    def test_it_reads_the_steps_at_the_head_it_is_given_not_the_prs_head_on_github(self):
+        # `just land` passes its local merge of main (#305: a step's script
+        # on main only must count).
+        shown = []
+
+        def git(*arguments, **_):
+            if arguments[0] == "show":
+                shown.append(arguments[1])
+                return steps_rs(step("1.2", "None", "22"))
+            return ""
+
+        with mock.patch.object(merge, "gh", lambda *a: '{"closingIssuesReferences": []}'), \
+                mock.patch.object(merge, "git", git), \
+                mock.patch.dict(os.environ, {checklist_tickets.OFFLINE: "0"}):
+            merge.require_no_step_waits_on_a_closed_ticket(self.PR, is_open, head="def5678")
+        self.assertEqual(shown, [f"def5678:{checklist_tickets.STEPS}"])
+
     def test_it_lets_through_a_pr_whose_steps_wait_only_on_open_tickets(self):
         self.assertEqual(self.gate(steps_rs(step("1.2", "None", "22")), [120]), "")
 

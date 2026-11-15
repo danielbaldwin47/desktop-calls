@@ -433,7 +433,7 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None, head: str |
         lines = "\n".join(f"  {line}" for line in wrong)
         raise Refused(
             f"Real-Phone Checklist steps wait on closed tickets (ticket #120):\n{lines}\n"
-            f"Next: write those steps' scripts on PR #{number}'s branch, then just merge {number}"
+            f"Next: write those steps' scripts on PR #{number}'s branch, then just land {number}"
         )
 
 

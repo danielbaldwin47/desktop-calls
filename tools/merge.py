@@ -76,11 +76,6 @@ CHECKS_APPEAR_SECONDS = 90
 # look at main to the squash, and `just merge` for its final recheck and
 # squash. Before #286 it was ci-local's lock, when landing ran CI itself.
 LANDING_LOCK = ci_local.ROOT / "landing-lock"
-# How long GitHub may take to start CI on a head just pushed.
-CHECKS_APPEAR_SECONDS = 90
-# Landings take turns on this lock (#247): `just land` holds it from its
-# first look at main to the squash, and `just merge` for its final recheck.
-LANDING_LOCK = ci_local.ROOT / "landing-lock"
 
 
 class Refused(Exception):

@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use test_harness::{AppState, Harness, Key};
+use test_harness::{AppState, Harness, Key, MenuEntry};
 
 /// How long the app may take to notice a change.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -98,11 +98,20 @@ fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
 
 /// Chooses Quiet Hours… in the Indicator's menu, whatever times its hint
 /// shows.
+/// Opens the window from the Indicator's menu, once the menu offers it. A
+/// restarted app answers on the control interface before it registers its
+/// Indicator, so until then the tray still lists the item of the app that
+/// is gone (CI run 43681715594: `ServiceUnknown` reading its menu).
 fn open(harness: &Harness) {
-    let menu = harness.tray().menu();
+    let quiet_hours = |entry: &&MenuEntry| entry.label.starts_with("Quiet Hours…");
+    let menu = harness
+        .tray()
+        .wait_for_menu("the menu has Quiet Hours…", DEADLINE, |menu| {
+            menu.iter().any(|entry| quiet_hours(&entry))
+        });
     let entry = menu
         .iter()
-        .find(|entry| entry.label.starts_with("Quiet Hours…"))
+        .find(quiet_hours)
         .unwrap_or_else(|| panic!("the menu has Quiet Hours…: {menu:#?}"));
     harness.tray().click(&entry.label);
 }

@@ -1,9 +1,33 @@
 # cargo-nextest, which runs the harness's scenarios in CI's shards (#118).
 
 [profile.default]
-# The slowest scenario takes about 30 s on a CI runner. A scenario still
+# The slowest scenario takes about 48 s on a CI runner. A scenario still
 # running after 3 minutes has hung: nextest kills it and fails it, rather
 # than leave the job to run until GitHub's 6-hour limit. With six at a time
 # on two CPUs, call_window_keyboard's scenarios hung for over 2 minutes in
 # run 42034428129.
 slow-timeout = { period = "60s", terminate-after = 3 }
+
+# The scenarios that wait out real time, 20 s or more on a CI runner, start
+# first in their shard, so none of them sets the shard's floor by starting
+# last (#139). In run 43680311355 the 48 s Contacts countdown started 52 s
+# into its shard and ended it at 100 s, against 70 to 93 s for the others.
+# They wait out the app's own deadlines, which are what a user gets: the
+# Phone's 30 s Contacts prompt (the app's `PROMPT_TIMEOUT`, which the Setup
+# Window counts down), Quiet Hours' boundaries, the 5 s collapse of the
+# Call Window, and a restart's give-up. So they can't be made shorter
+# without a path only tests take. A scenario added later that is as slow
+# belongs here; the shards' logs list each scenario's time.
+[[profile.default.overrides]]
+filter = '''
+test(=setup_contacts::an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again)
+| test(=contacts::an_unanswered_prompt_needs_permission_until_the_phone_gives_up)
+| test(=crash_restart::a_call_that_ended_while_the_app_was_down_is_forgotten_and_the_log_says_so)
+| test(=quiet_hours::quiet_hours_across_midnight_turn_calls_off_when_they_begin)
+| test(=quiet_hours::quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connects_within_10_s)
+| test(=quiet_hours::quiet_hours_beginning_sends_no_confirmation)
+| test(=quiet_hours::quiet_hours_ending_sends_no_confirmation)
+| test(=setup_contacts::a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again)
+| test(=call_window_collapse::the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_the_keyboard_until_escape)
+'''
+priority = 100

@@ -1,6 +1,7 @@
 //! Bringing the Call Window up to date with the Call state machine's view
 //! and the clock, and reporting what it shows.
 
+use super::super::footer;
 use super::{
     CallWindow, Change, Icon, Who, class, report_cut_short, seconds_since, set_class, shows,
 };
@@ -79,6 +80,7 @@ impl CallWindow {
         self.show_timer(&view, &mut content);
         self.show_calls_off_after(&view, &mut content);
         self.show_state_line(&view, &mut content);
+        self.show_escape(&view, &mut content);
         self.show_notice(&view, &mut content);
         let live = matches!(view.phase, CallWindowPhase::Live { .. }) && !view.connection_lost;
         self.show_tiles(&view, live, &mut content);
@@ -212,6 +214,27 @@ impl CallWindow {
         content.insert("state".to_owned(), text);
         if wideband {
             content.insert("hd".to_owned(), messages::label(Label::Hd).to_owned());
+        }
+    }
+
+    /// The Esc hint at the right of the state line, while Escape collapses
+    /// the window to the Call Pill (ticket #300). Above the tiles, so Hang
+    /// up never moves for it.
+    fn show_escape(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
+        let hint = messages::call_window_escape(view);
+        // Its words never change, so it is filled once.
+        if let Some(key) = hint
+            && self.state.escape.first_child().is_none()
+        {
+            footer::show(&self.state.escape, &vec![key]);
+        }
+        self.state.escape.set_visible(hint.is_some());
+        self.state
+            .bar
+            .set_visible(hint.is_some() || self.state.row.get_visible());
+        if let Some((keys, does)) = hint {
+            content.insert("collapse-shortcut".to_owned(), keys.join(" "));
+            content.insert("collapse".to_owned(), does.to_owned());
         }
     }
 

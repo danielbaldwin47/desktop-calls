@@ -335,7 +335,10 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     pending = [check for check in found if check["bucket"] == "pending"]
     # A skipped job passes only with the summary that judged it.
     judged = ["pass", "fail", "cancel", "pending"]
-    if any(check["name"] == SUMMARY_CHECK and check["bucket"] == "pass" for check in found):
+    summary_passed = any(
+        check["name"] == SUMMARY_CHECK and check["bucket"] == "pass" for check in found
+    )
+    if summary_passed:
         judged.append("skipping")
     other = [check for check in found if check["bucket"] not in judged]
     if failed:
@@ -361,6 +364,17 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
         raise Refused(
             f"{len(other)} of {len(found)} checks on PR #{number} did not pass:\n{lines}\n"
             f"Next: gh pr checks {number}"
+        )
+    # Only the pull_request run's summary judges every job; a dispatched
+    # run's is named apart on purpose, so it never counts (#290).
+    if not summary_passed:
+        names = ", ".join(label(check) for check in found)
+        raise Refused(
+            f'No passed "{SUMMARY_CHECK}" check on PR #{number}\'s head '
+            f"({pr['headRefOid'][:7]}), so nothing judged every job. Checks found: {names}.\n"
+            "GitHub starts no pull_request run on a PR that conflicts with main.\n"
+            f"Next: gh pr view {number} --json mergeable   (if it conflicts, merge origin/main "
+            f"into the branch and push; then `just land {number}`)"
         )
 
 

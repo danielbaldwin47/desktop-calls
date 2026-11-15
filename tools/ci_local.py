@@ -325,6 +325,37 @@ def clear_stale_test_folders(
     return removed
 
 
+def clear_truncated_artifacts(target: pathlib.Path = CACHE / "target") -> list[str]:
+    """Removes every artifact of each crate that a killed or cancelled run
+    left half-written in the shared cache: an empty `.rmeta` or `.rlib`,
+    which cargo would trust, so every later run failed to link against it
+    (#255). Cargo builds the crate again. Returns the units removed, as
+    `name-hash`."""
+    removed = []
+    for deps in sorted(target.glob("*/deps")):
+        profile = deps.parent
+        units = sorted({
+            artifact.stem.removeprefix("lib")
+            for artifact in deps.iterdir()
+            if artifact.suffix in (".rmeta", ".rlib") and artifact.stat().st_size == 0
+        })
+        for unit in units:
+            name = unit.rsplit("-", 1)[0]
+            for path in [
+                *deps.glob(f"lib{unit}.*"),
+                *deps.glob(f"{unit}.*"),
+                profile / ".fingerprint" / unit,
+                *(profile / "incremental").glob(f"{name}-*"),
+            ]:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                    remove_tree(path)  # what the image's other IDs made
+                else:
+                    path.unlink(missing_ok=True)
+            removed.append(unit)
+    return removed
+
+
 def prune_old_runs(now: float | None = None) -> None:
     now = time.time() if now is None else now
     for parent in (LOGS, RUNS):
@@ -756,6 +787,12 @@ def main() -> int:
         if removed:
             log.line(f"Removed {len(removed)} stale /tmp/{STALE_TEST_FOLDER} folders.")
         prune_old_runs()
+        truncated = clear_truncated_artifacts()
+        if truncated:
+            log.line(
+                f"Removed {len(truncated)} half-written crates from the shared cache, "
+                f"left by a run that was stopped: {', '.join(truncated)}."
+            )
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
         claim.write("running", sha)

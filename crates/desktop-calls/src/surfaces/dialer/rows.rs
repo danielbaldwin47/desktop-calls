@@ -88,15 +88,15 @@ impl RowView {
         }
     }
 
-    /// Shows `row`, as `text` reads, with the dot if `marked`. The letters
-    /// of the name that matched what was typed are underlined in
+    /// Shows `row`, as `text` reads, with the dot as `dot` says. The
+    /// letters of the name that matched what was typed are underlined in
     /// `underline`.
     pub(super) fn show(
         &self,
         row: &DialerRow,
         text: &DialerRowText,
         underline: &gtk::gdk::RGBA,
-        marked: bool,
+        dot: Dot,
     ) {
         self.show_glyph(&text.glyph);
         self.title.set_text(&text.title);
@@ -126,7 +126,11 @@ impl RowView {
             .set_visible(text.missed || !text.detail.is_empty());
         self.time.set_text(&text.time);
         self.time.set_visible(!text.time.is_empty());
-        self.dot.set_visible(marked);
+        // An unmarked row keeps the dot's room while any row has one, so
+        // the times stay in one column.
+        self.dot.set_visible(dot != Dot::None);
+        self.dot
+            .set_opacity(if dot == Dot::Shown { 1.0 } else { 0.0 });
         self.list_row.set_visible(true);
     }
 
@@ -157,6 +161,17 @@ impl RowView {
     pub(super) fn hide(&self) {
         self.list_row.set_visible(false);
     }
+}
+
+/// The dot at a row's right.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Dot {
+    /// No row has one.
+    None,
+    /// Another row has one: this row keeps its room, empty.
+    Room,
+    /// A Missed Call the user hasn't seen.
+    Shown,
 }
 
 /// Pango attributes that underline the bytes `ranges` in `colour`.

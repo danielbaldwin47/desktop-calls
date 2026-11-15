@@ -132,7 +132,7 @@ fn status_starts_the_stopped_service_through_dbus_activation() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "No Phone is set up yet.\n"
+        "No phone is set up yet.\n"
     );
     assert!(harness.app_on_bus(), "the service is running");
 }

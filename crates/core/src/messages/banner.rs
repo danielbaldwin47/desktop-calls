@@ -52,7 +52,7 @@ pub fn banner_consequence(view: &BannerView, choice: BannerChoice) -> Option<Str
             Some(format!("{} waits on hold", full_name(other)))
         }
         (WaitingOptions::HoldOrEnd | WaitingOptions::End, BannerChoice::EndAndAnswer) => {
-            Some(format!("Ends the Call with {}", first_name(other)))
+            Some(format!("Ends the call with {}", first_name(other)))
         }
         (WaitingOptions::Answer, BannerChoice::Answer) => {
             Some(format!("{} stays on hold", full_name(other)))
@@ -110,14 +110,14 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
         BannerFooter::NoKeybinding => vec![FooterPart::Words(NO_KEYBINDING)],
         BannerFooter::GiveKeyboardBack => vec![
             FooterPart::Key("Esc".to_owned()),
-            FooterPart::Words("gives the keyboard back; the Call keeps ringing"),
+            FooterPart::Words("gives the keyboard back; the call keeps ringing"),
         ],
     }
 }
 
 /// What the footer says with no keybinding set: where to add one, in the
 /// Indicator's own words for the entry (a test holds them alike).
-const NO_KEYBINDING: &str = "No keybinding set. Add one in Connect your phone…";
+const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
 
 /// The footer as one line of text, as the control interface reports it: a
 /// comma sits against the key before it.

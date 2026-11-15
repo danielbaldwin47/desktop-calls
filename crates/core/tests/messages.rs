@@ -29,7 +29,7 @@ fn status_says_the_connection_state_and_names_the_phone() {
     );
     assert_eq!(
         messages::status(&ConnectionState::NotSetUp, None, false, false),
-        "No Phone is set up yet."
+        "No phone is set up yet."
     );
 }
 
@@ -45,7 +45,7 @@ fn status_with_contact_lost_says_so_in_the_call_windows_words() {
                 hands_free_lost,
                 true
             ),
-            "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the Call continues on your phone."
+            "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the call continues on your phone."
         );
     }
     // Hands-free back while the lost Call is awaited, or the pairing gone:
@@ -125,7 +125,7 @@ fn losing_contact_with_a_call_says_where_to_hang_up() {
         messages::contact_lost(Failure::ConnectionLost),
         (
             "Connection to phone lost",
-            "The Call continues on your phone. Hang up there."
+            "The call continues on your phone. Hang up there."
         )
     );
 }
@@ -354,5 +354,5 @@ fn the_call_pill_says_its_tags_and_tooltips_in_sentence_case() {
         "Hang up · Ctrl+H"
     );
     assert_eq!(messages::call_pill_tooltip(Label::Mute, "M"), "Mute · M");
-    assert_eq!(messages::show_call_tooltip(), "Show Call · Super+Alt+C");
+    assert_eq!(messages::show_call_tooltip(), "Show call · Super+Alt+C");
 }

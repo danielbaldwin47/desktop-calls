@@ -136,7 +136,7 @@ fn a_focused_problem_button_is_what_enter_presses_even_where_it_takes_no_focus_i
         [
             (&["Enter"][..], "Set up audio"),
             (&["Tab"][..], "Next button"),
-            (&["Esc"][..], "Close")
+            (&["Esc"][..], "Cancel")
         ]
     );
     assert_eq!(
@@ -155,11 +155,11 @@ fn cancel_focused_while_choosing_is_what_enter_presses_and_a_phone_focused_pairs
     };
     assert_eq!(
         keys_of(&view(choose.clone(), Some(SetupFocus::Button(0)))),
-        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Close")]
+        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Cancel")]
     );
     assert_eq!(
         keys_of(&view(choose, Some(SetupFocus::Phone))),
-        [(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")]
+        [(&["Enter"][..], "Pair"), (&["Esc"][..], "Cancel")]
     );
 }
 
@@ -168,7 +168,7 @@ fn a_focused_button_the_step_lacks_names_the_default() {
     let pairing = SetupStep::Pairing { phone: pixel() };
     assert_eq!(
         keys_of(&view(pairing, Some(SetupFocus::Button(1)))),
-        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Close")]
+        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Cancel")]
     );
 }
 

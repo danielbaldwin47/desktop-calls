@@ -27,7 +27,7 @@ pub use banner::{
     FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
 };
 pub use call_pill::{call_pill_tag, call_pill_tooltip, calls_off_after_tag, show_call_tooltip};
-pub use call_window::{call_window_escape, contact_lost, elapsed, state_line};
+pub use call_window::{call_window_escape, contact_lost, elapsed, live_notice_heading, state_line};
 pub use calls_off::{
     SetupCallsOffText, calls_kept_on, calls_off_for_too_long, calls_off_pending_status,
     calls_off_status, calls_off_until_unreadable, calls_off_waits, calls_turned,
@@ -244,27 +244,27 @@ pub fn failure(failure: Failure) -> Message {
             )),
         ),
         Failure::AnswerFailed => (
-            "Your phone didn't answer the Call; answer it on your phone instead.",
+            "Your phone didn't answer the call; answer it on your phone instead.",
             None,
         ),
         Failure::HangUpFailed => (
-            "Your phone didn't hang up the Call; hang up on your phone instead.",
+            "Your phone didn't hang up the call; hang up on your phone instead.",
             None,
         ),
         Failure::CallMayStillBeLive => (
-            "The Call may still be live on your phone; check your phone and hang up there if it is.",
+            "The call may still be live on your phone; check your phone and hang up there if it is.",
             None,
         ),
         Failure::AudioNotMoved => (
-            "Your phone kept the audio; to hear the Call here, tap the audio button on your phone's call screen.",
+            "Your phone kept the audio; to hear the call here, tap the audio button on your phone's call screen.",
             None,
         ),
         Failure::AudioNotMovedToPhone => (
             "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen.",
             None,
         ),
-        Failure::NoSuchCall => ("That Call has already ended.", None),
-        Failure::CallNotRinging => ("That Call isn't ringing any more.", None),
+        Failure::NoSuchCall => ("That call has already ended.", None),
+        Failure::CallNotRinging => ("That call isn't ringing any more.", None),
         Failure::Undialable => (
             "That isn't a number your phone can dial; use digits, spaces and + * # only.",
             None,
@@ -282,20 +282,20 @@ pub fn failure(failure: Failure) -> Message {
             Some(NextAction::Command("desktop-calls connect")),
         ),
         Failure::ConnectionLost => (
-            "Connection to phone lost: the Call continues on your phone.",
+            "Connection to phone lost: the call continues on your phone.",
             None,
         ),
-        Failure::CallInProgress => ("Hang up the current Call first.", None),
+        Failure::CallInProgress => ("Hang up the current call first.", None),
         Failure::NumberRefused => (
             "Your phone can't dial that number; check it and try again.",
             None,
         ),
         Failure::PhoneBusy => (
-            "Your phone is busy with another Call; try again in a moment.",
+            "Your phone is busy with another call; try again in a moment.",
             None,
         ),
         Failure::DialNotSupported => (
-            "Your phone doesn't let this computer place Calls; call from your phone instead.",
+            "Your phone doesn't let this computer place calls; call from your phone instead.",
             None,
         ),
         Failure::NoSignal => (
@@ -307,12 +307,12 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::DialFailed => (
-            "Your phone couldn't place the Call; check it has signal and isn't in airplane mode.",
+            "Your phone couldn't place the call; check it has signal and isn't in airplane mode.",
             None,
         ),
-        Failure::NoLiveCall => ("There's no connected Call right now.", None),
+        Failure::NoLiveCall => ("There's no connected call right now.", None),
         Failure::MuteUnavailable => (
-            "Mute works only while the Call's audio is on this computer; mute on your phone instead.",
+            "Mute works only while the call's audio is on this computer; mute on your phone instead.",
             None,
         ),
         Failure::MuteFailed => (
@@ -329,31 +329,31 @@ pub fn failure(failure: Failure) -> Message {
             "That caller withheld their number, so it can't be called back.",
             None,
         ),
-        Failure::NoWaitingCall => ("There's no Waiting Call to answer.", None),
-        Failure::NoHeldCall => ("There's no Call on hold to swap to.", None),
+        Failure::NoWaitingCall => ("There's no waiting call to answer.", None),
+        Failure::NoHeldCall => ("There's no call on hold to swap to.", None),
         Failure::HoldAndAnswerFailed => (
-            "Your phone didn't put your Call on hold, so both Calls are as they were; answer on your phone instead.",
+            "Your phone didn't put your call on hold, so both calls are as they were; answer on your phone instead.",
             None,
         ),
         Failure::EndAndAnswerFailed => (
-            "Your phone didn't end your Call, so both Calls are as they were; end it on your phone instead.",
+            "Your phone didn't end your call, so both calls are as they were; end it on your phone instead.",
             None,
         ),
         Failure::SwapFailed => (
-            "Your phone didn't swap the Calls, so both are as they were; swap them on your phone instead.",
+            "Your phone didn't swap the calls, so both are as they were; swap them on your phone instead.",
             None,
         ),
         Failure::NotConnectedYet => (
-            "Your Call hasn't connected yet, so it can't be put on hold; choose End & Answer or Decline.",
+            "Your call hasn't connected yet, so it can't be put on hold; choose End & answer or Decline.",
             None,
         ),
         Failure::WaitingCallFirst => (label(Label::WaitingCallFirst), None),
         Failure::AlreadyHolding => (
-            "You already have a Call on hold, so this one can't go on hold too; choose End & Answer or Decline.",
+            "You already have a call on hold, so this one can't go on hold too; choose End & answer or Decline.",
             None,
         ),
         Failure::NothingToHoldOrEnd => (
-            "Your other Call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
+            "Your other call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
             None,
         ),
         Failure::CallsOffUntilPassed => (calls_off::UNTIL_PASSED, None),
@@ -371,14 +371,14 @@ pub fn failure(failure: Failure) -> Message {
 
 /// The Indicator's menu entry that opens the Setup Window, where the
 /// keybinding is added.
-const CONNECT_YOUR_PHONE: &str = "Connect your phone…";
+const CONNECT_YOUR_PHONE: &str = "Phone setup…";
 
 /// The Indicator's status: its menu's first line, and its tooltip without
 /// the Problems.
 #[must_use]
 pub fn indicator_status(status: &IndicatorStatus) -> String {
     match status {
-        IndicatorStatus::NoPhone => "No Phone set up".to_owned(),
+        IndicatorStatus::NoPhone => "No phone set up".to_owned(),
         IndicatorStatus::CallsOff { until, quiet_hours } => {
             calls_off::calls_off(*until, *quiet_hours)
         }
@@ -397,11 +397,11 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
             format!("Call from {}", caller_name(caller, contact.as_ref()))
         }
         IndicatorStatus::InCall { caller, contact } => {
-            format!("In a Call with {}", caller_name(caller, contact.as_ref()))
+            format!("In a call with {}", caller_name(caller, contact.as_ref()))
         }
         // The Call Window's notice, naming the Call.
         IndicatorStatus::CallOnPhone { caller, contact } => format!(
-            "Connection to phone lost: the Call with {} continues on your phone",
+            "Connection to phone lost: the call with {} continues on your phone",
             caller_name(caller, contact.as_ref())
         ),
     }
@@ -439,7 +439,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
     match entry {
         IndicatorEntry::Status => indicator_status(&view.status),
         IndicatorEntry::MissedCalls(count) => format!("{}…", missed_calls(*count)),
-        IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
+        IndicatorEntry::OpenDialer => "New call…".to_owned(),
         IndicatorEntry::ConnectPhone => CONNECT_YOUR_PHONE.to_owned(),
         IndicatorEntry::Separator => String::new(),
         IndicatorEntry::TurnCallsOff { .. } => calls_off::TURN_CALLS_OFF.to_owned(),
@@ -474,7 +474,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
             problem @ (ProblemKind::ContactsDenied | ProblemKind::ContactsPromptUnanswered),
         ) => problem_heading(*problem).to_owned(),
         // Its click opens the Setup Window, which puts it right.
-        IndicatorEntry::Problem(problem) => format!("{}: put it right…", problem_heading(*problem)),
+        IndicatorEntry::Problem(problem) => format!("{}: fix…", problem_heading(*problem)),
     }
 }
 
@@ -515,17 +515,17 @@ pub fn status(
     contact_lost: bool,
 ) -> String {
     match (connection_state, phone) {
-        (ConnectionState::NotSetUp, _) | (_, None) => "No Phone is set up yet.".to_owned(),
+        (ConnectionState::NotSetUp, _) | (_, None) => "No phone is set up yet.".to_owned(),
         (ConnectionState::Connecting, Some(phone)) => {
             format!("Connecting to {}.", describe(phone))
         }
         (ConnectionState::Connected, Some(phone)) => format!("Connected to {}.", describe(phone)),
         (ConnectionState::Disconnected, Some(phone)) if contact_lost => format!(
-            "Connection to {} lost: the Call continues on your phone.",
+            "Connection to {} lost: the call continues on your phone.",
             describe(phone)
         ),
         (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
-            "{} is in range, but not connected for Calls: connecting it again.",
+            "{} is in range, but not connected for calls: connecting it again.",
             describe(phone)
         ),
         (ConnectionState::Disconnected, Some(phone)) => {
@@ -671,24 +671,24 @@ pub fn label(label: Label) -> &'static str {
         Label::CantCallBack => "can't be called back",
         Label::CallBack => "Call back",
         Label::Dismiss => "Dismiss",
-        Label::ShowInDialer => "Show in Dialer",
+        Label::ShowInDialer => "Show in dialer",
         Label::WaitingCall => "Waiting call",
-        Label::HoldAndAnswer => "Hold & Answer",
-        Label::EndAndAnswer => "End & Answer",
+        Label::HoldAndAnswer => "Hold & answer",
+        Label::EndAndAnswer => "End & answer",
         Label::Swap => "Swap",
         Label::Resume => "Resume",
         Label::OnHold => "On hold",
         Label::WaitingCallFirst => {
-            "Answer or decline the Waiting Call first: until then, your phone would act on it instead of these Calls."
+            "Answer or decline the waiting call first: until then, your phone would act on it instead of these calls."
         }
         Label::OnYourPhone => "On your phone",
         Label::OneOnHold => "1 on hold",
         Label::ToPhone => "To phone",
         Label::MoveHere => "Move here",
         Label::Moving => "Moving…",
-        Label::NotInContacts => "Not in Contacts",
+        Label::NotInContacts => "Not in contacts",
         Label::ConnectionToPhoneLost => "Connection to phone lost",
-        Label::HangUpHeldCall => "Hang up the Held Call",
+        Label::HangUpHeldCall => "Hang up the held call",
     }
 }
 

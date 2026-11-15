@@ -116,7 +116,7 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     );
 
     let state = open_the_dialer(&harness);
-    for keys in ["Enter Call", "↑ ↓ Move", "Alt Q Quiet Hours", "Esc Close"] {
+    for keys in ["Enter Call", "↑ ↓ Move", "Alt Q Quiet hours", "Esc Close"] {
         assert!(
             footer_shows(&state, keys),
             "the footer shows {keys:?}: {state:#?}"
@@ -205,30 +205,30 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
     harness.keyboard().press_with_alt('q');
     let state = wait_for_quiet_hours(
         harness,
-        "Alt+Q opens the Quiet Hours Window with the switch focused",
+        "Alt+Q opens the Quiet hours Window with the switch focused",
         &[("switch", "off"), ("focus", "switch")],
     );
     assert!(state.surface("dialer").is_none(), "the Dialer closed");
-    performed.did("Open the Quiet Hours Window: Alt+Q");
+    performed.did("Open the Quiet hours Window: Alt+Q");
     assert!(quiet_hours_keys(&state, "Space Switch on"), "{state:#?}");
     harness.keyboard().type_text(" ");
-    let state = harness.wait_for_app("Space switches Quiet Hours on", DEADLINE, |state| {
-        state.quiet_hours == Some((22 * 60, 7 * 60)) && quiet_hours_keys(state, "Tab Next")
+    let state = harness.wait_for_app("Space switches Quiet hours on", DEADLINE, |state| {
+        state.quiet_hours == Some((22 * 60, 7 * 60)) && quiet_hours_keys(state, "Tab Next field")
     });
     assert!(quiet_hours_keys(&state, "↑ ↓ 15 min"), "{state:#?}");
-    performed.did("Switch Quiet Hours on: Space");
+    performed.did("Switch Quiet hours on: Space");
     harness.keyboard().press(Key::Tab);
     wait_for_quiet_hours(harness, "Tab focuses the start", &[("focus", "start")]);
     harness.keyboard().press(Key::Up);
     harness.wait_for_app("Up steps the start", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
     });
-    performed.did("Step the start of Quiet Hours: Tab, Up");
+    performed.did("Step the start of Quiet hours: Tab, Up");
     harness.keyboard().press(Key::Down);
     harness.wait_for_app("Down steps the start back", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60, 7 * 60))
     });
-    performed.did("Step the start of Quiet Hours back: Down");
+    performed.did("Step the start of Quiet hours back: Down");
     harness.keyboard().press(Key::Tab);
     wait_for_quiet_hours(harness, "Tab focuses the end", &[("focus", "end")]);
     // Without Backspace, 07630 would not be 06:30.
@@ -239,7 +239,7 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
     harness.wait_for_app("the end typed is saved", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60, 6 * 60 + 30))
     });
-    performed.did("Type the end of Quiet Hours: Tab, digits");
+    performed.did("Type the end of Quiet hours: Tab, digits");
     harness.keyboard().press_with_shift(Key::Tab);
     harness.keyboard().press_with_shift(Key::Tab);
     wait_for_quiet_hours(
@@ -248,17 +248,17 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
         &[("focus", "switch")],
     );
     harness.keyboard().type_text(" ");
-    harness.wait_for_app("Space switches Quiet Hours off", DEADLINE, |state| {
+    harness.wait_for_app("Space switches Quiet hours off", DEADLINE, |state| {
         state.quiet_hours.is_none()
     });
-    performed.did("Switch Quiet Hours off: Shift+Tab, Space");
+    performed.did("Switch Quiet hours off: Shift+Tab, Space");
     let state = harness.app_state();
     assert!(quiet_hours_keys(&state, "Esc Close"), "{state:#?}");
     harness.keyboard().press(Key::Escape);
-    harness.wait_for_app("Escape closes the Quiet Hours Window", DEADLINE, |state| {
+    harness.wait_for_app("Escape closes the Quiet hours Window", DEADLINE, |state| {
         state.surface("quiet-hours-window").is_none()
     });
-    performed.did("Close the Quiet Hours Window: Escape");
+    performed.did("Close the Quiet hours Window: Escape");
 }
 
 #[test]

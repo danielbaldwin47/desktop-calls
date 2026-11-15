@@ -17,7 +17,7 @@ const DEADLINE: Duration = Duration::from_secs(5);
 const STAYS: Duration = Duration::from_secs(4);
 const PHONE_NAME: &str = "My Pixel";
 const NUMBER: &str = "+447700900123";
-const PENDING: &str = "Calls turn off when this Call ends";
+const PENDING: &str = "Calls turn off when this call ends";
 
 fn connected() -> Harness {
     let harness = Harness::builder().phone_name(PHONE_NAME).start();
@@ -155,19 +155,19 @@ fn calls_off_from_the_cli_while_a_call_rings_waits_and_calls_on_keeps_them_on() 
     let said = cli_ok(&harness, &["calls", "off"]);
     assert_eq!(
         said,
-        "Calls turn off when this Call ends, until you turn them on. Your Call carries on; run desktop-calls calls on to keep calls on.\n"
+        "Calls turn off when this call ends, until you turn them on. Your call carries on; run desktop-calls calls on to keep calls on.\n"
     );
     let state = wait_waiting(&harness);
     assert!(state.ringing, "the Call still rings");
     assert!(
         cli_ok(&harness, &["status"])
-            .ends_with("Calls turn off when this Call ends, until you turn them on.\n")
+            .ends_with("Calls turn off when this call ends, until you turn them on.\n")
     );
 
     let said = cli_ok(&harness, &["calls", "on"]);
     assert_eq!(
         said,
-        "Calls stay on: they won't turn off when this Call ends.\n"
+        "Calls stay on: they won't turn off when this call ends.\n"
     );
     harness.wait_for_app("nothing waits", DEADLINE, |state| !state.calls_off_pending);
     assert!(!record(&harness).exists(), "the record is cleared");
@@ -409,7 +409,7 @@ fn a_turn_off_during_a_call_confirms_when_asked_and_says_nothing_when_it_applies
     let notification = harness.notifications().wait_for(
         "the confirmation that calls go off after the Call",
         DEADLINE,
-        |notification| notification.summary == "Calls off after this Call",
+        |notification| notification.summary == "Calls off after this call",
     );
     assert_eq!(
         notification.body,
@@ -433,7 +433,7 @@ fn a_turn_off_during_a_call_confirms_when_asked_and_says_nothing_when_it_applies
 
     assert_eq!(
         summaries(&harness),
-        ["Calls off after this Call", "Calls on"]
+        ["Calls off after this call", "Calls on"]
     );
 }
 
@@ -456,6 +456,6 @@ fn keeping_calls_on_while_a_turn_off_waits_confirms_that_the_phone_stays_connect
     harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
     assert_eq!(
         summaries(&harness),
-        ["Calls off after this Call", "Calls on"]
+        ["Calls off after this call", "Calls on"]
     );
 }

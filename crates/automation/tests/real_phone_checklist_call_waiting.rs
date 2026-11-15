@@ -27,16 +27,16 @@ fn group_4_checks_each_waiting_call_choice_and_4_6_carries_on_from_4_5() {
         (
             "4.1",
             &[
-                "The Banner offered Hold & Answer, End & Answer, Decline.",
+                "The Banner offered Hold & answer, End & answer, Decline.",
                 "The Desktop stayed silent for the Waiting Call.",
-                "Hold & Answer put the Test Number's Call on hold and made the second helper's live",
+                "Hold & answer put the Test Number's Call on hold and made the second helper's live",
                 "Swap put the Test Number's Call live and the second helper's on hold",
                 "Hanging up one Call left the other, the second helper's, live alone.",
             ][..],
         ),
         (
             "4.2",
-            &["End & Answer ended the Test Number's Call and connected the second helper's"][..],
+            &["End & answer ended the Test Number's Call and connected the second helper's"][..],
         ),
         (
             "4.3",
@@ -52,8 +52,8 @@ fn group_4_checks_each_waiting_call_choice_and_4_6_carries_on_from_4_5() {
         (
             "4.5",
             &[
-                "The Banner offered End & Answer, Decline.",
-                "End & Answer ended only the second helper's first Call",
+                "The Banner offered End & answer, Decline.",
+                "End & answer ended only the second helper's first Call",
             ][..],
         ),
         (
@@ -105,14 +105,14 @@ fn a_phone_that_refuses_to_hold_fails_4_1_with_what_the_call_window_said_and_end
     assert!(
         says(
             held,
-            "Hold & Answer didn't leave the second helper's Call live beside the Test Number's on hold"
+            "Hold & answer didn't leave the second helper's Call live beside the Test Number's on hold"
         ),
         "{held:#}"
     );
     assert!(
         says(
             held,
-            "the Call Window says: Your phone didn't put your Call on hold"
+            "the Call Window says: Your phone didn't put your call on hold"
         ),
         "{held:#}"
     );

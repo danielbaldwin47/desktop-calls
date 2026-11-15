@@ -276,7 +276,7 @@ fn a_turn_off_during_a_call_says_calls_go_off_after_it() {
             until: Some(morning())
         }
     );
-    assert_eq!(text.summary, "Calls off after this Call (until 07:00)");
+    assert_eq!(text.summary, "Calls off after this call (until 07:00)");
     assert_eq!(
         text.body,
         "My Pixel stays connected until then. Keep calls on from the bar to cancel."
@@ -393,7 +393,7 @@ fn quiet_hours_beginning_and_ending_say_nothing() {
     ]);
 
     let (state, begins) = run(state, [clock_with(START, Some(quiet_hours()))]);
-    assert!(state.calls_off(), "Quiet Hours turned calls off");
+    assert!(state.calls_off(), "Quiet hours turned calls off");
     let (state, _) = run(state, [blocked(true)]);
     let (state, _) = run(state, dropped());
     let (state, ends) = run(state, [clock_with(END, Some(quiet_hours()))]);

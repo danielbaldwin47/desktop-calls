@@ -126,7 +126,7 @@ pub fn dialer_row(row: &DialerRow, now: Timestamp, utc_offset_seconds: i64) -> D
                     caller_detail(&shown_label, &row.shown_number),
                 )
             } else if shown_label.is_empty() {
-                (caller(&row.caller), "Not in Contacts".to_owned())
+                (caller(&row.caller), "Not in contacts".to_owned())
             } else {
                 (caller(&row.caller), shown_label)
             };
@@ -164,7 +164,7 @@ pub fn dialer_key(key: DialerKey) -> (&'static [&'static str], &'static str) {
         DialerKey::Call => (&["Enter"], "Call"),
         DialerKey::CallAnyway => (&["Enter"], "Call anyway"),
         DialerKey::Move => (&["↑", "↓"], "Move"),
-        DialerKey::QuietHours => (&["Alt", "Q"], "Quiet Hours"),
+        DialerKey::QuietHours => (&["Alt", "Q"], "Quiet hours"),
         DialerKey::Close => (&["Esc"], "Close"),
     }
 }

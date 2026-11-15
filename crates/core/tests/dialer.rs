@@ -375,7 +375,7 @@ fn the_footer_names_only_the_keys_that_work_now() {
     assert_eq!(dialer(&open(connected(), "zed")).keys, [QuietHours, Close]);
     assert_eq!(
         desktop_calls_core::messages::dialer_key(QuietHours),
-        (&["Alt", "Q"][..], "Quiet Hours")
+        (&["Alt", "Q"][..], "Quiet hours")
     );
 }
 

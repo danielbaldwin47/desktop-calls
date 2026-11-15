@@ -510,10 +510,10 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
     // Quiet Hours: off when they begin, not when set; on when they end.
     let quiet = step(&result, "6.6");
     for said in [
-        "went off when the Quiet Hours began",
-        "disconnected when the Quiet Hours began",
-        "came back on when the Quiet Hours ended",
-        "Quiet Hours are off",
+        "went off when the Quiet hours began",
+        "disconnected when the Quiet hours began",
+        "came back on when the Quiet hours ended",
+        "Quiet hours are off",
     ] {
         assert!(says(quiet, said), "{said}: {quiet:#}");
     }

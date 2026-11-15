@@ -19,7 +19,7 @@ const GIVE_UP: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(1);
 
 const NUMBER: &str = "+447700900123";
-const AUDIO_NOT_MOVED: &str = "Your phone kept the audio; to hear the Call here, tap the audio button on your phone's call screen.";
+const AUDIO_NOT_MOVED: &str = "Your phone kept the audio; to hear the call here, tap the audio button on your phone's call screen.";
 
 /// The app on a screen of its own, the Phone connected, earbuds connected
 /// to the Phone, and a Call ringing; returns the Call's path on the Phone

@@ -266,7 +266,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-held-third-call-waiting",
-        title: "Three Calls: one live and one on hold, Swap gone and Hang up dimmed until the Waiting Call is answered or declined, and a Waiting Call's Banner with End & Answer, Decline and the keybinding",
+        title: "Three Calls: one live and one on hold, Swap gone and Hang up dimmed until the Waiting Call is answered or declined, and a Waiting Call's Banner with End & answer, Decline and the keybinding",
         still: |_| true,
         prepare: with_keybinding,
         reach: |harness| {
@@ -392,7 +392,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "setup-window-contacts-syncing",
-        title: "The Setup Window, with recent Calls read and Contacts still being read",
+        title: "The Setup Window, with recent calls read and Contacts still being read",
         // Only while Contacts are still being read, not in the moment
         // after they are and before the finish page.
         still: |state| {
@@ -413,7 +413,7 @@ const STATES: &[State] = &[
                 state
                     .surface("setup-window")
                     .and_then(|window| window.get("progress"))
-                    .is_some_and(|progress| progress.starts_with("✓ Recent Calls\nContacts · 312"))
+                    .is_some_and(|progress| progress.starts_with("✓ Recent calls\nContacts · 312"))
             });
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
@@ -652,7 +652,7 @@ fn held(harness: &Harness) {
     on_a_call(harness);
     waiting(harness);
     if let Err(error) = harness.hold_and_answer() {
-        panic!("Hold & Answer: {error:?}");
+        panic!("Hold & answer: {error:?}");
     }
     harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
         state

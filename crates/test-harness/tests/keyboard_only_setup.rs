@@ -285,7 +285,7 @@ fn a_setup_window_fix_that_copies_a_command_by_keys_alone() {
     let state = harness.app_state();
     let keys = setup_window(&state, "keys").unwrap_or_default();
     assert!(
-        keys.split(" · ").any(|shown| shown == "Esc Close"),
+        keys.split(" · ").any(|shown| shown == "Esc Cancel"),
         "{keys:?}"
     );
     harness.keyboard().press(Key::Escape);

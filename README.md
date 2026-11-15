@@ -46,7 +46,7 @@ you place from the Dialer while calls are off connects the phone for that
 one Call, and calls go off again when it ends.
 
 Quiet Hours turn calls off at the same times every day. Set them in
-**Quiet Hours…** in the Indicator's menu, or:
+**Quiet hours…** in the Indicator's menu, or:
 
 ```sh
 desktop-calls quiet-hours 22:00-07:00   # may cross midnight

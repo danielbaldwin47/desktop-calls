@@ -46,10 +46,24 @@ fn first_name(caller: &Caller, contact: Option<&ContactMatch>) -> String {
 #[must_use]
 pub fn contact_lost(notice: Failure) -> (&'static str, &'static str) {
     let next = match notice {
-        Failure::ConnectionLost => "The Call continues on your phone. Hang up there.",
+        Failure::ConnectionLost => "The call continues on your phone. Hang up there.",
         other => failure(other).text,
     };
     (label(Label::ConnectionToPhoneLost), next)
+}
+
+/// The heading over the Call Window's notice for `notice` while the Call
+/// is live, as "Call not placed" heads a Call that didn't start: a
+/// Handoff the Phone turned down left the audio where it was, which the
+/// user hears at once, so it is named first. `None` for a notice that
+/// only says why a press did nothing.
+#[must_use]
+pub fn live_notice_heading(notice: Failure) -> Option<&'static str> {
+    matches!(
+        notice,
+        Failure::AudioNotMoved | Failure::AudioNotMovedToPhone
+    )
+    .then_some("Audio not moved")
 }
 
 /// The Call Window's hint for Escape, beside its state line: the keycaps,

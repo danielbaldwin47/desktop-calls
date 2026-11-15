@@ -41,7 +41,7 @@ fn step_1_2_with_the_pixel_still_paired_says_to_start_over_at_1_1_without_waitin
 fn step_1_2_fails_when_the_finish_page_offers_no_keybinding() {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
-    // The user's config already uses Super + Alt + C for another program:
+    // The user's config already uses Super+Alt+C for another program:
     // set up as the user chooses the Pixel, before the finish page checks.
     runner.slips = vec![("enter", "bind-super-alt-c-elsewhere;enter")];
     runner.quit_at = Some("1.3");
@@ -52,11 +52,11 @@ fn step_1_2_fails_when_the_finish_page_offers_no_keybinding() {
     assert_eq!(pairing["result"], "fail", "{pairing:#}");
     assert!(
         says(pairing, "offered no keybinding to add")
-            && says(pairing, "Super + Alt + C already does something else"),
+            && says(pairing, "Super+Alt+C already does something else"),
         "{pairing:#}"
     );
     assert!(
-        !runner.printed("Press Super + Alt + C"),
+        !runner.printed("Press Super+Alt+C"),
         "it had the user press keys that open nothing: {}",
         runner.transcript.join("\n")
     );
@@ -79,7 +79,7 @@ fn step_1_2_waits_for_the_added_page_when_the_user_cancels_the_line_and_adds_it_
     assert!(
         says(
             pairing,
-            "Once confirmed, the finish page says: Place your first Call: press"
+            "Once confirmed, the finish page says: Place your first call: press"
         ),
         "{pairing:#}"
     );

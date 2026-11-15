@@ -234,7 +234,7 @@ fn dialling_during_a_live_call_says_hang_up_first_and_never_dials() {
     let output = harness.cli(&["dial", "01632 960001"]);
 
     assert!(!output.status.success());
-    assert_eq!(stderr(&output), "Hang up the current Call first.");
+    assert_eq!(stderr(&output), "Hang up the current call first.");
     assert_eq!(
         harness.wait_for_app_error(DEADLINE).kind,
         "call-in-progress"

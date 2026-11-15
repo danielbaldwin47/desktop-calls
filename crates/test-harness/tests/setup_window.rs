@@ -282,7 +282,7 @@ fn the_indicator_the_control_interface_and_the_command_line_each_open_the_window
     connected(&harness);
     assert!(setup_window(&harness.app_state()).is_none());
 
-    harness.tray().click("Connect your phone…");
+    harness.tray().click("Phone setup…");
     wait_for_step(&harness, "choose", DEADLINE);
     harness.keyboard().press(Key::Escape);
     closed(&harness);

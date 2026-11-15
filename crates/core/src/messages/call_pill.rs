@@ -33,5 +33,5 @@ pub fn call_pill_tooltip(name: Label, shortcut: &str) -> String {
 /// Super+Alt+C", with the Desktop Calls keybinding, which expands it too.
 #[must_use]
 pub fn show_call_tooltip() -> String {
-    format!("Show Call · {}", shown_keys(KEYS).replace(" + ", "+"))
+    format!("Show call · {}", shown_keys(KEYS))
 }

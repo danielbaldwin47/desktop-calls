@@ -548,9 +548,9 @@ pub(super) fn quiet_hours_soon(sitting: &mut Sitting) -> Result<(), Stop> {
 fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), Stop> {
     let off = wait_saying(
         sitting,
-        "Quiet Hours beginning",
+        "Quiet hours beginning",
         QUIET_HOURS_BEGIN,
-        "Calls are still on: the Quiet Hours haven't begun yet.",
+        "Calls are still on: the Quiet hours haven't begun yet.",
         |state| state.calls_off == "off" && state.calls_off_until != 0,
     )?;
     let until_us = off.state.calls_off_until.saturating_mul(1_000_000);
@@ -578,9 +578,9 @@ fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), 
     sitting.check(
         began_later,
         if began_later {
-            "Calls went off when the Quiet Hours began, not when they were set.".to_owned()
+            "Calls went off when the Quiet hours began, not when they were set.".to_owned()
         } else {
-            "Calls went off as the Quiet Hours were set: set them to start a minute ahead."
+            "Calls went off as the Quiet hours were set: set them to start a minute ahead."
                 .to_owned()
         },
     );
@@ -594,10 +594,10 @@ fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), 
     sitting.check(
         disconnected.is_some(),
         if disconnected.is_some() {
-            "The Pixel disconnected when the Quiet Hours began.".to_owned()
+            "The Pixel disconnected when the Quiet hours began.".to_owned()
         } else {
             format!(
-                "The Pixel didn't disconnect within {} of the Quiet Hours beginning.",
+                "The Pixel didn't disconnect within {} of the Quiet hours beginning.",
                 seconds(DISCONNECTS)
             )
         },
@@ -605,7 +605,7 @@ fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), 
     let Some(ended) = deadline_passed_logged(sitting, from_us, until_us)? else {
         sitting.check(
             false,
-            "The app logged no calls-off-deadline-passed line: calls didn't come back on when the Quiet Hours ended."
+            "The app logged no calls-off-deadline-passed line: calls didn't come back on when the Quiet hours ended."
                 .to_owned(),
         );
         return Ok(());
@@ -613,9 +613,9 @@ fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), 
     sitting.check(
         ended.at_us >= until_us,
         if ended.at_us >= until_us {
-            "Calls came back on when the Quiet Hours ended.".to_owned()
+            "Calls came back on when the Quiet hours ended.".to_owned()
         } else {
-            "Calls came back on before the Quiet Hours ended.".to_owned()
+            "Calls came back on before the Quiet hours ended.".to_owned()
         },
     );
     connected_again(
@@ -623,7 +623,7 @@ fn quiet_hours_begin_and_end(sitting: &mut Sitting, from_us: u64) -> Result<(), 
         &ended,
         ended.at_us,
         "reconnect_after_quiet_hours_ms",
-        "the Quiet Hours ending",
+        "the Quiet hours ending",
     )
 }
 
@@ -674,7 +674,7 @@ fn deadline_passed_logged(
         }
         sitting.say(
             &format!(
-                "Calls are off for Quiet Hours, for {} more.",
+                "Calls are off for Quiet hours, for {} more.",
                 seconds(Duration::from_micros(
                     until_us.saturating_sub(unix_micros())
                 ))
@@ -701,9 +701,9 @@ fn quiet_hours_off(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.check(
         cleared.is_some(),
         if cleared.is_some() {
-            "Quiet Hours are off.".to_owned()
+            "Quiet hours are off.".to_owned()
         } else {
-            "The app logged no quiet-hours-cleared line: Quiet Hours are still set.".to_owned()
+            "The app logged no quiet-hours-cleared line: Quiet hours are still set.".to_owned()
         },
     );
     Ok(())

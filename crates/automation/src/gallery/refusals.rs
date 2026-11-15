@@ -35,7 +35,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
             on_a_call(harness);
             open_dialer(harness, "jose");
             harness.keyboard().press(Key::Return);
-            wait_for_notice(harness, "Hang up the current Call first.");
+            wait_for_notice(harness, "Hang up the current call first.");
         },
         shown: |screenshot, _| shows_dialer(screenshot),
     },

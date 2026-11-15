@@ -21,7 +21,7 @@ const STAYS: Duration = Duration::from_secs(4);
 const SETTLES: Duration = Duration::from_millis(500);
 const TYPED: &str = "07700 900888";
 const DIALLED: &str = "07700900888";
-const AGAIN: &str = "Calls off again when this Call ends";
+const AGAIN: &str = "Calls off again when this call ends";
 const CONNECTING: &str = "Connecting to your phone…";
 
 fn on_screen() -> Harness {

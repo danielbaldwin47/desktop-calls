@@ -34,16 +34,16 @@ const BOB: &str = "+447700900123";
 /// Alice, who calls while the user is on with Bob.
 const ALICE: &str = "+447700900456";
 
-const LOST: &str = "Connection to phone lost: the Call continues on your phone.";
+const LOST: &str = "Connection to phone lost: the call continues on your phone.";
 /// The Call Window's notice while contact is lost: its heading, and what
 /// to do.
 const LOST_HEADING: &str = "Connection to phone lost";
-const LOST_NOTICE: &str = "The Call continues on your phone. Hang up there.";
+const LOST_NOTICE: &str = "The call continues on your phone. Hang up there.";
 const HANG_UP_ON_PHONE: &str = "Hang up on your phone";
 /// What the Indicator says while the Call Window says [`LOST_NOTICE`] about Bob's
 /// Call.
 const INDICATOR_LOST_BOB: &str =
-    "Connection to phone lost: the Call with +44 7700 900123 continues on your phone";
+    "Connection to phone lost: the call with +44 7700 900123 continues on your phone";
 /// The state line while the audio is on the Phone, where Mute is.
 const ON_PHONE: &str = "On your phone. Mute there, or move the audio here";
 
@@ -242,12 +242,12 @@ fn assert_lost_menu(menu: &[MenuEntry], status: &str) {
         MenuEntry::labels(menu),
         [
             status,
-            "Open Dialer",
+            "New call…",
             HANG_UP_ON_PHONE,
             "Turn calls off",
-            "Quiet Hours…",
+            "Quiet hours…",
             "---",
-            "Connect your phone…"
+            "Phone setup…"
         ]
     );
     let hang_up = MenuEntry::find(menu, HANG_UP_ON_PHONE)
@@ -344,11 +344,11 @@ fn with_hands_free_lost_the_indicator_says_what_the_call_window_says() {
         MenuEntry::labels(&menu),
         [
             "Connection to My Pixel lost",
-            "Open Dialer",
+            "New call…",
             "Turn calls off",
-            "Quiet Hours…",
+            "Quiet hours…",
             "---",
-            "Connect your phone…"
+            "Phone setup…"
         ]
     );
 }
@@ -376,7 +376,7 @@ fn with_a_held_call_both_calls_stay_listed_and_neither_can_be_acted_on() {
     let (_, alice) = alice_waits(&harness);
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     harness.wait_for_app("Alice is live and Bob on hold", DEADLINE, |state| {
         state_of(state, alice) == Some("active")
             && state_of(state, bob) == Some("held")
@@ -448,7 +448,7 @@ fn two_calls_lost_in_one_link_drop_come_back_alike_however_far_apart_they_went()
     let (_, alice) = alice_waits(&harness);
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     harness.wait_for_app("Alice is live and Bob on hold", DEADLINE, |state| {
         state_of(state, alice) == Some("active") && state_of(state, bob) == Some("held")
     });

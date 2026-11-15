@@ -21,9 +21,9 @@ use crate::checklist::watch::AppState;
 
 /// What the Banner offers for a Waiting Call while one Call is live, and
 /// none is on hold.
-const OPTIONS_WITH_ONE_LIVE: &str = "Hold & Answer, End & Answer, Decline";
+const OPTIONS_WITH_ONE_LIVE: &str = "Hold & answer, End & answer, Decline";
 /// With one Call live and another on hold, the Phone can hold no more.
-const OPTIONS_WITH_ONE_ON_HOLD_AND_ONE_LIVE: &str = "End & Answer, Decline";
+const OPTIONS_WITH_ONE_ON_HOLD_AND_ONE_LIVE: &str = "End & answer, Decline";
 /// With one Call on hold alone, nothing is live to hold or end.
 const OPTIONS_WITH_ONE_ON_HOLD: &str = "Answer, Decline";
 
@@ -274,17 +274,17 @@ fn waiting_call_arrives(
 /// Call is live and the Test Number's on hold. Has the user end the Calls
 /// when it isn't, and returns whether it was.
 fn hold_and_answer(sitting: &mut Sitting, first: u32, second: u32) -> Result<bool, Stop> {
-    sitting.say("On the Banner, choose Hold & Answer.", &["hold-and-answer"]);
-    let (done, state) = after_choice(sitting, "Hold & Answer taking effect", |state| {
+    sitting.say("On the Banner, choose Hold & answer.", &["hold-and-answer"]);
+    let (done, state) = after_choice(sitting, "Hold & answer taking effect", |state| {
         live_beside_held(state, second, first)
     })?;
     sitting.check(
         done,
         if done {
-            "Hold & Answer put the Test Number's Call on hold and made the second helper's live, and the Call Window lists both.".to_owned()
+            "Hold & answer put the Test Number's Call on hold and made the second helper's live, and the Call Window lists both.".to_owned()
         } else {
             format!(
-                "Hold & Answer didn't leave the second helper's Call live beside the Test Number's on hold: {}.",
+                "Hold & answer didn't leave the second helper's Call live beside the Test Number's on hold: {}.",
                 describe(&state, &[(first, TEST_NUMBER_CALL), (second, SECOND_HELPER_CALL)])
             )
         },
@@ -398,17 +398,17 @@ pub(super) fn end_and_answer(sitting: &mut Sitting) -> Result<(), Stop> {
     else {
         return Ok(());
     };
-    sitting.say("On the Banner, choose End & Answer.", &["end-and-answer"]);
-    let (done, state) = after_choice(sitting, "End & Answer taking effect", |state| {
+    sitting.say("On the Banner, choose End & answer.", &["end-and-answer"]);
+    let (done, state) = after_choice(sitting, "End & answer taking effect", |state| {
         live_alone(state, second)
     })?;
     sitting.check(
         done,
         if done {
-            "End & Answer ended the Test Number's Call and connected the second helper's, which is live alone.".to_owned()
+            "End & answer ended the Test Number's Call and connected the second helper's, which is live alone.".to_owned()
         } else {
             format!(
-                "End & Answer didn't leave the second helper's Call live alone: {}.",
+                "End & answer didn't leave the second helper's Call live alone: {}.",
                 describe(&state, &[(first, TEST_NUMBER_CALL), (second, SECOND_HELPER_CALL)])
             )
         },
@@ -560,17 +560,17 @@ fn test_number_held_beside_the_third_phone(
     else {
         return Ok(None);
     };
-    sitting.say("On the Banner, choose End & Answer.", &["end-and-answer"]);
-    let (done, state) = after_choice(sitting, "End & Answer taking effect", |state| {
+    sitting.say("On the Banner, choose End & answer.", &["end-and-answer"]);
+    let (done, state) = after_choice(sitting, "End & answer taking effect", |state| {
         live_beside_held(state, third, first)
     })?;
     sitting.check(
         done,
         if done {
-            "End & Answer ended only the second helper's first Call: the third phone's is live and the Test Number's is still on hold.".to_owned()
+            "End & answer ended only the second helper's first Call: the third phone's is live and the Test Number's is still on hold.".to_owned()
         } else {
             format!(
-                "End & Answer didn't leave the third phone's Call live beside the Test Number's on hold: {}.",
+                "End & answer didn't leave the third phone's Call live beside the Test Number's on hold: {}.",
                 describe(
                     &state,
                     &[

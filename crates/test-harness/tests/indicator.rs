@@ -20,7 +20,7 @@ const TRANSPORT: &str = "org.pipewire.Telephony.AudioGatewayTransport1";
 /// What the Indicator says while a Call from [`NUMBER`] rings, and once it
 /// is answered.
 const RINGING: &str = "Call from +44 7700 900123";
-const IN_CALL: &str = "In a Call with +44 7700 900123";
+const IN_CALL: &str = "In a call with +44 7700 900123";
 
 fn connected() -> Harness {
     let harness = Harness::builder().phone_name(PHONE_NAME).start();
@@ -145,11 +145,11 @@ fn idle_the_menu_offers_the_status_and_the_dialer() {
         MenuEntry::labels(&harness.tray().menu()),
         [
             "My Pixel connected",
-            "Open Dialer",
+            "New call…",
             "Turn calls off",
-            "Quiet Hours…",
+            "Quiet hours…",
             "---",
-            "Connect your phone…"
+            "Phone setup…"
         ]
     );
 }
@@ -163,14 +163,14 @@ fn during_a_call_the_menu_mutes_and_hangs_up_as_the_call_window_does() {
         MenuEntry::labels(&harness.tray().menu()),
         [
             IN_CALL,
-            "Open Dialer",
+            "New call…",
             "Mute",
             "Move audio to phone",
             "Hang up",
             "Turn calls off",
-            "Quiet Hours…",
+            "Quiet hours…",
             "---",
-            "Connect your phone…"
+            "Phone setup…"
         ]
     );
 

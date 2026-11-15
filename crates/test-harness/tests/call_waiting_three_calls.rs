@@ -11,7 +11,7 @@ const CAROL: &str = "+447700900789";
 
 /// What the Call Window says, and a refused Hang up or Swap, while a Call is
 /// on hold and another waits.
-const WAITING_CALL_FIRST: &str = "Answer or decline the Waiting Call first: until then, your phone would act on it instead of these Calls.";
+const WAITING_CALL_FIRST: &str = "Answer or decline the waiting call first: until then, your phone would act on it instead of these calls.";
 
 /// Alice live, Bob on hold, and Carol waiting, the Banner showing her
 /// options. Returns the Calls' object paths and ids: Bob's, Alice's, then
@@ -20,7 +20,7 @@ fn three_calls(harness: &Harness) -> [(String, u32); 3] {
     let bob = on_a_call(harness);
     let alice = alice_waits(harness);
     let held = harness.hold_and_answer().map_err(|error| error.kind);
-    assert_eq!(held, Ok(()), "Hold & Answer is passed on");
+    assert_eq!(held, Ok(()), "Hold & answer is passed on");
     wait_for_alice_live_bob_held(harness, bob.1, alice.1);
     let carol_path = harness.simulated_phone().ring(CAROL);
     let state = harness.wait_for_app("Carol's Call waits", DEADLINE, |state| {
@@ -40,7 +40,7 @@ fn while_a_third_call_waits_the_held_call_offers_neither_swap_nor_hang_up() {
     let (_, alice) = alice_waits(&harness);
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     wait_for_alice_live_bob_held(&harness, bob, alice);
 
     let carol_path = harness.simulated_phone().ring(CAROL);
@@ -98,7 +98,7 @@ fn on_the_simulated_phone_hanging_up_a_held_call_while_one_waits_declines_the_wa
     let (_, alice) = alice_waits(&harness);
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     wait_for_alice_live_bob_held(&harness, bob, alice);
     let carol_path = harness.simulated_phone().ring(CAROL);
     harness.wait_for_app("Carol waits", DEADLINE, |state| state.calls.len() == 3);
@@ -156,7 +156,7 @@ fn a_call_ringing_while_one_is_being_placed_is_answered_by_end_and_answer() {
         banner(&state)
             .and_then(|banner| banner.get("options"))
             .map(String::as_str),
-        Some("End & Answer, Decline")
+        Some("End & answer, Decline")
     );
     assert!(!state.ringing);
     let error = harness
@@ -164,7 +164,7 @@ fn a_call_ringing_while_one_is_being_placed_is_answered_by_end_and_answer() {
         .expect_err("a Call not yet connected can't be held");
     assert!(error.kind.ends_with("NotConnectedYet"), "{error:?}");
 
-    harness.end_and_answer().expect("End & Answer is passed on");
+    harness.end_and_answer().expect("End & answer is passed on");
 
     let recorded = wait_for_phone_asked(&harness, "Answer");
     assert!(hung_up(&recorded, &placing_path), "{recorded:#?}");
@@ -198,10 +198,10 @@ fn with_a_call_on_hold_a_third_call_offers_only_end_and_answer_which_ends_only_t
 
     let state = harness.app_state();
     let options = banner(&state).and_then(|banner| banner.get("options").cloned());
-    assert_eq!(options.as_deref(), Some("End & Answer, Decline"));
+    assert_eq!(options.as_deref(), Some("End & answer, Decline"));
     let error = harness
         .hold_and_answer()
-        .expect_err("Hold & Answer is refused");
+        .expect_err("Hold & answer is refused");
     assert!(error.kind.ends_with("AlreadyHolding"), "{error:?}");
 
     let asked = |recorded: &[RecordedMethodCall]| {
@@ -294,7 +294,7 @@ fn with_only_a_held_call_answer_answers_the_waiting_call_and_keeps_the_held_one(
     let (alice_path, alice) = alice_waits(&harness);
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     wait_for_alice_live_bob_held(&harness, bob, alice);
     harness.simulated_phone().caller_hangs_up(&alice_path);
     harness.wait_for_app("only Bob's Call is left, on hold", DEADLINE, |state| {

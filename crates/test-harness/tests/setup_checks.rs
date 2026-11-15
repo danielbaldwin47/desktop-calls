@@ -178,7 +178,7 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
     let state = harness.wait_for_app(
         "the footer says Enter turns Bluetooth on",
         DEADLINE,
-        |state| window_field(state, "keys") == Some("Enter Turn on · Tab Next button · Esc Close"),
+        |state| window_field(state, "keys") == Some("Enter Turn on · Tab Next button · Esc Cancel"),
     );
     assert_eq!(window_field(&state, "dimmed"), Some("true"));
 
@@ -360,7 +360,10 @@ fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
         field(state, "problems") == Some("contacts-support-missing")
     });
     let state = wait_for_phone_listed(&harness);
-    assert_eq!(window_field(&state, "keys"), Some("Enter Pair · Esc Close"));
+    assert_eq!(
+        window_field(&state, "keys"),
+        Some("Enter Pair · Esc Cancel")
+    );
     assert_eq!(
         window_field(&state, "dimmed"),
         None,
@@ -802,7 +805,7 @@ fn every_problem_asks_for_attention_and_the_menu_explains_it_in_plain_words() {
     let headings = [
         "Bluetooth is off",
         "Bluetooth's own calling is on",
-        "Audio not set up for Calls",
+        "Audio not set up for calls",
         "Contacts support not installed",
     ];
     let tooltip = format!("My Pixel not connected · {}", headings.join(" · "));
@@ -828,7 +831,7 @@ fn every_problem_asks_for_attention_and_the_menu_explains_it_in_plain_words() {
     let menu = harness.tray().menu();
     let mut texts: Vec<String> = MenuEntry::labels(&menu);
     for (heading, problem) in headings.iter().zip(&state.problems) {
-        let entry = MenuEntry::find(&menu, &format!("{heading}: put it right…"))
+        let entry = MenuEntry::find(&menu, &format!("{heading}: fix…"))
             .unwrap_or_else(|| panic!("{heading:?} is in the menu: {menu:#?}"));
         let explanation = MenuEntry::labels(&entry.children).join(" ");
         assert_eq!(
@@ -840,7 +843,7 @@ fn every_problem_asks_for_attention_and_the_menu_explains_it_in_plain_words() {
     }
 
     // Choosing one opens the Setup Window, which shows them all.
-    harness.tray().click("Bluetooth is off: put it right…");
+    harness.tray().click("Bluetooth is off: fix…");
     let state = harness.wait_for_app("the Setup Window shows the Problems", DEADLINE, |state| {
         field(state, "problems")
             == Some("bluetooth-off\nbluez-hands-free\naudio-not-set-up\ncontacts-support-missing")

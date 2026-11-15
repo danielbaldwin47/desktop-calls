@@ -122,14 +122,14 @@ fn each_state_has_its_own_look() {
 
 #[test]
 fn the_tooltip_says_the_state_in_words() {
-    assert_eq!(tooltip(&State::default()), "No Phone set up");
+    assert_eq!(tooltip(&State::default()), "No phone set up");
     assert_eq!(tooltip(&paired()), "My Pixel not connected");
     assert_eq!(tooltip(&connected()), "My Pixel connected");
     assert_eq!(tooltip(&out_of_range()), "My Pixel out of range");
     assert_eq!(tooltip(&ringing(connected())), "Call from +44 7700 900123");
     assert_eq!(
         tooltip(&live_on_desktop()),
-        "In a Call with +44 7700 900123"
+        "In a call with +44 7700 900123"
     );
     assert_eq!(
         tooltip(&denied()),
@@ -230,7 +230,7 @@ fn with_quiet_hours(state: State) -> State {
     run(
         state,
         [Input::QuietHoursKept(
-            QuietHours::parse("22:00-07:00").unwrap_or_else(|| panic!("valid Quiet Hours")),
+            QuietHours::parse("22:00-07:00").unwrap_or_else(|| panic!("valid Quiet hours")),
         )],
     )
 }
@@ -346,22 +346,22 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
         labels(&with_quiet_hours(connected())),
         [
             "My Pixel connected",
-            "Open Dialer",
+            "New call…",
             "Turn calls off",
-            "Quiet Hours…  22:00–07:00",
+            "Quiet hours…  22:00–07:00",
             "",
-            "Connect your phone…",
+            "Phone setup…",
         ]
     );
     assert_eq!(
         labels(&off(denied())),
         [
             "Calls off",
-            "Open Dialer",
+            "New call…",
             "Turn calls on",
-            "Quiet Hours…",
+            "Quiet hours…",
             "",
-            "Connect your phone…",
+            "Phone setup…",
             "Contacts not shared",
         ]
     );
@@ -371,15 +371,15 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
             [Input::TurnCallsOff { until: None }]
         )),
         [
-            "Calls turn off when this Call ends",
-            "Open Dialer",
+            "Calls turn off when this call ends",
+            "New call…",
             "Mute",
             "Move audio to phone",
             "Hang up",
             "Keep calls on",
-            "Quiet Hours…",
+            "Quiet hours…",
             "",
-            "Connect your phone…",
+            "Phone setup…",
         ]
     );
 }
@@ -415,4 +415,24 @@ fn a_problem_is_in_the_menu() {
         ))
     );
     assert_eq!(view.menu.last().and_then(IndicatorEntry::intent), None);
+}
+
+#[test]
+fn a_problem_the_setup_window_puts_right_reads_fix() {
+    let view = indicator(&connected());
+    for (problem, label) in [
+        (
+            messages::ProblemKind::BluetoothOff,
+            "Bluetooth is off: fix…",
+        ),
+        (
+            messages::ProblemKind::PairingLost,
+            "Pairing lost: pair again…",
+        ),
+    ] {
+        assert_eq!(
+            messages::indicator_entry(&IndicatorEntry::Problem(problem), &view),
+            label
+        );
+    }
 }

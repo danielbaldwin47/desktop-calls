@@ -58,7 +58,7 @@ pub(super) struct CallWindow {
     /// "Calls off after", while a turn-off waits for the Call to end.
     calls_off: gtk::Label,
     timer: gtk::Label,
-    /// The number's label and the number, or "Not in Contacts".
+    /// The number's label and the number, or "Not in contacts".
     meta: gtk::Label,
     /// The line under who: the meta and the "Calls off after" tag.
     detail_line: gtk::Box,

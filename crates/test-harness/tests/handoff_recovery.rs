@@ -28,9 +28,9 @@ const LOST_WINDOW_DEADLINE: Duration = Duration::from_secs(14);
 
 const NUMBER: &str = "+447700900123";
 const DEVICE: &str = "org.bluez.Device1";
-const LOST: &str = "Connection to phone lost: the Call continues on your phone.";
+const LOST: &str = "Connection to phone lost: the call continues on your phone.";
 /// What the Call Window's notice says while contact is lost.
-const LOST_NOTICE: &str = "The Call continues on your phone. Hang up there.";
+const LOST_NOTICE: &str = "The call continues on your phone. Hang up there.";
 
 /// The app on a screen of its own, so its surfaces show, with the Phone
 /// connected.

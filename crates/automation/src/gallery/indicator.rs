@@ -75,7 +75,7 @@ fn quiet_hours(harness: &Harness) {
     // wait on the menu itself.
     harness
         .tray()
-        .wait_for_menu("the menu shows the Quiet Hours", DEADLINE, |menu| {
+        .wait_for_menu("the menu shows the Quiet hours", DEADLINE, |menu| {
             MenuEntry::find(menu, QUIET_HOURS_ENTRY).is_some()
         });
 }
@@ -98,7 +98,7 @@ fn missed_call(harness: &Harness) {
 const MISSED_TOOLTIP: &str = "Simulated Pixel connected · 1 missed call";
 
 /// The Quiet Hours entry, with the times `quiet_hours` sets as its hint.
-const QUIET_HOURS_ENTRY: &str = "Quiet Hours…  22:00–07:00";
+const QUIET_HOURS_ENTRY: &str = "Quiet hours…  22:00–07:00";
 
 /// The icon's states.
 pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
@@ -171,7 +171,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         title: "The Indicator, in a Call",
         prepare: as_is,
         reach: live,
-        tooltip: "In a Call with +44 7700 900123",
+        tooltip: "In a call with +44 7700 900123",
         submenu: None,
         menu_shows: &[],
     },
@@ -183,7 +183,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this Call ends",
+        tooltip: "Calls turn off when this call ends",
         submenu: None,
         menu_shows: &[],
     },
@@ -222,7 +222,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
     },
     IndicatorState {
         name: "off-quiet-hours",
-        title: "The Indicator, calls off for Quiet Hours",
+        title: "The Indicator, calls off for Quiet hours",
         prepare: as_is,
         // Under way at any time but the day's last minute, in whichever
         // time zone the gallery runs.
@@ -240,7 +240,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
 pub(super) const MENU_STATES: &[IndicatorState] = &[
     IndicatorState {
         name: "menu-calls-on",
-        title: "The Indicator's menu, calls on, with Quiet Hours set",
+        title: "The Indicator's menu, calls on, with Quiet hours set",
         prepare: at_noon,
         reach: |harness| {
             connect(harness);
@@ -295,7 +295,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this Call ends",
+        tooltip: "Calls turn off when this call ends",
         submenu: None,
         menu_shows: &["Hang up", "Keep calls on"],
     },

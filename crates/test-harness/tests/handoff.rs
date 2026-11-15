@@ -832,6 +832,11 @@ fn a_handoff_to_the_phone_bluez_refuses_says_how_to_do_it_on_the_phone() {
             "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen."
         )
     );
+    assert_eq!(
+        shown(&state, "notice-heading").as_deref(),
+        Some("Audio not moved"),
+        "headed, as Call not placed and Connection to phone lost are (#324)"
+    );
     assert_eq!(state.audio_location, "desktop");
     assert_eq!(shown(&state, "handoff").as_deref(), Some("To phone"));
     let error = harness.wait_for_app_error(DEADLINE);

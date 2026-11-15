@@ -403,10 +403,10 @@ fn granted_the_window_shows_the_call_history_done_first_then_the_contacts_being_
     let text = messages::setup_window(&view, Timestamp(12_000), None);
     let sync = text.sync.expect("the sync shows");
     let lines: Vec<String> = sync.rows.iter().map(messages::SyncRow::line).collect();
-    assert_eq!(lines, ["✓ Recent Calls", "Contacts · 312 · about 8 s left"]);
+    assert_eq!(lines, ["✓ Recent calls", "Contacts · 312 · about 8 s left"]);
     assert_eq!(
         sync.note,
-        "Calls already work. Names appear as Contacts arrive."
+        "Calls already work. Names appear as contacts arrive."
     );
     // Recent Calls are in, and Contacts part read: the bar is under way,
     // and not full.
@@ -451,7 +451,7 @@ fn once_the_whole_sync_is_done_the_finish_page_reports_what_was_synced() {
     assert!(effects.contains(&Effect::CheckKeybinding), "{effects:?}");
     assert_eq!(
         text(&state).summary.as_deref(),
-        Some("Synced 312 Contacts and 200 recent Calls.")
+        Some("Synced 312 contacts and 200 recent calls.")
     );
 }
 
@@ -518,7 +518,7 @@ fn a_phone_leaving_while_it_asks_is_waited_for_and_continuing_asks_again() {
     );
     assert_eq!(
         text(&state).summary.as_deref(),
-        Some("Synced 3 Contacts and 2 recent Calls.")
+        Some("Synced 3 contacts and 2 recent calls.")
     );
 }
 
@@ -660,7 +660,7 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
     assert!(
         text.keybinding
             .as_ref()
-            .is_some_and(|card| card.text.contains("Super + Alt + C")),
+            .is_some_and(|card| card.text.contains("Super+Alt+C")),
         "{:?}",
         text.keybinding
     );
@@ -717,7 +717,7 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
     assert!(
         text.keybinding.as_ref().is_some_and(|card| card
             .text
-            .starts_with("Place your first Call: press Super + Alt + C")),
+            .starts_with("Place your first call: press Super+Alt+C")),
         "{:?}",
         text.keybinding
     );

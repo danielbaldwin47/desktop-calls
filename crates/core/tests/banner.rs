@@ -122,7 +122,7 @@ fn hold_and_answer_names_who_waits_on_hold_and_end_and_answer_whose_call_ends() 
     );
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
-        Some("Ends the Call with Alice")
+        Some("Ends the call with Alice")
     );
     assert_eq!(consequence(&view, BannerChoice::Decline), None);
 }
@@ -139,7 +139,7 @@ fn a_call_with_a_bare_number_is_named_by_its_number() {
     );
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
-        Some("Ends the Call with +44\u{a0}7700\u{a0}900456")
+        Some("Ends the call with +44\u{a0}7700\u{a0}900456")
     );
 }
 
@@ -162,7 +162,7 @@ fn while_placing_a_call_end_and_answer_names_the_call_being_placed() {
     );
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
-        Some("Ends the Call with Alice")
+        Some("Ends the call with Alice")
     );
 }
 
@@ -187,7 +187,7 @@ fn with_a_call_on_hold_end_and_answer_names_the_live_call_not_the_held_one() {
     assert_eq!(view.waiting, Some(WaitingOptions::End));
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
-        Some("Ends the Call with José")
+        Some("Ends the call with José")
     );
 }
 
@@ -300,13 +300,13 @@ fn the_footer_names_the_keybinding_set_then_the_letters_that_act() {
     assert_eq!(banner(&unbound).footer, Some(BannerFooter::NoKeybinding));
     assert_eq!(
         footer(&unbound, &["A", "D"]).as_deref(),
-        Some("No keybinding set. Add one in Connect your phone…")
+        Some("No keybinding set. Phone setup… adds one.")
     );
     // It names the Indicator's entry in that entry's own words.
     let indicator = unbound.indicator(&unbound.surfaces());
     let entry = messages::indicator_entry(&IndicatorEntry::ConnectPhone, &indicator);
     assert!(
-        footer(&unbound, &["A", "D"]).is_some_and(|footer| footer.ends_with(&entry)),
+        footer(&unbound, &["A", "D"]).is_some_and(|footer| footer.contains(&entry)),
         "the footer names {entry:?}"
     );
 }
@@ -329,7 +329,7 @@ fn with_the_keyboard_the_footer_says_escape_gives_it_back() {
     assert_eq!(view.footer, Some(BannerFooter::GiveKeyboardBack));
     assert_eq!(
         footer(&state, &["A", "D"]).as_deref(),
-        Some("Esc gives the keyboard back; the Call keeps ringing")
+        Some("Esc gives the keyboard back; the call keeps ringing")
     );
 }
 
@@ -385,7 +385,7 @@ fn with_a_call_on_hold_and_one_being_placed_end_and_answer_names_the_one_being_p
     assert_eq!(view.waiting, Some(WaitingOptions::End));
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
-        Some("Ends the Call with José")
+        Some("Ends the call with José")
     );
 }
 

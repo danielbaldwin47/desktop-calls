@@ -526,7 +526,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
     );
     assert_eq!(
         choose.keys,
-        [(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")],
+        [(&["Enter"][..], "Pair"), (&["Esc"][..], "Cancel")],
         "one Phone has nothing to move between"
     );
     let two = messages::setup_window(
@@ -541,7 +541,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         [
             (&["↑", "↓"][..], "Choose"),
             (&["Enter"][..], "Pair"),
-            (&["Esc"][..], "Close")
+            (&["Esc"][..], "Cancel")
         ]
     );
     let none = messages::setup_window(
@@ -551,7 +551,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
     );
     assert_eq!(
         none.keys,
-        [(&["Esc"][..], "Close")],
+        [(&["Esc"][..], "Cancel")],
         "with no Phone listed, only Escape works"
     );
 
@@ -592,7 +592,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     );
     assert_eq!(
         off.summary.as_deref(),
-        Some("My Pixel is paired, but isn't sharing Calls with this computer.")
+        Some("My Pixel is paired, but isn't sharing calls with this computer.")
     );
     assert!(
         off.instructions
@@ -615,7 +615,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     );
     assert_eq!(
         done.summary.as_deref(),
-        Some("Synced 1 Contact and 1 recent Call.")
+        Some("Synced 1 contact and 1 recent call.")
     );
     assert!(
         done.instructions
@@ -633,7 +633,8 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     );
     assert_eq!(
         syncing.keys,
-        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Close")]
+        [(&["Enter"][..], "Cancel"), (&["Esc"][..], "Cancel")],
+        "Escape does what the lone Cancel button does, and says it in its word"
     );
     let close_only = messages::setup_window(
         &view(SetupStep::Connecting { phone: pixel() }),
@@ -642,8 +643,8 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     );
     assert_eq!(
         close_only.keys,
-        [(&["Enter", "Esc"][..], "Close")],
-        "Enter and Escape both close, so one entry says it"
+        [(&["Enter"][..], "Close"), (&["Esc"][..], "Close")],
+        "an entry a key: two keycaps in one entry read as a chord"
     );
 }
 

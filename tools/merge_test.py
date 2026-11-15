@@ -6,9 +6,11 @@ asked. `just lint` runs them."""
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -81,7 +83,7 @@ class Next(unittest.TestCase):
 
     def test_it_says_what_land_does_and_that_it_stops_on_a_conflict(self):
         message = self.next_step(PR)
-        self.assertIn("runs CI on the result", message)
+        self.assertIn("waits for GitHub's \"CI passed\"", message)
         self.assertIn("On a conflict it stops and says what to run.", message)
 
 
@@ -126,7 +128,7 @@ class BehindMain(unittest.TestCase):
 
 
 class TheLane(unittest.TestCase):
-    """A merge to main takes the CI lane's lock for its final recheck and the
+    """A merge to main takes the landing lock for its final recheck and the
     squash, so it can't fall between `just land`'s merge of main and its own
     squash (ticket #247). `just land` holds the lock already."""
 
@@ -150,7 +152,7 @@ class TheLane(unittest.TestCase):
             mock.patch.object(merge, "require_checks_passed", step("checked")),
             mock.patch.object(merge, "require_mergeable", side_effect=lambda pr: pr),
             mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", step("ticket")),
-            mock.patch.object(merge.ci_local, "take_turn", step("take the lock")),
+            mock.patch.object(merge, "take_landing_turn", step("take the lock")),
             mock.patch.object(merge, "gh", gh),
             contextlib.redirect_stdout(io.StringIO()),
         ):
@@ -165,6 +167,48 @@ class TheLane(unittest.TestCase):
 
     def test_land_holds_the_lock_itself_so_merge_does_not_take_it_again(self):
         self.assertEqual(self.merge(lane_held=True), ["wait", "checked", "ticket", "squash"])
+
+    def test_the_lock_keeps_a_second_landing_out_until_the_first_lets_go(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / "landing-lock"
+            with mock.patch.object(merge, "LANDING_LOCK", lock):
+                first = merge.take_landing_turn()
+                second = open(lock, "w")
+                self.addCleanup(second.close)
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(second, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                first.close()
+                fcntl.flock(second, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if still held
+
+
+class WaitingForChecks(unittest.TestCase):
+    """GitHub starts CI on a push after a few seconds: a head with no check
+    yet is waited for, for a while (#286)."""
+
+    def wait(self, seen: list[list[dict]], clock: list[float]) -> int:
+        looks = iter(seen)
+        asked = []
+
+        def checks(pr):
+            asked.append(1)
+            return next(looks)
+
+        with (
+            mock.patch.object(merge, "checks", checks),
+            mock.patch.object(merge.time, "sleep"),
+            mock.patch.object(merge.time, "monotonic", side_effect=clock),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            merge.wait_for_checks(PR, 30 * 60)
+        return len(asked)
+
+    def test_checks_that_appear_after_a_moment_are_waited_for(self):
+        passed = [{"name": "CI passed", "bucket": "pass"}]
+        self.assertEqual(self.wait([[], [], passed], [0, 0, 1, 1, 2, 2, 3, 3]), 3)
+
+    def test_a_head_github_starts_nothing_on_is_given_up_on(self):
+        late = merge.CHECKS_APPEAR_SECONDS + 1
+        self.assertEqual(self.wait([[], []], [0, 0, 1, 1, late, late]), 2)
 
 
 if __name__ == "__main__":

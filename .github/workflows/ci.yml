@@ -143,7 +143,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # TEMPORARY, for measuring PR #287's warm runs; removed before it lands.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/pull/287/merge' }}
       - name: just lint
         env: { GH_TOKEN: "${{ github.token }}" }
         run: just lint
@@ -181,25 +182,32 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}
+          name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}${{ matrix.names && format('-{0}', matrix.names) || '' }}
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 
   # The Real-Phone Checklist's demo runs of group 6 wait out real time:
   # calls stay off for 60 s, and Quiet Hours begin at the next minute and
-  # end a minute later. About 3.5 minutes, whatever the runner does.
+  # end a minute later. Its three tests took 157, 157 and 60 s; two at a
+  # time on one runner, 217 s, the slowest job of run 43675318041. So one
+  # 157 s test gets a runner of its own, and the other two share one. The
+  # names, between them, are the justfile's checklist_group_6_tests.
   checklist:
-    name: just ci-checklist-group-6
+    name: just ci-checklist-group-6 ${{ matrix.names }}
     needs: [changes, image]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
+    strategy:
+      fail-fast: false
+      matrix:
+        names: [group_6_times, step_6_2_]
     steps:
       - *checkout
       - *cache
-      - name: just ci-checklist-group-6
-        run: just ci-checklist-group-6
+      - name: just ci-checklist-group-6 ${{ matrix.names }}
+        run: just ci-checklist-group-6 ${{ matrix.names }}
       - *scenario-logs
 
   # The gallery, every surface in every state, light and dark, stock and

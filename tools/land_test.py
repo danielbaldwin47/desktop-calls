@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests of `just land` (tools/land.py, ticket #247): bring a PR up to date,
-test the result and merge it, holding the CI lane. GitHub is never asked, and
-nothing is run in the image. The git steps run against a throwaway repository.
+wait for GitHub's CI on the result and merge it, holding the landing lock;
+then clear target/ (#286, #277). GitHub is never asked. The git steps run against a throwaway repository.
 `just lint` runs them."""
 
 from __future__ import annotations
@@ -28,31 +28,6 @@ ENV = {
     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
 }
 SHA, MERGED = "a" * 40, "b" * 40
-
-
-class Decide(unittest.TestCase):
-    """What to do with a head, from where it stands against the base."""
-
-    def test_a_green_head_that_contains_main_merges_with_no_run(self):
-        self.assertEqual(land.decide(behind=False, gap_has_code=False, status="success"), land.MERGE_NOW)
-
-    def test_a_green_head_lacking_only_docs_is_let_through_with_no_run(self):
-        self.assertEqual(land.decide(behind=True, gap_has_code=False, status="success"), land.MERGE_NOW)
-
-    def test_a_green_head_lacking_code_is_updated_and_run_again(self):
-        self.assertEqual(land.decide(behind=True, gap_has_code=True, status="success"), land.UPDATE_AND_RUN)
-
-    def test_a_head_never_run_is_run_and_one_behind_main_is_updated_first(self):
-        self.assertEqual(land.decide(behind=False, gap_has_code=False, status=None), land.RUN)
-        self.assertEqual(land.decide(behind=False, gap_has_code=False, status="pending"), land.RUN)
-        self.assertEqual(land.decide(behind=True, gap_has_code=False, status=None), land.UPDATE_AND_RUN)
-
-    def test_a_red_head_with_nothing_new_to_test_is_refused_not_rerun(self):
-        self.assertEqual(land.decide(behind=False, gap_has_code=False, status="failure"), land.RED)
-        self.assertEqual(land.decide(behind=True, gap_has_code=False, status="error"), land.RED)
-
-    def test_a_red_head_that_must_take_main_is_run_on_the_merge_as_a_new_commit(self):
-        self.assertEqual(land.decide(behind=True, gap_has_code=True, status="failure"), land.UPDATE_AND_RUN)
 
 
 class InARepository(unittest.TestCase):
@@ -134,7 +109,7 @@ class InARepository(unittest.TestCase):
         land.level_with_github("work")
         self.assertEqual(self.head(), ahead)
 
-    def test_a_branch_ahead_of_its_copy_is_left_for_ci_local_to_push(self):
+    def test_a_branch_ahead_of_its_copy_is_left_to_be_pushed(self):
         self.branch_off_main()
         behind = self.head()
         self.remote("work", behind)
@@ -174,7 +149,7 @@ class InARepository(unittest.TestCase):
             land.update_from_base("main", 42)
         message = str(raised.exception)
         self.assertIn("conflicts in shared.txt", message)
-        self.assertIn("nothing was run and nothing was posted", message)
+        self.assertIn("nothing was pushed or merged", message)
         self.assertIn("Next: git merge --no-edit origin/main   (resolve the conflicts, commit, "
                       "then `just land 42`)", message)
         self.assertEqual(self.head(), mine)
@@ -196,51 +171,45 @@ class Interrupted(unittest.TestCase):
         self.assertEqual(calls[-1], ["git", "merge", "--abort"])
 
 
+MERGE = f"merge 42 waiting {land.CI_WAIT_MINUTES} min, lock held: True"
+
+
 class Landing(unittest.TestCase):
     """The order of a landing, with every step stubbed and recorded."""
 
-    def land(self, status: str | None, behind: bool, gap_has_code: bool, *, run_passes: bool = True,
-             conflict: bool = False, ticket_refused: bool = False) -> list[str]:
+    def land(self, behind: bool, gap_has_code: bool, *, on_github: bool = True, conflict: bool = False,
+             ticket_refused: bool = False) -> list[str]:
         steps: list[str] = []
-
-        def step(name, result=None):
-            def call(*args, **_):
-                steps.append(name)
-                return result
-            return call
 
         def update(base, number):
             steps.append("merge main in")
             if conflict:
                 raise merge.Refused("Merging origin/main into the branch conflicts in x.\nNext: ...")
 
-        def run(sha, jobs, every_job, full, rebuild, log):
-            steps.append(f"run {'every job' if jobs == list(ci_local.JOBS) else jobs} on {sha[:7]}")
-            return ci_local.EXIT_PASSED if run_passes else ci_local.EXIT_FAILED
-
         def ticket(pr):
             steps.append("ticket check")
             if ticket_refused:
                 raise merge.Refused("Real-Phone Checklist steps wait on closed tickets")
 
+        def ancestor(older, newer):
+            return on_github and older == SHA
+
         pr = {"number": 42, "state": "OPEN", "isDraft": False, "headRefName": "work",
               "baseRefName": "main", "headRefOid": SHA}
-        look = land.Survey("work", "main", SHA, behind, gap_has_code, "a code change", status)
+        look = land.Survey("work", "main", SHA, behind, gap_has_code, "a code change")
         with (
             mock.patch.object(merge, "pull_request", return_value=pr),
             mock.patch.object(land, "require_here"),
             mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
             mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", ticket),
-            mock.patch.object(land, "survey", step("look", look)),
+            mock.patch.object(land, "survey", lambda pr, level: steps.append("look") or look),
             mock.patch.object(land, "update_from_base", update),
             mock.patch.object(land, "git", return_value=MERGED + "\n"),
-            mock.patch.object(ci_local, "Log"),
-            mock.patch.object(ci_local, "clear_stale_test_folders"),
-            mock.patch.object(ci_local, "prune_old_runs"),
-            mock.patch.object(ci_local, "run_and_post", run),
+            mock.patch.object(land, "is_ancestor", ancestor),
+            mock.patch.object(land, "push", lambda branch, sha: steps.append(f"push {sha[:7]}")),
             mock.patch.object(land, "wait_for_head_on_github", lambda n, sha: steps.append(f"wait for {sha[:7]}")),
             mock.patch.object(merge, "merge", lambda n, wait, lane_held: steps.append(
-                f"merge {n} with wait {wait}, lane held: {lane_held}") or 0),
+                f"merge {n} waiting {wait} min, lock held: {lane_held}") or 0),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             try:
@@ -249,86 +218,75 @@ class Landing(unittest.TestCase):
                 steps.append("refused")
         return steps
 
-    def test_a_head_behind_main_by_code_takes_main_runs_everything_and_merges_the_result(self):
+    def test_a_head_behind_main_by_code_takes_main_pushes_and_merges_once_github_passes_it(self):
         self.assertEqual(
-            self.land("success", behind=True, gap_has_code=True),
-            ["ticket check", "look", "merge main in", f"run every job on {MERGED[:7]}",
-             f"wait for {MERGED[:7]}", "merge 42 with wait 0, lane held: True"],
+            self.land(behind=True, gap_has_code=True),
+            ["ticket check", "look", "merge main in", f"push {MERGED[:7]}", f"wait for {MERGED[:7]}", MERGE],
         )
 
-    def test_a_docs_only_gap_with_a_green_head_runs_nothing_and_merges(self):
-        self.assertEqual(
-            self.land("success", behind=True, gap_has_code=False),
-            ["ticket check", "look", f"wait for {SHA[:7]}", "merge 42 with wait 0, lane held: True"],
-        )
+    def test_a_docs_only_gap_pushes_nothing_and_merges_once_github_passes_the_head(self):
+        self.assertEqual(self.land(behind=True, gap_has_code=False),
+                         ["ticket check", "look", f"wait for {SHA[:7]}", MERGE])
 
-    def test_a_green_head_that_contains_main_runs_nothing_and_merges(self):
-        self.assertEqual(
-            self.land("success", behind=False, gap_has_code=False),
-            ["ticket check", "look", f"wait for {SHA[:7]}", "merge 42 with wait 0, lane held: True"],
-        )
+    def test_a_head_that_contains_main_pushes_nothing_and_merges_once_github_passes_it(self):
+        self.assertEqual(self.land(behind=False, gap_has_code=False),
+                         ["ticket check", "look", f"wait for {SHA[:7]}", MERGE])
 
-    def test_a_head_with_no_run_yet_is_run_as_it_is_and_merged(self):
-        self.assertEqual(
-            self.land(None, behind=False, gap_has_code=False),
-            ["ticket check", "look", f"run every job on {SHA[:7]}", f"wait for {SHA[:7]}",
-             "merge 42 with wait 0, lane held: True"],
-        )
+    def test_a_head_github_lacks_is_pushed_first(self):
+        self.assertEqual(self.land(behind=False, gap_has_code=False, on_github=False),
+                         ["ticket check", "look", f"push {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
-    def test_a_red_head_is_refused_with_nothing_run_or_merged(self):
-        self.assertEqual(self.land("failure", behind=False, gap_has_code=False),
-                         ["ticket check", "look", "refused"])
-
-    def test_a_red_run_on_the_merge_merges_nothing(self):
-        steps = self.land("success", behind=True, gap_has_code=True, run_passes=False)
-        self.assertEqual(steps[-2:], [f"run every job on {MERGED[:7]}", "refused"])
-        self.assertFalse([step for step in steps if step.startswith("merge 42")])
-
-    def test_a_conflict_runs_and_merges_nothing(self):
-        self.assertEqual(self.land("success", behind=True, gap_has_code=True, conflict=True),
+    def test_a_conflict_pushes_and_merges_nothing(self):
+        self.assertEqual(self.land(behind=True, gap_has_code=True, conflict=True),
                          ["ticket check", "look", "merge main in", "refused"])
 
-    def test_a_ticket_the_checklist_waits_on_is_refused_before_any_run(self):
-        self.assertEqual(self.land("success", behind=True, gap_has_code=True, ticket_refused=True),
+    def test_a_ticket_the_checklist_waits_on_is_refused_before_anything(self):
+        self.assertEqual(self.land(behind=True, gap_has_code=True, ticket_refused=True),
                          ["ticket check", "refused"])
 
-    def test_it_merges_the_commit_the_run_tested_not_the_one_it_started_with(self):
-        steps = self.land(None, behind=True, gap_has_code=False)
+    def test_it_merges_the_commit_it_pushed_not_the_one_it_started_with(self):
+        steps = self.land(behind=True, gap_has_code=True)
         self.assertIn(f"wait for {MERGED[:7]}", steps)
         self.assertNotIn(f"wait for {SHA[:7]}", steps)
 
 
-class TakingTheLane(unittest.TestCase):
-    """`land` holds the lock before it looks at main and gives the claim up
-    whatever happens."""
+class TakingTheLock(unittest.TestCase):
+    """`land` takes the landing lock before it looks at main, lets it go
+    whatever happens, and clears target/ only after a merge."""
 
-    def land(self, inside) -> tuple[list[str], int | None, Exception | None]:
+    def land(self, inside, keep_target: bool = False) -> tuple[list[str], int | None, Exception | None]:
         steps: list[str] = []
         pr = {"number": 42, "state": "OPEN", "isDraft": False, "headRefName": "work", "baseRefName": "main"}
-        claim = mock.Mock()
-        claim.take.side_effect = lambda sha: steps.append("claim")
-        claim.release.side_effect = lambda: steps.append("release")
+        lock = mock.Mock()
+        lock.close.side_effect = lambda: steps.append("let go")
         with (
             mock.patch.object(merge, "pull_request", return_value=pr),
             mock.patch.object(land, "require_here"),
-            mock.patch.object(ci_local, "require_online"),
             mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
             mock.patch.object(ci_local, "stop_on_sigterm"),
-            mock.patch.object(ci_local, "worktree", return_value="/work/here"),
-            mock.patch.object(ci_local, "Claim", return_value=claim),
-            mock.patch.object(ci_local, "take_turn", lambda: steps.append("lock")),
+            mock.patch.object(merge, "take_landing_turn", lambda: steps.append("lock") or lock),
             mock.patch.object(land, "holding_the_lane", inside(steps)),
+            mock.patch.object(land, "target_directory", return_value=Path("/work/here/target")),
+            mock.patch.object(land, "clear_target", lambda target: steps.append(f"clear {target}")),
         ):
             try:
-                return steps, land.land(42), None
+                return steps, land.land(42, keep_target), None
             except Exception as error:  # noqa: BLE001 - the test reports what escaped
                 return steps, None, error
 
-    def test_it_claims_the_worktree_and_takes_the_lock_before_it_looks_at_main(self):
+    def test_it_takes_the_lock_before_it_looks_at_main_and_clears_target_after_the_merge(self):
         steps, code, _ = self.land(lambda steps: lambda number: steps.append("look at main") or 0)
-        self.assertEqual((steps, code), (["claim", "lock", "look at main", "release"], 0))
+        self.assertEqual((steps, code), (["lock", "look at main", "let go", "clear /work/here/target"], 0))
 
-    def test_a_refusal_inside_still_gives_the_claim_up(self):
+    def test_a_merge_whose_branch_remains_still_clears_target(self):
+        steps, code, _ = self.land(lambda steps: lambda number: land.EXIT_BRANCH_REMAINS)
+        self.assertEqual((steps[-1], code), ("clear /work/here/target", land.EXIT_BRANCH_REMAINS))
+
+    def test_keep_target_keeps_it(self):
+        steps, code, _ = self.land(lambda steps: lambda number: 0, keep_target=True)
+        self.assertEqual((steps, code), (["lock", "let go"], 0))
+
+    def test_a_refusal_lets_the_lock_go_and_clears_nothing(self):
         def refuses(steps):
             def inside(number):
                 steps.append("look at main")
@@ -337,20 +295,20 @@ class TakingTheLane(unittest.TestCase):
 
         steps, _, error = self.land(refuses)
         self.assertIsInstance(error, merge.Refused)
-        self.assertEqual(steps[-1], "release")
+        self.assertEqual(steps, ["lock", "look at main", "let go"])
 
 
 class HoldingTheLock(unittest.TestCase):
-    """The lock is really held, with the real `take_turn`, from before the
-    first look at main to the end of the landing, and let go after it."""
+    """The lock is really held, with the real `take_landing_turn`, from before
+    the first look at main to the end of the landing, and let go after it."""
 
-    def test_another_run_cannot_take_the_lock_while_a_landing_is_inside(self):
+    def test_another_landing_cannot_take_the_lock_while_one_is_inside(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            lock = Path(directory) / "landing-lock"
             seen: list[str] = []
 
             def inside(number):
-                other = open(root / "lock", "w")
+                other = open(lock, "w")
                 try:
                     fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     seen.append("free")
@@ -358,23 +316,19 @@ class HoldingTheLock(unittest.TestCase):
                     seen.append("held")
                 finally:
                     other.close()
-                return 0
+                return 1
 
             pr = {"number": 42, "state": "OPEN", "isDraft": False, "headRefName": "work", "baseRefName": "main"}
             with (
-                mock.patch.object(ci_local, "ROOT", root),
-                mock.patch.object(ci_local, "LOCK", root / "lock"),
-                mock.patch.object(ci_local, "CLAIMS", root / "claims"),
+                mock.patch.object(merge, "LANDING_LOCK", lock),
                 mock.patch.object(merge, "pull_request", return_value=pr),
                 mock.patch.object(land, "require_here"),
-                mock.patch.object(ci_local, "require_online"),
                 mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
                 mock.patch.object(ci_local, "stop_on_sigterm"),
-                mock.patch.object(ci_local, "worktree", return_value="/work/here"),
                 mock.patch.object(land, "holding_the_lane", inside),
             ):
-                land.land(42)
-            after = open(root / "lock", "w")
+                land.land(42, keep_target=False)
+            after = open(lock, "w")
             self.addCleanup(after.close)
             fcntl.flock(after, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if still held
         self.assertEqual(seen, ["held"])
@@ -430,25 +384,52 @@ class Waiting(unittest.TestCase):
         self.assertIn("Next: git push origin HEAD, then `just land 42`", str(raised.exception))
 
 
-class TheStatus(unittest.TestCase):
-    def ci_state(self, returncode: int, stdout: str = "", stderr: str = "") -> str | None:
-        done = subprocess.CompletedProcess([], returncode, stdout, stderr)
-        with mock.patch.object(land.subprocess, "run", return_value=done):
-            return land.ci_state(SHA)
+class ClearingTarget(unittest.TestCase):
+    """After a merge, the worktree's target/ goes, and only it (#277)."""
 
-    def test_the_newest_status_is_read(self):
-        self.assertEqual(self.ci_state(0, "success\n"), "success")
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.worktree = Path(directory.name) / "worktree"
+        self.target = self.worktree / "target"
+        (self.target / "debug").mkdir(parents=True)
+        (self.target / "debug" / "app").write_bytes(b"x" * 2_000_000)
+        (self.worktree / "src").mkdir()
+        (self.worktree / "src" / "main.rs").write_text("fn main() {}\n")
 
-    def test_no_status_is_none(self):
-        self.assertIsNone(self.ci_state(0, "null\n"))
-        self.assertIsNone(self.ci_state(0, ""))
+    def clear(self) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            land.clear_target(self.target)
+        return out.getvalue(), err.getvalue()
 
-    def test_a_commit_github_lacks_is_none(self):
-        self.assertIsNone(self.ci_state(1, stderr="gh: Not Found (HTTP 404)"))
+    def test_it_removes_target_says_what_it_freed_and_leaves_the_rest(self):
+        out, _ = self.clear()
+        self.assertFalse(self.target.exists())
+        self.assertTrue((self.worktree / "src" / "main.rs").exists())
+        self.assertEqual(out, "Removed target/ (2 MB).\n")
 
-    def test_any_other_failure_is_refused_not_taken_for_no_status(self):
-        with self.assertRaises(merge.Refused):
-            self.ci_state(1, stderr="gh: authentication required")
+    def test_a_target_reached_through_a_link_is_not_followed(self):
+        elsewhere = self.worktree.parent / "shared-target"
+        self.target.rename(elsewhere)
+        self.target.symlink_to(elsewhere)
+        self.clear()
+        self.assertTrue((elsewhere / "debug" / "app").exists())
+
+    def test_a_failure_is_said_and_raises_nothing(self):
+        with mock.patch.object(land.shutil, "rmtree", side_effect=PermissionError("denied")):
+            _, err = self.clear()
+        self.assertIn("Merged, but removing", err)
+        self.assertIn("Next: cargo clean", err)
+
+    def test_no_target_is_said_and_is_fine(self):
+        land.shutil.rmtree(self.target)
+        out, _ = self.clear()
+        self.assertIn("No target/ to remove", out)
+
+    def test_the_target_is_the_worktrees_own(self):
+        with mock.patch.object(ci_local, "worktree", return_value="/work/here"):
+            self.assertEqual(land.target_directory(), Path("/work/here/target"))
 
 
 if __name__ == "__main__":

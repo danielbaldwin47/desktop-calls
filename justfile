@@ -42,10 +42,12 @@ ci-tests:
     cargo build --workspace --bins --locked
     cargo test --workspace --exclude test-harness --locked -- "${skips[@]}"
 
-# Run the Real-Phone Checklist's demo runs of group 6, about 3.5 minutes of real waits.
-ci-checklist-group-6:
+# CI passes one of the names above, to run its tests on a runner of their
+# own: all on one runner, they took 217 s, the slowest job of a run (#286).
+# Run the Real-Phone Checklist's demo runs of group 6, or those whose names contain one of NAMES.
+ci-checklist-group-6 names=checklist_group_6_tests:
     cargo build --workspace --bins --locked
-    cargo test -p automation --test real_phone_checklist --locked -- {{checklist_group_6_tests}}
+    cargo test -p automation --test real_phone_checklist --locked -- {{names}}
 
 # CI passes `1/3` to render part 1 of 3 of the gallery's states; empty, every state.
 # Render the gallery through its test, or one part of it.
@@ -94,15 +96,15 @@ ci-first-frame-timings:
         SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 --nocapture
     done
 
-# GitHub runs full CI only on pushes to main, so run this before every push.
-# It tests HEAD in CI's image: lint, tests, gallery, scorecard and every
-# scenario. If all pass, it pushes the branch if GitHub lacks the commit and
-# posts the status "CI passed", which branch protection requires and `just
-# merge` reads. Refuses a dirty tree. Runs from several agents take turns, and
-# a waiting run tests HEAD as it is when its turn comes. `just ci-local --cancel`
-# stops this worktree's run, and only it. Rules for agents: docs/agents/shared-machine.md.
-# Cache, image and logs: ~/.cache/desktop-calls-ci. `just ci-local --help`.
-# Run CI here, and post "CI passed" on HEAD if it passes.
+# Optional: GitHub runs CI on every push to a PR, and its "CI passed" is what
+# a merge needs (#286). This runs the same jobs on HEAD, on this machine, to
+# find a failure before a push: lint, tests, gallery, scorecard and every
+# scenario. It posts and pushes nothing. Refuses a dirty tree. Runs from
+# several agents take turns, and a waiting run tests HEAD as it is when its
+# turn comes. `just ci-local --cancel` stops this worktree's run, and only it.
+# Rules for agents: docs/agents/shared-machine.md. Cache, image and logs:
+# ~/.cache/desktop-calls-ci. `just ci-local --help`.
+# Run CI's jobs here before a push; optional, nothing is posted.
 [positional-arguments]
 [no-exit-message]
 ci-local *args:
@@ -174,12 +176,12 @@ run *args:
 pbap-probe *args:
     @/usr/bin/python3 tools/real-phone/pbap_probe.py "$@"
 
-# How to land a PR: bring it up to date with origin/main if it is behind, run
-# what `just ci-local` runs on the result, post "CI passed" and squash-merge,
-# all while holding the CI lane's lock so nothing else lands in between. Run
-# it from the worktree that has the PR's branch. Takes its turn like `just
-# ci-local` (a run of 204 to 262 s when main has moved, none when it hasn't).
-# `just land 42 --plan` says what it would do. `just land --help`. Ticket #247.
+# How to land a PR: bring it up to date with origin/main if main has moved by
+# code, push it, wait for GitHub's "CI passed" on the head and squash-merge,
+# taking turns with other landings so nothing lands in between; then remove
+# the worktree's target/ (--keep-target keeps it). Run it from the worktree
+# that has the PR's branch. `just land 42 --plan` says what it would do.
+# `just land --help`. Tickets #247, #286, #277.
 [positional-arguments]
 [no-exit-message]
 land pr *args:
@@ -187,7 +189,7 @@ land pr *args:
 
 # Squash-merge PR once its checks pass on a head containing origin/main: the
 # last step of `just land`, and by itself for a PR that is already current.
-# It checks more than branch protection's "CI passed", which `just ci-local`
+# It checks more than branch protection's "CI passed", which GitHub's CI
 # posts, and refuses a PR that main has moved past, naming `just land`.
 # `just merge --help` for options and the conditions it checks.
 [positional-arguments]
@@ -195,9 +197,9 @@ land pr *args:
 merge pr *args:
     @python3 tools/merge.py "$@"
 
-# Wait on one GitHub CI run (default: the latest for this branch; only pushes
-# to main and `gh workflow run CI` start one). If it passed, print one line. If not, print each failed test's panic and download the
-# scenario logs into target/ci/<run-id>/. `just ci-wait --help`.
+# Wait on one GitHub CI run (default: the latest for this branch). If it
+# passed, print one line. If not, print each failed test's panic and download
+# the scenario logs into target/ci/<run-id>/. `just ci-wait --help`.
 [positional-arguments]
 [no-exit-message]
 ci-wait *args:

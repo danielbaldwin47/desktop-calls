@@ -101,11 +101,12 @@ fn missed_call(harness: &Harness) {
     phone.set_pbap_folder(
         "cch",
         &[
-            vcards::call(CallKind::Missed, Some(NUMBER), "20261104T113000"),
-            vcards::call(CallKind::Missed, Some("+447700900999"), "20261104T110000"),
-            vcards::call(CallKind::Missed, None, "20261104T103000"),
-            vcards::call(CallKind::Dialed, Some(NUMBER), "20261104T100000"),
-            vcards::call(CallKind::Received, Some("+447700900001"), "20261103T090000"),
+            vcards::call(
+                CallKind::Missed,
+                Some(NUMBER),
+                &format!("{}T095500", vcards::days_ago(0)),
+            ),
+            super::recent_calls().concat(),
         ]
         .concat(),
     );

@@ -44,3 +44,4 @@ pub use machine::{
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;
+pub use number::locale_region;

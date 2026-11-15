@@ -98,6 +98,12 @@ fn connected() -> State {
 
 /// Synced, then the Phone went out of range.
 fn disconnected() -> State {
+    goes_out_of_range(connected())
+}
+
+/// Synced, then hands-free dropped with the Phone still in range, as when
+/// another app drops it (ticket #216).
+fn without_hands_free() -> State {
     run(
         connected(),
         [Input::PhoneDisconnected {
@@ -480,6 +486,21 @@ fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
     assert_eq!(
         dialer_key(desktop_calls_core::DialerKey::Call),
         (&["Enter"][..], "Call")
+    );
+}
+
+/// In range without hands-free, Enter says the Phone is reconnecting, as
+/// the footer does, never that it is out of range (ticket #152).
+#[test]
+fn with_hands_free_dropped_in_range_enter_says_the_phone_is_reconnecting() {
+    let state = open(without_hands_free(), "jose");
+
+    let (state, effects) = run(state, [Input::DialerEnter]);
+
+    assert_eq!(effects, [Effect::ReportError(Failure::PhoneReconnecting)]);
+    assert_eq!(
+        state.surfaces().dialer.map(|view| view.notice),
+        Some(Some(Failure::PhoneReconnecting))
     );
 }
 

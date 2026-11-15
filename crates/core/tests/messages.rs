@@ -16,20 +16,47 @@ fn pixel() -> Phone {
 #[test]
 fn status_says_the_connection_state_and_names_the_phone() {
     assert_eq!(
-        messages::status(&ConnectionState::Connected, Some(&pixel()), false),
+        messages::status(&ConnectionState::Connected, Some(&pixel()), false, false),
         "Connected to My Pixel (AA:BB:CC:DD:EE:FF)."
     );
     assert_eq!(
-        messages::status(&ConnectionState::Connecting, Some(&pixel()), false),
+        messages::status(&ConnectionState::Connecting, Some(&pixel()), false, false),
         "Connecting to My Pixel (AA:BB:CC:DD:EE:FF)."
     );
     assert_eq!(
-        messages::status(&ConnectionState::Disconnected, Some(&pixel()), false),
+        messages::status(&ConnectionState::Disconnected, Some(&pixel()), false, false),
         "My Pixel (AA:BB:CC:DD:EE:FF) is out of range or has Bluetooth off."
     );
     assert_eq!(
-        messages::status(&ConnectionState::NotSetUp, None, false),
+        messages::status(&ConnectionState::NotSetUp, None, false, false),
         "No Phone is set up yet."
+    );
+}
+
+/// While contact with the live Call is lost, out of range or with only
+/// hands-free gone, the status says so as the Call Window does (#152).
+#[test]
+fn status_with_contact_lost_says_so_in_the_call_windows_words() {
+    for hands_free_lost in [false, true] {
+        assert_eq!(
+            messages::status(
+                &ConnectionState::Disconnected,
+                Some(&pixel()),
+                hands_free_lost,
+                true
+            ),
+            "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the Call continues on your phone."
+        );
+    }
+    // Hands-free back while the lost Call is awaited, or the pairing gone:
+    // the connection state says more.
+    assert_eq!(
+        messages::status(&ConnectionState::Connected, Some(&pixel()), false, true),
+        "Connected to My Pixel (AA:BB:CC:DD:EE:FF)."
+    );
+    assert_eq!(
+        messages::status(&ConnectionState::PairingLost, Some(&pixel()), false, true),
+        "My Pixel (AA:BB:CC:DD:EE:FF) has forgotten this computer; pair them again."
     );
 }
 

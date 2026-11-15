@@ -50,7 +50,7 @@ use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, ref
 pub use input::{
     ConnectFailure, DialProgress, Effect, Input, PairingFailure, PhoneCommand, PhoneRefusal, Timer,
 };
-use missed_calls::missed_call_input;
+use missed_calls::{keep_cue, missed_call_input};
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
 use presence::{Presence, forget_phone, hang_up_undelivered, presence_input};
 use quiet_hours_window::QuietHoursWindows;
@@ -727,7 +727,7 @@ impl State {
 /// Works out the new state and the effects that follow from `input`.
 #[must_use]
 pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
-    let was_ringing = state.ringing();
+    let (was_ringing, unseen) = (state.ringing(), state.missed.unseen.count);
     let (mut state, mut effects) = decide(state, input);
     // Focus goes with the surface that had it.
     let surfaces = state.surfaces();
@@ -755,6 +755,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     calls_off::apply_pending(&mut state, &mut effects);
     quiet_hours::apply(&mut state, &mut effects);
     calls_off::hold_back_connects(&state, &mut effects);
+    keep_cue(unseen, &state, &mut effects);
     (state, effects)
 }
 
@@ -813,7 +814,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::CallHistoryRefreshFailed
         | Input::OpenMissedCall(_)
         | Input::CallBack(_)
-        | Input::MissedCallDismissed(_)) => missed_call_input(&mut state, input, &mut effects),
+        | Input::MissedCallDismissed(_)
+        | Input::MissedCallsKept(_)) => missed_call_input(&mut state, input, &mut effects),
         Input::TransportChanged(transport) => {
             transport_changed(&mut state, transport, &mut effects);
         }

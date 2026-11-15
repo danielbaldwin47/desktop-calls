@@ -236,22 +236,23 @@ fn with_quiet_hours(state: State) -> State {
 }
 
 /// Where an entry belongs in the menu's one order: the status line, the
-/// main action, the Call's actions, calls on or off, Quiet Hours, the
-/// separator, setup, then Problems.
+/// Missed Calls' line, the main action, the Call's actions, calls on or
+/// off, Quiet Hours, the separator, setup, then Problems.
 fn place(entry: &IndicatorEntry) -> u8 {
     match entry {
         IndicatorEntry::Status => 0,
-        IndicatorEntry::OpenDialer => 1,
-        IndicatorEntry::Mute(_) => 2,
-        IndicatorEntry::MoveAudio { .. } => 3,
-        IndicatorEntry::HangUp(_) | IndicatorEntry::HangUpOnPhone => 4,
+        IndicatorEntry::MissedCalls(_) => 1,
+        IndicatorEntry::OpenDialer => 2,
+        IndicatorEntry::Mute(_) => 3,
+        IndicatorEntry::MoveAudio { .. } => 4,
+        IndicatorEntry::HangUp(_) | IndicatorEntry::HangUpOnPhone => 5,
         IndicatorEntry::TurnCallsOff { .. }
         | IndicatorEntry::TurnCallsOn
-        | IndicatorEntry::KeepCallsOn => 5,
-        IndicatorEntry::QuietHours(_) => 6,
-        IndicatorEntry::Separator => 7,
-        IndicatorEntry::ConnectPhone => 8,
-        IndicatorEntry::Problem(_) => 9,
+        | IndicatorEntry::KeepCallsOn => 6,
+        IndicatorEntry::QuietHours(_) => 7,
+        IndicatorEntry::Separator => 8,
+        IndicatorEntry::ConnectPhone => 9,
+        IndicatorEntry::Problem(_) => 10,
         IndicatorEntry::CallsOffUntilTurnedOn
         | IndicatorEntry::CallsOffForAnHour(_)
         | IndicatorEntry::CallsOffUntilMorning(_) => u8::MAX,
@@ -273,6 +274,8 @@ fn the_menu_keeps_one_order_in_every_state() {
         ringing(off(connected())),
         live_on_desktop(),
         run(live_on_desktop(), [Input::TurnCallsOff { until: None }]),
+        run(connected(), [Input::MissedCallsKept(2)]),
+        run(live_on_desktop(), [Input::MissedCallsKept(1)]),
         // Contact lost: the Phone gone and hands-free with it, and the
         // Call with it, though it carries on on the Phone.
         run(
@@ -306,7 +309,13 @@ fn the_menu_keeps_one_order_in_every_state() {
         });
         assert!(in_order, "out of order: {menu:?}");
         assert_eq!(menu.first(), Some(&IndicatorEntry::Status), "{menu:?}");
-        assert_eq!(menu.get(1), Some(&IndicatorEntry::OpenDialer), "{menu:?}");
+        assert!(
+            menu.iter()
+                .skip(1)
+                .find(|entry| !matches!(entry, IndicatorEntry::MissedCalls(_)))
+                == Some(&IndicatorEntry::OpenDialer),
+            "{menu:?}"
+        );
         assert!(menu.contains(&IndicatorEntry::ConnectPhone), "{menu:?}");
         assert!(menu.contains(&IndicatorEntry::Separator), "{menu:?}");
         assert!(
@@ -321,7 +330,7 @@ fn the_menu_keeps_one_order_in_every_state() {
     places.dedup();
     places.sort_unstable();
     places.dedup();
-    assert_eq!(places, (0..=9).collect::<Vec<u8>>());
+    assert_eq!(places, (0..=10).collect::<Vec<u8>>());
     for entry in [
         IndicatorEntry::HangUpOnPhone,
         IndicatorEntry::TurnCallsOn,

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- The Indicator: the Phone connected, with Missed Calls since the Dialer was last opened. The phone, moved left, with the missed-call arrow (down and to the left, as on the notification's glyph) over its top right corner and a gap around the arrow. Not a filled badge, which is a Problem's. -->
+  <mask id="gap">
+    <rect width="16" height="16" fill="#fff"/>
+    <path fill="none" stroke="#000" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" d="M14.6 1.4 9.8 6.2M9.8 2.6v3.6h3.6"/>
+  </mask>
+  <path mask="url(#gap)" fill="#bebebe" fill-rule="evenodd" d="M4 1h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zM3.6 2.6v9.2h4.8V2.6zM6 12.6a0.9 0.9 0 1 0 0.01 0z"/>
+  <path fill="none" stroke="#bebebe" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M14.6 1.4 9.8 6.2M9.8 2.6v3.6h3.6"/>
+</svg>

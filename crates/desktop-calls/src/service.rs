@@ -37,8 +37,8 @@ use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{
-    bluez, calls_off, chosen_phone, clock, contacts, earlier_run, keybinding, logind, pairing,
-    phone_link, quiet_hours,
+    bluez, calls_off, chosen_phone, clock, contacts, earlier_run, keybinding, logind, missed_calls,
+    pairing, phone_link, quiet_hours,
 };
 
 /// Why the service could not run.
@@ -160,6 +160,9 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         clock::now(),
         quiet_hours,
     )));
+    if let Some(count) = missed_calls::load() {
+        let _ = input_sender.unbounded_send(Input::MissedCallsKept(count));
+    }
     if let Some(record) = calls_off::load() {
         let _ = input_sender.unbounded_send(Input::CallsOffKept(record));
     }
@@ -377,6 +380,7 @@ impl Shell {
                     });
                 }
                 Effect::KeepChosenPhone { phone } => chosen_phone::save(&phone),
+                Effect::KeepMissedCalls(count) => missed_calls::save(count),
                 effect @ (Effect::KeepCallsOff(_)
                 | Effect::ReadClockAt(_)
                 | Effect::KeepQuietHours(_)

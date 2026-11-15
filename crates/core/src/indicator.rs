@@ -20,9 +20,12 @@ pub struct IndicatorView {
     pub status: IndicatorStatus,
     /// Every Problem, for the tooltip and the menu.
     pub problems: Vec<ProblemKind>,
+    /// How many Missed Calls the lasting cue counts, for the tooltip.
+    pub missed_calls: u32,
     /// The menu's entries, in one order in every state: the status line,
-    /// the main action, during a Call the Call's actions, calls on or off,
-    /// Quiet Hours, a separator, then setup and Problems.
+    /// the Missed Calls' line while the cue counts any, the main action,
+    /// during a Call the Call's actions, calls on or off, Quiet Hours, a
+    /// separator, then setup and Problems.
     pub menu: Vec<IndicatorEntry>,
 }
 
@@ -44,6 +47,11 @@ pub enum IndicatorLook {
     /// Calls are off: the Desktop keeps the Phone disconnected. Problems
     /// don't change it.
     Off,
+    /// [`IndicatorLook::Connected`], with the Missed Call badge: there have
+    /// been Missed Calls since the Dialer was last opened (#236).
+    ConnectedMissedCalls,
+    /// [`IndicatorLook::Disconnected`], with the Missed Call badge.
+    DisconnectedMissedCalls,
 }
 
 /// What the Indicator's status says, before Messages puts it in words.
@@ -125,6 +133,9 @@ impl From<PhoneStatus> for IndicatorStatus {
 pub enum IndicatorEntry {
     /// The status line, which does nothing.
     Status,
+    /// How many Missed Calls the cue counts; opens the Dialer, which marks
+    /// them.
+    MissedCalls(u32),
     OpenDialer,
     /// Opens the Setup Window, to pair a Phone, pair again or switch.
     ConnectPhone,
@@ -178,7 +189,7 @@ impl IndicatorEntry {
     #[must_use]
     pub fn intent(&self) -> Option<Input> {
         match self {
-            Self::OpenDialer => Some(Input::OpenDialer {
+            Self::OpenDialer | Self::MissedCalls(_) => Some(Input::OpenDialer {
                 query: String::new(),
                 select_call: None,
             }),
@@ -353,8 +364,22 @@ impl State {
         if look == IndicatorLook::Disconnected && self.desktop_keeps_phone_away() {
             look = IndicatorLook::Problem;
         }
+        // The Missed Call badge, on the idle looks only: ringing, a Call and
+        // a Problem each say more, and calls off keeps its own silhouette.
+        let missed_calls = self.unseen_missed_calls();
+        if missed_calls > 0 {
+            look = match look {
+                IndicatorLook::Connected => IndicatorLook::ConnectedMissedCalls,
+                IndicatorLook::Disconnected => IndicatorLook::DisconnectedMissedCalls,
+                other => other,
+            };
+        }
 
-        let mut menu = vec![IndicatorEntry::Status, IndicatorEntry::OpenDialer];
+        let mut menu = vec![IndicatorEntry::Status];
+        if missed_calls > 0 {
+            menu.push(IndicatorEntry::MissedCalls(missed_calls));
+        }
+        menu.push(IndicatorEntry::OpenDialer);
         if call_window.is_some_and(|window| window.connection_lost) {
             // Nothing acts on the Call from here: only where to hang up.
             menu.push(IndicatorEntry::HangUpOnPhone);
@@ -385,6 +410,7 @@ impl State {
                 || (!problems.is_empty() && look != IndicatorLook::Off),
             status,
             problems,
+            missed_calls,
             menu,
         }
     }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use test_harness::{AppState, Harness, Key, RecordedMethodCall, vcards};
 
 use super::keyboard_only::{
-    DEADLINE, FIRST_RUN, Performed, SETUP_COPY, SYNC_DEADLINE, focused, shown,
+    DEADLINE, FIRST_RUN, Performed, SETUP_COPY, SETUP_REFUSED, SYNC_DEADLINE, focused, shown,
 };
 
 /// How long the app may take to start and open the Setup Window.
@@ -159,6 +159,47 @@ fn first_run_in_the_setup_window_by_keys_alone() {
 }
 
 #[test]
+fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
+    let mut performed = Performed::by(SETUP_REFUSED);
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .start();
+    let phone = harness.simulated_phone();
+    phone.set_hands_free("refused");
+    phone.set_contacts_prompt("ask");
+
+    wait_for_enter_on(&harness, "Pair", STARTUP);
+    harness.keyboard().press(Key::Return);
+    wait_for_enter_on(&harness, "Confirm", CONNECT_DEADLINE);
+    harness.keyboard().press(Key::Return);
+    wait_for_step(&harness, "phone-calls-off", CONNECT_DEADLINE);
+    wait_for_enter_on(&harness, "Try again", DEADLINE);
+    // The user switches Phone calls on, and tries again.
+    harness.simulated_phone().set_hands_free("when-asked");
+    harness.keyboard().press(Key::Return);
+    harness.wait_for_app("the Phone is connected", CONNECT_DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    performed.did("Try again once the Phone refused hands-free: Enter");
+
+    wait_for_step(&harness, "contacts-prompt-timed-out", PROMPT_TIMEOUT_DEADLINE);
+    let state = wait_for_enter_on(&harness, "Try again", DEADLINE);
+    let keys = setup_window(&state, "keys").unwrap_or_default();
+    assert!(keys.split(" · ").any(|shown| shown == "Tab Next button"), "{keys:?}");
+    harness.keyboard().press(Key::Tab);
+    // The footer still names Try again for Enter once Tab has moved to
+    // Skip (#296), so the outcome shows which button Enter pressed.
+    harness.keyboard().press(Key::Return);
+    wait_for_step(&harness, "done", DEADLINE);
+    let prompts = harness.simulated_phone().contacts_prompts();
+    assert_eq!(prompts.len(), 1, "the Phone is not asked again: {prompts:?}");
+    performed.did("Skip Contacts once the prompt timed out: Tab, Enter on Skip");
+    performed.all_done();
+}
+
+#[test]
 fn a_setup_window_fix_that_copies_a_command_by_keys_alone() {
     const INSTALL: &str = "sudo pacman -S --needed bluez-obex";
     let mut performed = Performed::by(SETUP_COPY);
@@ -178,6 +219,9 @@ fn a_setup_window_fix_that_copies_a_command_by_keys_alone() {
     assert_eq!(harness.clipboard_text(), INSTALL);
     performed.did("Copy the install command: Shift+Tab, Enter");
 
+    let state = harness.app_state();
+    let keys = setup_window(&state, "keys").unwrap_or_default();
+    assert!(keys.split(" · ").any(|shown| shown == "Esc Close"), "{keys:?}");
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape closes the Setup Window", DEADLINE, |state| {
         state.surface("setup-window").is_none()

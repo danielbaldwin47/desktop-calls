@@ -22,6 +22,9 @@ use std::time::Duration;
 use test_harness::{AppState, Harness, Key, RecordedMethodCall, TestClient, vcards};
 use vcards::CallKind;
 
+use super::handoff::audio_requests;
+use super::mute_and_tones::{sent, set_to, wait_for_microphone_volumes};
+
 /// How long the app may take to show a change.
 pub(super) const DEADLINE: Duration = Duration::from_secs(5);
 /// How long Contacts and Call History may take to sync.
@@ -87,7 +90,7 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ("Search Contacts and Call the match: type, Enter", Case(DIALER)),
     ("Call back a Missed Call: Enter", Case(DIALER)),
     ("Open the Quiet Hours Window: Alt+Q", Case(DIALER)),
-    ("Switch Quiet Hours on: Enter", Case(DIALER)),
+    ("Switch Quiet Hours on: Space", Case(DIALER)),
     ("Step the start of Quiet Hours: Tab, Up", Case(DIALER)),
     ("Type the end of Quiet Hours: Tab, digits", Case(DIALER)),
     ("Close the Quiet Hours Window: Escape", Case(DIALER)),
@@ -107,6 +110,8 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ("Add the keybinding: Enter", Case(FIRST_RUN)),
     ("Confirm the keybinding's line: Enter", Case(FIRST_RUN)),
     ("Finish: Enter on Done", Case(FIRST_RUN)),
+    ("Try again once the Phone refused hands-free: Enter", Case(SETUP_REFUSED)),
+    ("Skip Contacts once the prompt timed out: Tab, Enter on Skip", Case(SETUP_REFUSED)),
     ("Copy the install command: Shift+Tab, Enter", Case(SETUP_COPY)),
     ("Close the Setup Window: Escape", Case(SETUP_COPY)),
     ("Open the Setup Window again: Connect your phone…", Missing { ticket: 292 }),
@@ -118,17 +123,22 @@ const CALL_WAITING: &str = "call_waiting_by_keys_alone";
 const DIALER: &str = "the_dialer_and_the_quiet_hours_window_by_keys_alone";
 const CALLS_OFF: &str = "while_calls_are_off_the_dialer_calls_anyway_by_keys_alone";
 pub(super) const FIRST_RUN: &str = "keyboard_only_setup::first_run_in_the_setup_window_by_keys_alone";
+pub(super) const SETUP_REFUSED: &str =
+    "keyboard_only_setup::a_refused_phone_then_skipped_contacts_by_keys_alone";
 pub(super) const SETUP_COPY: &str =
     "keyboard_only_setup::a_setup_window_fix_that_copies_a_command_by_keys_alone";
 
-/// The tests in this file that perform actions.
-const CASES: [&str; 7] = [
+/// The tests that perform actions. A name here is not checked against the
+/// tests that exist: deleting a test leaves its actions listed and passing
+/// here, so a case is deleted with its entries in [`ACTIONS`].
+const CASES: [&str; 8] = [
     BANNER,
     CALL_WINDOW,
     CALL_WAITING,
     DIALER,
     CALLS_OFF,
     FIRST_RUN,
+    SETUP_REFUSED,
     SETUP_COPY,
 ];
 
@@ -248,6 +258,15 @@ fn wait_for_asked(harness: &Harness, member: &str, count: usize) -> Vec<Recorded
     )
 }
 
+/// What BlueZ was asked of the Phone's hands-free profile, in order.
+fn profile_requests(recorded: &[RecordedMethodCall]) -> Vec<&str> {
+    recorded
+        .iter()
+        .filter(|call| call.bus == "system" && call.member.ends_with("Profile"))
+        .map(|call| call.member.as_str())
+        .collect()
+}
+
 fn hung_up(recorded: &[RecordedMethodCall], path: &str) -> bool {
     recorded
         .iter()
@@ -295,6 +314,13 @@ fn focus_the_banner_showing(harness: &Harness, key: &str) {
     );
 }
 
+/// Waits until the focused Banner's footer says what Escape does.
+fn banner_shows_escape(harness: &Harness) {
+    harness.wait_for_app("the Banner's footer shows Esc", DEADLINE, |state| {
+        shown(state, "banner", "footer").is_some_and(|footer| footer.starts_with("Esc gives the keyboard back"))
+    });
+}
+
 /// Presses the keybinding during a Call, and waits until the Call Window
 /// has the keyboard and shows `shortcut` for `action`.
 fn focus_the_call_window_showing(harness: &Harness, action: &str, shortcut: &str) {
@@ -323,6 +349,12 @@ fn answered_by_keys(harness: &Harness, number: &str) -> (String, u32) {
     let call = state.calls[0].id;
     focus_the_banner_showing(harness, "A");
     harness.keyboard().type_text("a");
+    // Each case answers once by A, so this is its Answer.
+    let recorded = wait_for_asked(harness, "Answer", 1);
+    assert!(
+        recorded.iter().any(|asked| asked.member == "Answer" && asked.path == path),
+        "{recorded:#?}"
+    );
     harness.wait_for_app("the Call is live here", DEADLINE, |state| {
         state_of(state, call) == Some("active") && state.audio_location == "desktop"
     });
@@ -341,6 +373,7 @@ fn the_banner_by_keys_alone() {
 
     // Escape gives the keyboard back; the Call rings on.
     focus_the_banner_showing(&harness, "D");
+    banner_shows_escape(&harness);
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("the Banner gave the keyboard back", DEADLINE, |state| {
         state.surface("banner").is_some() && !focused(state, "banner")
@@ -375,9 +408,11 @@ fn the_call_window_and_the_call_pill_by_keys_alone() {
     focus_the_call_window_showing(&harness, "mute", "M");
     performed.did("Focus the Call Window: the keybinding");
     harness.keyboard().type_text("m");
+    wait_for_microphone_volumes(&harness, &[set_to(0)]);
     harness.wait_for_app("M mutes", DEADLINE, |state| state.muted);
     performed.did("Mute: M");
     harness.keyboard().type_text("m");
+    wait_for_microphone_volumes(&harness, &[set_to(0), set_to(9)]);
     harness.wait_for_app("M unmutes", DEADLINE, |state| !state.muted);
     performed.did("Unmute: M");
 
@@ -388,11 +423,13 @@ fn the_call_window_and_the_call_pill_by_keys_alone() {
     });
     performed.did("Open the keypad: K");
     harness.keyboard().type_text("12#");
-    wait_for_asked(&harness, "SendTones", 3);
+    let recorded = wait_for_asked(&harness, "SendTones", 3);
+    assert_eq!(sent(&recorded), ["1", "2", "#"], "{recorded:#?}");
     performed.did("Send tones by typing them");
     let pasted = harness.set_clipboard("*0");
     harness.keyboard().press_with_control('v');
-    wait_for_asked(&harness, "SendTones", 5);
+    let recorded = wait_for_asked(&harness, "SendTones", 5);
+    assert_eq!(sent(&recorded), ["1", "2", "#", "*", "0"], "{recorded:#?}");
     drop(pasted);
     harness.wait_for_app("the keypad shows the tones sent", DEADLINE, |state| {
         shown(state, "call-window", "tones") == Some("12#*0")
@@ -409,9 +446,38 @@ fn the_call_window_and_the_call_pill_by_keys_alone() {
     harness.wait_for_app("A moves the audio to the Phone", DEADLINE, |state| {
         state.audio_location == "phone"
     });
+    // The Desktop drops hands-free and connects it again, and hangs up
+    // nothing.
+    let recorded = harness.simulated_phone().wait_for_recorded(
+        "BlueZ is asked to drop hands-free and connect it again",
+        DEADLINE,
+        |recorded| profile_requests(recorded).len() >= 2,
+    );
+    assert_eq!(
+        profile_requests(&recorded),
+        ["DisconnectProfile", "ConnectProfile"],
+        "{recorded:#?}"
+    );
+    assert_eq!(asked(&recorded, "Hangup"), 0, "{recorded:#?}");
     performed.did("Move the audio to the Phone: A");
     wait_for_call_window_showing(&harness, "handoff", "A");
+    let activations = |recorded: &[RecordedMethodCall]| {
+        audio_requests(recorded)
+            .into_iter()
+            .filter(|request| *request == "Activate")
+            .count()
+    };
+    let before = activations(
+        &harness
+            .simulated_phone()
+            .wait_for_recorded("anything", DEADLINE, |_| true),
+    );
     harness.keyboard().type_text("a");
+    harness.simulated_phone().wait_for_recorded(
+        "the Phone is asked to bring the audio here",
+        DEADLINE,
+        |recorded| activations(recorded) > before,
+    );
     harness.wait_for_app("A brings the audio here", DEADLINE, |state| {
         state.audio_location == "desktop"
     });
@@ -461,6 +527,7 @@ fn call_waiting_by_keys_alone() {
     // Escape on a Waiting Call's Banner leaves both Calls as they were.
     let (alice_path, alice) = waits(&harness, ALICE, 2);
     focus_the_banner_showing(&harness, "H");
+    banner_shows_escape(&harness);
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("the Banner gave the keyboard back", DEADLINE, |state| {
         state.surface("banner").is_some() && !focused(state, "banner")
@@ -531,14 +598,11 @@ fn call_waiting_by_keys_alone() {
     // Carol alone on hold, once the other caller hangs up: S resumes her.
     let (frank_path, _) = held_for(&harness, FRANK, carol, 3);
     harness.simulated_phone().caller_hangs_up(&frank_path);
-    let state = wait_for_call_window_showing(&harness, "swap", "S");
-    let state = if shown(&state, "call-window", "swap") == Some("Resume") {
-        state
-    } else {
-        harness.wait_for_app("the Call Window offers Resume", DEADLINE, |state| {
-            shown(state, "call-window", "swap") == Some("Resume")
-        })
-    };
+    let state = harness.wait_for_app("the Call Window offers Resume on S", DEADLINE, |state| {
+        focused(state, "call-window")
+            && shown(state, "call-window", "swap") == Some("Resume")
+            && shown(state, "call-window", "swap-shortcut") == Some("S")
+    });
     assert_eq!(state_of(&state, carol), Some("held"), "{state:#?}");
     harness.keyboard().type_text("s");
     harness.wait_for_app("Carol is live again", DEADLINE, |state| {
@@ -546,7 +610,9 @@ fn call_waiting_by_keys_alone() {
     });
     performed.did("Resume the Call left on hold: S");
 
+    wait_for_call_window_showing(&harness, "hang-up", "Ctrl+H");
     harness.keyboard().press_with_control('h');
+    wait_for_asked(&harness, "Hangup", hang_ups + 3);
     harness.wait_for_app("no Call is left", DEADLINE, |state| state.calls.is_empty());
     performed.all_done();
 }
@@ -630,6 +696,11 @@ fn selected_row(state: &AppState) -> String {
 
 fn quiet_hours_window<'a>(state: &'a AppState, key: &str) -> Option<&'a str> {
     shown(state, "quiet-hours-window", key)
+}
+
+/// The Quiet Hours Window's footer shows `keys`, such as `Esc Close`.
+fn quiet_hours_keys(state: &AppState, keys: &str) -> bool {
+    quiet_hours_window(state, "keys").is_some_and(|footer| footer.lines().any(|shown| shown == keys))
 }
 
 fn wait_for_quiet_hours(harness: &Harness, why: &str, fields: &[(&str, &str)]) -> AppState {
@@ -718,11 +789,13 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     );
     assert!(state.surface("dialer").is_none(), "the Dialer closed");
     performed.did("Open the Quiet Hours Window: Alt+Q");
-    harness.keyboard().press(Key::Return);
-    harness.wait_for_app("Enter switches Quiet Hours on", DEADLINE, |state| {
-        state.quiet_hours == Some((22 * 60, 7 * 60))
+    assert!(quiet_hours_keys(&state, "Space Switch on"), "{state:#?}");
+    harness.keyboard().type_text(" ");
+    let state = harness.wait_for_app("Space switches Quiet Hours on", DEADLINE, |state| {
+        state.quiet_hours == Some((22 * 60, 7 * 60)) && quiet_hours_keys(state, "Tab Next")
     });
-    performed.did("Switch Quiet Hours on: Enter");
+    assert!(quiet_hours_keys(&state, "↑ ↓ 15 min"), "{state:#?}");
+    performed.did("Switch Quiet Hours on: Space");
     harness.keyboard().press(Key::Tab);
     wait_for_quiet_hours(&harness, "Tab focuses the start", &[("focus", "start")]);
     harness.keyboard().press(Key::Up);
@@ -737,6 +810,8 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
         state.quiet_hours == Some((22 * 60 + 15, 6 * 60 + 30))
     });
     performed.did("Type the end of Quiet Hours: Tab, digits");
+    let state = harness.app_state();
+    assert!(quiet_hours_keys(&state, "Esc Close"), "{state:#?}");
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape closes the Quiet Hours Window", DEADLINE, |state| {
         state.surface("quiet-hours-window").is_none()
@@ -771,7 +846,9 @@ fn while_calls_are_off_the_dialer_calls_anyway_by_keys_alone() {
     );
     dialled_then_hung_up(&harness, "07700900888", 1);
     harness.wait_for_app("calls go off again", DEADLINE, |state| {
-        state.calls_off == "off" && !state.calls_off_pending
+        state.calls_off == "off"
+            && !state.calls_off_pending
+            && state.connection_state == "disconnected"
     });
     performed.did("Call a typed number while calls are off: Enter calls anyway");
     performed.all_done();

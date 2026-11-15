@@ -104,7 +104,7 @@ fn is_activate(call: &RecordedMethodCall) -> bool {
 
 /// What the Desktop asked of the audio, in order: `false` and `true` for
 /// each `RejectSCO` write, `"Activate"` for each `Activate`.
-fn audio_requests(calls: &[RecordedMethodCall]) -> Vec<&'static str> {
+pub(super) fn audio_requests(calls: &[RecordedMethodCall]) -> Vec<&'static str> {
     telephony(calls)
         .filter_map(|call| {
             if is_reject_sco(call, false) {

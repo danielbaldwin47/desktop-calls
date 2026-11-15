@@ -63,7 +63,7 @@ fn microphone_volumes_set(recorded: &[RecordedMethodCall]) -> Vec<String> {
 
 /// Waits until the Phone has been asked to set as many `MicrophoneVolume`
 /// values as `expected` has, and checks they are those, in order.
-fn wait_for_microphone_volumes(harness: &Harness, expected: &[String]) {
+pub(super) fn wait_for_microphone_volumes(harness: &Harness, expected: &[String]) {
     let recorded = harness.simulated_phone().wait_for_recorded(
         &format!("{} MicrophoneVolume values are set", expected.len()),
         DEADLINE,
@@ -83,7 +83,7 @@ fn no_microphone_volume_is_set(harness: &Harness) {
 }
 
 /// The tones among `recorded`, one `SendTones` each, in order.
-fn sent(recorded: &[RecordedMethodCall]) -> Vec<String> {
+pub(super) fn sent(recorded: &[RecordedMethodCall]) -> Vec<String> {
     recorded
         .iter()
         .filter(|call| call.member == "SendTones")
@@ -100,7 +100,7 @@ fn tones_argument(call: &RecordedMethodCall) -> String {
 
 /// `Set(AudioGateway1, MicrophoneVolume, <byte>)` as the Simulated Phone
 /// records it.
-fn set_to(volume: u8) -> String {
+pub(super) fn set_to(volume: u8) -> String {
     format!("(\"{AUDIO_GATEWAY}\", \"MicrophoneVolume\", <byte 0x{volume:02x}>)")
 }
 

@@ -188,16 +188,23 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     // outcome shows Reject was pressed.
     harness.keyboard().press(Key::Tab);
     harness.keyboard().press(Key::Return);
+    // The window moves on before the answer reaches the Phone, so the
+    // Phone's record of it is read once the second pairing is through.
     wait_for_step(&harness, "choose", CONNECT_DEADLINE);
-    let outcome = harness.simulated_phone().pairing_requests().pop().map(|(_, outcome)| outcome);
-    assert_eq!(outcome.as_deref(), Some("rejected"));
-    performed.did("Reject the pairing code: Tab, Enter on Reject");
 
     wait_for_enter_on(&harness, "Pair", CONNECT_DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_enter_on(&harness, "Confirm", CONNECT_DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "phone-calls-off", CONNECT_DEADLINE);
+    let outcomes: Vec<String> = harness
+        .simulated_phone()
+        .pairing_requests()
+        .into_iter()
+        .map(|(_, outcome)| outcome)
+        .collect();
+    assert_eq!(outcomes, ["rejected", "confirmed"]);
+    performed.did("Reject the pairing code: Tab, Enter on Reject");
     wait_for_enter_on(&harness, "Try again", DEADLINE);
     // The user switches Phone calls on, and tries again.
     harness.simulated_phone().set_hands_free("when-asked");

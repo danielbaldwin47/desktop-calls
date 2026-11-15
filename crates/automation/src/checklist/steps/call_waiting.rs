@@ -514,7 +514,10 @@ fn left_by_4_5(state: &AppState, test_number: &Fingerprint) -> Option<(u32, u32)
         .calls
         .iter()
         .find(|call| call.state == "held" && call.number.is(test_number))?;
-    let live = state.calls.iter().find(|call| call.state == "active")?;
+    let live = state
+        .calls
+        .iter()
+        .find(|call| call.state == "active" && !call.number.is(test_number))?;
     live_beside_held(state, live.id, held.id).then_some((held.id, live.id))
 }
 

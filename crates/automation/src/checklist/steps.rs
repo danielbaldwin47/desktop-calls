@@ -415,17 +415,23 @@ pub fn order() -> Vec<&'static str> {
 
 /// Makes sure no Call is left over from an earlier step.
 fn no_call_left(sitting: &mut Sitting) -> Result<(), Stop> {
-    if sitting.now().calls.is_empty() {
-        return Ok(());
+    loop {
+        let left = sitting.now().calls.len();
+        if left == 0 {
+            return Ok(());
+        }
+        sitting.say(
+            if left == 1 {
+                "A Call is still going. End it, on either device."
+            } else {
+                "Calls are still going. End them, on either device."
+            },
+            &["hang-up"],
+        );
+        sitting.wait_for("a Call ending", TALK_DEADLINE, |state| {
+            state.calls.len() < left
+        })?;
     }
-    sitting.say(
-        "A Call is still going. End it, on either device.",
-        &["hang-up"],
-    );
-    sitting.wait_for("the last Call ending", TALK_DEADLINE, |state| {
-        state.calls.is_empty()
-    })?;
-    Ok(())
 }
 
 /// The helper calls: waits for the Call to ring and the Banner to show,

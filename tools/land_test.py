@@ -178,8 +178,14 @@ class Landing(unittest.TestCase):
     """The order of a landing, with every step stubbed and recorded."""
 
     def land(self, behind: bool, gap_has_code: bool, *, on_github: bool = True, conflict: bool = False,
-             ticket_refused: bool = False) -> list[str]:
+             ticket_refused: bool = False, unreviewed: bool = False) -> list[str]:
         steps: list[str] = []
+        self.refusal = ""
+
+        def reviewed(pr, head=None):
+            steps.append(f"reviews {(head or pr['headRefOid'])[:7]}")
+            if unreviewed:
+                raise merge.Refused("PR #42 has no passed review recorded")
 
         def update(base, number):
             steps.append("merge main in")
@@ -202,6 +208,7 @@ class Landing(unittest.TestCase):
             mock.patch.object(land, "require_here"),
             mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
             mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", ticket),
+            mock.patch.object(merge, "require_reviewed", reviewed),
             mock.patch.object(land, "survey", lambda pr, level: steps.append("look") or look),
             mock.patch.object(land, "update_from_base", update),
             mock.patch.object(land, "git", return_value=MERGED + "\n"),
@@ -214,38 +221,49 @@ class Landing(unittest.TestCase):
         ):
             try:
                 land.holding_the_lane(42)
-            except merge.Refused:
+            except merge.Refused as refusal:
+                self.refusal = str(refusal)
                 steps.append("refused")
         return steps
 
     def test_a_head_behind_main_by_code_takes_main_pushes_and_merges_once_github_passes_it(self):
         self.assertEqual(
             self.land(behind=True, gap_has_code=True),
-            ["look", "merge main in", f"ticket check {MERGED[:7]}", f"push {MERGED[:7]}",
+            ["look", f"reviews {SHA[:7]}", "merge main in", f"ticket check {MERGED[:7]}", f"push {MERGED[:7]}",
              f"wait for {MERGED[:7]}", MERGE],
         )
 
     def test_a_docs_only_gap_pushes_nothing_and_merges_once_github_passes_the_head(self):
         self.assertEqual(self.land(behind=True, gap_has_code=False),
-                         ["look", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"reviews {SHA[:7]}", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_head_that_contains_main_pushes_nothing_and_merges_once_github_passes_it(self):
         self.assertEqual(self.land(behind=False, gap_has_code=False),
-                         ["look", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"reviews {SHA[:7]}", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_head_github_lacks_is_pushed_first(self):
         self.assertEqual(self.land(behind=False, gap_has_code=False, on_github=False),
-                         ["look", f"ticket check {SHA[:7]}", f"push {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"reviews {SHA[:7]}", f"ticket check {SHA[:7]}", f"push {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_conflict_pushes_and_merges_nothing(self):
         self.assertEqual(self.land(behind=True, gap_has_code=True, conflict=True),
-                         ["look", "merge main in", "refused"])
+                         ["look", f"reviews {SHA[:7]}", "merge main in", "refused"])
 
     def test_the_checklist_is_judged_on_the_head_with_main_merged_in_before_any_push(self):
         # A step whose script landed on main must not refuse a branch behind
         # main: the check reads the head as it will be merged.
         self.assertEqual(self.land(behind=True, gap_has_code=True, ticket_refused=True),
-                         ["look", "merge main in", f"ticket check {MERGED[:7]}", "refused"])
+                         ["look", f"reviews {SHA[:7]}", "merge main in", f"ticket check {MERGED[:7]}", "refused"])
+
+    def test_a_head_without_recorded_reviews_is_refused_before_main_is_merged_in(self):
+        self.assertEqual(self.land(behind=True, gap_has_code=True, unreviewed=True),
+                         ["look", f"reviews {SHA[:7]}", "refused"])
+
+    def test_a_checklist_refusal_after_merging_main_says_the_merge_stays_unpushed(self):
+        self.land(behind=True, gap_has_code=True, ticket_refused=True)
+        self.assertIn("The merge of origin/main made above stays in work, unpushed", self.refusal)
+        self.land(behind=False, gap_has_code=False, ticket_refused=True)
+        self.assertNotIn("stays in", self.refusal)
 
     def test_it_merges_the_commit_it_pushed_not_the_one_it_started_with(self):
         steps = self.land(behind=True, gap_has_code=True)
@@ -267,6 +285,7 @@ class TakingTheLock(unittest.TestCase):
             mock.patch.object(land, "require_here"),
             mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
             mock.patch.object(ci_local, "stop_on_sigterm"),
+            mock.patch.object(merge, "require_reviewed", lambda pr: steps.append("reviews")),
             mock.patch.object(merge, "take_landing_turn", lambda: steps.append("lock") or lock),
             mock.patch.object(land, "holding_the_lane", inside(steps)),
             mock.patch.object(land, "target_directory", return_value=Path("/work/here/target")),
@@ -279,7 +298,7 @@ class TakingTheLock(unittest.TestCase):
 
     def test_it_takes_the_lock_before_it_looks_at_main_and_clears_target_after_the_merge(self):
         steps, code, _ = self.land(lambda steps: lambda number: steps.append("look at main") or 0)
-        self.assertEqual((steps, code), (["lock", "look at main", "let go", "clear /work/here/target"], 0))
+        self.assertEqual((steps, code), (["reviews", "lock", "look at main", "let go", "clear /work/here/target"], 0))
 
     def test_a_merge_whose_branch_remains_still_clears_target(self):
         steps, code, _ = self.land(lambda steps: lambda number: land.EXIT_BRANCH_REMAINS)
@@ -287,7 +306,7 @@ class TakingTheLock(unittest.TestCase):
 
     def test_keep_target_keeps_it(self):
         steps, code, _ = self.land(lambda steps: lambda number: 0, keep_target=True)
-        self.assertEqual((steps, code), (["lock", "let go"], 0))
+        self.assertEqual((steps, code), (["reviews", "lock", "let go"], 0))
 
     def test_a_refusal_lets_the_lock_go_and_clears_nothing(self):
         def refuses(steps):
@@ -298,7 +317,7 @@ class TakingTheLock(unittest.TestCase):
 
         steps, _, error = self.land(refuses)
         self.assertIsInstance(error, merge.Refused)
-        self.assertEqual(steps, ["lock", "look at main", "let go"])
+        self.assertEqual(steps, ["reviews", "lock", "look at main", "let go"])
 
 
 class HoldingTheLock(unittest.TestCase):
@@ -328,6 +347,7 @@ class HoldingTheLock(unittest.TestCase):
                 mock.patch.object(land, "require_here"),
                 mock.patch.object(ci_local, "require_clean_head", return_value=SHA),
                 mock.patch.object(ci_local, "stop_on_sigterm"),
+                mock.patch.object(merge, "require_reviewed"),
                 mock.patch.object(land, "holding_the_lane", inside),
             ):
                 land.land(42, keep_target=False)

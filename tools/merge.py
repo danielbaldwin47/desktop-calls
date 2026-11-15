@@ -36,6 +36,10 @@ It refuses unless all of these hold, in this order:
   5. GitHub reports the PR as mergeable, and it is not a draft.
   6. No Real-Phone Checklist step at the head lands with a closed ticket, or
      with one the PR closes (tools/checklist_tickets.py, ticket #120).
+  7. The PR's comments record passed reviews for the head: `standards-spec`
+     and `spec` if it touches product or harness code, else `tooling`
+     (tools/reviews.py, ticket #327). Checked before the wait for CI, so a
+     PR missing one waits for nothing, and again at the final recheck.
 
 When the head lacks commits on <base>, the refusal names `just land`, which
 merges origin/<base> into the branch and pushes it, so GitHub's CI tests
@@ -63,6 +67,7 @@ import time
 import changes
 import checklist_tickets
 import ci_local
+import reviews
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 
@@ -85,8 +90,10 @@ class Refused(Exception):
 
 # The check run CI's summary job posts on a PR's head, and on main, once
 # every job passed (.github/workflows/ci.yml). Branch protection requires it,
-# from GitHub Actions only.
-SUMMARY_CHECK = "CI passed"
+# from GitHub Actions only, so only a check from CI's pull_request run counts:
+# not a commit status of that name, which anyone who can push may post (as
+# `just ci-local` did before #286), nor another workflow's job.
+SUMMARY_CHECK, SUMMARY_WORKFLOW, SUMMARY_EVENT = "CI passed", "CI", "pull_request"
 # The compare API lists at most this many files and commits.
 COMPARE_FILES_LIMIT, COMPARE_COMMITS_LIMIT = 300, 250
 
@@ -250,7 +257,7 @@ def checks(pr: dict) -> list[dict]:
     # gh exits 8 while checks are pending, 1 if one failed or none exist, so
     # read its output whatever the exit status.
     result = subprocess.run(
-        ["gh", "pr", "checks", number, "--json", "name,event,bucket,state,link"],
+        ["gh", "pr", "checks", number, "--json", "name,event,workflow,bucket,state,link"],
         capture_output=True,
         text=True,
     )
@@ -336,7 +343,11 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     # A skipped job passes only with the summary that judged it.
     judged = ["pass", "fail", "cancel", "pending"]
     summary_passed = any(
-        check["name"] == SUMMARY_CHECK and check["bucket"] == "pass" for check in found
+        check["name"] == SUMMARY_CHECK
+        and check.get("workflow") == SUMMARY_WORKFLOW
+        and check.get("event") == SUMMARY_EVENT
+        and check["bucket"] == "pass"
+        for check in found
     )
     if summary_passed:
         judged.append("skipping")
@@ -366,11 +377,12 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
             f"Next: gh pr checks {number}"
         )
     # Only the pull_request run's summary judges every job; a dispatched
-    # run's is named apart on purpose, so it never counts (#290).
+    # run's is named apart on purpose, so it never counts (#290), and a
+    # status or another workflow's job of the same name doesn't either.
     if not summary_passed:
         names = ", ".join(label(check) for check in found)
         raise Refused(
-            f'No passed "{SUMMARY_CHECK}" check on PR #{number}\'s head '
+            f'No passed "{SUMMARY_CHECK}" check from {SUMMARY_WORKFLOW}\'s {SUMMARY_EVENT} run on PR #{number}\'s head '
             f"({pr['headRefOid'][:7]}), so nothing judged every job. Checks found: {names}.\n"
             "GitHub starts no pull_request run on a PR that conflicts with main.\n"
             f"Next: gh pr view {number} --json mergeable   (if it conflicts, merge origin/main "
@@ -437,6 +449,42 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None, head: str |
         )
 
 
+def review_status(pr: dict, head: str, posted: tuple[reviews.Record, ...] = ()) -> tuple[tuple[str, ...], list[str]]:
+    """The review kinds `head` needs, and what keeps the PR's comments from
+    showing each passed on it (tools/reviews.py, ticket #327). `posted`: a
+    record just posted, which GitHub may not list yet."""
+    number, base = pr["number"], pr["baseRefName"]
+    git("fetch", "--quiet", "origin", base, f"refs/pull/{number}/head")
+    comments = json.loads(gh("pr", "view", str(number), "--json", "comments"))["comments"]
+    # The repository is public: anyone may comment, so only those who can
+    # push record reviews, and a hidden (minimized) comment records nothing.
+    records = [
+        record
+        for comment in comments
+        if comment.get("authorAssociation") in reviews.RECORDERS
+        and not comment.get("isMinimized")
+        and (record := reviews.parse(comment["body"]))
+    ]
+    return reviews.problems(git, records + list(posted), head, f"origin/{base}")
+
+
+def require_reviewed(pr: dict, head: str | None = None) -> None:
+    """The PR's comments must record passed reviews for `head` (the PR's head
+    on GitHub unless given: `just land` passes its local head)."""
+    number, head = pr["number"], head or pr["headRefOid"]
+    needed, missing = review_status(pr, head)
+    if not missing:
+        return
+    touches = "product or harness code" if needed == reviews.PRODUCT_KINDS else "docs or tooling only"
+    lines = "\n".join(f"  {line}" for line in missing)
+    raise Refused(
+        f"PR #{number} has no passed review recorded for {head[:7]} of every kind it needs (ticket #327). "
+        f"It touches {touches}, so it needs {' and '.join(needed)}:\n{lines}\n"
+        f"Next: have {head[:7]} reviewed (push it first if GitHub lacks it), then for each kind: "
+        f"just review-record {number} <kind> <model> <PASS|FAIL> <findings file>"
+    )
+
+
 def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     """Squash-merges PR `number` if every condition holds. `lane_held` says the
     caller (`just land`) already holds the landing lock. Otherwise the final
@@ -447,6 +495,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     allowed = require_contains_base(pr)
     if allowed:
         print(allowed, flush=True)
+    require_reviewed(pr)
     try:
         wait_for_checks(pr, wait_minutes * 60)
     except KeyboardInterrupt:
@@ -472,6 +521,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
         print(allowed_now, flush=True)
     now = require_mergeable(now)
     require_no_step_waits_on_a_closed_ticket(now)
+    require_reviewed(now)  # a FAIL may have been posted while CI ran
 
     head, branch = now["headRefOid"], now["headRefName"]
     gh("pr", "merge", str(number), "--squash", "--match-head-commit", head)

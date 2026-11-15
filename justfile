@@ -201,6 +201,16 @@ land pr *args:
 merge pr *args:
     @python3 tools/merge.py "$@"
 
+# Post a review's record on PR's head, which `just merge` and `just land`
+# require (#327): KIND is standards-spec and spec for product or harness
+# code (crates/, data/, Cargo.toml, Cargo.lock, rust-toolchain.toml), tooling
+# for anything else; MODEL sonnet, opus or haiku. FINDINGS, a file of each
+# finding and how it was resolved, follows the record's first line.
+[positional-arguments]
+[no-exit-message]
+review-record pr kind model verdict *findings:
+    @python3 tools/review_record.py "$@"
+
 # Wait on one GitHub CI run (default: the latest for this branch). If it
 # passed, print one line. If not, print each failed test's panic and download
 # the scenario logs into target/ci/<run-id>/. `just ci-wait --help`.

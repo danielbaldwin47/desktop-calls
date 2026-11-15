@@ -103,12 +103,23 @@ fn dial(harness: &Harness, number: &str) -> RunningCli {
 }
 
 /// The controls the Call Window can show besides Hang up.
-const CONTROLS: [&str; 6] = ["mute", "keypad-toggle", "handoff", "tone-entry", "keypad", "swap"];
+const CONTROLS: [&str; 6] = [
+    "mute",
+    "keypad-toggle",
+    "handoff",
+    "tone-entry",
+    "keypad",
+    "swap",
+];
 
 /// Placing a Call, the Call Window offers Hang up and nothing that wouldn't
 /// work yet.
 fn assert_offers_only_hang_up(window: &BTreeMap<String, String>) {
-    assert_eq!(window.get("hang-up").map(String::as_str), Some("Hang up"), "{window:?}");
+    assert_eq!(
+        window.get("hang-up").map(String::as_str),
+        Some("Hang up"),
+        "{window:?}"
+    );
     for key in CONTROLS {
         assert!(!window.contains_key(key), "{key}: {window:?}");
     }

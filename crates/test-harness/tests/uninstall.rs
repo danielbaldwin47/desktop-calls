@@ -123,10 +123,16 @@ fn uninstalling_with_calls_off_unblocks_the_phone_through_the_running_service() 
     let harness = calls_off();
     assert!(harness.app_on_bus(), "the service runs");
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
-    assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone is unblocked"
+    );
     assert!(!record(&harness).exists(), "the record is gone");
     assert_eq!(files_left(&harness), Vec::<&str>::new());
     assert_eq!(
@@ -147,10 +153,16 @@ fn uninstalling_with_the_service_stopped_unblocks_the_phone_without_starting_it(
     harness.wait_until_app_off_bus();
     let connects_before = connects_asked(&harness);
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
-    assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone is unblocked"
+    );
     assert!(!record(&harness).exists(), "the record is gone");
     assert_eq!(files_left(&harness), Vec::<&str>::new());
     // The app is going away: nothing connects the Phone.
@@ -173,10 +185,16 @@ fn uninstalling_finishes_a_turn_on_the_app_left_halfway() {
     )
     .expect("write the record");
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
-    assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone is unblocked"
+    );
     assert!(!record(&harness).exists(), "the record is gone");
 }
 
@@ -188,10 +206,16 @@ fn uninstalling_leaves_a_phone_blocked_with_no_record_blocked() {
     // As if the user had blocked the Phone themselves.
     fs::remove_file(record(&harness)).expect("remove the record");
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
-    assert!(harness.simulated_phone().blocked(), "the Phone is still blocked");
+    assert!(
+        harness.simulated_phone().blocked(),
+        "the Phone is still blocked"
+    );
     assert_eq!(unblocks_asked(&harness), 0, "BlueZ was asked to unblock");
     assert_eq!(files_left(&harness), Vec::<&str>::new());
     assert_eq!(said(&output), "", "nothing to say about a Phone left alone");
@@ -201,7 +225,10 @@ fn uninstalling_leaves_a_phone_blocked_with_no_record_blocked() {
 fn uninstalling_with_calls_on_changes_nothing_at_the_phone() {
     let harness = calls_on_with_phone();
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
     assert!(!harness.simulated_phone().blocked());
@@ -233,7 +260,10 @@ fn uninstalling_without_bluez_finishes_and_names_the_command_to_run_later() {
             "Bluetooth didn't unblock your phone: once it is running, run `bluetoothctl unblock {address}` to let it connect to this computer again.\n"
         )
     );
-    assert!(harness.simulated_phone().blocked(), "nothing reached the Phone");
+    assert!(
+        harness.simulated_phone().blocked(),
+        "nothing reached the Phone"
+    );
 }
 
 #[test]
@@ -250,7 +280,10 @@ fn uninstalling_while_staging_a_package_makes_no_bluez_call() {
         .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
-    assert!(harness.simulated_phone().blocked(), "the Phone is still blocked");
+    assert!(
+        harness.simulated_phone().blocked(),
+        "the Phone is still blocked"
+    );
     assert!(record(&harness).is_file(), "the record is still there");
     assert_eq!(unblocks_asked(&harness), 0, "BlueZ was asked to unblock");
     assert_eq!(
@@ -268,9 +301,14 @@ fn uninstalling_during_a_call_with_a_turn_off_waiting_cancels_it_and_blocks_noth
     harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
     let output = harness.cli(&["calls", "off"]);
     assert!(output.status.success(), "{output:?}");
-    harness.wait_for_app("a turn-off waits", DEADLINE, |state| state.calls_off_pending);
+    harness.wait_for_app("a turn-off waits", DEADLINE, |state| {
+        state.calls_off_pending
+    });
 
-    let output = harness.uninstall_command().output().expect("run install.py");
+    let output = harness
+        .uninstall_command()
+        .output()
+        .expect("run install.py");
 
     assert!(output.status.success(), "{}", said(&output));
     assert_eq!(said(&output), "");

@@ -27,6 +27,26 @@ enum Command {
         /// `~/.local/state/desktop-calls/real-phone-checklist`.
         #[arg(long)]
         results: Option<PathBuf>,
+        /// cargo-nextest's `JUnit` report of the harness's scenarios, or a
+        /// directory of them (one per CI shard). `just scorecard` runs the
+        /// scenarios and passes its own.
+        #[arg(long)]
+        scenarios: Option<PathBuf>,
+        /// The screenshot review's verdict. Default:
+        /// `docs/reviews/screenshot-review.md`.
+        #[arg(long)]
+        review: Option<PathBuf>,
+        /// Where the gallery the review judged is, for the evidence.
+        #[arg(long)]
+        gallery: Option<String>,
+        /// Print the name of every scenario the scorecard reads, one a
+        /// line, for `cargo test --exact`, and score nothing.
+        #[arg(long)]
+        names: bool,
+        /// Print every Real-Phone Checklist step's id, one a line, and
+        /// score nothing: for the scorecard's tests.
+        #[arg(long, hide = true)]
+        checklist_steps: bool,
     },
     /// Walk through the Real-Phone Checklist one step at a time, observing
     /// what a machine can and asking only what it can't.
@@ -94,7 +114,21 @@ enum Command {
 
 fn main() -> ExitCode {
     match Arguments::parse().command {
-        Command::Scorecard { results } => scorecard::run(results),
+        Command::Scorecard {
+            results,
+            scenarios,
+            review,
+            gallery,
+            names,
+            checklist_steps,
+        } => scorecard::run(scorecard::Options {
+            results,
+            scenarios,
+            review,
+            gallery,
+            names,
+            checklist_steps,
+        }),
         Command::RealPhoneChecklist {
             group,
             demo,

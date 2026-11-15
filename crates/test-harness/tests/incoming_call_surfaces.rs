@@ -460,12 +460,16 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     harness.pointer().move_to(x, y);
     // The Call lasts 2 s or more, so "Call ended" shows how long, not 0:00
     // (#262).
-    harness.wait_for_app("the Call Window's timer reads 0:02 or more", DEADLINE, |state| {
-        call_window(state)
-            .and_then(|window| window.get("timer"))
-            .and_then(|status| seconds(status))
-            .is_some_and(|lasted| lasted >= 2)
-    });
+    harness.wait_for_app(
+        "the Call Window's timer reads 0:02 or more",
+        DEADLINE,
+        |state| {
+            call_window(state)
+                .and_then(|window| window.get("timer"))
+                .and_then(|status| seconds(status))
+                .is_some_and(|lasted| lasted >= 2)
+        },
+    );
 
     click(&harness, hang_up);
 

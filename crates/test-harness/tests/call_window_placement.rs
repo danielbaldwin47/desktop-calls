@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use test_harness::{AppState, BAR_COLOUR, BAR_HEIGHT, Builder, Harness, LAYOUT_SIZE, Region, Screenshot};
+use test_harness::{
+    AppState, BAR_COLOUR, BAR_HEIGHT, Builder, Harness, LAYOUT_SIZE, Region, Screenshot,
+};
 
 /// How long the app may take to notice a change on the Phone, or a key.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -108,9 +110,10 @@ fn hang_up_on_screen(harness: &Harness, name: &str) -> Region {
 /// Rests the pointer in the Call Window's padding beside Hang up, so it
 /// stays expanded. The window grows upwards, so the pointer stays in it.
 fn hover_beside(harness: &Harness, hang_up: Region) {
-    harness
-        .pointer()
-        .move_to(hang_up.left - 8.0, f64::midpoint(hang_up.top, hang_up.bottom));
+    harness.pointer().move_to(
+        hang_up.left - 8.0,
+        f64::midpoint(hang_up.top, hang_up.bottom),
+    );
 }
 
 /// Checks a capture taken once `changed` is on screen still shows Hang up
@@ -214,13 +217,17 @@ fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_go
     });
     // Muting recolours the window and moves nothing: it keeps its height.
     let muted = window_height(&harness.screenshot("call-window-muted-settled"));
-    assert!((muted - height).abs() <= 1.0, "the Call Window went from {height} to {muted} high");
+    assert!(
+        (muted - height).abs() <= 1.0,
+        "the Call Window went from {height} to {muted} high"
+    );
 
     // A click in the padding gives the window the keyboard; K opens the
     // keypad.
-    harness
-        .pointer()
-        .click(hang_up.left - 8.0, f64::midpoint(hang_up.top, hang_up.bottom));
+    harness.pointer().click(
+        hang_up.left - 8.0,
+        f64::midpoint(hang_up.top, hang_up.bottom),
+    );
     harness.keyboard().type_text("k");
     harness.wait_for_app("K shows the keypad", DEADLINE, |state| {
         shown(state, "keypad").as_deref() == Some("shown")

@@ -297,7 +297,9 @@ fn hands_free_dropped_with_the_phone_still_connected_comes_back_within_10_s() {
 #[test]
 fn a_connected_phone_without_hands_free_is_not_called_out_of_range() {
     let harness = connected();
-    harness.simulated_phone().enable_quirk("connect-profile-fails");
+    harness
+        .simulated_phone()
+        .enable_quirk("connect-profile-fails");
     drop_hands_free_from_elsewhere(&harness);
     harness.wait_for_app("ConnectionState is disconnected", DEADLINE, |state| {
         state.connection_state == "disconnected"
@@ -444,9 +446,7 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
             state
                 .surface("call-window")
                 .and_then(|window| window.get("notice"))
-                .is_some_and(|notice| {
-                    notice == "The Call continues on your phone. Hang up there."
-                })
+                .is_some_and(|notice| notice == "The Call continues on your phone. Hang up there.")
         },
     );
     assert_eq!(state.connection_state, "disconnected");

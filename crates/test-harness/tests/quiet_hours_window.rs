@@ -89,11 +89,9 @@ fn wait_for_window(harness: &Harness, fields: &[(&str, &str)]) -> AppState {
 }
 
 fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
-    harness.wait_for_app(
-        &format!("Quiet Hours are {hours:?}"),
-        DEADLINE,
-        |state| state.quiet_hours == hours,
-    )
+    harness.wait_for_app(&format!("Quiet Hours are {hours:?}"), DEADLINE, |state| {
+        state.quiet_hours == hours
+    })
 }
 
 /// Chooses Quiet Hours… in the Indicator's menu, whatever times its hint
@@ -140,7 +138,10 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
         Some("Saved. Calls go off tonight at 22:00 and come back at 07:00, every day.")
     );
     assert_eq!(field(&state, "bar"), Some("00:00-07:00 22:00-24:00"));
-    assert_eq!(field(&state, "keys"), Some("Tab Next\n↑ ↓ 15 min\nEsc Close"));
+    assert_eq!(
+        field(&state, "keys"),
+        Some("Tab Next\n↑ ↓ 15 min\nEsc Close")
+    );
     assert_eq!(field(&state, "notice"), None);
 
     harness.keyboard().press(Key::Escape);
@@ -284,7 +285,11 @@ fn the_command_line_opens_it_and_enter_works_the_switch() {
     cli_ok(&harness, &["quiet-hours", "22:00-07:00"]);
     wait_for_hours(&harness, Some((minutes(22, 0), minutes(7, 0))));
 
-    assert_eq!(cli_ok(&harness, &["quiet-hours"]), "", "it opens, saying nothing");
+    assert_eq!(
+        cli_ok(&harness, &["quiet-hours"]),
+        "",
+        "it opens, saying nothing"
+    );
     wait_for_window(
         &harness,
         &[

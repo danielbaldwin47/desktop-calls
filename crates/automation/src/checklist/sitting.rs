@@ -60,6 +60,10 @@ pub struct Findings {
     pub evidence: Vec<String>,
     pub measurements: Map<String, Value>,
     pub failed: bool,
+    /// Measurements the step set out to take and hasn't: each becomes
+    /// `null` when the step ends, so the scorecard sees what never
+    /// happened, however the step stopped.
+    pending: Vec<String>,
 }
 
 /// How often the runner looks for Ctrl-C while nothing else happens.
@@ -134,6 +138,49 @@ impl Sitting {
         self.findings
             .measurements
             .insert(name.to_owned(), value.into());
+    }
+
+    /// Says the step is about to time `name`: unless a measurement follows,
+    /// the result file records it as `null`, never happened.
+    pub fn expect(&mut self, name: &str) {
+        if !self.findings.pending.iter().any(|pending| pending == name) {
+            self.findings.pending.push(name.to_owned());
+        }
+    }
+
+    /// Takes back [`Sitting::expect`]: the step stopped before `name` could
+    /// be timed, for a fault another item answers for.
+    pub fn not_timed(&mut self, name: &str) {
+        self.findings.pending.retain(|pending| pending != name);
+    }
+
+    /// Records `millis` for `name`, keeping the slowest of the step's
+    /// measurements of it: each must meet the target. One that never
+    /// happened (`null`) stays.
+    pub fn measure_slowest(&mut self, name: &str, millis: u64) {
+        self.findings.pending.retain(|pending| pending != name);
+        let slowest = match self.findings.measurements.get(name) {
+            Some(Value::Null) => return,
+            Some(earlier) => earlier
+                .as_u64()
+                .map_or(millis, |earlier| earlier.max(millis)),
+            None => millis,
+        };
+        self.measure(name, slowest);
+    }
+
+    /// Records a Call's codec, keeping a narrowband one the step recorded
+    /// earlier: every Call must be wideband.
+    pub fn measure_codec(&mut self, codec: &str, wideband: bool) {
+        self.findings
+            .pending
+            .retain(|pending| pending != "wideband");
+        let narrowband_before =
+            self.findings.measurements.get("wideband") == Some(&Value::Bool(false));
+        if !narrowband_before {
+            self.measure("codec", codec);
+            self.measure("wideband", wideband);
+        }
     }
 
     /// The app's state now.
@@ -482,7 +529,11 @@ impl Sitting {
 
     /// Starts the next step's findings, and returns the last step's.
     pub fn take_findings(&mut self) -> Findings {
-        std::mem::take(&mut self.findings)
+        let mut findings = std::mem::take(&mut self.findings);
+        for name in std::mem::take(&mut findings.pending) {
+            findings.measurements.insert(name, Value::Null);
+        }
+        findings
     }
 
     fn first_since_cursor(&mut self, condition: impl Fn(&AppState) -> bool) -> Option<Seen> {

@@ -151,7 +151,10 @@ fn pill_on_screen(harness: &Harness, name: &str) -> (Region, Screenshot) {
 /// Where Hang up and Mute are on the Call Pill: the middle of each.
 fn pill_buttons(pill: Region) -> ((f64, f64), (f64, f64)) {
     let middle = f64::midpoint(pill.top, pill.bottom);
-    ((pill.right - TO_HANG_UP, middle), (pill.right - TO_MUTE, middle))
+    (
+        (pill.right - TO_HANG_UP, middle),
+        (pill.right - TO_MUTE, middle),
+    )
 }
 
 /// Whether any pixel in `region` of `screenshot` is close to `colour`.
@@ -229,7 +232,9 @@ fn a_connected_call_collapses_to_the_call_pill_in_the_bottom_right_corner_after_
         Some("+44 7700 900123")
     );
     assert!(
-        shown.get("status").is_some_and(|status| status.contains(':')),
+        shown
+            .get("status")
+            .is_some_and(|status| status.contains(':')),
         "the Call Pill shows the timer: {shown:?}"
     );
     assert_eq!(shown.get("mute").map(String::as_str), Some("Mute"));
@@ -249,8 +254,14 @@ fn a_connected_call_collapses_to_the_call_pill_in_the_bottom_right_corner_after_
         )
     );
     assert!(!shown.contains_key("tag"), "a plain live Call has no tag");
-    assert_eq!(shown.get("anchor").map(String::as_str), Some("bottom-right"));
-    assert!(!shown.contains_key("focused"), "the Call Pill took the keyboard");
+    assert_eq!(
+        shown.get("anchor").map(String::as_str),
+        Some("bottom-right")
+    );
+    assert!(
+        !shown.contains_key("focused"),
+        "the Call Pill took the keyboard"
+    );
 
     // On screen: one strip in the bottom-right corner, 12 px from both edges.
     let (region, screenshot) = pill_on_screen(&harness, "call-pill");
@@ -371,7 +382,9 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
     let window = call_window_on_screen(&harness, "call-window");
 
     // The pointer rests on the Call Window's padding, beside its caller.
-    harness.pointer().move_to(window.left + 6.0, window.top + 6.0);
+    harness
+        .pointer()
+        .move_to(window.left + 6.0, window.top + 6.0);
     harness.app_holds(
         "the Call Window stays expanded while the pointer is over it",
         KEPT_EXPANDED,
@@ -379,7 +392,9 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
     );
 
     // Once the pointer leaves, it collapses 5 s later.
-    harness.pointer().move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
+    harness
+        .pointer()
+        .move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
     harness.app_holds(
         "the Call Window stays expanded for a moment after the pointer leaves",
         Duration::from_secs(4),
@@ -387,7 +402,11 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
     );
     wait_until_collapsed(&harness);
     harness.activate();
-    harness.wait_for_app("the keybinding expands it", DEADLINE, expanded_with_keyboard);
+    harness.wait_for_app(
+        "the keybinding expands it",
+        DEADLINE,
+        expanded_with_keyboard,
+    );
 
     // A click on the window keeps the keyboard there, which keeps it
     // expanded with the pointer gone.
@@ -397,7 +416,9 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
             .surface("call-window")
             .is_some_and(|window| window.contains_key("focused"))
     });
-    harness.pointer().move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
+    harness
+        .pointer()
+        .move_to(LAYOUT_SIZE.0 / 2.0, LAYOUT_SIZE.1 / 2.0);
     harness.app_holds(
         "the Call Window stays expanded while it has the keyboard",
         KEPT_EXPANDED,
@@ -410,7 +431,11 @@ fn the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_
 
     // Expanded by the keybinding and let go of with Escape, it collapses.
     harness.activate();
-    harness.wait_for_app("the keybinding expands it", DEADLINE, expanded_with_keyboard);
+    harness.wait_for_app(
+        "the keybinding expands it",
+        DEADLINE,
+        expanded_with_keyboard,
+    );
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape collapses it again", DEADLINE, collapsed);
 }
@@ -431,15 +456,22 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
         at_rest.path.display()
     );
     // The strip's fill, in its left padding, before it is pointed at.
-    let fill_at = (pill_region.left + 5.0, f64::midpoint(pill_region.top, pill_region.bottom));
+    let fill_at = (
+        pill_region.left + 5.0,
+        f64::midpoint(pill_region.top, pill_region.bottom),
+    );
     let fill = at_rest.colour_at(fill_at.0, fill_at.1);
     let (hang_up, mute) = pill_buttons(pill_region);
 
     // Pointed at, Hang up is the theme's red.
     harness.pointer().move_to(hang_up.0, hang_up.1);
-    let _hovered = harness.screenshot_when("call-pill-hang-up-hovered", SCREEN_DEADLINE, |screenshot| {
-        close_to(screenshot.colour_at(hang_up.0 - 12.0, hang_up.1 - 12.0), RED)
-    });
+    let _hovered =
+        harness.screenshot_when("call-pill-hang-up-hovered", SCREEN_DEADLINE, |screenshot| {
+            close_to(
+                screenshot.colour_at(hang_up.0 - 12.0, hang_up.1 - 12.0),
+                RED,
+            )
+        });
 
     harness.pointer().click(mute.0, mute.1);
 
@@ -474,9 +506,11 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
     // One click.
     harness.pointer().click(hang_up.0, hang_up.1);
 
-    harness.wait_for_app("Hang up on the Call Pill ends the Call", DEADLINE, |state| {
-        state.calls.is_empty()
-    });
+    harness.wait_for_app(
+        "Hang up on the Call Pill ends the Call",
+        DEADLINE,
+        |state| state.calls.is_empty(),
+    );
     harness
         .simulated_phone()
         .wait_for_recorded("the Call is hung up", DEADLINE, |recorded| {
@@ -496,7 +530,11 @@ fn the_call_window_grows_out_of_the_call_pill_and_shrinks_back_in_200_ms() {
 
     click_pill_body(&harness, pill_region);
 
-    harness.wait_for_app("the click expands the Call Window", DEADLINE, expanded_with_keyboard);
+    harness.wait_for_app(
+        "the click expands the Call Window",
+        DEADLINE,
+        expanded_with_keyboard,
+    );
     let expanding = AppEvent::kind("call-window-change-started")
         .with("form", "expanded")
         .with("animated", true);
@@ -514,7 +552,10 @@ fn the_call_window_grows_out_of_the_call_pill_and_shrinks_back_in_200_ms() {
         &AppEvent::kind("surface-mapped").with("surface", "call-window"),
         DEADLINE,
     );
-    assert!(reported < took, "the Call Window was reported only once grown");
+    assert!(
+        reported < took,
+        "the Call Window was reported only once grown"
+    );
 
     let pressed = SystemTime::now();
     harness.keyboard().press(Key::Escape);
@@ -568,7 +609,11 @@ fn with_animations_off_the_change_is_a_cut() {
 
     click_pill_body(&harness, pill_region);
 
-    harness.wait_for_app("the click expands the Call Window", DEADLINE, expanded_with_keyboard);
+    harness.wait_for_app(
+        "the click expands the Call Window",
+        DEADLINE,
+        expanded_with_keyboard,
+    );
     let expanded_in = harness.app_took(
         &AppEvent::kind("call-window-change-started")
             .with("form", "expanded")
@@ -595,7 +640,10 @@ fn a_waiting_calls_banner_takes_its_usual_place_while_the_call_pill_shows() {
             .surface("banner")
             .is_some_and(|banner| banner.contains_key("options"))
     });
-    assert!(collapsed(&state), "a ringing Waiting Call doesn't expand it");
+    assert!(
+        collapsed(&state),
+        "a ringing Waiting Call doesn't expand it"
+    );
     let screenshot = harness.screenshot_when("call-pill-and-banner", SCREEN_DEADLINE, |shot| {
         find(shot, GREEN).is_some()
     });
@@ -734,15 +782,23 @@ fn hold_and_answer_expands_the_call_pill_and_collapsed_again_it_says_one_on_hold
     // compositor's choice: sway hands it over when nothing else has it. The
     // core doesn't ask for it (core tests).
     harness.activate();
-    harness.wait_for_app("the keybinding gives it the keyboard", DEADLINE, expanded_with_keyboard);
+    harness.wait_for_app(
+        "the keybinding gives it the keyboard",
+        DEADLINE,
+        expanded_with_keyboard,
+    );
     harness.keyboard().press(Key::Escape);
     let state = harness.wait_for_app("Escape collapses it", DEADLINE, collapsed);
     assert_eq!(
-        pill(&state).and_then(|pill| pill.get("held")).map(String::as_str),
+        pill(&state)
+            .and_then(|pill| pill.get("held"))
+            .map(String::as_str),
         Some("1 on hold")
     );
     assert_eq!(
-        pill(&state).and_then(|pill| pill.get("tag")).map(String::as_str),
+        pill(&state)
+            .and_then(|pill| pill.get("tag"))
+            .map(String::as_str),
         Some("1 on hold")
     );
 }
@@ -780,7 +836,9 @@ fn end_and_answer_expands_the_call_pill_for_the_new_call_which_collapses_again()
     // core doesn't ask for it (core tests).
     let state = wait_until_collapsed(&harness);
     assert_eq!(
-        pill(&state).and_then(|pill| pill.get("caller")).map(String::as_str),
+        pill(&state)
+            .and_then(|pill| pill.get("caller"))
+            .map(String::as_str),
         Some("+44 7700 900456")
     );
 }
@@ -804,4 +862,3 @@ fn a_call_ended_while_collapsed_says_call_ended_on_the_call_pill_then_goes() {
         pill(state).is_none() && state.surface("call-window").is_none()
     });
 }
-

@@ -206,6 +206,7 @@ fn waiting_call_arrives(
     demo_action: &str,
     options: &str,
 ) -> Result<Option<u32>, Stop> {
+    sitting.expect("banner_latency_ms");
     let mark = sitting.mark();
     sitting.say(request, &[demo_action]);
     let arrived = sitting.wait_for("the helper's Call arriving", CALL_DEADLINE, |state| {
@@ -221,6 +222,8 @@ fn waiting_call_arrives(
         return Err(Stop::TimedOut("the helper's Call arriving".to_owned()));
     };
     if call.state != "waiting" {
+        // The Phone's fault, not the Banner's: item 1 doesn't count it.
+        sitting.not_timed("banner_latency_ms");
         sitting.check(
             false,
             format!(

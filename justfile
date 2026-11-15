@@ -15,6 +15,10 @@ check: lint
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
 lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets
     cargo fmt --all --check
+    # The harness's scenario files reach the compiler only through
+    # build.rs's generated `#[path]` modules and `include!`, which cargo fmt
+    # doesn't follow (#330).
+    rustfmt --check crates/test-harness/tests/*.rs crates/test-harness/tests/moved/*.rs
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo deny --locked check
 
@@ -141,10 +145,24 @@ screenshot *args:
     cargo build --workspace --bins --locked
     target/debug/automation screenshot "$@"
 
+# Runs the scenarios the scorecard reads (a few minutes, four at a time as
+# CI's limits allow, so a deadline isn't missed for load), then scores them
+# with the latest real Real-Phone Checklist and the screenshot review. A
+# failing scenario fails its item rather than stop the report. CI's run on
+# main scores its own shards' results instead (`--scenarios DIR`).
 # Report every polish-scorecard item with its status and evidence.
-scorecard:
-    @cargo build --quiet --workspace --bins --locked
-    @target/debug/automation scorecard
+scorecard *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --quiet --workspace --bins --locked
+    log=target/scorecard-scenarios.log
+    names=$(target/debug/automation scorecard --names)
+    python3 tools/scenario_shader_cache.py cargo test -p test-harness --test scenarios --locked \
+        -- --exact --test-threads 4 $names > "$log" 2>&1 \
+        || echo "cargo test exited non-zero: a failed scenario fails its item; anything else is in $log"
+    gallery=target/screenshots/gallery/index.html
+    [ -f "$gallery" ] || gallery="not rendered here: just screenshot"
+    target/debug/automation scorecard --scenarios "$log" --gallery "$gallery" {{args}}
 
 # Run the app against the Simulated Phone in a nested compositor window,
 # acting out SCENARIO. Close the window or press Ctrl-C to stop. Needs sway.

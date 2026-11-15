@@ -147,12 +147,27 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
     );
 }
 
-/// `automation scorecard --results results`, as text.
+/// `automation scorecard --results results`, as text, with every scenario
+/// passing, so that the items' Real-Phone halves show.
 fn scorecard(results: &Path) -> String {
+    let names = Command::new(env!("CARGO_BIN_EXE_automation"))
+        .args(["scorecard", "--names"])
+        .output()
+        .expect("run automation scorecard --names");
+    let passed: Vec<String> = String::from_utf8(names.stdout)
+        .expect("the names are text")
+        .lines()
+        .map(|name| format!("test {name} ... ok"))
+        .collect();
+    let directory = tempfile::tempdir().expect("a directory for the scenarios' results");
+    let scenarios = directory.path().join("scenarios.log");
+    std::fs::write(&scenarios, passed.join("\n")).expect("write the scenarios' results");
     let printed = Command::new(env!("CARGO_BIN_EXE_automation"))
         .arg("scorecard")
         .arg("--results")
         .arg(results)
+        .arg("--scenarios")
+        .arg(&scenarios)
         .output()
         .expect("run automation scorecard");
     assert!(printed.status.success(), "scorecard failed: {printed:?}");
@@ -174,8 +189,14 @@ fn the_scorecard_reads_the_latest_real_phone_result_and_never_a_demo() {
 
     // A run against the Simulated Phone is no evidence about the real one.
     let demo = scorecard(results.path());
-    assert!(row(&demo, 3).ends_with("no evidence yet"), "{demo}");
-    assert!(row(&demo, 5).ends_with("no evidence yet"), "{demo}");
+    assert!(
+        row(&demo, 3).contains("no real Call's codec recorded"),
+        "{demo}"
+    );
+    assert!(
+        row(&demo, 5).contains("no Real-Phone Checklist run against the real Phone yet"),
+        "{demo}"
+    );
 
     // The same file, as if the real Phone had produced it.
     let file = std::fs::read_dir(results.path())
@@ -192,14 +213,12 @@ fn the_scorecard_reads_the_latest_real_phone_result_and_never_a_demo() {
     let codec = row(&real, 3);
     assert!(codec.contains("PASS"), "{real}");
     assert!(codec.contains("lc3-swb") && codec.contains("2.1"), "{real}");
+    // Only group 2 ran: the rest of the Checklist is still to do.
     let checklist = row(&real, 5);
-    assert!(
-        checklist.contains("FAIL"),
-        "the scenarios aren't counted yet: {real}"
-    );
+    assert!(checklist.contains("MANUAL"), "{real}");
     assert!(
         checklist.contains("Real-Phone Checklist")
-            && checklist.contains("8 pass, 0 fail, 0 skipped"),
+            && checklist.contains("8 pass, 0 fail, 0 skipped, not run: group 1"),
         "{real}"
     );
 }

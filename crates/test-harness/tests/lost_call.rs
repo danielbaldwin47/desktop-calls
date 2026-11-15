@@ -147,7 +147,10 @@ fn assert_offers_tones(state: &AppState) {
         .surface("call-window")
         .unwrap_or_else(|| panic!("no Call Window: {state:#?}"));
     for key in ["keypad-toggle", "hang-up"] {
-        assert!(window.contains_key(key), "{key} is not offered: {window:#?}");
+        assert!(
+            window.contains_key(key),
+            "{key} is not offered: {window:#?}"
+        );
     }
 }
 
@@ -204,11 +207,11 @@ fn assert_keys_do_nothing(harness: &Harness) {
     // Nothing the app reports marks a key as handled when it does nothing,
     // so this watches for a while instead. Before #111, these keys reached
     // the app within it as refused intents, each an `Error` signal.
-    harness.simulated_phone().recorded_holds(
-        "no key asks the Phone anything",
-        HOLD,
-        |recorded| acts_on_calls(recorded) == before,
-    );
+    harness
+        .simulated_phone()
+        .recorded_holds("no key asks the Phone anything", HOLD, |recorded| {
+            acts_on_calls(recorded) == before
+        });
     assert_eq!(
         harness.app_errors()[errors..],
         [],
@@ -409,8 +412,14 @@ fn with_a_held_call_both_calls_stay_listed_and_neither_can_be_acted_on() {
     );
     assert_eq!(state_of(&state, alice), Some("active"));
     assert_eq!(state_of(&state, bob), Some("held"));
-    assert!(call_window(&state, "hang-up-shortcut").is_some(), "{state:#?}");
-    assert!(call_window(&state, "hang-up-held-shortcut").is_some(), "{state:#?}");
+    assert!(
+        call_window(&state, "hang-up-shortcut").is_some(),
+        "{state:#?}"
+    );
+    assert!(
+        call_window(&state, "hang-up-held-shortcut").is_some(),
+        "{state:#?}"
+    );
     assert_eq!(call_window(&state, "hang-up").as_deref(), Some("Hang up"));
     assert_offers_tones(&state);
     // The Hang up refused while contact was lost was not kept for later.
@@ -693,7 +702,10 @@ fn losing_contact_and_getting_it_back_puts_the_controls_back_where_they_were() {
         .into_iter()
         .filter(|(left, right)| right - left >= narrowest - SAME_PLACE)
         .collect();
-    assert!(left.is_empty(), "tiles show while contact is lost: {left:?}");
+    assert!(
+        left.is_empty(),
+        "tiles show while contact is lost: {left:?}"
+    );
 
     harness.simulated_phone().return_to_range();
     wait_contact_back(&harness);
@@ -707,7 +719,11 @@ fn losing_contact_and_getting_it_back_puts_the_controls_back_where_they_were() {
             && (moved.right - hang_up.right).abs() <= SAME_PLACE,
         "Hang up moved from {hang_up:?} to {moved:?}"
     );
-    assert_three_tiles(&tiles(&back, hang_up, background), hang_up, "once contact is back");
+    assert_three_tiles(
+        &tiles(&back, hang_up, background),
+        hang_up,
+        "once contact is back",
+    );
 }
 
 /// How long the Call Window may take to collapse to the Call Pill by
@@ -747,7 +763,9 @@ fn lost_contact_expands_the_call_pill_and_collapsed_again_it_says_on_your_phone(
     let state = harness.wait_for_app("Escape collapses it", DEADLINE, |state| {
         state.surface("call-pill").is_some()
     });
-    assert_eq!(call_pill(&state, "status").as_deref(), Some("On your phone"));
+    assert_eq!(
+        call_pill(&state, "status").as_deref(),
+        Some("On your phone")
+    );
     assert_eq!(call_pill(&state, "mute"), None, "nothing to mute here");
 }
-

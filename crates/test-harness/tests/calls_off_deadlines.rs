@@ -131,9 +131,11 @@ fn a_deadline_replaced_by_a_later_one_doesnt_delay_the_later_one() {
     // The first deadline passes while calls are off until the later one:
     // nothing happens then, and the later one still turns calls on in time.
     wait_until_past(first);
-    harness.app_holds("calls stay off past the replaced deadline", Duration::from_secs(1), |state| {
-        state.calls_off == "off"
-    });
+    harness.app_holds(
+        "calls stay off past the replaced deadline",
+        Duration::from_secs(1),
+        |state| state.calls_off == "off",
+    );
     connected_within_10_s_of(&harness, later);
 }
 
@@ -145,7 +147,9 @@ fn turning_calls_off_again_while_they_are_off_sets_the_new_end_time() {
     wait_off_until(&harness, first);
 
     let sooner = now() + 6;
-    harness.turn_calls_off(sooner).expect("calls turn off until sooner");
+    harness
+        .turn_calls_off(sooner)
+        .expect("calls turn off until sooner");
 
     wait_off_until(&harness, sooner);
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");
@@ -164,21 +168,32 @@ fn a_deadline_a_few_seconds_ahead_turns_calls_on_by_itself_and_reconnects_within
     harness.turn_calls_off(until).expect("calls turn off");
 
     wait_off_until(&harness, until);
-    let item = indicator_says(&harness, &format!("Calls off until {}", clock_time(until, 0)));
+    let item = indicator_says(
+        &harness,
+        &format!("Calls off until {}", clock_time(until, 0)),
+    );
     assert_eq!(item.status.as_deref(), Some("Active"), "no attention asked");
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");
     assert!(
         record_text.contains(&format!(r#""until":{until}"#)),
         "{record_text}"
     );
-    assert!(now() < until, "the setup took too long to test the deadline");
-    harness.app_holds("calls stay off until the deadline", Duration::from_secs(1), |state| {
-        state.calls_off == "off"
-    });
+    assert!(
+        now() < until,
+        "the setup took too long to test the deadline"
+    );
+    harness.app_holds(
+        "calls stay off until the deadline",
+        Duration::from_secs(1),
+        |state| state.calls_off == "off",
+    );
 
     wait_connected(&harness, Duration::from_secs(6) + RECONNECT_DEADLINE);
     let took = connected_after(&harness, "calls-off-deadline-passed");
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after the deadline");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after the deadline"
+    );
     assert!(now() >= until, "calls came back on before the deadline");
     assert!(!record(&harness).exists(), "the record is cleared");
     assert!(!harness.simulated_phone().blocked());
@@ -198,16 +213,21 @@ fn a_deadline_that_passes_during_a_suspend_takes_effect_on_the_resume() {
     harness.wait_for_app_log("desktop-suspending", DEADLINE);
     wait_until_past(until);
     // Asleep, the Desktop doesn't act on the deadline.
-    harness.app_holds("calls stay off while suspended", Duration::from_secs(2), |state| {
-        state.calls_off == "off"
-    });
+    harness.app_holds(
+        "calls stay off while suspended",
+        Duration::from_secs(2),
+        |state| state.calls_off == "off",
+    );
     assert!(phone.blocked(), "the Phone is still blocked");
 
     phone.prepare_for_sleep(false);
 
     wait_connected(&harness, RECONNECT_DEADLINE);
     let took = connected_after(&harness, "desktop-resumed");
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after the resume");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after the resume"
+    );
     harness.wait_for_app_log("calls-off-deadline-passed", DEADLINE);
     assert_eq!(phone.connects_while_blocked(), 0);
 }
@@ -225,7 +245,10 @@ fn a_deadline_that_passed_while_the_app_was_stopped_takes_effect_at_the_next_sta
 
     wait_connected(&harness, RECONNECT_DEADLINE);
     let took = connected_after(&harness, "calls-off-loaded");
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after starting");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after starting"
+    );
     assert!(!harness.simulated_phone().blocked());
     assert!(!record(&harness).exists(), "the record is cleared");
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
@@ -241,12 +264,18 @@ fn a_deadline_still_ahead_at_the_next_start_keeps_calls_off_until_it_passes() {
     harness.restart_app();
 
     wait_off_until(&harness, until);
-    indicator_says(&harness, &format!("Calls off until {}", clock_time(until, 0)));
+    indicator_says(
+        &harness,
+        &format!("Calls off until {}", clock_time(until, 0)),
+    );
     assert!(harness.simulated_phone().blocked(), "the Phone is blocked");
     wait_connected(&harness, Duration::from_secs(8) + RECONNECT_DEADLINE);
     assert!(now() >= until, "calls came back on before the deadline");
     let took = connected_after(&harness, "calls-off-deadline-passed");
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after the deadline");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after the deadline"
+    );
 }
 
 #[test]
@@ -282,7 +311,9 @@ fn the_cli_turns_calls_off_for_a_length_or_until_a_time_and_says_until_when() {
     let shown = clock_time(until, offset);
     assert_eq!(
         said,
-        format!("Calls are off until {shown}: your phone stays disconnected, and connects again then.\n")
+        format!(
+            "Calls are off until {shown}: your phone stays disconnected, and connects again then.\n"
+        )
     );
     assert_eq!(
         cli_ok(&harness, &["status"]),

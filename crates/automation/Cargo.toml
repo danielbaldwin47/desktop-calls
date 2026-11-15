@@ -12,6 +12,8 @@ publish.workspace = true
 clap.workspace = true
 # The gallery and the demo run the app in the test harness's world.
 test-harness = { path = "../test-harness" }
+# The gallery reads how long the app shows its states that last a moment.
+desktop-calls-core.workspace = true
 # `just demo` outlives Ctrl-C long enough to clean up its scenario.
 signal-hook = "0.4"
 # The Real-Phone Checklist runner watches the app's control interface,

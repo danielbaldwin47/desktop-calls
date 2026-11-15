@@ -5,6 +5,9 @@
 
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+use desktop_calls_core::CALL_ENDED_MS;
 
 use test_harness::{AppState, Harness, Key, LAYOUT_SIZE, Screenshot};
 
@@ -344,6 +347,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             let call = ring(harness);
             harness.answer(call);
             wait_until_collapsed(harness);
+            let hung_up = Instant::now();
             harness.hang_up(call);
             harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
                 state
@@ -351,6 +355,11 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .and_then(|pill| pill.get("status"))
                     .is_some_and(|status| status.starts_with("Call ended · "))
             });
+            // For only 2 s, so the app is stopped for the capture (#248).
+            harness.freeze_app_before(
+                hung_up + Duration::from_millis(CALL_ENDED_MS.into()),
+                "the Call Pill saying Call ended",
+            );
         },
         // Mute and Hang up go once the Call has ended, as the app reports.
         shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),

@@ -785,6 +785,7 @@ fn keys_taken_after_the_offer_refresh_the_offer_instead_of_asking_to_try_again()
     assert!(
         shown
             .notice
+            .as_ref()
             .is_some_and(|notice| !notice.contains("try again")),
         "{shown:?}"
     );

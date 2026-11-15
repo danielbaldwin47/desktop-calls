@@ -224,7 +224,10 @@ fn the_dialer_keeps_its_top_edge_while_its_height_follows_the_rows() {
     let full = app_region(&full).expect("the Dialer is on screen");
     let (x, y) = full.centre();
     let (width, height) = LAYOUT_SIZE;
-    assert!((x - width / 2.0).abs() <= 2.0, "not centred across: {full:?}");
+    assert!(
+        (x - width / 2.0).abs() <= 2.0,
+        "not centred across: {full:?}"
+    );
     // Centred in the space below the bar.
     let middle = f64::midpoint(height, BAR_HEIGHT);
     assert!((y - middle).abs() <= 2.0, "not centred down: {full:?}");

@@ -809,6 +809,8 @@ pub struct Options {
     /// How long to wait between reaching each state and capturing it, as a
     /// slow runner might (#248).
     pub late: Option<Duration>,
+    /// Only this look, by its name, as a PR's CI renders the gallery.
+    pub look: Option<String>,
 }
 
 /// The states to render: `only`, or the states of `shard`, or every state.
@@ -835,6 +837,30 @@ fn chosen_states(options: &Options) -> Option<Vec<&'static State>> {
     state.map(|state| vec![state])
 }
 
+/// The looks to render: `look`, or every look. None, having said why, if
+/// `look` names no look.
+fn chosen_looks(options: &Options) -> Option<Vec<Look>> {
+    let looks: Vec<Look> = LOOKS
+        .into_iter()
+        .filter(|look| {
+            options
+                .look
+                .as_ref()
+                .is_none_or(|only| only == look.as_str())
+        })
+        .collect();
+    if looks.is_empty() {
+        let names: Vec<&str> = LOOKS.iter().map(|look| look.as_str()).collect();
+        eprintln!(
+            "The gallery has no look {:?}. Its looks: {}.",
+            options.look.as_deref().unwrap_or_default(),
+            names.join(", ")
+        );
+        return None;
+    }
+    Some(looks)
+}
+
 /// `automation screenshot`: renders the gallery, or with `only` one state
 /// of it, `repeat` times, into `output` or `target/screenshots/gallery`.
 pub fn run(options: &Options) -> ExitCode {
@@ -845,6 +871,9 @@ pub fn run(options: &Options) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let Some(states) = chosen_states(options) else {
+        return ExitCode::FAILURE;
+    };
+    let Some(looks) = chosen_looks(options) else {
         return ExitCode::FAILURE;
     };
     let output = if let Some(output) = options.output.clone() {
@@ -869,7 +898,7 @@ pub fn run(options: &Options) -> ExitCode {
 
     let shots: Vec<(&State, Look)> = states
         .iter()
-        .flat_map(|state| LOOKS.map(|look| (*state, look)))
+        .flat_map(|state| looks.iter().map(|look| (*state, *look)))
         .collect();
     for repetition in 1..=options.repeat {
         render_all(&shots, &output, options.workers, options.late);
@@ -921,11 +950,13 @@ pub fn run(options: &Options) -> ExitCode {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }
-    let states = shots.len() / LOOKS.len();
+    let states = all_states()
+        .filter(|state| shots.iter().any(|(shot, _, _)| shot.name == state.name))
+        .count();
     let indicator_states = indicators.len() / INDICATOR_THEMES.len();
     let menu_states = menus.len() / INDICATOR_THEMES.len();
     println!(
-        "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy; \
+        "Gallery: {} screenshots of {states} state{}; \
          the Indicator in {indicator_states} state{} and its menu in {menu_states}, light and dark.",
         shots.len(),
         if states == 1 { "" } else { "s" },

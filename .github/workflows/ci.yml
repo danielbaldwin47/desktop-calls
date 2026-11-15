@@ -165,10 +165,12 @@ jobs:
       - *cache
       - name: just ci-tests
         run: just ci-tests
+      # A report, not a gate: only the run on main makes it.
       - name: just scorecard
+        if: github.event_name != 'pull_request'
         run: just scorecard | tee scorecard.txt
       - name: Keep the scorecard
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: scorecard
@@ -192,10 +194,15 @@ jobs:
   # time on one runner, 217 s, the slowest job of run 43675318041. So one
   # 157 s test gets a runner of its own, and the other two share one. The
   # names, between them, are the justfile's checklist_group_6_tests.
+  #
+  # Only on main, not on PRs: it was the slowest job of a PR's run (4 min 50 s
+  # of run 43677761934, the rest done by 4 min 2 s), and it tests the
+  # checklist's demo runner, which the scenarios' Calls Off and Quiet Hours
+  # tests don't need (#286, 2026-11-15).
   checklist:
     name: just ci-checklist-group-6 ${{ matrix.names }}
     needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
@@ -210,8 +217,10 @@ jobs:
         run: just ci-checklist-group-6 ${{ matrix.names }}
       - *scenario-logs
 
-  # The gallery, every surface in every state, light and dark, stock and
-  # under Omarchy, in parts: each renders every N-th state.
+  # The gallery, every surface in every state, in parts: each renders every
+  # N-th state. A PR's run renders the light stock look only, enough to catch
+  # a broken surface (the Omarchy theme has scenarios of its own); the run on
+  # main renders every look, light and dark, stock and under Omarchy.
   gallery:
     name: just ci-gallery (part ${{ matrix.shard }} of ${{ strategy.job-total }})
     needs: [changes, image]
@@ -229,7 +238,7 @@ jobs:
       - *checkout
       - *cache
       - name: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }} ${{ github.event_name == 'pull_request' && 'light' || '' }}
       - name: Keep the gallery
         if: always()
         uses: actions/upload-artifact@v4
@@ -324,7 +333,8 @@ jobs:
   # The one check that says CI passed, and the context branch protection
   # requires, pinned to GitHub Actions. It fails unless `changes` succeeded
   # and every other job succeeded, or was skipped because `changes` found only
-  # docs. `just merge` and `just land` wait for it.
+  # docs, or, for the checklist, because the run is a PR's. `just merge` and
+  # `just land` wait for it.
   ci-passed:
     name: ${{ github.event_name == 'workflow_dispatch' && 'CI passed (dispatched run)' || 'CI passed' }}
     if: ${{ !cancelled() }}
@@ -338,10 +348,12 @@ jobs:
           CODE: ${{ needs.changes.outputs.code }}
           IMAGE: ${{ needs.image.result }}
           JOBS: >-
-            ${{ needs.lint.result }} ${{ needs.tests.result }} ${{ needs.checklist.result }}
+            ${{ needs.lint.result }} ${{ needs.tests.result }}
             ${{ needs.gallery.result }} ${{ needs.scenarios.result }}
+          CHECKLIST: ${{ needs.checklist.result }}
+          PR: ${{ github.event_name == 'pull_request' }}
         run: |
-          echo "changes: $CHANGES, code changed: $CODE, image: $IMAGE, jobs: $JOBS"
+          echo "changes: $CHANGES, code changed: $CODE, image: $IMAGE, jobs: $JOBS, checklist: $CHECKLIST"
           [ "$CHANGES" = success ] || exit 1
           for result in $JOBS; do
             if [ "$CODE" = true ]; then
@@ -350,6 +362,11 @@ jobs:
               [ "$result" = skipped ] || exit 1
             fi
           done
+          if [ "$CODE" = true ] && [ "$PR" != true ]; then
+            [ "$CHECKLIST" = success ] || exit 1
+          else
+            [ "$CHECKLIST" = skipped ] || exit 1
+          fi
           if [ "$CODE" = true ]; then [ "$IMAGE" = success ] || exit 1; fi
 
       # A shard that didn't run, or a partition that left scenarios out, would

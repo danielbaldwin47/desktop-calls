@@ -51,9 +51,9 @@ ci-checklist-group-6 names=checklist_group_6_tests:
 
 # CI passes `1/3` to render part 1 of 3 of the gallery's states; empty, every state.
 # Render the gallery through its test, or one part of it.
-ci-gallery shard="":
+ci-gallery shard="" look="":
     cargo build --workspace --bins --locked
-    GALLERY_SHARD={{shard}} cargo test -p automation --test gallery --locked
+    GALLERY_SHARD={{shard}} GALLERY_LOOK={{look}} cargo test -p automation --test gallery --locked
 
 # CI passes `--partition count:k/N` to run shard k of N; `just ci-local` runs
 # them whole.

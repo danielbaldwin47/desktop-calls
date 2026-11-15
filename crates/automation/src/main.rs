@@ -80,6 +80,10 @@ enum Command {
         /// moment must still be captured (#248).
         #[arg(long, value_name = "MS")]
         late: Option<u64>,
+        /// Render only this look: light, dark, omarchy-light or
+        /// omarchy-dark. A PR's CI renders one; the run on main every one.
+        #[arg(long, value_name = "LOOK")]
+        look: Option<String>,
     },
     /// Run the app against the Simulated Phone in a nested compositor window.
     Demo {
@@ -112,6 +116,7 @@ fn main() -> ExitCode {
             shard,
             list_states,
             late,
+            look,
         } => gallery::run(&gallery::Options {
             output,
             only,
@@ -120,6 +125,7 @@ fn main() -> ExitCode {
             shard,
             list_states,
             late: late.map(std::time::Duration::from_millis),
+            look,
         }),
         Command::Demo { scenario } => demo::run(&scenario),
     }

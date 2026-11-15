@@ -61,6 +61,11 @@ const STATES: &[&str] = &[
     "setup-problem-bluez-hands-free",
 ];
 
+/// The environment variable `name`, unless it is unset or empty.
+fn set(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
 /// Renders the gallery exactly as `just screenshot` does, into its default
 /// directory, `target/screenshots/gallery`. CI keeps that directory as an
 /// artifact, so this test is also what makes CI's gallery.
@@ -76,9 +81,7 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     // CI renders the gallery in parts, one per runner (#286): GALLERY_SHARD
     // is K/N, and this part holds every N-th of the gallery's states from
     // the K-th, in the order `--list-states` prints.
-    let shard = std::env::var("GALLERY_SHARD")
-        .ok()
-        .filter(|shard| !shard.is_empty());
+    let shard = set("GALLERY_SHARD");
     let listed = Command::new(binary)
         .args(["screenshot", "--list-states"])
         .output()
@@ -102,10 +105,14 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         position.is_some_and(|position| position % count == number - 1)
     };
 
+    // A PR's CI renders one look, GALLERY_LOOK, enough to catch a broken
+    // surface; the run on main renders every look.
+    let look = set("GALLERY_LOOK");
+
     let mut command = Command::new(binary);
     command.arg("screenshot");
-    if let Some(shard) = &shard {
-        command.args(["--shard", shard]);
+    for (flag, value) in [("--shard", &shard), ("--look", &look)] {
+        command.args(value.iter().flat_map(|value| [flag, value]));
     }
     // The gallery is one test, so the test runner's limit on how many run at
     // once doesn't reach it. `just ci-local` sets that limit to what the
@@ -134,7 +141,9 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         .filter(|state| in_this_part(state))
         .flat_map(|state| {
             ["light", "dark", "omarchy-light", "omarchy-dark"]
-                .map(|look| format!("{state}-{look}.png"))
+                .into_iter()
+                .filter(|each| look.as_deref().is_none_or(|only| only == *each))
+                .map(move |look| format!("{state}-{look}.png"))
         });
     for file in files {
         let file = file.as_str();

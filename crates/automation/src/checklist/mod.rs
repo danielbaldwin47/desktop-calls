@@ -28,14 +28,14 @@ use zbus::Connection;
 
 use app_log::AppLog;
 use results::{Mode, Outcome, ResultFile, StepRecord};
+use sitting::{Demo, Sitting, Stop, flush};
+use steps::{GROUPS, Group, Step};
 
 /// Every step's id, in the Checklist's order, for the scorecard to tell a
 /// whole run from part of one.
 pub fn step_ids() -> Vec<&'static str> {
     steps::order()
 }
-use sitting::{Demo, Sitting, Stop, flush};
-use steps::{GROUPS, Group, Step};
 
 /// What `automation real-phone-checklist` was asked to do.
 pub struct Options {

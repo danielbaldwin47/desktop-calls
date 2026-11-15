@@ -301,6 +301,61 @@ fn the_slowest_real_measurement_decides_a_timed_item() {
 }
 
 #[test]
+fn a_banner_that_never_showed_fails_item_1_whatever_else_was_measured() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("2.1", r#"{ "banner_latency_ms": null }"#),
+            ("3.2", r#"{ "banner_latency_ms": 300 }"#),
+        ],
+    );
+
+    assert_eq!(status(&text, 1), "FAIL", "{text}");
+    assert!(
+        row(&text, 1).contains("real Phone: never happened"),
+        "{text}"
+    );
+    assert!(row(&text, 1).contains("step 2.1"), "{text}");
+}
+
+#[test]
+fn one_narrowband_call_fails_item_3_though_a_later_one_was_wideband() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("2.2", r#"{ "codec": "cvsd", "wideband": false }"#),
+            ("2.3", r#"{ "codec": "msbc", "wideband": true }"#),
+        ],
+    );
+
+    assert_eq!(status(&text, 3), "FAIL", "{text}");
+    assert!(row(&text, 3).contains("cvsd (narrowband)"), "{text}");
+}
+
+#[test]
+fn an_unreadable_shard_report_leaves_the_others_counted() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let scenarios = scenarios();
+    let good = directory.path().join("scenario-results-1");
+    std::fs::create_dir(&good).expect("a shard's directory");
+    junit(&good, &scenarios, &[]);
+    let bad = directory.path().join("scenario-results-2");
+    std::fs::create_dir(&bad).expect("a shard's directory");
+    std::fs::write(bad.join("junit.xml"), [0xff, 0xfe, 0x00]).expect("write a broken report");
+
+    let text = scorecard(&["--scenarios", directory.path().to_str().unwrap()]);
+
+    assert_eq!(status(&text, 1), "MANUAL", "{text}");
+    assert!(row(&text, 1).contains("12 of 12 scenarios pass"), "{text}");
+}
+
+#[test]
 fn what_cargo_test_printed_counts_as_a_report() {
     let directory = tempfile::tempdir().expect("a directory");
     let scenarios = scenarios();

@@ -32,16 +32,20 @@ impl Report {
         sources.sort();
         // A file that can't be read is left out; the scenarios it held
         // then fail their items as not run.
-        sources.retain(|source| fs::read_to_string(source).is_ok());
+        let read: Vec<(PathBuf, String)> = sources
+            .into_iter()
+            .filter_map(|source| {
+                let text = fs::read_to_string(&source).ok()?;
+                Some((source, text))
+            })
+            .collect();
+        let sources: Vec<PathBuf> = read.iter().map(|(source, _)| source.clone()).collect();
         let mut results = BTreeMap::new();
-        for source in &sources {
-            let Ok(text) = fs::read_to_string(source) else {
-                continue;
-            };
+        for (_, text) in &read {
             let found = if text.contains("<testcase ") {
-                testcases(&text)
+                testcases(text)
             } else {
-                printed_results(&text)
+                printed_results(text)
             };
             for (name, ran) in found {
                 // A scenario that failed in one report stays failed.

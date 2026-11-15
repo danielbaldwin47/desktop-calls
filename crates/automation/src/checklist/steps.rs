@@ -454,6 +454,8 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
         state.shows("banner") || state.call(call).is_none()
     })?;
     if !banner.state.shows("banner") {
+        // No latency, and the scorecard's item 1 must see that it failed.
+        sitting.measure("banner_latency_ms", serde_json::Value::Null);
         return Err(Stop::TimedOut(
             "the Incoming Call Banner showing before the Call stopped ringing".to_owned(),
         ));

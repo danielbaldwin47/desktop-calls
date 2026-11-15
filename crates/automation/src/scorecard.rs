@@ -180,17 +180,30 @@ fn timed(evidence: &Evidence, names: &[&str], key: &str, bound: u64, group: &str
         Ok(summary) => summary,
         Err(failed) => return failed,
     };
+    // A step records `null` when what it times never happened: slower
+    // than any bound.
     let measured = evidence.checklist.and_then(|checklist| {
         checklist
             .steps
             .iter()
             .filter_map(|step| {
-                let millis = step.measurements.get(key)?.as_u64()?;
-                Some((checklist, step.id.as_str(), millis))
+                let value = step.measurements.get(key)?;
+                Some((
+                    checklist,
+                    step.id.as_str(),
+                    value.as_u64().unwrap_or(u64::MAX),
+                ))
             })
             .max_by_key(|(_, _, millis)| *millis)
     });
     match measured {
+        Some((checklist, step, u64::MAX)) => Score::new(
+            Status::Fail,
+            format!(
+                "{simulated}; real Phone: never happened, Real-Phone Checklist {}, step {step}",
+                checklist.started
+            ),
+        ),
         Some((checklist, step, millis)) => Score::new(
             if millis <= bound {
                 Status::Pass
@@ -211,14 +224,24 @@ fn timed(evidence: &Evidence, names: &[&str], key: &str, bound: u64, group: &str
     }
 }
 
-/// Item 3: the codec the runner recorded on the latest real Call.
+/// Item 3: the codecs the runner recorded on the latest real Checklist's
+/// Calls: a narrowband one, if any, else the last.
 fn wideband(checklist: Option<&ResultFile>) -> Score {
     let recorded = checklist.and_then(|checklist| {
-        checklist.steps.iter().rev().find_map(|step| {
-            let codec = step.measurements.get("codec")?.as_str()?;
-            let wideband = step.measurements.get("wideband")?.as_bool()?;
-            Some((checklist, step.id.as_str(), codec, wideband))
-        })
+        let calls: Vec<_> = checklist
+            .steps
+            .iter()
+            .filter_map(|step| {
+                let codec = step.measurements.get("codec")?.as_str()?;
+                let wideband = step.measurements.get("wideband")?.as_bool()?;
+                Some((checklist, step.id.as_str(), codec, wideband))
+            })
+            .collect();
+        calls
+            .iter()
+            .find(|(_, _, _, wideband)| !wideband)
+            .or_else(|| calls.last())
+            .copied()
     });
     match recorded {
         Some((checklist, step, codec, wideband)) => Score::new(
@@ -325,7 +348,7 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
         count(Outcome::Fail),
         count(Outcome::Skipped),
     );
-    let not_run = groups_not_run(checklist, "");
+    let not_run = groups_not_run(checklist);
     let status = if failed > 0 {
         Status::Fail
     } else if skipped > 0 || !not_run.is_empty() {
@@ -348,15 +371,14 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
     )
 }
 
-/// The groups, by number, with a step whose id starts with `prefix` that
-/// `checklist` has no record of: a run of one group, or one quit partway,
-/// records only the steps it ran.
-fn groups_not_run(checklist: &ResultFile, prefix: &str) -> Vec<String> {
+/// The groups, by number, with a step that `checklist` has no record of: a
+/// run of one group, or one quit partway, records only the steps it ran.
+fn groups_not_run(checklist: &ResultFile) -> Vec<String> {
     let mut groups: Vec<String> = Vec::new();
     for id in checklist::step_ids() {
         let recorded = checklist.steps.iter().any(|step| step.id == id);
         let group = id.split('.').next().unwrap_or(id).to_owned();
-        if id.starts_with(prefix) && !recorded && !groups.contains(&group) {
+        if !recorded && !groups.contains(&group) {
             groups.push(group);
         }
     }
@@ -391,16 +413,21 @@ fn reconnects(evidence: &Evidence) -> Score {
         .filter(|step| step.outcome == Outcome::Fail)
         .map(|step| step.id.as_str())
         .collect();
-    let passed = group
-        .iter()
-        .filter(|step| step.outcome == Outcome::Pass)
-        .count();
-    // Every step of group 6 the Checklist has, run or not: a run quit
-    // partway records only some.
-    let scripted = checklist::step_ids()
-        .iter()
+    // Every step of group 6 the Checklist has now, run or not: a run quit
+    // partway records only some, and a step since renamed counts for none.
+    let scripted: Vec<&str> = checklist::step_ids()
+        .into_iter()
         .filter(|id| id.starts_with("6."))
+        .collect();
+    let passed = scripted
+        .iter()
+        .filter(|id| {
+            group
+                .iter()
+                .any(|step| step.id == **id && step.outcome == Outcome::Pass)
+        })
         .count();
+    let scripted = scripted.len();
     let status = if !failed.is_empty() {
         Status::Fail
     } else if passed < scripted {

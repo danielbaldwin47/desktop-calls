@@ -235,6 +235,8 @@ fn waiting_call_arrives(
         state.surface_field("banner", "options").is_some() || state.call(call.id).is_none()
     })?;
     let Some(banner) = banner.filter(|seen| seen.state.call(call.id).is_some()) else {
+        // No latency, and the scorecard's item 1 must see that it failed.
+        sitting.measure("banner_latency_ms", serde_json::Value::Null);
         sitting.check(
             false,
             format!(

@@ -48,7 +48,11 @@ window.desktop-calls-quiet-hours > box { padding: 20px; }
 .desktop-calls-quiet-hours .quiet-time:focus {
     box-shadow: inset 0 0 0 2px var(--dc-accent); outline: none;
 }
-.desktop-calls-quiet-hours .quiet-times.dim { opacity: 0.45; }
+/* Off, the times read as set aside but still readable, about 4:1 (#314):
+   the secondary colour in place of the stock half opacity. */
+.desktop-calls-quiet-hours .quiet-times.dim .quiet-time:disabled { filter: none; opacity: 1; }
+.desktop-calls-quiet-hours .quiet-times.dim .quiet-time:disabled label,
+.desktop-calls-quiet-hours .quiet-times.dim label { color: var(--dc-secondary); }
 .desktop-calls-quiet-hours switch:focus { outline: 2px solid var(--dc-accent); outline-offset: 2px; }
 .desktop-calls-quiet-hours .quiet-bar { background: var(--dc-raised); color: var(--dc-accent); }
 .desktop-calls-quiet-hours .quiet-hour {
@@ -60,6 +64,30 @@ window.desktop-calls-quiet-hours > box { padding: 20px; }
 
 /// The spans of the day the 24-hour bar fills, in minutes after midnight.
 type Spans = Rc<RefCell<Vec<(u16, u16)>>>;
+
+/// The notice that shows while times are refused, hidden: the box, the line
+/// saying why, and the line saying what is still saved (#314).
+fn refusal_notice() -> (gtk::Box, gtk::Label, gtk::Label) {
+    let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
+    icon.add_css_class("notice-icon");
+    icon.set_valign(gtk::Align::Start);
+    let why = gtk::Label::new(None);
+    why.set_xalign(0.0);
+    why.set_wrap(true);
+    let kept = gtk::Label::new(None);
+    kept.set_xalign(0.0);
+    kept.set_wrap(true);
+    kept.set_max_width_chars(40);
+    let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    lines.append(&why);
+    lines.append(&kept);
+    let notice = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+    notice.add_css_class(class::NOTICE);
+    notice.append(&icon);
+    notice.append(&lines);
+    notice.set_visible(false);
+    (notice, why, kept)
+}
 
 /// One of the two times: its field, and what typing in it means.
 struct TimeField {
@@ -83,8 +111,12 @@ pub(super) struct QuietHoursWindow {
     bar_area: gtk::DrawingArea,
     saved_icon: gtk::Image,
     sentence: gtk::Label,
+    /// The saved sentence, hidden while times are refused for the notice
+    /// with what is still saved, in its place (#314).
+    said: gtk::Box,
     notice: gtk::Box,
     notice_text: gtk::Label,
+    kept: gtk::Label,
     footer: gtk::Box,
     intents: UnboundedSender<Input>,
     report: SharedReport,
@@ -144,16 +176,10 @@ impl QuietHoursWindow {
         said.append(&saved_icon);
         said.append(&sentence);
 
-        let notice_icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
-        notice_icon.add_css_class("notice-icon");
-        let notice_text = gtk::Label::new(None);
-        notice_text.set_xalign(0.0);
-        notice_text.set_wrap(true);
-        let notice = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
-        notice.add_css_class(class::NOTICE);
-        notice.append(&notice_icon);
-        notice.append(&notice_text);
-        notice.set_visible(false);
+        let (notice, notice_text, kept) = refusal_notice();
+        let said_or_notice = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        said_or_notice.append(&said);
+        said_or_notice.append(&notice);
 
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         footer.add_css_class(class::FOOTER_LINE);
@@ -163,8 +189,7 @@ impl QuietHoursWindow {
             top.upcast_ref::<gtk::Widget>(),
             times.upcast_ref(),
             bar.upcast_ref(),
-            notice.upcast_ref(),
-            said.upcast_ref(),
+            said_or_notice.upcast_ref(),
             footer.upcast_ref(),
         ] {
             layout.append(widget);
@@ -185,8 +210,10 @@ impl QuietHoursWindow {
             bar_area,
             saved_icon,
             sentence,
+            said,
             notice,
             notice_text,
+            kept,
             footer,
             intents: intents.clone(),
             report,
@@ -396,10 +423,18 @@ impl QuietHoursWindow {
         self.bar.set_visible(view.on);
         self.spans.replace(view.off_spans.clone());
         self.bar_area.queue_draw();
+        // While refused, the notice says what is still saved in place of the
+        // saved sentence, so no success shows beside the refusal (#314).
         self.notice_text.set_text(text.notice.unwrap_or_default());
-        self.notice.set_visible(text.notice.is_some());
         self.saved_icon.set_visible(view.on);
-        self.sentence.set_text(&text.sentence);
+        let refused = text.notice.is_some();
+        if refused {
+            self.kept.set_text(&text.sentence);
+        } else {
+            self.sentence.set_text(&text.sentence);
+        }
+        self.notice.set_visible(refused);
+        self.said.set_visible(!refused);
         if *self.shown_keys.borrow() != text.keys {
             self.show_keys(&text.keys);
             self.shown_keys.replace(text.keys.clone());

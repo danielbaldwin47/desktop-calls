@@ -225,6 +225,11 @@ fn with_keys_alone_each_change_is_saved_at_once_and_kept_across_a_restart() {
         &[("start", "06:00"), ("notice", "Start and end must differ")],
     );
     assert_eq!(state.quiet_hours, Some((minutes(22, 15), minutes(6, 0))));
+    // Beside the refusal, what is still saved, and no "Saved." (#314).
+    assert_eq!(
+        field(&state, "sentence"),
+        Some("Still 22:15–06:00: nothing changed.")
+    );
     harness.keyboard().press(Key::Up);
     wait_for_hours(&harness, Some((minutes(6, 15), minutes(6, 0))));
     let state = wait_for_window(&harness, &[("start", "06:15")]);

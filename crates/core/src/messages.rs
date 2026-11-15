@@ -21,6 +21,7 @@ mod dialer;
 mod problems;
 mod quiet_hours;
 mod setup;
+mod setup_parts;
 mod when;
 pub use banner::{
     FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
@@ -44,6 +45,10 @@ pub use dialer::{
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
+pub use setup_parts::{
+    Instruction, InstructionGroup, Place, SETUP_STAGES, SetupCard, StageMark, SyncRow, SyncText,
+    grouped, stage_marks,
+};
 pub use when::{dialer_time, when};
 
 /// A failure the user can be told about.

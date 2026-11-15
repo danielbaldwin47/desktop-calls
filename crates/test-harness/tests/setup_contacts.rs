@@ -165,9 +165,8 @@ fn add_the_keybinding(harness: &Harness) -> String {
     harness.keyboard().press(Key::Return);
     harness.wait_for_app("the keybinding is added", DEADLINE, |state| {
         field(state, "buttons") == Some("Done")
-            && field(state, "instructions").is_some_and(|text| {
-                text.starts_with("Place your first Call: press Super + Alt + C")
-            })
+            && field(state, "keybinding")
+                .is_some_and(|text| text.contains("Place your first Call: press Super + Alt + C"))
     });
     line
 }
@@ -195,7 +194,16 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
         "the warning comes before the prompt"
     );
 
+    // Four named steps across the top: Pair is done, sharing is now.
+    assert_eq!(field(&state, "stage"), Some("Share contacts"));
+    assert_eq!(
+        field(&state, "stages"),
+        Some("✓ Pair\nShare contacts\nSync\nShortcut")
+    );
+
     let state = wait_for_step(&harness, "contacts-prompt", PROMPT_DEADLINE);
+    // The countdown says what it counts.
+    assert_eq!(field(&state, "countdown-label"), Some("left to tap Allow"));
     let countdown: u64 = field(&state, "countdown")
         .and_then(|countdown| countdown.parse().ok())
         .unwrap_or_else(|| panic!("no countdown: {state:?}"));
@@ -224,13 +232,28 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
         PROMPT_DEADLINE,
         |state| {
             field(state, "progress").is_some_and(|progress| {
-                progress.starts_with("✓ Recent Calls\n312 Contacts… about ")
+                progress.starts_with("✓ Recent Calls\nContacts · 312 · about ")
             })
         },
     );
     assert_eq!(field(&state, "step"), Some("contacts-syncing"));
+    assert_eq!(field(&state, "stage"), Some("Sync"));
+    assert_eq!(
+        field(&state, "sync-note"),
+        Some("Calls already work. Names appear as Contacts arrive.")
+    );
+    // The bar has moved, and isn't full while Contacts are read.
+    let bar: u32 = field(&state, "sync-bar")
+        .and_then(|bar| bar.parse().ok())
+        .unwrap_or_else(|| panic!("no bar: {state:?}"));
+    assert!((1..1_000).contains(&bar), "{bar}");
     let state = wait_for_step(&harness, "done", SYNC_DEADLINE);
     assert_eq!(field(&state, "summary"), Some(SYNCED));
+    assert_eq!(field(&state, "stage"), Some("Shortcut"));
+    assert_eq!(
+        field(&state, "stages"),
+        Some("✓ Pair\n✓ Share contacts\n✓ Sync\nShortcut")
+    );
     assert_eq!(state.contacts.state, "ready");
     assert_eq!(
         harness.simulated_phone().contacts_prompts()[0].outcome,
@@ -349,7 +372,7 @@ fn a_phone_leaving_during_the_contacts_pull_leaves_contacts_not_synced_across_a_
         PROMPT_DEADLINE,
         |state| {
             field(state, "progress")
-                .is_some_and(|progress| progress.starts_with("✓ Recent Calls\n312 Contacts…"))
+                .is_some_and(|progress| progress.starts_with("✓ Recent Calls\nContacts · 312"))
         },
     );
 
@@ -407,8 +430,13 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
         "how to allow it later: {summary}"
     );
     assert!(
-        field(&state, "instructions").is_some_and(|text| text.contains("Place your first Call")),
+        field(&state, "keybinding").is_some_and(|text| text.contains("Open the Dialer")),
         "{state:?}"
+    );
+    // Sharing was refused, so neither it nor the sync is ticked.
+    assert_eq!(
+        field(&state, "stages"),
+        Some("✓ Pair\nShare contacts\nSync\nShortcut")
     );
     assert_eq!(state.contacts.state, "denied");
 }
@@ -417,12 +445,14 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
 fn the_keybinding_is_written_exactly_as_shown_once_confirmed_and_not_at_all_when_declined() {
     let harness = fresh_install();
     let state = at_the_finish_page_offering_the_keybinding(&harness);
+    // The keybinding and the pin tip: two cards.
     assert!(
-        field(&state, "instructions").is_some_and(|text| text.contains("Super + Alt + C")),
+        field(&state, "keybinding").is_some_and(|text| text.contains("Super + Alt + C")),
         "{state:?}"
     );
     assert!(
-        field(&state, "tip").is_some_and(|tip| tip.contains("pin Desktop Calls")),
+        field(&state, "tip").is_some_and(|tip| tip.starts_with("Keep Desktop Calls in the bar\n")
+            && tip.contains("pin Desktop Calls")),
         "{state:?}"
     );
 
@@ -463,7 +493,7 @@ fn the_finish_page_names_the_config_file_from_a_tilde_and_writes_the_line_as_sho
     let state = at_the_finish_page_offering_the_keybinding(&harness);
     let named = "~/.config/hypr/bindings.lua";
     assert!(
-        field(&state, "instructions").is_some_and(|text| text.contains(named)),
+        field(&state, "keybinding").is_some_and(|text| text.contains(named)),
         "{state:?}"
     );
 
@@ -497,12 +527,12 @@ fn keys_the_user_already_bound_are_left_alone_and_the_finish_page_names_the_comm
     wait_for_step(&harness, "done", SYNC_DEADLINE);
 
     let state = harness.wait_for_app("the finish page names the clash", DEADLINE, |state| {
-        field(state, "instructions")
+        field(state, "keybinding")
             .is_some_and(|text| text.contains("Super + Alt + C already does something else"))
     });
     assert_eq!(field(&state, "buttons"), Some("Done"), "{state:?}");
     assert!(
-        field(&state, "instructions").is_some_and(|text| text.contains("desktop-calls")),
+        field(&state, "keybinding").is_some_and(|text| text.contains("desktop-calls")),
         "the command to bind by hand: {state:?}"
     );
     assert_eq!(bindings(&harness), config, "the config is left alone");

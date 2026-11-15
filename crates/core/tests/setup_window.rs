@@ -595,7 +595,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     assert!(
         off.instructions
             .iter()
-            .all(|line| !line.contains("is paired"))
+            .all(|line| !line.text.contains("is paired"))
     );
 
     let done = messages::setup_window(
@@ -618,7 +618,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     assert!(
         done.instructions
             .iter()
-            .all(|line| !line.contains("Synced"))
+            .all(|line| !line.text.contains("Synced"))
     );
     assert_eq!(
         done.keys,

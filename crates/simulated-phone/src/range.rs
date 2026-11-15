@@ -122,6 +122,25 @@ impl Change {
         )
     }
 
+    /// This change split after the first Call's `CallRemoved`: that Call
+    /// going, then everything after it. The second part is empty if no Call
+    /// went.
+    pub fn split_after_first_call(self) -> (Self, Self) {
+        let at = self
+            .signals
+            .iter()
+            .position(|(_, signal)| matches!(signal, Signal::CallRemoved { .. }))
+            .map_or(self.signals.len(), |at| at + 1);
+        let mut first = self.signals;
+        let rest = first.split_off(at);
+        (Self { signals: first }, Self { signals: rest })
+    }
+
+    /// Whether the change sends nothing.
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+
     fn bluez(&mut self, signal: Signal) {
         self.signals.push((Service::Bluez, signal));
     }

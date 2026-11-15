@@ -178,6 +178,13 @@ pub enum Quirk {
     /// reply, or a busy `WirePlumber`. Tests use it to order "hands-free is
     /// back" well before "the Calls are listed" (tickets #169 and #170).
     CallsListedLate,
+    /// On going out of range, the Desktop sees the first Call go
+    /// [`CALLS_GO_APART`] before the other Calls and the AudioGateway, as
+    /// the app did when its main loop was held between them on a slow
+    /// runner (ticket #303). PipeWire sends them together; tests use it to
+    /// put a fixed gap where a stall fell. The first Call is the one at the
+    /// lowest path, the earliest still on the Phone.
+    CallsGoApart,
     /// BlueZ marks the Phone connected without sending the `Connected`
     /// `PropertiesChanged`: the Desktop's last word on the Phone stays
     /// "away" while BlueZ has it connected, as the real Desktop's was while
@@ -202,6 +209,13 @@ pub const SERVICE_LEVEL_TIME: Duration = Duration::from_millis(200);
 /// Call, counted from the drop, and within the 3 s it waits for the Calls
 /// once hands-free is back (ADR-0007).
 pub const CALLS_LISTED_LATE: Duration = Duration::from_secs(2);
+
+/// How long [`Quirk::CallsGoApart`] holds back what follows the first
+/// Call going: under the Desktop's 2 s grace for a vanished Call, so the
+/// first Call is still awaited when the AudioGateway goes even if the app
+/// is held a further 0.5 s, and long enough that a Phone back 0.6 s after
+/// the AudioGateway went is back after that first Call's own 2 s.
+pub const CALLS_GO_APART: Duration = Duration::from_millis(1_500);
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.
 pub const SLOW_REPLY: Duration = Duration::from_secs(1);
@@ -232,6 +246,7 @@ impl Quirk {
             "hangup-unanswered-once" => Some(Self::HangupUnansweredOnce),
             "slow-service-level" => Some(Self::SlowServiceLevel),
             "calls-listed-late" => Some(Self::CallsListedLate),
+            "calls-go-apart" => Some(Self::CallsGoApart),
             "connected-unannounced" => Some(Self::ConnectedUnannounced),
             "connect-never-answers-once" => Some(Self::ConnectNeverAnswersOnce),
             "connect-busy-after-unblock" => Some(Self::ConnectBusyAfterUnblock),

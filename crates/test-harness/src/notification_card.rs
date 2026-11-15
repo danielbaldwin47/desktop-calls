@@ -38,6 +38,10 @@ const LINE: u32 = 18;
 /// The timestamp's font size, and the buttons'.
 const STAMP_SIZE: u32 = 11;
 const BUTTON_SIZE: u32 = 12;
+/// The room the timestamp takes at the summary's right, and about how wide
+/// a character of Liberation Sans 14 is, in tenths of a pixel.
+const STAMP_ROOM: u32 = 32;
+const ADVANCE_TENTHS: u32 = 78;
 /// A button segment's height: Omarchy's control height and 6.
 const SEGMENT: u32 = 34;
 /// Omarchy's darkening of the text colour for the body, and for the
@@ -113,7 +117,10 @@ pub fn draw_notification_card(
          <text x=\"{right}\" y=\"{y}\" text-anchor=\"end\" font-family=\"monospace\" \
          font-size=\"{STAMP_SIZE}\" fill=\"{dim}\">now</text>",
         y = top + LINE - 4,
-        summary = escape(&notification.summary),
+        summary = escape(&elide(
+            &notification.summary,
+            right - text_left - STAMP_ROOM
+        )),
     );
     if !notification.body.is_empty() {
         let _ = write!(
@@ -121,7 +128,7 @@ pub fn draw_notification_card(
             "<text x=\"{text_left}\" y=\"{y}\" font-family=\"{TEXT_FONT}\" \
              font-size=\"{TEXT_SIZE}\" fill=\"{body_colour}\">{body}</text>",
             y = top + 2 * LINE - 4,
-            body = escape(&notification.body),
+            body = escape(&elide(&notification.body, right - text_left)),
         );
     }
     if !buttons.is_empty() {
@@ -167,6 +174,20 @@ pub fn draw_notification_card(
         border = hex(colours.border),
     );
     render(&document, output)
+}
+
+/// `text` cut short with `…` to fit `room` logical pixels at
+/// [`ADVANCE_TENTHS`], so a long name stays on the card. Omarchy wraps a
+/// long summary instead; the stand-in keeps to one line.
+fn elide(text: &str, room: u32) -> String {
+    let fits = usize::try_from(room * 10 / ADVANCE_TENTHS).unwrap_or(usize::MAX);
+    if text.chars().count() <= fits {
+        return text.to_owned();
+    }
+    text.chars()
+        .take(fits.saturating_sub(1))
+        .chain(['\u{2026}'])
+        .collect()
 }
 
 /// `colour` darkened as Qt's `darker(colour, factor)` does: its value

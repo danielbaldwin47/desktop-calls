@@ -189,8 +189,13 @@ pub(super) struct Roles {
     pub(super) border: Rgb,
     /// Selection and keyboard focus.
     pub(super) accent: Rgb,
-    /// A label on the accent.
+    /// A label on a button filled with the accent: one label on every
+    /// primary button, as Adwaita's suggested action has. White on stock
+    /// Adwaita.
     pub(super) accent_label: Rgb,
+    /// A primary button's fill: the accent, in the least deeper or paler
+    /// shade, if need be, that the accent label reads on (#320).
+    pub(super) accent_fill: Rgb,
     /// Answer: the green, in the least deeper or paler shade, if need be,
     /// that the call label reads on.
     pub(super) answer: Rgb,
@@ -247,6 +252,7 @@ impl Roles {
             raised: palette.lighter_background,
             text,
             accent: palette.accent.unwrap_or(stock.accent),
+            accent_label: None,
             answer,
             end,
             call_label: None,
@@ -255,7 +261,7 @@ impl Roles {
     }
 
     /// The roles for stock Adwaita, light or dark. Answer and End keep
-    /// white labels, as on a phone.
+    /// white labels, as on a phone, and primary buttons keep Adwaita's.
     pub(super) fn stock(dark: bool) -> Self {
         let stock = if dark { &STOCK_DARK } else { &STOCK_LIGHT };
         Self::from_base(Base {
@@ -263,6 +269,7 @@ impl Roles {
             raised: None,
             text: stock.foreground,
             accent: stock.accent,
+            accent_label: Some(WHITE),
             answer: STOCK_GREEN,
             end: STOCK_RED,
             call_label: Some(WHITE),
@@ -276,6 +283,7 @@ impl Roles {
             raised,
             text,
             accent,
+            accent_label,
             answer,
             end,
             call_label,
@@ -294,6 +302,7 @@ impl Roles {
             .unwrap_or_else(|| labels.on(&backgrounds));
         let call_label = call_label.unwrap_or_else(|| labels.on(&[answer, end]));
         let answer = under_label(answer, call_label);
+        let accent_label = accent_label.unwrap_or_else(|| labels.on(&[accent]));
         Self {
             surface,
             raised,
@@ -301,7 +310,8 @@ impl Roles {
             secondary,
             border: surface.under(text, BORDER_PERCENT),
             accent,
-            accent_label: labels.on(&[accent]),
+            accent_label,
+            accent_fill: under_label(accent, accent_label),
             answer,
             answer_ring: surface.under(answer, ANSWER_RING_PERCENT),
             end: under_label(end, call_label),
@@ -346,6 +356,8 @@ struct Base {
     raised: Option<Rgb>,
     text: Rgb,
     accent: Rgb,
+    /// A fixed label for primary buttons, else one chosen to read.
+    accent_label: Option<Rgb>,
     answer: Rgb,
     end: Rgb,
     /// A fixed label for Answer and End, else one chosen to read.

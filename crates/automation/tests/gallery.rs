@@ -12,6 +12,7 @@ const STATES: &[&str] = &[
     "incoming-call-banner-keyboard",
     "incoming-call-banner-not-in-contacts",
     "incoming-call-banner-no-keybinding",
+    "incoming-call-banner-keybinding-unreadable",
     "incoming-call-banner-withheld",
     "call-waiting-banner-keyboard",
     "call-waiting-banner-without-hold",

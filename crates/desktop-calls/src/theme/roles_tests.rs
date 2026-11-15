@@ -203,14 +203,23 @@ fn missed_reads_in_red_on_a_selected_row() {
 }
 
 #[test]
-fn the_accent_label_reads_on_the_accent() {
+fn the_accent_label_reads_on_the_accent_fill() {
     for (theme, roles) in every_theme() {
         assert_reads(
             theme,
             "the accent label",
             roles.accent_label,
-            &[("accent", roles.accent)],
+            &[("accent fill", roles.accent_fill)],
         );
+    }
+}
+
+#[test]
+fn stock_primary_buttons_keep_adwaitas_white_label_on_a_deepened_blue() {
+    for dark in [false, true] {
+        let roles = Roles::stock(dark);
+        assert_eq!(roles.accent_label, Rgb(0xff, 0xff, 0xff), "dark: {dark}");
+        assert_ne!(roles.accent_fill, roles.accent, "dark: {dark}");
     }
 }
 

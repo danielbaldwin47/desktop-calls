@@ -143,6 +143,9 @@ pub enum BannerFooter {
     /// No keybinding runs Desktop Calls, so nothing gives the Banner the
     /// keyboard: where to add one.
     NoKeybinding,
+    /// `bindings.lua` couldn't be read, so whether a keybinding gives the
+    /// Banner the keyboard isn't known: where to find out what to do.
+    KeybindingUnreadable,
     /// The Banner has the keyboard: Escape gives it back, and the choices'
     /// keys are on their buttons.
     GiveKeyboardBack,
@@ -536,6 +539,7 @@ impl State {
                         match &self.keybinding {
                             BoundKeys::NotRead => None,
                             BoundKeys::Unbound => Some(BannerFooter::NoKeybinding),
+                            BoundKeys::Unreadable => Some(BannerFooter::KeybindingUnreadable),
                             BoundKeys::Keys(keys) => Some(BannerFooter::Keybinding(keys.clone())),
                         }
                     },

@@ -108,6 +108,7 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
             parts
         }
         BannerFooter::NoKeybinding => vec![FooterPart::Words(NO_KEYBINDING)],
+        BannerFooter::KeybindingUnreadable => vec![FooterPart::Words(KEYBINDING_UNREADABLE)],
         BannerFooter::GiveKeyboardBack => vec![
             FooterPart::Key("Esc".to_owned()),
             FooterPart::Words("gives the keyboard back; the call keeps ringing"),
@@ -118,6 +119,11 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
 /// What the footer says with no keybinding set: where to add one, in the
 /// Indicator's own words for the entry (a test holds them alike).
 const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
+
+/// What the footer says when `bindings.lua` couldn't be read: that, and
+/// where the Setup Window's last page says what to do, rather than a guess
+/// that no keybinding is set (#366).
+const KEYBINDING_UNREADABLE: &str = "Couldn't read bindings.lua. Phone setup… shows what to do.";
 
 /// The footer as one line of text, as the control interface reports it: a
 /// comma sits against the key before it.

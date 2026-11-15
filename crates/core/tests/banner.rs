@@ -323,6 +323,28 @@ fn the_footer_names_the_keybinding_set_then_the_letters_that_act() {
 }
 
 #[test]
+fn with_bindings_lua_unreadable_the_footer_says_so_rather_than_guessing_none_is_set() {
+    let unreadable = Input::KeybindingRead(desktop_calls_core::HyprlandConfig {
+        command: "/usr/bin/desktop-calls".to_owned(),
+        bindings: Some(ConfigFile {
+            path: "/home/user/.config/hypr/bindings.lua".to_owned(),
+            text: None,
+            required: Vec::new(),
+        }),
+    });
+    let state = run(
+        connected(),
+        [unreadable, added(FIRST, CallState::Ringing, ALICE, 1_000)],
+    );
+    // A keybinding may well be set: the app can't tell, so it says what it
+    // knows and where the user finds what to do (#366).
+    assert_eq!(
+        footer(&state, &["A", "D"]).as_deref(),
+        Some("Couldn't read bindings.lua. Phone setup… shows what to do.")
+    );
+}
+
+#[test]
 fn with_the_keyboard_the_footer_says_escape_gives_it_back() {
     let state = run(
         connected(),

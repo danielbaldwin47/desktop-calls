@@ -88,7 +88,7 @@ pub struct Builder {
     /// Calls.
     wireplumber: Option<Vec<WirePlumberEntry>>,
     /// What Omarchy's `hypr/bindings.lua` holds, if the Desktop has one.
-    hyprland_bindings: Option<String>,
+    hyprland_bindings: Option<HyprlandBindings>,
     config_home: ConfigHome,
 }
 
@@ -101,6 +101,14 @@ pub(super) enum ConfigHome {
     /// `~/.config`, as on a real Desktop, so a file in it is named with a
     /// `~`.
     UnderHome,
+}
+
+/// What sits at Omarchy's `hypr/bindings.lua`.
+enum HyprlandBindings {
+    /// A file holding this text.
+    File(String),
+    /// Something the app finds there but can't read.
+    Unreadable,
 }
 
 /// One entry in the Desktop's `WirePlumber` drop-in folder.
@@ -465,7 +473,15 @@ impl Builder {
     /// starts. Without it, the Desktop has no Hyprland config, so no
     /// keybinding.
     pub fn hyprland_bindings(mut self, text: &str) -> Self {
-        self.hyprland_bindings = Some(text.to_owned());
+        self.hyprland_bindings = Some(HyprlandBindings::File(text.to_owned()));
+        self
+    }
+
+    /// Puts something at `hypr/bindings.lua` in the config folder that the
+    /// app finds there but can't read: a directory, which even root can't
+    /// read as a file.
+    pub fn hyprland_bindings_unreadable(mut self) -> Self {
+        self.hyprland_bindings = Some(HyprlandBindings::Unreadable);
         self
     }
 
@@ -495,11 +511,16 @@ impl Builder {
         }
         self.notification_state.set_up(&directory.join("home"));
         write_wireplumber(&directory.join("config"), self.wireplumber.take());
-        if let Some(text) = self.hyprland_bindings.take() {
-            let hypr = directory.join("config/hypr");
-            fs::create_dir_all(&hypr)
+        let hypr = directory.join("config/hypr");
+        match self.hyprland_bindings.take() {
+            Some(HyprlandBindings::File(text)) => fs::create_dir_all(&hypr)
                 .and_then(|()| fs::write(hypr.join("bindings.lua"), text))
-                .expect("write the Hyprland bindings");
+                .expect("write the Hyprland bindings"),
+            // A directory in the file's place: unreadable even to root, as
+            // CI's container runs, where a file's mode wouldn't stop it.
+            Some(HyprlandBindings::Unreadable) => fs::create_dir_all(hypr.join("bindings.lua"))
+                .expect("put a directory where the Hyprland bindings go"),
+            None => {}
         }
     }
 

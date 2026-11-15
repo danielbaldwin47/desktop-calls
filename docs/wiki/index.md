@@ -8,7 +8,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## Decisions
 
-- [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope; where the five criteria stood on 2026-11-14 and 2026-11-15, including the evening of 2026-11-15 at `2846987`: v1's agent-side work complete, the UI pass finished, the scorecard tool's 0 of 8 (item 7 FAIL on #292, item 8 NEEDS-REVIEW), and only the user's sitting remaining (added 2026-11-13; updated 2026-11-15).
+- [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope; where the five criteria stood on 2026-11-14 and 2026-11-15, including the evening of 2026-11-15 at `2846987`: v1's agent-side work complete, the UI pass finished, the scorecard tool's 0 of 8 (item 7 FAIL on #292, item 8 NEEDS-REVIEW), and only the user's sitting remaining; and late that evening at `fc72ab3`: one red run traced without a rerun, 11 of the screenshot review's 14 findings closed, and the design questions open for the user (added 2026-11-13; updated 2026-11-15).
 
 - [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb, with the audit of 2026-11-14 against the Simulated Phone and the 2026-11-15 scorecard tool's four statuses per item (updated 2026-11-15).
 
@@ -24,7 +24,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## Process
 
-- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-15, morning to afternoon, `main` up to `2846987`, with #357's later fix of that day's gallery failure noted: the after-v1 merges, the review gate, the `/tmp` quota, the UI pass finished, v1's agent-side work complete and what is open for the user; before it, 2026-11-15, CI back on GitHub and green; and 2026-11-14, the Call Pill, Calls Off and the UI pass merged).
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-15 evening, `main` from `d71a7f4` up to `fc72ab3`: PRs #357 and #359 to #370, #104 closed as not reproducible, main's red after #359 traced by event order without a rerun (#362, #363), and the design questions open for the user; before it, 2026-11-15, morning to afternoon, `main` up to `2846987`, with #357's later fix of that day's gallery failure noted: the after-v1 merges, the review gate, the `/tmp` quota, the UI pass finished, v1's agent-side work complete and what is open for the user; before it, 2026-11-15, CI back on GitHub and green; and 2026-11-14, the Call Pill, Calls Off and the UI pass merged).
 
 - [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05), the disk filling (2026-11-14), and the `/tmp` quota, the review gate and two CI reruns (2026-11-15).
 

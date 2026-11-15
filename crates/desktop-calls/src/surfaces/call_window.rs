@@ -99,12 +99,18 @@ pub(super) struct CallWindow {
     fade: RefCell<Option<adw::TimedAnimation>>,
 }
 
-/// The state line: an icon, what it says, and the HD mark.
+/// The state line: an icon, what it says, and the HD mark; and at its
+/// right, while Escape collapses the window, the Esc hint. The hint stays
+/// while a notice says what the state line would.
 struct StateRow {
+    /// The state line and the hint, one row.
+    bar: gtk::Box,
     row: gtk::Box,
     icon: IconView,
     text: gtk::Label,
     hd: gtk::Label,
+    /// Esc and what it does, in the footers' keycap style.
+    escape: gtk::Box,
 }
 
 /// A notice in the warning tint: a heading, if it has one, over what to do.
@@ -205,7 +211,7 @@ impl CallWindow {
         let content = gtk::Box::new(gtk::Orientation::Vertical, space::M);
         content.append(&held.row);
         content.append(&who);
-        content.append(&state.row);
+        content.append(&state.bar);
         content.append(&notice.row);
         content.append(&tones);
         content.append(&keypad);
@@ -548,11 +554,24 @@ impl StateRow {
         row.append(&icon.area);
         row.append(&text);
         row.append(&hd);
+        let escape = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        escape.add_css_class(class::FOOTER_LINE);
+        escape.add_css_class(class::RUN);
+        // At the right, also while a notice hides the state line.
+        escape.set_hexpand(true);
+        escape.set_halign(gtk::Align::End);
+        escape.set_valign(gtk::Align::Center);
+        escape.set_visible(false);
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+        bar.append(&row);
+        bar.append(&escape);
         Self {
+            bar,
             row,
             icon,
             text,
             hd,
+            escape,
         }
     }
 }

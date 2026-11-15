@@ -190,10 +190,6 @@ const ACTIONS: &[(&str, KeyPath)] = &[
 /// the open ticket that shows them. Close on a Setup Window step is not
 /// here: Escape closes it, and its footer says so on every step.
 const UNSHOWN: &[(&str, u32)] = &[
-    (
-        "Collapse the Call Window to the Call Pill, the Call still live: Escape",
-        300,
-    ),
     ("Send tones by pasting them: Ctrl+V", 301),
     ("Move a page down the Call History: Page Down", 301),
     ("Move a page up the Call History: Page Up", 301),
@@ -235,7 +231,7 @@ const CASES: [&str; 8] = [
 ];
 
 /// Open tickets that add a missing key path, or show a key.
-const OPEN_TICKETS: [u32; 4] = [292, 296, 300, 301];
+const OPEN_TICKETS: [u32; 3] = [292, 296, 301];
 
 #[test]
 fn every_action_is_performed_by_a_case_or_names_its_ticket() {
@@ -597,6 +593,7 @@ fn the_call_window_and_the_call_pill_by_keys_alone() {
 
     // Escape collapses the Call Window; the Call stays live.
     let hang_ups = asked(&wait_for_asked(&harness, "Answer", 1), "Hangup");
+    wait_for_call_window_showing(&harness, "collapse", "Esc");
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape collapses the Call Window", DEADLINE, |state| {
         state.surface("call-pill").is_some() && state.surface("call-window").is_none()

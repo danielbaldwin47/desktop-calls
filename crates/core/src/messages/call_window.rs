@@ -3,7 +3,7 @@
 
 use super::{Failure, Label, caller_name, failure, label};
 use crate::call::Caller;
-use crate::machine::StateLine;
+use crate::machine::{CallWindowView, StateLine};
 use crate::matching::ContactMatch;
 
 /// What the Call Window's state line says for `line`, about a Call with
@@ -50,6 +50,18 @@ pub fn contact_lost(notice: Failure) -> (&'static str, &'static str) {
         other => failure(other).text,
     };
     (label(Label::ConnectionToPhoneLost), next)
+}
+
+/// The Call Window's hint for Escape, beside its state line: the keycaps,
+/// as shown, and what pressing it does, while Escape collapses the window
+/// to the Call Pill. `None` while Escape only gives the keyboard back, as
+/// before the Call connects. "Collapse" says the Call stays, where "Close"
+/// could read as hanging up (ticket #300).
+#[must_use]
+pub fn call_window_escape(
+    view: &CallWindowView,
+) -> Option<(&'static [&'static str], &'static str)> {
+    view.collapses_on_escape().then_some((&["Esc"], "Collapse"))
 }
 
 /// The Call timer's text for `seconds`: `m:ss`, or `h:mm:ss` from an hour.

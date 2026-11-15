@@ -6,9 +6,9 @@ use std::io::{BufRead as _, BufReader};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use zbus::Connection;
 use zbus::fdo::DBusProxy;
@@ -17,10 +17,34 @@ use super::app::{collect_app_errors, collect_missed_calls, collect_published};
 use super::simulated_phone::PhoneIdentity;
 use super::{Harness, JOURNAL_SOCKET};
 use crate::process_group::ProcessGroup;
+use crate::prune::prune_older_than;
 use crate::screen::{Screen, ScreenKind};
 use crate::stand_ins::StandIns;
 use crate::timeline::{Timeline, unique_name};
 use crate::{OmarchyTheme, Theme, hyprland, omarchy_quiet, stand_ins};
+
+/// What every scenario's folder in the temporary directory starts with.
+const SCENARIO_DIRECTORY_PREFIX: &str = "desktop-calls-test-";
+
+/// How old a scenario's folder is before the next test process removes it.
+/// A folder from a run that is still going is never this old.
+const STALE_AFTER: Duration = Duration::from_hours(24);
+
+/// Before the first scenario of this test process, removes the scenario
+/// folders that earlier processes left in the temporary directory over
+/// [`STALE_AFTER`] ago: a failed scenario keeps its folder, and a killed
+/// process never runs `Harness::drop`.
+fn prune_stale_scenario_directories() {
+    static PRUNED: Once = Once::new();
+    PRUNED.call_once(|| {
+        prune_older_than(
+            &std::env::temp_dir(),
+            SCENARIO_DIRECTORY_PREFIX,
+            STALE_AFTER,
+            SystemTime::now(),
+        );
+    });
+}
 
 /// Whether the Desktop animates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -471,8 +495,9 @@ impl Builder {
     /// If any of them fails to start; the panic says which and where its log is.
     #[must_use]
     pub fn start(mut self) -> Harness {
+        prune_stale_scenario_directories();
         let directory = tempfile::Builder::new()
-            .prefix("desktop-calls-test-")
+            .prefix(SCENARIO_DIRECTORY_PREFIX)
             .tempdir()
             .expect("create the scenario directory")
             .keep();

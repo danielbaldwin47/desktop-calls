@@ -894,6 +894,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::ConfirmPairing
         | Input::RejectPairing
         | Input::PairingFailed(_)
+        | Input::PairDone { .. }
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
         | Input::RetryHandsFree

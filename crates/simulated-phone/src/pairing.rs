@@ -13,7 +13,10 @@
 //!   Phone's side always accepts. Confirmed: `Paired` and `Bonded` go true
 //!   and `Pair` returns. Refused: the connection drops and `Pair` fails with
 //!   `org.bluez.Error.AuthenticationRejected`. With no agent it fails with
-//!   `org.bluez.Error.AuthenticationFailed`.
+//!   `org.bluez.Error.AuthenticationFailed`. With `--paired-signal-held`,
+//!   `Paired` goes true without a signal, as BlueZ 5.87 holds it back while
+//!   the Phone's services aren't resolved (`device_set_paired`), while
+//!   `Bonded` is signalled at once (ticket #372).
 //! - The control interface's `PairFromPhone` is the person holding the Phone
 //!   tapping the Desktop on its "Pair new device" screen. It needs the
 //!   adapter `Discoverable`. The agent is asked the same way; once
@@ -76,6 +79,16 @@ pub struct Nearby {
     /// Another Phone with this name is paired too, and out of range.
     #[arg(long)]
     old_phone: Option<String>,
+    /// Each pairing's `Paired` is held back: set, so a read says so, but
+    /// never signalled, while `Bonded` is. Never released: as BlueZ 5.87
+    /// whose resolving of the Phone's services gets nowhere.
+    #[arg(long)]
+    paired_signal_held: bool,
+    /// The unpaired Phone's services are never resolved: its `UUIDs` stay
+    /// the ones it advertised, without the Hands-Free Audio Gateway, as
+    /// BlueZ keeps them until it has resolved its services.
+    #[arg(long)]
+    services_unresolved: bool,
 }
 
 /// Whether the Phone shares Calls with the Desktop: its "Phone calls"
@@ -119,6 +132,8 @@ pub struct Pairing {
     /// The AudioGateway of the other Phone, while it is connected with
     /// hands-free.
     pub other_gateway: Option<OwnedObjectPath>,
+    /// `Paired` is set without a signal (`--paired-signal-held`).
+    paired_signal_held: bool,
 }
 
 impl Pairing {
@@ -129,7 +144,10 @@ impl Pairing {
         nearby: &Nearby,
         range: &mut range::Range,
     ) -> zbus::Result<Self> {
-        let mut pairing = Self::default();
+        let mut pairing = Self {
+            paired_signal_held: nearby.paired_signal_held,
+            ..Self::default()
+        };
         if nearby.unpaired
             && let Some(mut interfaces) = tree.remove(phone)
         {
@@ -138,6 +156,9 @@ impl Pairing {
                     device.insert(name.to_owned(), OwnedVariant::from(false));
                 }
                 device.insert("RSSI".to_owned(), OwnedVariant::from(-52_i16));
+                if nearby.services_unresolved {
+                    device.insert("UUIDs".to_owned(), bluez::advertised_uuids()?);
+                }
             }
             range.reachable = true;
             pairing.undiscovered.push((phone.clone(), interfaces));
@@ -603,9 +624,13 @@ fn ask_agent_with(
         if confirmed {
             world.range.forgot_pairing = false;
             world.range.reachable = true;
+            let held = world.pairing.paired_signal_held;
             ["Paired", "Bonded"]
                 .into_iter()
                 .filter_map(|name| set(world, device.as_str(), bluez::DEVICE, name, true.into()))
+                // BlueZ 5.87 signals `Paired` only once the Phone's
+                // services are resolved (`device_set_paired`), and may never.
+                .filter(|signal| !(held && signal.changes("Paired")))
                 .collect::<Vec<_>>()
         } else {
             set(

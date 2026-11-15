@@ -318,6 +318,21 @@ impl Builder {
         self
     }
 
+    /// BlueZ holds back the `Paired` signal of each pairing, as BlueZ 5.87
+    /// does while the Phone's services aren't resolved: `Bonded` is
+    /// signalled, and a read says `Paired`, but no signal does (ticket #372).
+    pub fn paired_signal_held(mut self) -> Self {
+        self.nearby.push("--paired-signal-held".to_owned());
+        self
+    }
+
+    /// BlueZ never resolves the unpaired Phone's services, so its `UUIDs`
+    /// lack the Hands-Free Audio Gateway, before pairing and after.
+    pub fn services_unresolved(mut self) -> Self {
+        self.nearby.push("--services-unresolved".to_owned());
+        self
+    }
+
     /// Headphones named `name` are nearby, not paired: discovery finds them
     /// beside the Phone.
     pub fn headphones_nearby(mut self, name: &str) -> Self {

@@ -257,8 +257,16 @@ impl Step {
     /// Whether pairing with `address` is under way, so its finishing means
     /// the Phone is paired.
     fn pairs(&self, address: &str) -> bool {
-        matches!(self, Self::Pairing(phone) | Self::Confirm(phone, _) | Self::Confirmed(phone)
-            if phone.address.eq_ignore_ascii_case(address))
+        self.pairing()
+            .is_some_and(|phone| phone.address.eq_ignore_ascii_case(address))
+    }
+
+    /// The Phone being paired, if pairing is under way.
+    fn pairing(&self) -> Option<&Phone> {
+        match self {
+            Self::Pairing(phone) | Self::Confirm(phone, _) | Self::Confirmed(phone) => Some(phone),
+            _ => None,
+        }
     }
 
     /// The Phone that may be paired and not yet connected for Calls. A
@@ -448,6 +456,7 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
         Input::ConfirmPairing => answer_code(state, true, effects),
         Input::RejectPairing => answer_code(state, false, effects),
         Input::PairingFailed(failure) => pairing_failed(state, failure),
+        Input::PairDone { address } => pair_done(state, &address, effects),
         Input::HandsFreeRefused => {
             if let Some(setup) = state.setup.as_mut()
                 && let Step::AskedForHandsFree(phone) = &setup.step
@@ -648,6 +657,17 @@ fn pairing_failed(state: &mut State, failure: PairingFailure) {
         PairingFailure::Unreachable => SetupNotice::PairingUnreachable,
         PairingFailure::Failed => SetupNotice::PairingFailed,
     });
+}
+
+/// BlueZ paired the Phone the Setup Window is pairing, or had it paired
+/// already: it goes on as paired, without waiting for BlueZ to signal it,
+/// which BlueZ may never do (ticket #372). Whether the Phone offers Calls
+/// is for asking it for hands-free to find out.
+fn pair_done(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
+    let phone = state.setup.as_ref().and_then(|setup| setup.step.pairing());
+    if let Some(phone) = phone.filter(|phone| phone.address.eq_ignore_ascii_case(address)) {
+        paired(state, phone.clone(), effects);
+    }
 }
 
 /// An earlier run kept the Phone with `address`, and its `name`, as the

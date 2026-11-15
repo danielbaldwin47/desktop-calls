@@ -90,9 +90,11 @@ impl Pairing {
             Effect::AnswerPairingCode { confirm } => answer(&self.pending, confirm),
             Effect::PairPhone { address } => {
                 MainContext::default().spawn_local(async move {
-                    if let Err(failure) = pair(&system, &address).await {
-                        let _ = inputs.unbounded_send(Input::PairingFailed(failure));
-                    }
+                    let input = match pair(&system, &address).await {
+                        Ok(()) => Input::PairDone { address },
+                        Err(failure) => Input::PairingFailed(failure),
+                    };
+                    let _ = inputs.unbounded_send(input);
                 });
             }
             Effect::TrustPhone { address } => {
@@ -240,7 +242,8 @@ async fn stop(system: &Connection) {
 }
 
 /// `Device1.Pair` on the Phone with `address`. Its code comes through the
-/// agent; once paired, BlueZ's `Paired` says so.
+/// agent; its returning, or `AlreadyExists`, means paired, since BlueZ may
+/// hold `Paired` back (ticket #372).
 async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> {
     let Ok(Some(device)) = bluez::find_device(system, address).await else {
         return Err(pairing_failed(
@@ -253,12 +256,18 @@ async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> 
         .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Pair", &())
         .await
     {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            paired_by_bluez(address, "Pair returned");
+            Ok(())
+        }
         Err(zbus::Error::MethodError(name, message, _)) => {
             let detail = format!("{name}: {}", message.unwrap_or_default());
             let failure = match name.as_str() {
                 // Paired already, from the Phone's side meanwhile.
-                "org.bluez.Error.AlreadyExists" => return Ok(()),
+                "org.bluez.Error.AlreadyExists" => {
+                    paired_by_bluez(address, &detail);
+                    return Ok(());
+                }
                 "org.bluez.Error.AuthenticationRejected"
                 | "org.bluez.Error.AuthenticationCanceled" => PairingFailure::Rejected,
                 "org.bluez.Error.AuthenticationTimeout"
@@ -458,6 +467,16 @@ async fn set(
         .map(drop)
 }
 
+/// BlueZ says the Phone with `address` is paired, in answer to `Pair`.
+fn paired_by_bluez(address: &str, detail: &str) {
+    tracing::info!(
+        event_kind = %EventKind::Paired,
+        phone_address = %address,
+        detail,
+        "BlueZ paired the Phone"
+    );
+}
+
 fn setup_failed(step: &str, detail: &str) {
     tracing::warn!(
         event_kind = %EventKind::SetupFailed,
@@ -518,6 +537,12 @@ impl Agent {
         #[zbus(connection)] system: &Connection,
     ) -> Result<(), AgentError> {
         let phone = phone_at(system, device.as_str()).await;
+        tracing::info!(
+            event_kind = %EventKind::PairingCodeAsked,
+            phone_address = %phone.address,
+            "BlueZ asked whether the pairing code shows on both screens"
+        );
+        let address = phone.address.clone();
         let (sender, receiver) = oneshot::channel();
         // A request BlueZ asked earlier is turned down.
         if let Some(earlier) = self
@@ -532,7 +557,19 @@ impl Agent {
             phone,
             code: passkey,
         });
-        match receiver.await {
+        let answer = receiver.await;
+        let answered = match answer {
+            Ok(true) => "confirmed",
+            Ok(false) => "turned down",
+            Err(_) => "cancelled",
+        };
+        tracing::info!(
+            event_kind = %EventKind::PairingCodeAnswered,
+            phone_address = %address,
+            answered,
+            "Answered BlueZ's pairing code: {answered}"
+        );
+        match answer {
             Ok(true) => Ok(()),
             Ok(false) => Err(AgentError::Rejected("Turned down".to_owned())),
             Err(_) => Err(AgentError::Canceled("Cancelled".to_owned())),
@@ -559,6 +596,11 @@ impl Agent {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .is_some();
+        tracing::info!(
+            event_kind = %EventKind::PairingCancelled,
+            waiting = cancelled,
+            "BlueZ cancelled its pairing request"
+        );
         if cancelled {
             let _ = self
                 .inputs

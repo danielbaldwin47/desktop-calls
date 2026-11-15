@@ -144,7 +144,8 @@ impl Devices {
         if let Some(address) = self.phones.get(path) {
             inputs.extend(connected.map(|connected| presence(address, connected)));
         } else if let Some(phone) = paired_phone(device) {
-            tracing::debug!(
+            // At info: diagnosing the Setup Window needs it (ticket #372).
+            tracing::info!(
                 event_kind = %EventKind::PhonePaired,
                 phone_address = %phone.address,
                 "Found a paired Phone"
@@ -176,10 +177,7 @@ impl Devices {
 /// The Phone a `Device1` describes, if it isn't paired, says it is a Phone
 /// by its `Class`, and has a name to list it by.
 fn nearby_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
-    let paired = device
-        .get("Paired")
-        .and_then(|paired| bool::try_from(paired.clone()).ok())
-        .unwrap_or(false);
+    let paired = paired(device);
     // The major device class, bits 8 to 12 of the Class of Device: 2 is
     // Phone (Bluetooth Assigned Numbers, 2.8.2).
     let is_phone = device
@@ -199,6 +197,20 @@ fn nearby_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
     Some(Phone {
         name: text("Alias").or_else(|| text("Name"))?,
         address: text("Address")?,
+    })
+}
+
+/// Whether a `Device1` is paired: `Paired`, or `Bonded`. BlueZ 5.87 signals
+/// `Bonded` at once, but holds back `Paired` until it has resolved the
+/// device's services, which a Phone that paired from its own screen may
+/// never let it do; a read says `Paired` all along (`device_set_paired`,
+/// ticket #372). A bond is a stored pairing, so either will do.
+fn paired(device: &HashMap<String, OwnedVariant>) -> bool {
+    ["Paired", "Bonded"].into_iter().any(|name| {
+        device
+            .get(name)
+            .and_then(|value| bool::try_from(value.clone()).ok())
+            .unwrap_or(false)
     })
 }
 
@@ -558,10 +570,7 @@ fn bounce_failed(kind: BounceError, error: &zbus::Error) -> BounceError {
 
 /// The Phone a `Device1` describes, if it is paired and offers hands-free.
 fn paired_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
-    let paired = device
-        .get("Paired")
-        .and_then(|paired| bool::try_from(paired.clone()).ok())
-        .unwrap_or(false);
+    let paired = paired(device);
     let offers_hands_free = device
         .get("UUIDs")
         .and_then(|uuids| Vec::<String>::try_from(uuids.clone()).ok())

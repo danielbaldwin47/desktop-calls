@@ -76,6 +76,16 @@ pub(super) const BANNER_STATES: &[State] = &[
         prepare: with_keybinding,
         reach: |harness| {
             connect(harness);
+            // The app's first frame of a surface held its main loop up for
+            // 1.6 s of these 2 s on a loaded runner (run 43678330490), and
+            // the app was stopped too late. A Banner drawn and declined
+            // first leaves the identifying Banner's frame quick.
+            let warm_up = ring(harness);
+            harness.wait_for_app_log("Drew the banner surface's first frame", DEADLINE);
+            harness.decline(warm_up);
+            harness.wait_for_app("the first Banner has gone", DEADLINE, |state| {
+                state.calls.is_empty() && state.surface("banner").is_none()
+            });
             // A withheld number: the Banner identifies the caller for as long
             // as the Phone may still report one, longer than the
             // `late-line-identification` quirk's number takes.

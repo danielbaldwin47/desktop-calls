@@ -11,7 +11,10 @@
 //! holds every process's log: the app's own log file, which the app writes
 //! because the harness hides the systemd journal from it, and the standard
 //! error of each process. With [`KEEP_SCENARIO_LOGS`] set, passing scenarios
-//! keep theirs too.
+//! keep theirs too. Kept folders, and those of killed test processes, are
+//! removed by the next test process: before its first scenario starts, it
+//! deletes every `desktop-calls-test-*` folder in the temporary directory
+//! that was last modified over a day ago (`prune.rs`).
 //!
 //! Every process a scenario starts dies with it, even when the test process
 //! is killed: see `process_group.rs`.
@@ -53,6 +56,7 @@ mod input;
 mod notification_card;
 mod omarchy_quiet;
 mod process_group;
+mod prune;
 mod redraw;
 mod screen;
 mod screencopy;

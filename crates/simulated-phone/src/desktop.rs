@@ -410,13 +410,8 @@ impl Systemd {
         } else {
             "done"
         };
-        self.send_job_removed(
-            &emitter,
-            unrelated_id,
-            "wireplumber.service",
-            unrelated_result,
-        )
-        .await?;
+        self.send_job_removed(&emitter, unrelated_id, &name, unrelated_result)
+            .await?;
         if let Some(result) = result {
             self.send_job_removed(&emitter, id, &name, result).await?;
         }

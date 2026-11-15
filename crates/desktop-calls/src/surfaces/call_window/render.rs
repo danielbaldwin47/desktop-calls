@@ -25,6 +25,7 @@ impl CallWindow {
         }
         let Some(view) = view else {
             self.stop_ticker();
+            self.handoff_progress.show(false);
             self.surface.hide();
             self.pill.hide();
             self.reset_change();

@@ -223,7 +223,14 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
 #[test]
 #[ignore = "one scenario at a time: just test-file incoming_call_surfaces the_first_banner --ignored --ci-like"]
 fn the_first_banner_shows_without_holding_up_the_main_loop() {
-    let harness = connected_on_screen();
+    // Timed with animations on, the ringing dot breathing, as on the
+    // Desktop (#234).
+    let harness = connected(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .full_motion(),
+    );
     // As for a person's first Call, which comes long after login.
     harness.wait_for_first_frames_prepared(FIRST_FRAMES_DEADLINE);
 

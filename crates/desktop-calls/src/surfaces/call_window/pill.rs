@@ -41,6 +41,8 @@ const BUTTON_SIZE: i32 = 32;
 const LIVE_DOT: &str = "live";
 const STATE_ICON: &str = "state";
 const CHEVRON: &str = "chevron";
+/// Nothing: the lead keeps its room once the Call Pill is quiet.
+const QUIET: &str = "quiet";
 
 /// The Call Pill.
 pub(super) struct CallPill {
@@ -296,8 +298,10 @@ impl CallPill {
         tag
     }
 
-    /// Shows what leads the strip at rest, or nothing once it is quiet.
-    /// The chevron takes its place while the pointer is over the body.
+    /// Shows what leads the strip at rest, or nothing once it is quiet,
+    /// in the same room, so who the Call is with doesn't move (ticket
+    /// #323). The chevron takes its place while the pointer is over the
+    /// body.
     fn show_lead(&self, lead: Option<CallPillLead>) {
         let icon = match lead {
             Some(CallPillLead::Muted) => Some(Icon::MicrophoneMuted),
@@ -318,7 +322,9 @@ impl CallPill {
             CallPillLead::Muted | CallPillLead::OnPhone | CallPillLead::OnHold => STATE_ICON,
         });
         self.pointer.at_rest.set(at_rest);
-        self.lead.set_visible(at_rest.is_some());
+        if at_rest.is_none() {
+            self.lead.set_visible_child_name(QUIET);
+        }
         self.pointer.show(&self.lead);
     }
 
@@ -391,8 +397,8 @@ pub(super) fn calls_off_tag() -> gtk::Label {
     tag
 }
 
-/// The strip's lead, 16 px square: the live dot, the state icon, or the
-/// chevron. Returns it and the state icon.
+/// The strip's lead, 16 px square: the live dot, the state icon, the
+/// chevron, or nothing. Returns it and the state icon.
 fn lead() -> (gtk::Stack, IconView) {
     let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     dot.add_css_class(class::LIVE_DOT);
@@ -407,6 +413,7 @@ fn lead() -> (gtk::Stack, IconView) {
     lead.add_named(&dot, Some(LIVE_DOT));
     lead.add_named(&state_icon.area, Some(STATE_ICON));
     lead.add_named(&chevron.area, Some(CHEVRON));
+    lead.add_named(&gtk::Box::new(gtk::Orientation::Horizontal, 0), Some(QUIET));
     (lead, state_icon)
 }
 

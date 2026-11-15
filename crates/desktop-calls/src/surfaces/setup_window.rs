@@ -722,6 +722,7 @@ fn button_intents(step: &SetupStep) -> Vec<Input> {
         SetupStep::PhoneCallsOff { .. } | SetupStep::PhoneUnreachable { .. } => {
             vec![Input::RetryHandsFree, Input::CloseSetupWindow]
         }
+        SetupStep::PairingLost { .. } => vec![Input::PairAgain, Input::CloseSetupWindow],
         SetupStep::ContactsPromptTimedOut { .. } => {
             vec![Input::RetryContacts, Input::SkipContacts]
         }
@@ -738,6 +739,7 @@ fn button_intents(step: &SetupStep) -> Vec<Input> {
         } => vec![Input::ConfirmKeybinding, Input::CancelKeybinding],
         SetupStep::Choose { .. }
         | SetupStep::Pairing { .. }
+        | SetupStep::PairingAgain { .. }
         | SetupStep::Confirmed { .. }
         | SetupStep::Connecting { .. }
         | SetupStep::ContactsWarning { .. }

@@ -1,7 +1,9 @@
 //! Scenarios: the Setup Window pairs a Phone from nothing, with the same
 //! code on both screens, from either side; checks the Phone shares Calls;
-//! opens again from the Indicator, the control interface and the command
-//! line; pairs again after the Phone forgot the pairing; and switches to a
+//! pairs again, on Pair again, a Phone that forgot the pairing as it was
+//! asked for hands-free; opens again from the Indicator, the control
+//! interface and the command line; pairs again after the Phone forgot the
+//! pairing; and switches to a
 //! second Phone (ticket #21; polish scorecard items 4, 5, 7 and 8). Every
 //! step is taken with synthetic keys alone.
 
@@ -267,6 +269,83 @@ fn a_phone_refusing_hands_free_shows_where_to_switch_phone_calls_on() {
 
     // The user switches Phone calls on, and tries again.
     harness.simulated_phone().set_hands_free("when-asked");
+    harness.keyboard().press(Key::Return);
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+}
+
+/// Pairs the Phone, which refuses hands-free; then it forgets this computer
+/// while the user switches Phone calls on, and the user tries again. Waits
+/// for the window to say the pairing is lost.
+fn pairing_lost_as_asked_for_hands_free(harness: &Harness) {
+    harness.simulated_phone().set_hands_free("refused");
+    wait_for_phone_listed(harness, STARTUP);
+    harness.keyboard().press(Key::Return);
+    same_code_shown(harness);
+    harness.keyboard().press(Key::Return);
+    wait_for_step(harness, "phone-calls-off", CONNECT_DEADLINE);
+
+    harness.simulated_phone().set_hands_free("when-asked");
+    harness.simulated_phone().forget_pairing_keeping_link();
+    harness.keyboard().press(Key::Return);
+
+    let state = wait_for_step(harness, "pairing-lost", CONNECT_DEADLINE);
+    let summary = field(&state, "summary").unwrap_or_default();
+    assert!(
+        summary.contains("no longer has this computer paired"),
+        "{summary}"
+    );
+    assert_eq!(field(&state, "buttons"), Some("Pair again\nClose"));
+}
+
+/// A Phone that forgot the pairing answers the ask for hands-free with
+/// BlueZ's `key-missing`, not a refusal: the window says so, rather than
+/// send the user to a "Phone calls" setting that is on, where each Try
+/// again started another pairing prompt on the Phone. Pair again, and only
+/// that, removes this computer's stale pairing, finds the Phone again and
+/// pairs it, with no Phone to choose (ticket #377).
+#[test]
+fn a_phone_that_forgot_the_pairing_while_asked_for_hands_free_is_paired_again() {
+    let harness = fresh_install();
+    pairing_lost_as_asked_for_hands_free(&harness);
+    let removes = |harness: &Harness| {
+        recorded(harness)
+            .iter()
+            .filter(|call| call.member == "RemoveDevice")
+            .count()
+    };
+    assert_eq!(removes(&harness), 0, "nothing removed before Pair again");
+
+    harness.keyboard().press(Key::Return);
+    same_code_shown(&harness);
+    assert_eq!(removes(&harness), 1, "the stale pairing removed once");
+    harness.keyboard().press(Key::Return);
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+}
+
+/// If BlueZ won't remove the stale pairing, the window says so and what to
+/// do, and Pair again tries once more (ticket #377).
+#[test]
+fn a_stale_pairing_that_cannot_be_removed_says_what_to_do() {
+    let harness = fresh_install();
+    pairing_lost_as_asked_for_hands_free(&harness);
+    harness.simulated_phone().fail_next_remove_device();
+
+    harness.keyboard().press(Key::Return);
+    let state = harness.wait_for_app(
+        "the Setup Window says the old pairing wasn't removed",
+        CONNECT_DEADLINE,
+        |state| {
+            field(state, "step") == Some("pairing-lost")
+                && field(state, "notice").is_some_and(|notice| notice.contains("couldn't remove"))
+        },
+    );
+    let notice = field(&state, "notice").unwrap_or_default();
+    assert!(notice.contains("Bluetooth settings"), "{notice}");
+
+    harness.keyboard().press(Key::Return);
+    same_code_shown(&harness);
     harness.keyboard().press(Key::Return);
     connected(&harness);
     wait_for_step(&harness, "done", CONNECT_DEADLINE);

@@ -31,6 +31,8 @@ trait SimulatedPhone1 {
 
     fn forget_pairing_keeping_link(&self) -> zbus::Result<()>;
 
+    fn fail_next_remove_device(&self) -> zbus::Result<()>;
+
     fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
 
     fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
@@ -279,6 +281,17 @@ impl SimulatedPhone<'_> {
     pub fn forget_pairing_keeping_link(&self) {
         zbus::block_on(async { self.proxy().await?.forget_pairing_keeping_link().await })
             .expect("have the Simulated Phone forget the pairing, keeping the link");
+    }
+
+    /// Makes BlueZ fail the next `Adapter1.RemoveDevice` with
+    /// `org.bluez.Error.Failed`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn fail_next_remove_device(&self) {
+        zbus::block_on(async { self.proxy().await?.fail_next_remove_device().await })
+            .expect("have the Simulated BlueZ fail the next RemoveDevice");
     }
 
     /// Pairs from the Phone's side, as its owner does by tapping the Desktop

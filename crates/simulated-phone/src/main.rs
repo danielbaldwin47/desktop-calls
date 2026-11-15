@@ -446,6 +446,11 @@ impl Control {
         self.range_changed(change, &emitter).await
     }
 
+    /// Fails the next `Adapter1.RemoveDevice` with `org.bluez.Error.Failed`.
+    fn fail_next_remove_device(&self) {
+        lock(&self.world).pairing.fail_next_remove = true;
+    }
+
     /// The person holding the Phone taps the Desktop on its "Pair new
     /// device" screen, which needs the Desktop discoverable. Returns the
     /// passkey the Phone shows; `PairingRequests` says how it went.

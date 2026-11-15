@@ -21,6 +21,11 @@ pub enum SetupStep {
     PhoneCallsOff { phone: Phone },
     /// The Phone didn't answer: out of range, or its Bluetooth is off.
     PhoneUnreachable { phone: Phone },
+    /// The Phone no longer has this computer paired: Pair again.
+    PairingLost { phone: Phone },
+    /// Pair again: removing this computer's old pairing, and looking for
+    /// the Phone to pair it afresh.
+    PairingAgain { phone: Phone },
     /// Connected for Calls; the Phone is about to ask whether to share
     /// Contacts.
     ContactsWarning { phone: Phone },
@@ -63,6 +68,8 @@ impl SetupStep {
             Self::Connecting { .. } => "connecting",
             Self::PhoneCallsOff { .. } => "phone-calls-off",
             Self::PhoneUnreachable { .. } => "phone-unreachable",
+            Self::PairingLost { .. } => "pairing-lost",
+            Self::PairingAgain { .. } => "pairing-again",
             Self::ContactsWarning { .. } => "contacts-warning",
             Self::ContactsPrompt { .. } => "contacts-prompt",
             Self::ContactsPromptTimedOut { .. } => "contacts-prompt-timed-out",

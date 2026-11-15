@@ -130,6 +130,8 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         ),
         SetupStep::PhoneCallsOff { phone } => phone_calls_off(&mut text, phone, &desktop),
         SetupStep::PhoneUnreachable { phone } => phone_unreachable(&mut text, phone),
+        SetupStep::PairingLost { phone } => pairing_lost(&mut text, phone),
+        SetupStep::PairingAgain { phone } => pairing_again(phone),
         SetupStep::ContactsWarning { phone } => contacts_warning(&mut text, phone),
         SetupStep::ContactsPrompt { deadline, .. } => contacts_prompt(&mut text, *deadline, now),
         SetupStep::ContactsPromptTimedOut { .. } => contacts_prompt_timed_out(&mut text),
@@ -328,6 +330,35 @@ fn phone_unreachable(text: &mut SetupWindowText, phone: &Phone) -> Page {
             Instruction::here("Then choose Try again."),
         ],
         vec!["Try again", "Close"],
+    )
+}
+
+fn pairing_lost(text: &mut SetupWindowText, phone: &Phone) -> Page {
+    text.summary = Some(format!(
+        "{} no longer has this computer paired, so it can't share calls.",
+        phone.name
+    ));
+    (
+        format!("Pair {} again", phone.name),
+        vec![Instruction::here(
+            "Choose Pair again: this computer forgets its old pairing and pairs with your phone afresh.",
+        )],
+        vec!["Pair again", "Close"],
+    )
+}
+
+/// The Phone is found only while its "Pair new device" screen is open
+/// (inferred from Android's behaviour; not measured on the Pixel).
+fn pairing_again(phone: &Phone) -> Page {
+    (
+        format!("Pairing with {} again…", phone.name),
+        vec![
+            Instruction::phone(
+                "Open Settings, then Connected devices, then Pair new device, so this computer finds it.",
+            ),
+            Instruction::phone("When it asks, check the code and tap Pair."),
+        ],
+        vec!["Cancel"],
     )
 }
 
@@ -625,6 +656,9 @@ fn notice(notice: &SetupNotice) -> String {
             "Your phone didn't answer; check its Bluetooth is on and it's nearby, then try again."
         }
         SetupNotice::PairingFailed => "Pairing didn't finish; choose your phone to try again.",
+        SetupNotice::PairingNotRemoved => {
+            "This computer couldn't remove its old pairing with your phone; remove your phone in this computer's Bluetooth settings, then choose Pair again."
+        }
         SetupNotice::KeybindingNotAdded => {
             "The keybinding couldn't be added to the Hyprland config; choose Add keybinding to try again."
         }

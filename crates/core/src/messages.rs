@@ -5,11 +5,10 @@
 //! other code writes text for the user.
 
 use crate::call::{AudioLocation, Caller, Timestamp};
-use crate::contacts::CallHistoryKind;
 use crate::contacts::NumberLabel;
 use crate::indicator::{IndicatorEntry, IndicatorStatus, IndicatorView};
 use crate::machine::RingingCaller;
-use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
+use crate::matching::ContactMatch;
 use crate::missed::MissedCallNotice;
 use crate::{ConnectionState, Phone};
 
@@ -27,7 +26,7 @@ pub use banner::{
     FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
 };
 pub use call_pill::{call_pill_tag, call_pill_tooltip, calls_off_after_tag, show_call_tooltip};
-pub use call_window::{contact_lost, elapsed, state_line};
+pub use call_window::{call_window_escape, contact_lost, elapsed, state_line};
 pub use calls_off::{
     SetupCallsOffText, calls_kept_on, calls_off_for_too_long, calls_off_pending_status,
     calls_off_status, calls_off_until_unreadable, calls_off_waits, calls_turned,
@@ -38,11 +37,14 @@ pub use calls_off::{
 pub use checks::{
     command_copied, copy_command_label, fix_failed, fix_label, fixing, problem_keycap,
 };
-pub use dialer::{dialer_calls_off, dialer_key, dialer_phone};
+pub use dialer::{
+    DialerGlyph, DialerRowText, dialer_calls_off, dialer_key, dialer_phone, dialer_row,
+    dialer_section,
+};
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
-pub use when::when;
+pub use when::{dialer_time, when};
 
 /// A failure the user can be told about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -585,12 +587,8 @@ pub enum Label {
     DialerPlaceholder,
     /// What the Dialer lists when nothing matches what is typed.
     NoMatches,
-    /// A Call History row's kind: a Missed Call.
+    /// A Missed Call's row in the Dialer starts its detail line so.
     Missed,
-    /// A Call History row's kind: an answered incoming Call.
-    Incoming,
-    /// A Call History row's kind: a Call placed from the Phone or here.
-    Outgoing,
     /// A Call History row with a withheld number.
     CantCallBack,
     /// The Missed Call notification's button that places the Call.
@@ -665,8 +663,6 @@ pub fn label(label: Label) -> &'static str {
         Label::DialerPlaceholder => "Name or number",
         Label::NoMatches => "No matches",
         Label::Missed => "Missed",
-        Label::Incoming => "Incoming",
-        Label::Outgoing => "Outgoing",
         Label::CantCallBack => "can't be called back",
         Label::CallBack => "Call back",
         Label::Dismiss => "Dismiss",
@@ -735,80 +731,6 @@ pub fn caller(caller: &Caller) -> String {
 /// startup.
 pub fn prepare_caller() {
     crate::number::prepare();
-}
-
-/// A Dialer row as shown: a title, and a detail line that may be empty.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DialerRowText {
-    pub title: String,
-    pub detail: String,
-}
-
-impl DialerRowText {
-    /// The title and detail on one line, as the Dialer reports a row.
-    #[must_use]
-    pub fn line(&self) -> String {
-        if self.detail.is_empty() {
-            self.title.clone()
-        } else {
-            format!("{} · {}", self.title, self.detail)
-        }
-    }
-}
-
-/// What the Dialer shows for `row`: a Contact's name over the number's label
-/// and the number; for a Call History row who it was over its kind
-/// (Missed, Incoming or Outgoing) and `when`; for the number typed,
-/// "Call 07700 900123".
-#[must_use]
-pub fn dialer_row(row: &DialerRow, when: Option<&str>) -> DialerRowText {
-    let number_detail = || {
-        caller_detail(
-            &row.label.as_ref().map(number_label).unwrap_or_default(),
-            &row.shown_number,
-        )
-    };
-    match row.kind {
-        DialerRowKind::CallNumber => DialerRowText {
-            title: format!("Call {}", row.shown_number),
-            detail: String::new(),
-        },
-        DialerRowKind::Contact if !row.name.trim().is_empty() => DialerRowText {
-            title: row.name.clone(),
-            detail: number_detail(),
-        },
-        DialerRowKind::Contact => DialerRowText {
-            title: caller(&row.caller),
-            detail: row.label.as_ref().map(number_label).unwrap_or_default(),
-        },
-        DialerRowKind::CallHistory(kind) => {
-            let named = !row.name.trim().is_empty();
-            let title = if named {
-                row.name.clone()
-            } else {
-                caller(&row.caller)
-            };
-            let mut detail = vec![
-                label(match kind {
-                    CallHistoryKind::Missed => Label::Missed,
-                    CallHistoryKind::Incoming => Label::Incoming,
-                    CallHistoryKind::Outgoing => Label::Outgoing,
-                })
-                .to_owned(),
-            ];
-            if named {
-                detail.push(number_detail());
-            }
-            detail.extend(when.map(str::to_owned));
-            if row.caller == Caller::Withheld {
-                detail.push(label(Label::CantCallBack).to_owned());
-            }
-            DialerRowText {
-                title,
-                detail: detail.join(" · "),
-            }
-        }
-    }
 }
 
 /// What a desktop notification says: its summary, and the body under it.

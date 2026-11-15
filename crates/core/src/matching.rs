@@ -11,7 +11,10 @@
 //! Names are compared folded: lower case, accents taken off (`José` is
 //! `jose`), apostrophes dropped and every other mark a word break.
 
+mod highlight;
+
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use phonenumber::country::Id;
 use unicode_normalization::UnicodeNormalization as _;
@@ -427,6 +430,10 @@ pub struct DialerRow {
     pub shown_number: String,
     /// When the Call was, for a Call History row, if the Phone said.
     pub at: Option<Timestamp>,
+    /// The byte ranges of `name` that matched what was typed, in order,
+    /// for the Dialer to underline. Empty with nothing typed, or when the
+    /// number matched.
+    pub matched: Vec<Range<usize>>,
 }
 
 impl DialerRow {
@@ -488,6 +495,9 @@ pub fn search(query: &str, contacts: &Contacts, call_history: &CallHistory) -> V
                     caller: Caller::Number(contact.numbers[number_index].number.clone()),
                     shown_number: number.shown.clone(),
                     at: None,
+                    matched: name_rank
+                        .map(|rank| highlight::matched(&typed, &contact.name, rank.tier))
+                        .unwrap_or_default(),
                 },
             });
         }
@@ -504,20 +514,20 @@ pub fn search(query: &str, contacts: &Contacts, call_history: &CallHistory) -> V
         if known || !first {
             continue;
         }
-        let Some(rank) = typed
-            .name_rank(name)
-            .into_iter()
-            .chain(typed.number_rank(number))
-            .min()
-        else {
+        let name_rank = typed.name_rank(name);
+        let Some(rank) = name_rank.into_iter().chain(typed.number_rank(number)).min() else {
             continue;
         };
         exact |= typed.is(number);
+        let mut row = history_row(entry, Some(number), directory);
+        if let Some(name_rank) = name_rank {
+            row.matched = highlight::matched(&typed, &row.name, name_rank.tier);
+        }
         found.push(Found {
             rank,
             calls: history.calls(number),
             folded: name.folded.clone(),
-            row: history_row(entry, Some(number), directory),
+            row,
         });
     }
     // Stable, so a Contact's numbers keep their order.
@@ -563,6 +573,7 @@ fn history_row(
             .map(|number| number.shown.clone())
             .unwrap_or_default(),
         at: entry.at,
+        matched: Vec::new(),
     }
 }
 
@@ -658,23 +669,33 @@ impl Name {
 /// a space.
 fn fold(text: &str) -> String {
     let mut folded = String::with_capacity(text.len());
-    for character in text.nfd() {
+    for character in text.chars() {
+        fold_char(character, |letter| folded.push(letter));
+    }
+    folded
+}
+
+/// `character` folded as [`fold`] folds it, each resulting letter given to
+/// `push`, a space for a mark that breaks words. Folding character by
+/// character folds as the whole text does: decomposing reorders only the
+/// combining marks, which are dropped.
+fn fold_char(character: char, mut push: impl FnMut(char)) {
+    for character in std::iter::once(character).nfd() {
         match character {
             _ if is_combining_mark(character) => {}
             '\'' | '\u{2019}' | '\u{02bc}' => {}
-            'ß' => folded.push_str("ss"),
-            'æ' | 'Æ' => folded.push_str("ae"),
-            'œ' | 'Œ' => folded.push_str("oe"),
-            'þ' | 'Þ' => folded.push_str("th"),
-            'ø' | 'Ø' => folded.push('o'),
-            'ł' | 'Ł' => folded.push('l'),
-            'đ' | 'Đ' | 'ð' | 'Ð' => folded.push('d'),
-            'ı' => folded.push('i'),
-            _ if character.is_alphanumeric() => folded.extend(character.to_lowercase()),
-            _ => folded.push(' '),
+            'ß' => "ss".chars().for_each(&mut push),
+            'æ' | 'Æ' => "ae".chars().for_each(&mut push),
+            'œ' | 'Œ' => "oe".chars().for_each(&mut push),
+            'þ' | 'Þ' => "th".chars().for_each(&mut push),
+            'ø' | 'Ø' => push('o'),
+            'ł' | 'Ł' => push('l'),
+            'đ' | 'Đ' | 'ð' | 'Ð' => push('d'),
+            'ı' => push('i'),
+            _ if character.is_alphanumeric() => character.to_lowercase().for_each(&mut push),
+            _ => push(' '),
         }
     }
-    folded
 }
 
 /// What the user typed, ready to compare.
@@ -787,6 +808,7 @@ impl Typed {
             caller: Caller::Number(dial),
             shown_number: shown,
             at: None,
+            matched: Vec::new(),
         })
     }
 }
@@ -794,36 +816,25 @@ impl Typed {
 /// Where each of `typed` starts one of `words`, in order: the first word
 /// it starts, and how many letters of those words weren't typed.
 fn prefixes_in_order(typed: &[String], words: &[String]) -> Option<(usize, usize)> {
-    let mut next = 0;
-    let mut first = None;
-    let mut closeness = 0;
-    for part in typed {
-        let at = next
-            + words
-                .get(next..)?
-                .iter()
-                .position(|word| word.starts_with(part.as_str()))?;
-        first.get_or_insert(at);
-        closeness += words[at].len() - part.len();
-        next = at + 1;
-    }
-    Some((first?, closeness))
+    let at = highlight::starts_in_order(typed, words)?;
+    Some((*at.first()?, closeness(typed, words, &at)))
 }
 
 /// Whether each of `typed` starts a different one of `words`, in any order,
 /// and how many letters of those words weren't typed.
 fn prefixes_any_order(typed: &[String], words: &[String]) -> Option<usize> {
-    let mut used = vec![false; words.len()];
-    let mut closeness = 0;
-    for part in typed {
-        let at = words
-            .iter()
-            .enumerate()
-            .position(|(index, word)| !used[index] && word.starts_with(part.as_str()))?;
-        used[at] = true;
-        closeness += words[at].len() - part.len();
-    }
-    Some(closeness)
+    let at = highlight::starts_any_order(typed, words)?;
+    Some(closeness(typed, words, &at))
+}
+
+/// How many letters of the words at `at` the parts of `typed` that start
+/// them leave out.
+fn closeness(typed: &[String], words: &[String], at: &[usize]) -> usize {
+    typed
+        .iter()
+        .zip(at)
+        .map(|(part, &at)| words[at].len() - part.len())
+        .sum()
 }
 
 /// Whether `letters` appear in `text` in order, and how far apart: the

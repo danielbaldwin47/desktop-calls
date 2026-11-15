@@ -1,4 +1,5 @@
-//! When a Call was, as the Dialer shows it.
+//! When a Call was: in the Missed Call notification, and in the Dialer's
+//! right-hand column.
 
 use crate::call::Timestamp;
 
@@ -6,11 +7,41 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/// When a Call was, as the Dialer shows it: the time if today, "Yesterday"
-/// and the time, otherwise the date, with the year if not this year.
-/// `utc_offset_seconds` is the Desktop's time zone's offset now.
+/// 1970-01-01 was a Thursday.
+const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+
+/// When a Call was, as the Missed Call notification says it: the time if
+/// today, "Yesterday" and the time, otherwise the date, with the year if not
+/// this year. `utc_offset_seconds` is the Desktop's time zone's offset now.
 #[must_use]
 pub fn when(at: Timestamp, now: Timestamp, utc_offset_seconds: i64) -> String {
+    shown(at, now, utc_offset_seconds, |days_ago, _, time| {
+        (days_ago == 1).then(|| format!("Yesterday {time}"))
+    })
+}
+
+/// When a Call was, in the Dialer's right-hand column: the time if today,
+/// the weekday and the time within the last week ("Tue 14:05"), otherwise
+/// the date, with the year if not this year. `utc_offset_seconds` is the
+/// Desktop's time zone's offset now.
+#[must_use]
+pub fn dialer_time(at: Timestamp, now: Timestamp, utc_offset_seconds: i64) -> String {
+    shown(at, now, utc_offset_seconds, |days_ago, day, time| {
+        (1..=6).contains(&days_ago).then(|| {
+            let weekday = usize::try_from(day.rem_euclid(7)).unwrap_or(0);
+            format!("{} {time}", WEEKDAYS[weekday])
+        })
+    })
+}
+
+/// When `at` was: the time if today, `recent(days ago, day, time)` if it
+/// says, otherwise the date, with the year if not this year.
+fn shown(
+    at: Timestamp,
+    now: Timestamp,
+    utc_offset_seconds: i64,
+    recent: impl FnOnce(i64, i64, &str) -> Option<String>,
+) -> String {
     let local = |moment: Timestamp| {
         i64::try_from(moment.0 / 1_000).unwrap_or(i64::MAX) + utc_offset_seconds
     };
@@ -21,18 +52,18 @@ pub fn when(at: Timestamp, now: Timestamp, utc_offset_seconds: i64) -> String {
         at.rem_euclid(3_600) / 60
     );
     let (day, today) = (at.div_euclid(86_400), now.div_euclid(86_400));
-    match today - day {
-        0 => time,
-        1 => format!("Yesterday {time}"),
-        _ => {
-            let (year, month, day) = civil_date(day);
-            let month = MONTHS[month - 1];
-            if year == civil_date(today).0 {
-                format!("{day} {month}")
-            } else {
-                format!("{day} {month} {year}")
-            }
-        }
+    if today == day {
+        return time;
+    }
+    if let Some(recent) = recent(today - day, day, &time) {
+        return recent;
+    }
+    let (year, month, day_of_month) = civil_date(day);
+    let month = MONTHS[month - 1];
+    if year == civil_date(today).0 {
+        format!("{day_of_month} {month}")
+    } else {
+        format!("{day_of_month} {month} {year}")
     }
 }
 

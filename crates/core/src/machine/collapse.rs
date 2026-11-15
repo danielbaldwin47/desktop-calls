@@ -122,7 +122,7 @@ pub(super) fn form_input(state: &mut State, input: &Input) {
                 && state
                     .surfaces()
                     .call_window
-                    .is_some_and(|w| collapsible(&w))
+                    .is_some_and(|w| w.collapses_on_escape())
             {
                 expand_with_keyboard(state);
             } else {
@@ -156,20 +156,10 @@ fn collapse_by_hand(state: &mut State) {
     if state
         .surfaces()
         .call_window
-        .is_some_and(|window| collapsible(&window))
+        .is_some_and(|window| window.collapses_on_escape())
     {
         collapse(state);
     }
-}
-
-/// Whether the Call Window shows a Call that has connected, so the Call
-/// Pill has a Call to show.
-fn collapsible(window: &CallWindowView) -> bool {
-    window.connection_lost
-        || matches!(
-            window.phase,
-            CallWindowPhase::Live { .. } | CallWindowPhase::OnHold { .. }
-        )
 }
 
 fn collapse(state: &mut State) {

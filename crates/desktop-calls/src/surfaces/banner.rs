@@ -9,8 +9,10 @@
 //! happens to the user's other Call.
 
 use super::{
-    Anchor, SharedReport, Surface, Who, class, detail_label, has_command_modifier, set_class,
+    Anchor, SharedReport, Surface, Who, animations_on, class, detail_label, has_command_modifier,
+    set_class,
 };
+use crate::logging::EventKind;
 use crate::theme::space;
 use desktop_calls_core::messages::{self, FooterPart, Label};
 use desktop_calls_core::{BannerChoice, BannerView, CallId, Input, RingingCaller, WaitingOptions};
@@ -26,6 +28,8 @@ use std::rc::Rc;
 pub(super) struct Banner {
     pub(super) surface: Surface,
     eyebrow: gtk::Label,
+    /// The ringing dot, which breathes while the Banner shows (#234).
+    dot: gtk::Box,
     initial: gtk::Label,
     caller: gtk::Label,
     meta: gtk::Label,
@@ -214,6 +218,7 @@ impl Banner {
         let banner = Self {
             surface,
             eyebrow,
+            dot,
             initial,
             caller,
             meta,
@@ -227,6 +232,19 @@ impl Banner {
         };
         banner.on_letters(intents);
         banner
+    }
+
+    /// Sets the ringing dot breathing as the Banner appears, once every
+    /// 1.2 s for as long as it rings, or still where the Desktop asks for
+    /// reduced motion (#234).
+    fn breathe(&self) {
+        let breathing = animations_on();
+        set_class(&self.dot, class::BREATHING, breathing);
+        tracing::info!(
+            event_kind = %EventKind::BannerRingingDot,
+            breathing,
+            "The Banner's ringing dot shows, breathing: {breathing}"
+        );
     }
 
     /// While the Banner has keyboard focus, A answers and D declines; for a
@@ -286,6 +304,9 @@ impl Banner {
             self.surface.hide();
             return;
         };
+        if !self.surface.window.is_visible() {
+            self.breathe();
+        }
         let mut content = BTreeMap::from([("call".to_owned(), view.call.to_string())]);
         self.show_who(view, &mut content);
         let eyebrow = messages::label(if view.waiting.is_some() {

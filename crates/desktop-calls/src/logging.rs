@@ -97,6 +97,12 @@ pub enum EventKind {
     CallWindowChangeStarted,
     /// That change is over: the Call Window or the Call Pill shows alone.
     CallWindowChangeFinished,
+    /// The Banner showed its ringing dot: breathing, or still with reduced
+    /// motion (#234).
+    BannerRingingDot,
+    /// The audio tile started showing a Handoff's progress: smoothly, or in
+    /// steps with reduced motion (#234).
+    HandoffProgressStarted,
     DialerQueryTyped,
     DialerQueryShown,
     /// The Dialer redrew itself, unasked, on the refresh after its first
@@ -230,6 +236,8 @@ impl EventKind {
             Self::SurfaceUnmapped => "surface-unmapped",
             Self::CallWindowChangeStarted => "call-window-change-started",
             Self::CallWindowChangeFinished => "call-window-change-finished",
+            Self::BannerRingingDot => "banner-ringing-dot",
+            Self::HandoffProgressStarted => "handoff-progress-started",
             Self::DialerQueryTyped => "dialer-query-typed",
             Self::DialerQueryShown => "dialer-query-shown",
             Self::DialerRedrawnAfterShown => "dialer-redrawn-after-shown",

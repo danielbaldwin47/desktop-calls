@@ -826,6 +826,12 @@ fn has_command_modifier(modifiers: gtk::gdk::ModifierType) -> bool {
     )
 }
 
+/// Whether the Desktop animates: false where it asks for reduced motion,
+/// GTK's `gtk-enable-animations`, and every motion is then a cut (#234).
+fn animations_on() -> bool {
+    gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
+}
+
 fn seconds_since(since: Timestamp) -> u64 {
     now().0.saturating_sub(since.0) / 1_000
 }

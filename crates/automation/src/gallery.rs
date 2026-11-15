@@ -56,6 +56,14 @@ static BEFORE_KEYPAD_CAPTURES: AtomicUsize = AtomicUsize::new(0);
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
 
+/// Whether the Call Window's audio tile says `label`.
+fn handoff_shows(state: &AppState, label: &str) -> bool {
+    state
+        .surface("call-window")
+        .and_then(|window| window.get("handoff"))
+        .is_some_and(|handoff| handoff == label)
+}
+
 /// One state the gallery shows.
 struct State {
     /// The file name stem, such as `bare-output`.
@@ -216,6 +224,37 @@ const STATES: &[State] = &[
                 && !shows(screenshot, look.green())
                 && !shows(screenshot, look.warning())
         },
+    },
+    State {
+        name: "call-window-moving-audio",
+        title: "The Call Window while the audio moves here from the phone: the audio tile says so, disabled, with a bar filling along its foot",
+        still: |state| expanded(state) && handoff_shows(state, "Moving…"),
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            let path = harness.simulated_phone().ring(NUMBER);
+            harness.wait_for_app("the Banner shows", DEADLINE, |state| {
+                state.surface("banner").is_some()
+            });
+            harness.simulated_phone().answer_on_phone(&path);
+            harness.wait_for_app(
+                "the Call Window offers to move the audio here",
+                DEADLINE,
+                |state| handoff_shows(state, "Move here"),
+            );
+            // The Simulated Phone opens the audio link at once; a real one
+            // takes seconds, which is what the bar is for.
+            harness
+                .simulated_phone()
+                .set_activate_delay(Duration::from_millis(2_500));
+            harness
+                .move_audio("desktop")
+                .unwrap_or_else(|error| panic!("move the audio here: {error:?}"));
+            harness.wait_for_app("the audio tile says it moves", DEADLINE, |state| {
+                handoff_shows(state, "Moving…")
+            });
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()) && shows(screenshot, look.accent()),
     },
     State {
         name: "call-window-held",

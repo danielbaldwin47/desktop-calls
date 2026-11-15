@@ -45,6 +45,12 @@ pub(crate) mod class {
     pub(crate) const RUN: &str = "run";
     /// The Banner's ringing dot: 8 across, in the answer colour, ringed.
     pub(crate) const RINGING_DOT: &str = "ringing-dot";
+    /// With [`RINGING_DOT`]: it breathes, fading to 35% and back every
+    /// 1.2 s (#234). Left off with reduced motion.
+    pub(crate) const BREATHING: &str = "breathing";
+    /// The bar along the audio tile's foot while a Handoff is under way:
+    /// 3 high, in the accent (#234).
+    pub(crate) const HANDOFF_PROGRESS: &str = "handoff-progress";
     /// The square beside who is calling: their initial, or `#`, 40 across.
     pub(crate) const INITIAL_TILE: &str = "initial-tile";
     /// A button with a second line under its label, 48 high.
@@ -166,6 +172,8 @@ const STATIC: &str = r#"
     min-width: 8px; min-height: 8px; border-radius: 4px; margin: 0 2px;
     background: var(--dc-answer); box-shadow: 0 0 0 3px var(--dc-answer-ring);
 }
+@keyframes breathe { from { opacity: 1; } 50% { opacity: 0.35; } to { opacity: 1; } }
+.ringing-dot.breathing { animation: breathe 1.2s ease-in-out infinite; }
 .initial-tile {
     min-width: 40px; min-height: 40px; background: var(--dc-raised);
     font-family: monospace; font-size: 16px; font-weight: 600; color: var(--dc-secondary);
@@ -210,6 +218,13 @@ window.desktop-calls-surface:not(.dialer).contact-lost { box-shadow: inset 0 0 0
 }
 .desktop-calls-surface button.tile .type-keycap { border-color: transparent; padding: 0; }
 .desktop-calls-surface button.tile:checked { box-shadow: inset 0 0 0 2px var(--dc-accent); }
+.desktop-calls-surface progressbar.handoff-progress { margin: 0 10px 7px; min-width: 0; }
+.desktop-calls-surface progressbar.handoff-progress > trough {
+    min-width: 0; min-height: 3px; border-radius: 2px; background: alpha(currentColor, 0.15);
+}
+.desktop-calls-surface progressbar.handoff-progress > trough > progress {
+    min-width: 0; min-height: 3px; border-radius: 2px; background: var(--dc-accent);
+}
 .desktop-calls-surface button.tile.accent {
     background: var(--dc-accent); color: var(--dc-accent-label);
 }

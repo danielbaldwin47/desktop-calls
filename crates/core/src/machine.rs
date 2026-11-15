@@ -558,12 +558,7 @@ impl State {
         match self.connection {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
             ConnectionState::Connecting => Some(Failure::PhoneConnecting),
-            // As the Call Window and the Dialer's footer say (#152).
-            ConnectionState::Disconnected if self.contact_lost() => Some(Failure::ConnectionLost),
-            ConnectionState::Disconnected if self.hands_free_lost() => {
-                Some(Failure::PhoneReconnecting)
-            }
-            ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+            ConnectionState::Disconnected => Some(self.disconnected_refusal()),
             ConnectionState::PairingLost => Some(Failure::PhonePairingLost),
             ConnectionState::Connected if !self.calls.is_empty() || self.dialling.is_some() => {
                 Some(Failure::CallInProgress)

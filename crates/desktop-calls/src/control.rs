@@ -438,7 +438,9 @@ impl ControlInterface {
         let _ = self.dials.unbounded_send((number, verdict));
         match outcome.await {
             Ok(None) => Ok(()),
-            // Whatever the reason, the Call wasn't placed.
+            // Whatever the reason, the Call wasn't placed: even for a kind,
+            // such as `ConnectionLost`, that other intents report as
+            // `Error.Failed`.
             Ok(Some(failure)) => Err(Refused::CallNotPlaced(
                 messages::failure(failure).text.to_owned(),
             )),

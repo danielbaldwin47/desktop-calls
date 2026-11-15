@@ -26,8 +26,7 @@ const LOST_NOTICE: &str = "The Call continues on your phone. Hang up there.";
 const LOST: &str = "Connection to phone lost: the Call continues on your phone.";
 /// What a Call asked for while the Phone is in range without hands-free
 /// says.
-const RECONNECTING: &str = "Phone not connected: it's reconnecting, so try again in a moment.";
-const OUT_OF_RANGE: &str = "out of range";
+const RECONNECTING: &str = "Phone not connected: it's reconnecting.";
 
 /// The app on a screen of its own, so the Call Window shows, with the
 /// Phone connected.
@@ -111,6 +110,8 @@ fn dial_refused(harness: &Harness, kind: &str) -> String {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert_eq!((error.kind.as_str(), error.message.as_str()), (kind, printed.as_str()));
+    // The refusal is decided before anything is asked of the Phone, and
+    // the CLI has returned, so what the Phone recorded by now is final.
     let dials = harness
         .simulated_phone()
         .wait_for_recorded("what the Phone was asked", DEADLINE, |_| true)
@@ -168,8 +169,13 @@ fn after_the_lost_call_window_closes_with_the_phone_in_range_a_call_says_it_is_r
         state.surface("call-window").is_none()
     });
 
-    let printed = status(&harness);
-    assert!(!printed.contains(OUT_OF_RANGE), "{printed}");
+    let address = harness.phone().address.clone();
+    assert_eq!(
+        status(&harness),
+        format!(
+            "{PHONE_NAME} ({address}) is in range, but not connected for Calls: connecting it again."
+        )
+    );
     assert_eq!(dial_refused(&harness, "phone-reconnecting"), RECONNECTING);
 }
 

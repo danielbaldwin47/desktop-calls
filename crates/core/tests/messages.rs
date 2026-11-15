@@ -48,6 +48,16 @@ fn status_with_contact_lost_says_so_in_the_call_windows_words() {
             "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the Call continues on your phone."
         );
     }
+    // Hands-free back while the lost Call is awaited, or the pairing gone:
+    // the connection state says more.
+    assert_eq!(
+        messages::status(&ConnectionState::Connected, Some(&pixel()), false, true),
+        "Connected to My Pixel (AA:BB:CC:DD:EE:FF)."
+    );
+    assert_eq!(
+        messages::status(&ConnectionState::PairingLost, Some(&pixel()), false, true),
+        "My Pixel (AA:BB:CC:DD:EE:FF) has forgotten this computer; pair them again."
+    );
 }
 
 #[test]

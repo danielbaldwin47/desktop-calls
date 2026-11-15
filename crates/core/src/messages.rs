@@ -269,10 +269,7 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         // The Dialer's footer says "Reconnecting…" meanwhile.
-        Failure::PhoneReconnecting => (
-            "Phone not connected: it's reconnecting, so try again in a moment.",
-            None,
-        ),
+        Failure::PhoneReconnecting => ("Phone not connected: it's reconnecting.", None),
         Failure::PhonePairingLost => (
             "Phone not connected: it has forgotten this computer, so pair them again.",
             Some(NextAction::Command("desktop-calls connect")),
@@ -497,14 +494,14 @@ pub fn status(
 ) -> String {
     match (connection_state, phone) {
         (ConnectionState::NotSetUp, _) | (_, None) => "No Phone is set up yet.".to_owned(),
-        (_, Some(phone)) if contact_lost => format!(
-            "Connection to {} lost: the Call continues on your phone.",
-            describe(phone)
-        ),
         (ConnectionState::Connecting, Some(phone)) => {
             format!("Connecting to {}.", describe(phone))
         }
         (ConnectionState::Connected, Some(phone)) => format!("Connected to {}.", describe(phone)),
+        (ConnectionState::Disconnected, Some(phone)) if contact_lost => format!(
+            "Connection to {} lost: the Call continues on your phone.",
+            describe(phone)
+        ),
         (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
             "{} is in range, but not connected for Calls: connecting it again.",
             describe(phone)

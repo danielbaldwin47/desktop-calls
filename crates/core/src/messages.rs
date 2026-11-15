@@ -47,7 +47,7 @@ pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
 pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
 pub use setup_parts::{
     Instruction, InstructionGroup, Place, SETUP_STAGES, SetupCard, StageMark, SyncRow, SyncText,
-    grouped, stage_marks,
+    grouped, stage_line, stage_marks,
 };
 pub use when::{dialer_time, when};
 

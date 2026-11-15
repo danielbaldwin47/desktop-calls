@@ -109,12 +109,13 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
             (
                 "Check the code".to_owned(),
                 vec![
-                    // One line per place, so grouping keeps the order.
-                    Instruction::here(format!(
-                        "Check that {} shows this code too, then choose Confirm.",
+                    // One line per place, so grouping keeps the order:
+                    // check and tap Pair on the Phone, then confirm here.
+                    Instruction::phone(format!(
+                        "Check that {} shows this code too, then tap Pair.",
                         phone.name
                     )),
-                    Instruction::phone("Tap Pair."),
+                    Instruction::here("Then choose Confirm."),
                 ],
                 vec!["Confirm", "Cancel"],
             )
@@ -321,7 +322,7 @@ fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timesta
 fn contacts_prompt_timed_out(text: &mut SetupWindowText) -> Page {
     // The countdown ran out.
     text.countdown = Some("0".to_owned());
-    text.countdown_label = Some(COUNTDOWN_LABEL);
+    text.countdown_label = Some("Time ran out to tap Allow");
     text.summary =
         Some("Nobody answered on your phone in time, so it isn't sharing contacts yet.".to_owned());
     (
@@ -445,10 +446,16 @@ fn finish(
             text,
         })
     };
+    // Until a key opens the Dialer, the first Call starts from the bar.
+    let from_the_bar = || {
+        vec![Instruction::here(
+            "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.",
+        )]
+    };
     let check = match keybinding {
         KeybindingStage::Checking => {
             let text = "Checking the Hyprland config for a free key…".to_owned();
-            return (Vec::new(), card(text), vec!["Done"]);
+            return (from_the_bar(), card(text), vec!["Done"]);
         }
         KeybindingStage::Confirming(KeybindingCheck::Available {
             file,
@@ -516,7 +523,13 @@ fn finish(
             vec!["Done"],
         ),
     };
-    (Vec::new(), card(text), buttons)
+    let instructions = if matches!(check, KeybindingCheck::Added { .. }) {
+        // The keybinding card says how, with the keys.
+        Vec::new()
+    } else {
+        from_the_bar()
+    };
+    (instructions, card(text), buttons)
 }
 
 /// Keys as Hyprland names them, `SUPER + ALT + C`, as people read them:

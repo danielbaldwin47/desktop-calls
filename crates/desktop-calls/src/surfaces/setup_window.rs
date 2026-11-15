@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use desktop_calls_core::messages::{self, SETUP_STAGES, SetupWindowText, StageMark};
+use desktop_calls_core::messages::{self, SETUP_STAGES, SetupWindowText, StageMark, stage_line};
 use desktop_calls_core::{
     Input, KeybindingCheck, KeybindingStage, Phone, SetupStep, SetupWindowView, Timestamp,
 };
@@ -49,7 +49,7 @@ use gtk::prelude::*;
 
 use super::setup_calls_off::CallsOffCard;
 use super::setup_parts::{
-    self, Card, Instructions, Stages, SyncView, keep_runs_whole, stage_line, wrapping_label,
+    self, Card, Instructions, Stages, SyncView, keep_runs_whole, wrapping_label,
 };
 use super::setup_problems::notice_card;
 use super::{

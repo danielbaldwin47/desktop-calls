@@ -163,11 +163,16 @@ fn add_the_keybinding(harness: &Harness) -> String {
     });
     let line = field(&state, "line").unwrap_or_default().to_owned();
     harness.keyboard().press(Key::Return);
-    harness.wait_for_app("the keybinding is added", DEADLINE, |state| {
+    let state = harness.wait_for_app("the keybinding is added", DEADLINE, |state| {
         field(state, "buttons") == Some("Done")
             && field(state, "keybinding")
                 .is_some_and(|text| text.contains("Place your first Call: press Super + Alt + C"))
     });
+    // Every step is done, the shortcut too.
+    assert!(
+        field(&state, "stages").is_some_and(|stages| stages.ends_with("✓ Shortcut")),
+        "{state:?}"
+    );
     line
 }
 
@@ -273,6 +278,10 @@ fn an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again() {
         PROMPT_TIMEOUT_DEADLINE,
     );
     assert_eq!(field(&state, "countdown"), Some("0"));
+    assert_eq!(
+        field(&state, "countdown-label"),
+        Some("Time ran out to tap Allow")
+    );
     assert_eq!(field(&state, "buttons"), Some("Try again\nSkip"));
     let prompts = harness.simulated_phone().contacts_prompts();
     assert_eq!(prompts.len(), 1, "{prompts:?}");
@@ -431,6 +440,12 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
     );
     assert!(
         field(&state, "keybinding").is_some_and(|text| text.contains("Open the Dialer")),
+        "{state:?}"
+    );
+    // Without a keybinding yet, the first Call starts from the bar.
+    assert!(
+        field(&state, "instructions").is_some_and(|text| text
+            .contains("Place your first Call: choose Open Dialer from Desktop Calls in the bar")),
         "{state:?}"
     );
     // Sharing was refused, so neither it nor the sync is ticked.

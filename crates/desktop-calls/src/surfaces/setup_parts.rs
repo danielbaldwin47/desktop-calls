@@ -3,7 +3,7 @@
 //! checklist and bar, and the finish page's cards.
 
 use desktop_calls_core::messages::{
-    self, InstructionGroup, Place, SETUP_STAGES, SetupCard, StageMark, SyncText,
+    self, InstructionGroup, Place, SETUP_STAGES, SetupCard, StageMark, SyncText, stage_line,
 };
 use gtk::prelude::*;
 
@@ -74,15 +74,6 @@ impl Stages {
             set_class(stage, "now", mark == StageMark::Now);
             label.set_text(&stage_line(name, mark));
         }
-    }
-}
-
-/// A named step as shown and reported: ticked once done.
-pub(super) fn stage_line(name: &str, mark: StageMark) -> String {
-    if mark == StageMark::Ticked {
-        format!("✓ {name}")
-    } else {
-        name.to_owned()
     }
 }
 

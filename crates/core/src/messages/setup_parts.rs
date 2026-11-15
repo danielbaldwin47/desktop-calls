@@ -3,7 +3,10 @@
 //! the sync's checklist and bar, and the finish page's two cards.
 
 use crate::call::Timestamp;
-use crate::machine::{CONTACT_READ_MS, ContactsOutcome, ReadingContacts, SetupStep};
+use crate::keybinding::KeybindingCheck;
+use crate::machine::{
+    CONTACT_READ_MS, ContactsOutcome, KeybindingStage, ReadingContacts, SetupStep,
+};
 
 /// The four named steps across the top of the Setup Window, in order.
 pub const SETUP_STAGES: [&str; 4] = ["Pair", "Share contacts", "Sync", "Shortcut"];
@@ -50,12 +53,31 @@ pub fn stage_marks(step: &SetupStep) -> [StageMark; 4] {
         step,
         SetupStep::Done { contacts, .. } if !matches!(contacts, ContactsOutcome::Synced { .. })
     );
+    // Once the keybinding is added, the last step is done too.
+    let added = matches!(
+        step,
+        SetupStep::Done {
+            keybinding: KeybindingStage::Checked(KeybindingCheck::Added { .. }),
+            ..
+        }
+    );
     std::array::from_fn(|index| match index.cmp(&now) {
         std::cmp::Ordering::Less if unshared && index > 0 => StageMark::Passed,
         std::cmp::Ordering::Less => StageMark::Ticked,
+        std::cmp::Ordering::Equal if added => StageMark::Ticked,
         std::cmp::Ordering::Equal => StageMark::Now,
         std::cmp::Ordering::Greater => StageMark::Ahead,
     })
+}
+
+/// A named step as shown and reported: ticked once done.
+#[must_use]
+pub fn stage_line(name: &str, mark: StageMark) -> String {
+    if mark == StageMark::Ticked {
+        format!("✓ {name}")
+    } else {
+        name.to_owned()
+    }
 }
 
 /// Where an instruction is carried out.
@@ -270,7 +292,7 @@ impl SetupCard {
 pub(super) fn pin_card() -> SetupCard {
     SetupCard {
         title: "Keep Desktop Calls in the bar",
-        text: "In Omarchy, right-click the arrow at the bar's tray and pin Desktop Calls. Until then it hides in the drawer. Its Open Dialer places a Call."
+        text: "In Omarchy, right-click the arrow at the bar's tray and pin Desktop Calls. Until then it hides in the drawer."
             .to_owned(),
     }
 }

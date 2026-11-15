@@ -10,11 +10,13 @@
 //! shows it: a keycap, the footer's keys, or the button that has focus.
 //!
 //! Each case is a journey through one surface, so the suite starts the app
-//! seven times rather than once an action; the Setup Window's cases are in
+//! eight times rather than once an action; the Setup Window's cases are in
 //! `keyboard_only_setup.rs`. [`ACTIONS`] names every action and
 //! the case that performs it; a case fails unless it performed exactly its
 //! actions, and `every_action_is_performed_by_a_case_or_names_its_ticket`
-//! fails if an action is left with neither a case nor a ticket.
+//! fails if an action is left with neither a case nor a ticket. [`UNSHOWN`]
+//! names the keys a case presses that its surface doesn't show yet, each
+//! with its ticket.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -50,9 +52,11 @@ enum KeyPath {
     Case(&'static str),
     /// No key path yet: the open ticket that adds one.
     Missing { ticket: u32 },
+    /// Keys that something other than the app owns, and why.
+    Elsewhere(&'static str),
 }
 
-use KeyPath::{Case, Missing};
+use KeyPath::{Case, Elsewhere, Missing};
 
 /// Every user action in the spec's stories (#1, #197 and #198), and how
 /// keys alone reach it.
@@ -74,6 +78,7 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ("Collapse the Call Window to the Call Pill, the Call still live: Escape", Case(CALL_WINDOW)),
     ("Expand the Call Pill with the keyboard in it: the keybinding", Case(CALL_WINDOW)),
     ("Hang up: Ctrl+H", Case(CALL_WINDOW)),
+    ("Hang up a Call placed before the Phone connects: Ctrl+H", Case(CALLS_OFF)),
     // Call waiting.
     ("Give a Waiting Call's Banner the keyboard back, the Call still waiting: Escape", Case(CALL_WAITING)),
     ("Hold & Answer: H", Case(CALL_WAITING)),
@@ -86,13 +91,19 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     // The Dialer and the Quiet Hours Window.
     ("Open the Dialer: the keybinding", Case(DIALER)),
     ("Close the Dialer: Escape", Case(DIALER)),
+    ("Move a page down the Call History: Page Down", Case(DIALER)),
+    ("Move a page up the Call History: Page Up", Case(DIALER)),
+    ("Move up the Call History: Up", Case(DIALER)),
     ("Call the next row of the Call History: Down, Enter", Case(DIALER)),
     ("Search Contacts and Call the match: type, Enter", Case(DIALER)),
     ("Call back a Missed Call: Enter", Case(DIALER)),
     ("Open the Quiet Hours Window: Alt+Q", Case(DIALER)),
     ("Switch Quiet Hours on: Space", Case(DIALER)),
     ("Step the start of Quiet Hours: Tab, Up", Case(DIALER)),
+    ("Step the start of Quiet Hours back: Down", Case(DIALER)),
     ("Type the end of Quiet Hours: Tab, digits", Case(DIALER)),
+    ("Erase a digit typed in a time: Backspace", Case(DIALER)),
+    ("Switch Quiet Hours off: Shift+Tab, Space", Case(DIALER)),
     ("Close the Quiet Hours Window: Escape", Case(DIALER)),
     // Calls Off.
     ("Call a typed number while calls are off: Enter calls anyway", Case(CALLS_OFF)),
@@ -105,16 +116,40 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ("Turn Bluetooth on: Enter", Case(FIRST_RUN)),
     ("Set up audio: Shift+Tab, Enter", Case(FIRST_RUN)),
     ("Pair the Phone listed: Enter", Case(FIRST_RUN)),
+    ("Reject the pairing code: Tab, Enter on Reject", Case(SETUP_REFUSED)),
     ("Confirm the pairing code: Enter", Case(FIRST_RUN)),
     ("Ask for Contacts again once the prompt timed out: Enter on Try again", Case(FIRST_RUN)),
     ("Add the keybinding: Enter", Case(FIRST_RUN)),
+    ("Cancel the keybinding's line: Tab, Enter on Cancel", Case(FIRST_RUN)),
     ("Confirm the keybinding's line: Enter", Case(FIRST_RUN)),
     ("Finish: Enter on Done", Case(FIRST_RUN)),
     ("Try again once the Phone refused hands-free: Enter", Case(SETUP_REFUSED)),
+    ("Carry on once the Phone is back: Enter on Continue", Case(SETUP_REFUSED)),
     ("Skip Contacts once the prompt timed out: Tab, Enter on Skip", Case(SETUP_REFUSED)),
     ("Copy the install command: Shift+Tab, Enter", Case(SETUP_COPY)),
     ("Close the Setup Window: Escape", Case(SETUP_COPY)),
     ("Open the Setup Window again: Connect your phone…", Missing { ticket: 292 }),
+    // A Missed Call's notification.
+    (
+        "Call back or dismiss a Missed Call from its notification",
+        Elsewhere("Omarchy's notification daemon owns a notification's keys"),
+    ),
+];
+
+/// Keys a case presses that its surface doesn't show yet: the action, and
+/// the open ticket that shows them. Close on a Setup Window step is not
+/// here: Escape closes it, and its footer says so on every step.
+const UNSHOWN: &[(&str, u32)] = &[
+    ("Collapse the Call Window to the Call Pill, the Call still live: Escape", 300),
+    ("Send tones by pasting them: Ctrl+V", 301),
+    ("Move a page down the Call History: Page Down", 301),
+    ("Move a page up the Call History: Page Up", 301),
+    ("Erase a digit typed in a time: Backspace", 301),
+    ("Switch Quiet Hours off: Shift+Tab, Space", 301),
+    // The footer names the first button for Enter after Tab.
+    ("Reject the pairing code: Tab, Enter on Reject", 296),
+    ("Cancel the keybinding's line: Tab, Enter on Cancel", 296),
+    ("Skip Contacts once the prompt timed out: Tab, Enter on Skip", 296),
 ];
 
 const BANNER: &str = "the_banner_by_keys_alone";
@@ -142,8 +177,8 @@ const CASES: [&str; 8] = [
     SETUP_COPY,
 ];
 
-/// Open tickets that add a missing key path.
-const OPEN_TICKETS: [u32; 1] = [292];
+/// Open tickets that add a missing key path, or show a key.
+const OPEN_TICKETS: [u32; 4] = [292, 296, 300, 301];
 
 #[test]
 fn every_action_is_performed_by_a_case_or_names_its_ticket() {
@@ -156,7 +191,20 @@ fn every_action_is_performed_by_a_case_or_names_its_ticket() {
                 OPEN_TICKETS.contains(ticket),
                 "{action:?}: #{ticket} is not a ticket this suite waits on"
             ),
+            Elsewhere(why) => assert!(!why.is_empty(), "{action:?}: say whose keys"),
         }
+    }
+    for (action, ticket) in UNSHOWN {
+        assert!(
+            ACTIONS
+                .iter()
+                .any(|(listed, path)| listed == action && matches!(path, Case(_))),
+            "{action:?} is unshown but no case performs it"
+        );
+        assert!(
+            OPEN_TICKETS.contains(ticket),
+            "{action:?}: #{ticket} is not a ticket this suite waits on"
+        );
     }
     for case in CASES {
         assert!(
@@ -740,6 +788,20 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     performed.did("Close the Dialer: Escape");
 
     open_the_dialer(&harness);
+    for (key, row, action) in [
+        (Key::PageDown, "1", "Move a page down the Call History: Page Down"),
+        (Key::PageUp, "0", "Move a page up the Call History: Page Up"),
+        (Key::Down, "1", ""),
+        (Key::Up, "0", "Move up the Call History: Up"),
+    ] {
+        harness.keyboard().press(key);
+        harness.wait_for_app(&format!("{key:?} selects row {row}"), DEADLINE, |state| {
+            shown(state, "dialer", "selected") == Some(row)
+        });
+        if !action.is_empty() {
+            performed.did(action);
+        }
+    }
     harness.keyboard().press(Key::Down);
     let state = harness.wait_for_app("Down selects the second row", DEADLINE, |state| {
         shown(state, "dialer", "selected") == Some("1")
@@ -780,10 +842,16 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     dialled_then_hung_up(&harness, BOB, 3);
     performed.did("Call back a Missed Call: Enter");
 
-    open_the_dialer(&harness);
+    quiet_hours_by_keys_alone(&harness, &mut performed);
+    performed.all_done();
+}
+
+/// From the Dialer: Alt+Q, and every key the Quiet Hours Window takes.
+fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
+    open_the_dialer(harness);
     harness.keyboard().press_with_alt('q');
     let state = wait_for_quiet_hours(
-        &harness,
+        harness,
         "Alt+Q opens the Quiet Hours Window with the switch focused",
         &[("switch", "off"), ("focus", "switch")],
     );
@@ -797,19 +865,41 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     assert!(quiet_hours_keys(&state, "↑ ↓ 15 min"), "{state:#?}");
     performed.did("Switch Quiet Hours on: Space");
     harness.keyboard().press(Key::Tab);
-    wait_for_quiet_hours(&harness, "Tab focuses the start", &[("focus", "start")]);
+    wait_for_quiet_hours(harness, "Tab focuses the start", &[("focus", "start")]);
     harness.keyboard().press(Key::Up);
     harness.wait_for_app("Up steps the start", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
     });
     performed.did("Step the start of Quiet Hours: Tab, Up");
+    harness.keyboard().press(Key::Down);
+    harness.keyboard().press(Key::Up);
+    harness.wait_for_app("Down then Up steps the start back and on", DEADLINE, |state| {
+        state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
+    });
+    harness.keyboard().press(Key::Down);
+    harness.wait_for_app("Down steps the start back", DEADLINE, |state| {
+        state.quiet_hours == Some((22 * 60, 7 * 60))
+    });
+    performed.did("Step the start of Quiet Hours back: Down");
     harness.keyboard().press(Key::Tab);
-    wait_for_quiet_hours(&harness, "Tab focuses the end", &[("focus", "end")]);
-    harness.keyboard().type_text("0630");
+    wait_for_quiet_hours(harness, "Tab focuses the end", &[("focus", "end")]);
+    // Without Backspace, 07630 would not be 06:30.
+    harness.keyboard().type_text("07");
+    harness.keyboard().press(Key::Backspace);
+    performed.did("Erase a digit typed in a time: Backspace");
+    harness.keyboard().type_text("630");
     harness.wait_for_app("the end typed is saved", DEADLINE, |state| {
-        state.quiet_hours == Some((22 * 60 + 15, 6 * 60 + 30))
+        state.quiet_hours == Some((22 * 60, 6 * 60 + 30))
     });
     performed.did("Type the end of Quiet Hours: Tab, digits");
+    harness.keyboard().press_with_shift(Key::Tab);
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_quiet_hours(harness, "Shift+Tab focuses the switch", &[("focus", "switch")]);
+    harness.keyboard().type_text(" ");
+    harness.wait_for_app("Space switches Quiet Hours off", DEADLINE, |state| {
+        state.quiet_hours.is_none()
+    });
+    performed.did("Switch Quiet Hours off: Shift+Tab, Space");
     let state = harness.app_state();
     assert!(quiet_hours_keys(&state, "Esc Close"), "{state:#?}");
     harness.keyboard().press(Key::Escape);
@@ -817,7 +907,6 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
         state.surface("quiet-hours-window").is_none()
     });
     performed.did("Close the Quiet Hours Window: Escape");
-    performed.all_done();
 }
 
 #[test]
@@ -851,5 +940,30 @@ fn while_calls_are_off_the_dialer_calls_anyway_by_keys_alone() {
             && state.connection_state == "disconnected"
     });
     performed.did("Call a typed number while calls are off: Enter calls anyway");
+
+    // Out of range, the Call waits for the Phone to connect: Ctrl+H
+    // cancels it before it is placed.
+    harness.simulated_phone().disconnect();
+    open_the_dialer(&harness);
+    harness.keyboard().type_text("07700 900888");
+    harness.wait_for_app("the Dialer says Enter calls anyway", DEADLINE, |state| {
+        footer_shows(state, "Enter Call anyway")
+    });
+    harness.keyboard().press(Key::Return);
+    harness.wait_for_app("the Call Window says it is connecting", DEADLINE, |state| {
+        shown(state, "call-window", "state") == Some("Connecting to your phone…")
+    });
+    focus_the_call_window_showing(&harness, "hang-up", "Ctrl+H");
+    harness.keyboard().press_with_control('h');
+    harness.wait_for_app("the Call ended before it was placed", DEADLINE, |state| {
+        shown(state, "call-window", "state") == Some("Call ended")
+    });
+    harness.wait_for_app("calls are back off", DEADLINE, |state| {
+        state.calls_off == "off" && !state.calls_off_pending && state.calls.is_empty()
+    });
+    harness
+        .simulated_phone()
+        .recorded_holds("nothing more is dialled", HOLD, |recorded| asked(recorded, "Dial") == 1);
+    performed.did("Hang up a Call placed before the Phone connects: Ctrl+H");
     performed.all_done();
 }

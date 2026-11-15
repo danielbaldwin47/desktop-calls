@@ -138,6 +138,17 @@ fn first_run_in_the_setup_window_by_keys_alone() {
     wait_for_enter_on(&harness, "Add keybinding", DEADLINE);
     harness.keyboard().press(Key::Return);
     performed.did("Add the keybinding: Enter");
+    wait_for_enter_on(&harness, "Confirm", DEADLINE);
+    // The footer still names Confirm for Enter after Tab (#296); the
+    // outcome shows Cancel was pressed.
+    harness.keyboard().press(Key::Tab);
+    harness.keyboard().press(Key::Return);
+    wait_for_enter_on(&harness, "Add keybinding", DEADLINE);
+    let bindings = std::fs::read_to_string(harness.directory().join("config/hypr/bindings.lua"))
+        .unwrap_or_default();
+    assert!(!bindings.contains("desktop-calls"), "{bindings}");
+    performed.did("Cancel the keybinding's line: Tab, Enter on Cancel");
+    harness.keyboard().press(Key::Return);
     let state = wait_for_enter_on(&harness, "Confirm", DEADLINE);
     let line = setup_window(&state, "line").unwrap_or_default().to_owned();
     assert!(!line.is_empty(), "the window shows the line: {state:#?}");
@@ -173,6 +184,18 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     wait_for_enter_on(&harness, "Pair", STARTUP);
     harness.keyboard().press(Key::Return);
     wait_for_enter_on(&harness, "Confirm", CONNECT_DEADLINE);
+    // The footer still names Confirm for Enter after Tab (#296); the
+    // outcome shows Reject was pressed.
+    harness.keyboard().press(Key::Tab);
+    harness.keyboard().press(Key::Return);
+    wait_for_step(&harness, "choose", CONNECT_DEADLINE);
+    let outcome = harness.simulated_phone().pairing_requests().pop().map(|(_, outcome)| outcome);
+    assert_eq!(outcome.as_deref(), Some("rejected"));
+    performed.did("Reject the pairing code: Tab, Enter on Reject");
+
+    wait_for_enter_on(&harness, "Pair", CONNECT_DEADLINE);
+    harness.keyboard().press(Key::Return);
+    wait_for_enter_on(&harness, "Confirm", CONNECT_DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "phone-calls-off", CONNECT_DEADLINE);
     wait_for_enter_on(&harness, "Try again", DEADLINE);
@@ -184,6 +207,18 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     });
     performed.did("Try again once the Phone refused hands-free: Enter");
 
+    // The Phone leaves while it asks for Contacts, and comes back.
+    wait_for_step(&harness, "contacts-prompt", CONNECT_DEADLINE);
+    harness.simulated_phone().disconnect();
+    wait_for_step(&harness, "contacts-phone-away", DEADLINE);
+    harness.simulated_phone().connect();
+    wait_for_enter_on(&harness, "Continue", CONNECT_DEADLINE);
+    harness.keyboard().press(Key::Return);
+    wait_for_step(&harness, "contacts-prompt", CONNECT_DEADLINE);
+    let prompts = harness.simulated_phone().contacts_prompts();
+    assert_eq!(prompts.len(), 2, "the Phone asks again: {prompts:?}");
+    performed.did("Carry on once the Phone is back: Enter on Continue");
+
     wait_for_step(&harness, "contacts-prompt-timed-out", PROMPT_TIMEOUT_DEADLINE);
     let state = wait_for_enter_on(&harness, "Try again", DEADLINE);
     let keys = setup_window(&state, "keys").unwrap_or_default();
@@ -194,7 +229,7 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "done", DEADLINE);
     let prompts = harness.simulated_phone().contacts_prompts();
-    assert_eq!(prompts.len(), 1, "the Phone is not asked again: {prompts:?}");
+    assert_eq!(prompts.len(), 2, "the Phone is not asked again: {prompts:?}");
     performed.did("Skip Contacts once the prompt timed out: Tab, Enter on Skip");
     performed.all_done();
 }

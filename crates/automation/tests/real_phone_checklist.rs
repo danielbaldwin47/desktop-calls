@@ -868,3 +868,82 @@ fn step_7_1_fails_the_focus_check_when_the_call_window_had_the_keyboard_before_t
         "{keyboard:#}"
     );
 }
+
+/// Plays group 7 on a Desktop with `variables`, the user typing the Test
+/// Number as `typed` does it, and returns 7.1's record.
+fn step_7_1_with(variables: &[(&str, &str)], typed: &'static str) -> serde_json::Value {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start_with_environment(&["7"], results.path(), variables);
+    runner.slips = vec![("type-test-number", typed)];
+    runner.play(|_| "y".to_owned());
+    let transcript = runner.transcript.join("\n");
+    for number in ["900999", "900998"] {
+        assert!(!transcript.contains(number), "{typed}: {transcript}");
+    }
+    step(&result_file(results.path()), "7.1").clone()
+}
+
+#[test]
+fn step_7_1_reads_the_locale_as_the_app_does_lc_all_before_lc_telephone() {
+    // LC_ALL overrides every category, so the region is Britain's and the
+    // Test Number is +44: the Call to it passes. Read from LC_TELEPHONE
+    // first, the runner took it for a +1 number and failed a correct Call.
+    let keyboard = step_7_1_with(
+        &[
+            ("LC_ALL", "en_GB.UTF-8"),
+            ("LC_TELEPHONE", "en_US.UTF-8"),
+            ("LANG", "en_US.UTF-8"),
+        ],
+        "type-test-number",
+    );
+    assert_eq!(keyboard["result"], "pass", "{keyboard:#}");
+    assert!(
+        says(
+            &keyboard,
+            "Treating your Test Number as +44 (from your locale)."
+        ),
+        "{keyboard:#}"
+    );
+}
+
+#[test]
+fn step_7_1_passes_a_call_written_with_the_trunk_zero_after_the_country_code() {
+    // `+44 07700 900999` is the Test Number written another way: safe to
+    // accept, and a correct Call must not fail.
+    let keyboard = step_7_1_with(
+        &[("LANG", "en_GB.UTF-8")],
+        "type-test-number-with-trunk-zero",
+    );
+    assert_eq!(keyboard["result"], "pass", "{keyboard:#}");
+    assert!(says(&keyboard, "keyboard alone"), "{keyboard:#}");
+}
+
+#[test]
+fn step_7_1_reads_a_call_with_no_country_code_in_the_locale_region() {
+    // The Test Number is filed with its country code, +44. On a Desktop in
+    // the US a Call typed without one goes to a US number that shares its
+    // digits, not to the Test Number.
+    let filed = ("DESKTOP_CALLS_DEMO_TEST_NUMBER", "+44 7700 900999");
+    let abroad = step_7_1_with(
+        &[("LANG", "en_US.UTF-8"), filed],
+        "type-test-number-national",
+    );
+    assert_eq!(abroad["result"], "fail", "{abroad:#}");
+    assert!(
+        says(
+            &abroad,
+            "isn't the Test Number, so the runner hung it up, and it ended"
+        ),
+        "{abroad:#}"
+    );
+    // At home the same Call is to the Test Number.
+    let at_home = step_7_1_with(
+        &[("LANG", "en_GB.UTF-8"), filed],
+        "type-test-number-national",
+    );
+    assert_eq!(at_home["result"], "pass", "{at_home:#}");
+    assert!(
+        !says(&at_home, "Treating your Test Number as"),
+        "its country code was in the file: {at_home:#}"
+    );
+}

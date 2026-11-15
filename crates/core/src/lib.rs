@@ -43,4 +43,5 @@ pub use machine::{
     Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
+pub use number::locale_region;
 pub use missed::MissedCallNotice;

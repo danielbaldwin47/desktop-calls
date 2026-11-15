@@ -76,7 +76,7 @@ pub fn run(options: &Options) -> ExitCode {
     };
 
     let (sender, events) = mpsc::channel();
-    let timeline = match watch::start(&world.bus, sender.clone()) {
+    let timeline = match watch::start(&world.bus, sender.clone(), sitting::locale_region()) {
         Ok(timeline) => timeline,
         Err(watch::WatchError::NotRunning) => {
             eprintln!(

@@ -34,9 +34,12 @@ use crate::checklist::watch::AppState;
 ///   and `resume-then-phone-leaves`, with the Phone leaving only after
 ///   resume; `restart-wireplumber`, as Telephony leaves and returns;
 /// - the user's keyboard and Call Window, beyond the above:
-///   `type-test-number`, `type-wrong-number` (the last digit off, as a
-///   slip would be), `type-wrong-first-digit` (the first digit after the
-///   country code off), `type-wrong-country` (another country code),
+///   `type-test-number`, `type-test-number-national` (the same number
+///   without its country code), `type-test-number-with-trunk-zero` (the
+///   same number with the `0` a country dials before it, after the country
+///   code), `type-wrong-number` (the last digit off, as a slip would be),
+///   `type-wrong-first-digit` (the first digit after the country code
+///   off), `type-wrong-country` (another country code),
 ///   `ctrl-h`, `move-audio-to-phone`, `move-audio-here`,
 ///   `move-audio-to-phone-and-back` (each move waited for);
 /// - the Phone and its surroundings: `callee-answers` (the Test Number
@@ -74,6 +77,12 @@ const DEMO_NUMBER: &str = "+447700900461";
 /// The demo's Test Number, for the PBAP probe to redact: another Ofcom
 /// drama number.
 const DEMO_TEST_NUMBER: &str = "+447700900999";
+
+/// The demo's Test Number without its country code.
+const DEMO_NATIONAL_FORM: &str = "07700900999";
+
+/// The demo's Test Number with the trunk `0` after its country code.
+const DEMO_WITH_TRUNK_ZERO: &str = "+4407700900999";
 
 /// The demo's Test Number with its last digit slipped.
 const DEMO_WRONG_NUMBER: &str = "+447700900998";
@@ -382,6 +391,11 @@ impl Demo {
             "do-not-disturb-on" => self.harness.set_do_not_disturb(true),
             "do-not-disturb-off" => self.harness.set_do_not_disturb(false),
             "type-test-number" => self.harness.keyboard().type_text(DEMO_TEST_NUMBER),
+            "type-test-number-national" => self.harness.keyboard().type_text(DEMO_NATIONAL_FORM),
+            "type-test-number-with-trunk-zero" => self
+                .harness
+                .keyboard()
+                .type_text(DEMO_WITH_TRUNK_ZERO),
             "type-wrong-number" => self.harness.keyboard().type_text(DEMO_WRONG_NUMBER),
             "type-wrong-first-digit" => self.harness.keyboard().type_text(DEMO_WRONG_FIRST_DIGIT),
             "type-wrong-country" => self.harness.keyboard().type_text(DEMO_WRONG_COUNTRY),
@@ -533,8 +547,8 @@ impl Demo {
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
                      open-setup-window, contacts-access-off, allow-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm,indicator-click, indicator-mute, \
-                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-wrong-number, \
-                     type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
+                     indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-test-number-national, \
+                     type-test-number-with-trunk-zero, type-wrong-number, type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
                      earbuds-on, out-of-range, return-to-range, suspend, resume, resume-slowly, \
                      suspend-phone-stays, resume-then-phone-leaves, \
                      restart-wireplumber, move-audio-to-phone, move-audio-here, \

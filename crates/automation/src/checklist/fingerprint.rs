@@ -37,10 +37,20 @@ impl Fingerprint {
         Self::read(number, None)
     }
 
+    /// The fingerprint of a number a Phone reports for a Call. As in
+    /// [`Fingerprint::of`], but a number with no country code is read in
+    /// `locale_region` (`US` for `en_US.UTF-8`), as the Test Number is, so
+    /// that a national-form number is a number of the Desktop's own country
+    /// and never one of another that happens to share its digits. With no
+    /// usable region it has no country code, and takes any.
+    pub fn of_call(number: &str, locale_region: Option<&str>) -> Self {
+        Self::read(number, region_of(locale_region))
+    }
+
     /// The Test Number's fingerprint, written as in [`Fingerprint::of`].
     /// Without a country code it is taken as a number in `locale_region`
-    /// (`US` for `en_US.UTF-8`), and the country code that gives is
-    /// returned as assumed. `None` for an empty number.
+    /// (`US` for `en_US.UTF-8`), and the country code that reading gave it
+    /// is returned as assumed. `None` for an empty number.
     ///
     /// # Errors
     ///
@@ -57,14 +67,9 @@ impl Fingerprint {
         if plain.country.is_some() {
             return Ok(Some((plain, None)));
         }
-        let (region, code) = locale_region
-            .and_then(|region| region.to_ascii_uppercase().parse::<country::Id>().ok())
-            .and_then(|region| {
-                let code = DATABASE.by_id(region.as_ref())?.country_code();
-                Some((region, code))
-            })
-            .ok_or(NoCountry)?;
-        Ok(Some((Self::read(number, Some((region, code))), Some(code))))
+        let region = region_of(locale_region).ok_or(NoCountry)?;
+        let read = Self::read(number, Some(region));
+        Ok(Some((read, read.country)))
     }
 
     /// Whether the Phone reported a number at all.
@@ -117,14 +122,21 @@ impl Fingerprint {
             (None, None) => None,
         };
         let (national, country) = match parsed {
-            Some(parsed) => (
-                format!(
-                    "{}{}",
-                    "0".repeat(usize::from(parsed.national().zeros())),
-                    parsed.national().value()
-                ),
-                Some(parsed.code().value()),
-            ),
+            Some(parsed) => {
+                let code = parsed.code().value();
+                let zeros = usize::from(parsed.national().zeros());
+                // In the international form the trunk zero, if written, is
+                // the first of them.
+                let zeros = if international.is_some() && trunk_zero_is_dropped(code) {
+                    zeros.saturating_sub(1)
+                } else {
+                    zeros
+                };
+                (
+                    format!("{}{}", "0".repeat(zeros), parsed.national().value()),
+                    Some(code),
+                )
+            }
             // Unreadable with its country code: never the same as a number
             // libphonenumber could read.
             None if international.is_some() => (digits, None),
@@ -140,6 +152,29 @@ impl Fingerprint {
             country,
         }
     }
+}
+
+/// Whether a number written with this country code and then a `0` is the
+/// number without the `0`: where the country dials `0` before a national
+/// number (`+44 07700 900999` is `+44 7700 900999`), a person may write it
+/// down after the country code, which a Phone never dials. Where `0` is
+/// part of the number, as in Italian landlines, it is kept.
+fn trunk_zero_is_dropped(code: u16) -> bool {
+    DATABASE.by_code(&code).is_some_and(|regions| {
+        regions
+            .iter()
+            .any(|region| region.national_prefix() == Some("0"))
+    })
+}
+
+/// The region `locale_region` names, such as `US`, and its country code.
+fn region_of(locale_region: Option<&str>) -> Option<(country::Id, u16)> {
+    let region = locale_region?
+        .to_ascii_uppercase()
+        .parse::<country::Id>()
+        .ok()?;
+    let code = DATABASE.by_id(region.as_ref())?.country_code();
+    Some((region, code))
 }
 
 #[cfg(test)]
@@ -215,6 +250,55 @@ mod tests {
             assert!(number.is(&plain), "{written}");
             assert!(plain.is(&number), "{written}");
         }
+    }
+
+    #[test]
+    fn a_call_number_without_a_country_code_is_read_in_the_locale_region() {
+        let gb_test_number = Fingerprint::of("+447700900999");
+        assert!(gb_test_number.is(&Fingerprint::of_call("07700 900999", Some("GB"))));
+        assert!(gb_test_number.is(&Fingerprint::of_call("7700900999", Some("gb"))));
+        // In the US the same digits are a US number, never the Test Number
+        // in Britain.
+        assert!(!gb_test_number.is(&Fingerprint::of_call("07700 900999", Some("US"))));
+        assert!(!gb_test_number.is(&Fingerprint::of_call("7700900999", Some("US"))));
+        // A Call that carries its country code ignores the locale.
+        assert!(gb_test_number.is(&Fingerprint::of_call("+44 7700 900999", Some("US"))));
+        assert!(!gb_test_number.is(&Fingerprint::of_call("+1 7700 900999", Some("GB"))));
+        // With no region to read it in, it is as it always was.
+        assert!(gb_test_number.is(&Fingerprint::of_call("07700 900999", None)));
+        assert!(gb_test_number.is(&Fingerprint::of_call("07700 900999", Some("ZZ"))));
+    }
+
+    #[test]
+    fn a_country_code_with_the_trunk_zero_is_the_same_number() {
+        let plain = Fingerprint::of("+447700900999");
+        for written in [
+            "+44 07700 900999",
+            "+44 0 7700 900999",
+            "+44-07700-900999",
+            "0044 07700 900999",
+            "tel:+44-07700-900999",
+        ] {
+            assert!(Fingerprint::of(written).is(&plain), "{written}");
+            assert!(plain.is(&Fingerprint::of(written)), "{written}");
+            assert!(
+                Fingerprint::of_call(written, Some("US")).is(&plain),
+                "{written}"
+            );
+        }
+        // Still not another number.
+        assert!(!Fingerprint::of("+44 08700 900999").is(&plain));
+        assert!(!Fingerprint::of("+44 07700 900998").is(&plain));
+        assert!(!Fingerprint::of("+33 07700 900999").is(&plain));
+    }
+
+    #[test]
+    fn a_zero_that_belongs_to_the_number_is_kept() {
+        // Italian landlines keep their leading 0 in every form.
+        let rome = Fingerprint::of("+39 06 6982 3456");
+        assert!(rome.is(&Fingerprint::of("0039 06 6982 3456")));
+        assert!(!rome.is(&Fingerprint::of("+39 6 6982 3456")));
+        assert!(!rome.is(&Fingerprint::of("+39 06 6982 3457")));
     }
 
     #[test]

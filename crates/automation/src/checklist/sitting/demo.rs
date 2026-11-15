@@ -581,7 +581,7 @@ impl Demo {
                      decline-waiting, call-third, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
                      open-setup-window, contacts-access-off, allow-contacts, \
-                     bind-super-alt-c-elsewhere, cancel-then-confirm,indicator-click, indicator-mute, \
+                     bind-super-alt-c-elsewhere, cancel-then-confirm, indicator-click, indicator-mute, \
                      indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-test-number-national, \
                      type-test-number-trunk-zero, type-wrong-number, type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \
                      earbuds-on, out-of-range, return-to-range, suspend, resume, resume-slowly, \

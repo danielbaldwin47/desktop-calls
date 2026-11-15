@@ -467,9 +467,9 @@ impl State {
     }
 
     /// What is wrong that the user can put right.
-    #[must_use]
     /// The Desktop's own come first: without them, the Phone's can't be
     /// put right.
+    #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
         let mut kinds = self.desktop.problems();
         if self.presence.pairing_lost {

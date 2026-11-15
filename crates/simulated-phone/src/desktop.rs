@@ -29,7 +29,7 @@
 //!   sent only to the clients that called `Subscribe`, as systemd's manual
 //!   says: `done`, unless `--wireplumber-restart-job` says it ends `failed`
 //!   or `timeout` (`WirePlumber` doesn't restart then), or never ends. The
-//!   signals go out before the reply, an unrelated job's first.
+//!   signals go out before the reply, another job on the same unit first.
 //!
 //! The control interface's `SimulatedDesktop1.SetAdapterPower` changes the
 //! adapter's power as another app, or the user, would.
@@ -377,9 +377,10 @@ impl Systemd {
     /// Returns the job's path.
     ///
     /// The job is fast: before the reply goes out, `JobRemoved` goes to the
-    /// subscribers, first for an unrelated job that ended the other way,
-    /// then for this one. A client that matches on anything but the job's
-    /// own path, or that listens only once it has the reply, goes wrong.
+    /// subscribers, first for another job on the same unit that ended the
+    /// other way, then for this one. A client that matches on anything but
+    /// the job's own path, or that listens only once it has the reply, goes
+    /// wrong.
     async fn restart_unit(
         &self,
         #[zbus(object_server)] server: &ObjectServer,
@@ -409,13 +410,8 @@ impl Systemd {
         } else {
             "done"
         };
-        self.send_job_removed(
-            &emitter,
-            unrelated_id,
-            "unrelated.service",
-            unrelated_result,
-        )
-        .await?;
+        self.send_job_removed(&emitter, unrelated_id, &name, unrelated_result)
+            .await?;
         if let Some(result) = result {
             self.send_job_removed(&emitter, id, &name, result).await?;
         }

@@ -38,7 +38,7 @@ fn step_1_2_with_the_pixel_still_paired_says_to_start_over_at_1_1_without_waitin
 }
 
 #[test]
-fn step_1_2_fails_at_once_when_the_finish_page_offers_no_keybinding() {
+fn step_1_2_fails_when_the_finish_page_offers_no_keybinding() {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
     // The user's config already uses Super + Alt + C for another program:

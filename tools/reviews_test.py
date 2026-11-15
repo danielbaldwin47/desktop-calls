@@ -167,6 +167,25 @@ class InARepository(unittest.TestCase):
         (problem,) = self.problems([line("tooling", reviewed)])
         self.assertIn("is a merge that resolved a conflict or changed more", problem)
 
+    def test_a_merge_that_kept_gits_own_tree_for_a_conflict_needs_a_new_review(self):
+        # main deletes a file the branch edits; keeping the edit commits the
+        # very tree merge-tree prints for the conflict (re-review of #332).
+        self.git("switch", "--quiet", "main")
+        self.git("update-ref", "refs/remotes/origin/main", self.commit("tools/d.py", "d = 1\n", "Add d"))
+        self.git("switch", "--quiet", "work")
+        self.git("merge", "--quiet", "--no-edit", "origin/main")
+        reviewed = self.commit("tools/d.py", "d = 2\n", "Edit d")
+        self.git("switch", "--quiet", "main")
+        self.git("rm", "--quiet", "tools/d.py")
+        self.git("commit", "--quiet", "-m", "Delete d")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("switch", "--quiet", "work")
+        subprocess.run(["git", "merge", "--quiet", "--no-edit", "origin/main"], capture_output=True)
+        self.git("add", "tools/d.py")
+        self.git("commit", "--quiet", "--no-edit")
+        (problem,) = self.problems([line("tooling", reviewed)])
+        self.assertIn("is a merge that resolved a conflict or changed more", problem)
+
     def test_a_merge_of_main_that_moves_a_reviewed_line_needs_a_new_review(self):
         # The same lines added, elsewhere in the file: a diff without line
         # numbers can't tell, a remade merge can (review of #332).

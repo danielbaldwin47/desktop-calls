@@ -106,7 +106,10 @@ def unreviewed_commits(git: Git, reviewed: str, head: str, base: str) -> str | N
             return f"{commit[:7]} merges something other than {base}"
         merged = git("merge-tree", "--write-tree", "--no-messages", *parents, allowed=(0, 1)).split()
         tree = git("rev-parse", f"{commit}^{{tree}}").strip()
-        if not merged or merged[0] != tree:
+        # On a conflict, merge-tree still prints a tree first, then a line per
+        # conflicted path: a merge that kept git's conflicted tree (such as
+        # an edit kept over main's delete) must not pass for a clean one.
+        if len(merged) != 1 or merged[0] != tree:
             return f"{commit[:7]} is a merge that resolved a conflict or changed more"
     return None
 

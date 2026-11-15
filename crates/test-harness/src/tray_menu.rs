@@ -210,19 +210,19 @@ fn elide(label: &str, room: u32) -> String {
         .collect()
 }
 
-fn hex([red, green, blue]: [u8; 3]) -> String {
+pub(crate) fn hex([red, green, blue]: [u8; 3]) -> String {
     format!("#{red:02x}{green:02x}{blue:02x}")
 }
 
 /// `text` with the characters XML reads as markup escaped.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
 /// Draws `svg` with `rsvg-convert` into the PNG at `output`.
-fn render(svg: &str, output: &Path) -> Result<(), String> {
+pub(crate) fn render(svg: &str, output: &Path) -> Result<(), String> {
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
     }

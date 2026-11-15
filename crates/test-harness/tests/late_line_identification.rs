@@ -209,7 +209,7 @@ fn a_missed_call_whose_number_came_late_shows_the_contact() {
 
     harness.simulated_phone().caller_hangs_up(&path);
 
-    let notification = wait_for_notification(&harness, "Missed call from Alice (mobile)");
+    let notification = wait_for_notification(&harness, "Missed call from Alice");
     let signalled = harness.missed_calls();
     assert_eq!(
         signalled

@@ -198,11 +198,11 @@ fn alices_number() -> Caller {
 }
 
 #[test]
-fn a_missed_call_notification_names_the_caller_and_says_when() {
+fn a_missed_call_notification_says_who_in_the_summary_and_the_label_and_when_in_the_body() {
     let text = messages::missed_call(&missed_call(alices_number(), Some(alice()), 1), NOW, 0);
 
-    assert_eq!(text.summary, "Missed call from Alice (mobile)");
-    assert_eq!(text.body, "08:30");
+    assert_eq!(text.summary, "Missed call from Alice");
+    assert_eq!(text.body, "mobile · 08:30");
 }
 
 #[test]
@@ -210,6 +210,7 @@ fn a_missed_call_from_someone_not_in_contacts_shows_the_number() {
     let text = messages::missed_call(&missed_call(alices_number(), None, 1), NOW, 0);
 
     assert_eq!(text.summary, "Missed call from +44 7700 900123");
+    assert_eq!(text.body, "08:30");
 }
 
 #[test]
@@ -238,49 +239,56 @@ fn a_contacts_name_and_label_cant_make_a_missed_call_look_like_a_verification_co
     // zero-width non-joiner (U+200C), which no one sees, after the keyword's
     // first letter keeps it from being that word.
     let custom = |label: &str| NumberLabel::Custom(label.to_owned());
-    for (name, label, count, summary) in [
+    for (name, label, count, summary, body) in [
         (
             "Gate code 4821",
             NumberLabel::Mobile,
             1,
-            "Missed call from Gate c\u{200c}ode 4821 (mobile)",
+            "Missed call from Gate c\u{200c}ode 4821",
+            "mobile · 08:30",
         ),
         (
             "PIN A9F3K",
             NumberLabel::Work,
             1,
-            "Missed call from P\u{200c}IN A9F3K (work)",
+            "Missed call from P\u{200c}IN A9F3K",
+            "work · 08:30",
         ),
         (
             "Pin 4821",
             NumberLabel::Mobile,
             2,
             "2 missed calls from P\u{200c}in 4821",
+            "Latest 08:30",
         ),
         (
             "Bank",
             custom("verify 4821"),
             1,
-            "Missed call from Bank (v\u{200c}erify 4821)",
+            "Missed call from Bank",
+            "v\u{200c}erify 4821 · 08:30",
         ),
         (
             "one-time 482913",
             NumberLabel::Home,
             1,
-            "Missed call from o\u{200c}ne-time 482913 (home)",
+            "Missed call from o\u{200c}ne-time 482913",
+            "home · 08:30",
         ),
         (
             "Two factor, security key, confirmation 2FA",
             NumberLabel::Home,
             1,
-            "Missed call from T\u{200c}wo factor, s\u{200c}ecurity key, c\u{200c}onfirmation 2\u{200c}FA (home)",
+            "Missed call from T\u{200c}wo factor, s\u{200c}ecurity key, c\u{200c}onfirmation 2\u{200c}FA",
+            "home · 08:30",
         ),
         // Not whole keywords, so left as they are.
         (
             "Pinkerton Codey 4821",
             NumberLabel::Mobile,
             1,
-            "Missed call from Pinkerton Codey 4821 (mobile)",
+            "Missed call from Pinkerton Codey 4821",
+            "mobile · 08:30",
         ),
     ] {
         let contact = ContactMatch {
@@ -288,7 +296,8 @@ fn a_contacts_name_and_label_cant_make_a_missed_call_look_like_a_verification_co
             label,
         };
         let notice = missed_call(alices_number(), Some(contact), count);
-        assert_eq!(messages::missed_call(&notice, NOW, 0).summary, summary);
+        let text = messages::missed_call(&notice, NOW, 0);
+        assert_eq!((text.summary.as_str(), text.body.as_str()), (summary, body));
     }
 }
 

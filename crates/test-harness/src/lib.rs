@@ -50,6 +50,7 @@ mod desktop_conditions;
 mod freeze;
 mod hyprland;
 mod input;
+mod notification_card;
 mod omarchy_quiet;
 mod process_group;
 mod redraw;
@@ -73,6 +74,7 @@ pub use client::TestClient;
 pub use control::{AppEvent, PendingDial, RunningCli};
 pub use desktop::{Clipboard, Keyboard, Notifications, Pointer, Tray};
 pub use input::Key;
+pub use notification_card::{CardColours, draw_notification_card};
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
 pub use simulated_phone::{ContactsPrompt, PhoneIdentity, RecordedMethodCall, SimulatedPhone};
 pub use stand_ins::{

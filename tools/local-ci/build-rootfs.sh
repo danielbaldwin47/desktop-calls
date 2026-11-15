@@ -34,7 +34,7 @@ pacman-key --populate archlinux >/dev/null 2>&1
 pacman -Syu --noconfirm --needed \
     gcc pkgconf git rustup just cargo-deny cargo-nextest \
     gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject \
-    sway grim wl-clipboard libnotify
+    sway grim wl-clipboard libnotify ttf-nerd-fonts-symbols-mono
 pacman -Scc --noconfirm >/dev/null
 rm -rf /var/cache/pacman/pkg/* /usr/share/man /usr/share/doc /usr/share/gtk-doc
 # As in CI: the package gives sway a file capability the container refuses.

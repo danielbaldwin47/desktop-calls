@@ -154,6 +154,9 @@ pub struct Notification {
     pub actions: Vec<(String, String)>,
     /// Each hint's value in GVariant text form, such as `byte 0x02`.
     pub hints: BTreeMap<String, String>,
+    /// Omarchy's `omarchy-glyph` hint, the glyph for the icon slot, or
+    /// empty without one.
+    pub glyph: String,
     pub expire_timeout: i32,
     /// What Omarchy 4.5 takes for verification codes in its summary and
     /// body, which it offers to copy.
@@ -734,6 +737,11 @@ impl NotificationServer {
             .get("urgency")
             .and_then(|urgency| u8::try_from(&**urgency).ok())
             .unwrap_or(URGENCY_NORMAL);
+        let glyph = hints
+            .get("omarchy-glyph")
+            .and_then(|glyph| <&str>::try_from(&**glyph).ok())
+            .unwrap_or_default()
+            .to_owned();
         let verification_codes = omarchy_quiet::verification_codes(&summary, &body);
         let mut records = self.shared.records();
         let silenced = omarchy_quiet::silenced(
@@ -761,6 +769,7 @@ impl NotificationServer {
             summary,
             body,
             actions: pairs(actions),
+            glyph,
             hints: hints
                 .into_iter()
                 .map(|(name, value)| (name, value.to_string()))

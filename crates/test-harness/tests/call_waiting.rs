@@ -436,7 +436,7 @@ fn a_waiting_call_left_to_ring_out_raises_a_missed_call_notification() {
     harness.notifications().wait_for(
         "a Missed Call notification for Alice",
         SYNC_DEADLINE,
-        |notification| notification.summary == "Missed call from Alice (mobile)",
+        |notification| notification.summary == "Missed call from Alice",
     );
     let state = harness.app_state();
     assert_eq!(state.calls.len(), 1);

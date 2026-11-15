@@ -45,9 +45,15 @@ fn offers_the_keybinding(state: &AppState) -> bool {
     window_field(state, "buttons") == Some("Add keybinding\nDone")
 }
 
+/// What the finish page's keybinding card says, without its title.
+fn keybinding_said(state: &AppState) -> Option<&str> {
+    window_field(state, "keybinding")
+        .map(|card| card.split_once('\n').map_or(card, |(_, text)| text))
+}
+
 fn already_added(state: &AppState) -> bool {
-    window_field(state, "instructions")
-        .is_some_and(|text| text.starts_with("Place your first Call: press Super + Alt + C"))
+    window_field(state, "keybinding")
+        .is_some_and(|text| text.contains("Place your first Call: press Super + Alt + C"))
 }
 
 /// 1.1: the pairing forgotten on both sides, then `just install`, which
@@ -219,7 +225,7 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
         Some(_) => {}
         None => {
             let state = sitting.now();
-            let said = window_field(&state, "instructions").unwrap_or_default();
+            let said = keybinding_said(&state).unwrap_or_default();
             sitting.check(
                 false,
                 format!(
@@ -246,7 +252,7 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
     })?;
     let added_now = already_added(&added.state);
     let said = if added_now {
-        window_field(&added.state, "instructions")
+        keybinding_said(&added.state)
     } else {
         window_field(&added.state, "notice")
     };

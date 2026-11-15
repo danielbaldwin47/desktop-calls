@@ -163,7 +163,7 @@ class TruncatedArtifacts(unittest.TestCase):
             (deps / "libtest_harness-7a66.rmeta").write_bytes(b"")
             (deps / "libtest_harness-7a66.rlib").write_bytes(b"rlib")
             (deps / "test_harness-7a66.d").write_text("deps")
-            (profile / ".fingerprint" / "test_harness-7a66").mkdir(parents=True)
+            (profile / ".fingerprint" / "test-harness-7a66").mkdir(parents=True)
             (profile / "incremental" / "test_harness-1abc").mkdir(parents=True)
             (deps / "libzbus-5f5f.rmeta").write_bytes(b"rmeta")
             (profile / ".fingerprint" / "zbus-5f5f").mkdir()

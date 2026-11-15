@@ -340,11 +340,15 @@ def clear_truncated_artifacts(target: pathlib.Path = CACHE / "target") -> list[s
             if artifact.suffix in (".rmeta", ".rlib") and artifact.stat().st_size == 0
         })
         for unit in units:
-            name = unit.rsplit("-", 1)[0]
+            name, unit_hash = unit.rsplit("-", 1)
             for path in [
                 *deps.glob(f"lib{unit}.*"),
                 *deps.glob(f"{unit}.*"),
-                profile / ".fingerprint" / unit,
+                # Named by the package, which keeps its hyphens
+                # (`.fingerprint/test-harness-<hash>` for `libtest_harness-<hash>`);
+                # the hash alone names the unit.
+                *(profile / ".fingerprint").glob(f"*-{unit_hash}"),
+                # Every build of the crate, not only this unit's: only slower.
                 *(profile / "incremental").glob(f"{name}-*"),
             ]:
                 if path.is_dir():

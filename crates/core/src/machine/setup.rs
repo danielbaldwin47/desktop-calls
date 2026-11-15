@@ -199,6 +199,9 @@ pub struct SetupWindowView {
     /// The Problem whose button takes keyboard focus by itself, so Enter
     /// presses it instead of the step's default button.
     pub problem_has_focus: Option<ProblemKind>,
+    /// The Desktop's Bluetooth is off or blocked, so nothing is looked for
+    /// and nothing can pair until it is on.
+    pub bluetooth_off: bool,
     /// What the window last reported has the keyboard on this page, while
     /// it is still there: after Tab or Shift+Tab, Enter presses it.
     pub focus: Option<SetupFocus>,
@@ -338,6 +341,7 @@ impl State {
                 .problem_blocks_step()
                 .then(|| self.desktop.problems().first().copied())
                 .flatten(),
+            bluetooth_off: self.desktop.bluetooth_off(),
         })
     }
 

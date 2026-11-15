@@ -145,6 +145,55 @@ fn while_calls_are_off_the_setup_window_says_so_and_enter_turns_them_on() {
     });
 }
 
+/// What the window asks to be done here, its last instruction.
+fn here(state: &AppState) -> &str {
+    field(state, "instructions")
+        .and_then(|instructions| instructions.lines().last())
+        .unwrap_or_default()
+}
+
+#[test]
+fn while_calls_are_off_the_setup_window_offers_no_tap_until_calls_are_on() {
+    let harness = calls_off();
+
+    let state = opened_while_off(&harness);
+
+    // A Phone tapping this computer is turned down until calls are on, so
+    // no tap is offered (#369).
+    assert_eq!(
+        here(&state),
+        "Once calls are on, choose your phone below.",
+        "{state:?}"
+    );
+}
+
+#[test]
+fn with_bluetooth_off_and_calls_off_the_setup_window_asks_for_both() {
+    let harness = calls_off();
+    harness.set_bluetooth_power("off");
+
+    opened_while_off(&harness);
+    let state = harness.wait_for_app(
+        "the Setup Window shows the Bluetooth off Problem too",
+        DEADLINE,
+        |state| {
+            state
+                .surface("setup-problems")
+                .and_then(|problems| problems.get("problems"))
+                .is_some_and(|shown| shown == "bluetooth-off")
+        },
+    );
+
+    // Nothing is looked for and nothing can pair: no search, no computer
+    // to tap (#369).
+    assert_eq!(field(&state, "looking"), None, "{state:?}");
+    assert_eq!(
+        here(&state),
+        "Once Bluetooth and calls are on, choose your phone below.",
+        "{state:?}"
+    );
+}
+
 #[test]
 fn pairing_waits_while_calls_are_off() {
     let harness = calls_off();

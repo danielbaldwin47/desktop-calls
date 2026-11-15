@@ -408,3 +408,60 @@ fn a_phone_paired_outside_quiet_hours_keeps_nothing() {
         "{effects:?}"
     );
 }
+
+/// What the Setup Window asks to be done here, past the Phone's steps.
+fn here(state: &State) -> Vec<String> {
+    text(state)
+        .instructions
+        .iter()
+        .map(messages::Instruction::line)
+        .filter(|line| !line.starts_with("On your phone"))
+        .collect()
+}
+
+#[test]
+fn while_calls_are_off_the_setup_window_asks_for_a_phone_once_calls_are_on() {
+    // A Phone tapping this computer is turned down until calls are on, so
+    // no tap is offered (#369).
+    let state = opened(off());
+
+    assert_eq!(
+        here(&state),
+        ["Once calls are on, choose your phone below."]
+    );
+}
+
+#[test]
+fn while_quiet_hours_keep_calls_off_the_setup_window_asks_for_a_phone_once_calls_are_on() {
+    let (state, _) = run(connected(), [Input::QuietHoursKept(quiet_hours()), clock()]);
+    let state = opened(state);
+    assert!(
+        window(&state).calls_off.is_some_and(|off| off.quiet_hours),
+        "Quiet Hours keep calls off"
+    );
+
+    assert_eq!(
+        here(&state),
+        ["Once calls are on, choose your phone below."]
+    );
+}
+
+#[test]
+fn with_bluetooth_off_or_blocked_and_calls_off_the_setup_window_asks_for_both() {
+    // Neither is looked for nor can pair: the window names no computer and
+    // promises no tap (#369).
+    for power in [BluetoothPower::Off, BluetoothPower::Blocked] {
+        let state = run(
+            opened(off()),
+            [Input::DesktopChecked(DesktopCheck::Bluetooth(power))],
+        )
+        .0;
+
+        assert_eq!(text(&state).empty_list, None, "{power:?}");
+        assert_eq!(
+            here(&state),
+            ["Once Bluetooth and calls are on, choose your phone below."],
+            "{power:?}"
+        );
+    }
+}

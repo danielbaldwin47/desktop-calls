@@ -515,6 +515,7 @@ fn each_step_says_which_keys_work_and_numbers_only_what_to_do() {
         opened: 1,
         calls_off: None,
         problem_has_focus: None,
+        bluetooth_off: false,
         focus: None,
     };
     let choose = messages::setup_window(
@@ -583,6 +584,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
         opened: 1,
         calls_off: None,
         problem_has_focus: None,
+        bluetooth_off: false,
         focus: None,
     };
     let off = messages::setup_window(

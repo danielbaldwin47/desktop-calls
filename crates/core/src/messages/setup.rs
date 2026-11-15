@@ -186,27 +186,23 @@ fn choose(desktop: &str) -> Page {
 /// The first page, and in `empty_list` what shows while no Phone is listed.
 fn choosing(view: &SetupWindowView, desktop: &str, empty_list: &mut Option<&'static str>) -> Page {
     // Nothing to look for while pairing waits for calls.
-    let waits = view.calls_off.is_some_and(|off| off.blocks_step);
-    // A Problem blocks choosing only while Bluetooth is off or blocked:
-    // nothing is looked for, and how this computer shows on phones isn't
-    // known yet (#315).
-    let bluetooth_off = view.problem_has_focus.is_some();
-    *empty_list = (!waits && !bluetooth_off).then_some("Looking for phones nearby…");
-    if bluetooth_off {
-        choose_once_bluetooth_is_on()
-    } else {
-        choose(desktop)
-    }
-}
-
-/// The first page while Bluetooth is off or blocked: the phone's steps as
-/// ever, and here, what follows once the Problem card's fix is done.
-fn choose_once_bluetooth_is_on() -> Page {
-    let (heading, mut instructions, buttons) = choose("");
+    let calls_off = view.calls_off.is_some_and(|off| off.blocks_step);
+    // While Bluetooth is off or blocked nothing is looked for, and how this
+    // computer shows on phones isn't known yet (#315).
+    let bluetooth_off = view.bluetooth_off;
+    *empty_list = (!calls_off && !bluetooth_off).then_some("Looking for phones nearby…");
+    let (heading, mut instructions, buttons) = choose(desktop);
+    // A Phone tapping this computer is turned down while calls are off, and
+    // nothing is looked for, so its name isn't known either: here the page
+    // says only what follows once what it waits for is on (#369).
+    let once = match (bluetooth_off, calls_off) {
+        (true, true) => "Once Bluetooth and calls are on, choose your phone below.",
+        (true, false) => "Once Bluetooth is on, choose your phone below.",
+        (false, true) => "Once calls are on, choose your phone below.",
+        (false, false) => return (heading, instructions, buttons),
+    };
     instructions.pop();
-    instructions.push(Instruction::here(
-        "Once Bluetooth is on, choose your phone below.",
-    ));
+    instructions.push(Instruction::here(once));
     (heading, instructions, buttons)
 }
 

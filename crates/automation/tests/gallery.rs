@@ -66,6 +66,7 @@ const STATES: &[&str] = &[
     "setup-window-done-contacts-denied",
     "setup-window-keybinding",
     "setup-window-calls-off",
+    "setup-window-calls-off-bluetooth-off",
     "setup-problem-bluetooth-off",
     "setup-problem-bluetooth-blocked",
     "setup-problem-contacts-support-missing",

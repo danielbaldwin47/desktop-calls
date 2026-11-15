@@ -32,6 +32,7 @@ fn view(step: SetupStep, focus: Option<SetupFocus>) -> SetupWindowView {
         opened: 1,
         calls_off: None,
         problem_has_focus: None,
+        bluetooth_off: false,
         focus,
     }
 }

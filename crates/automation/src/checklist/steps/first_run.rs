@@ -58,15 +58,23 @@ fn already_added(state: &AppState) -> bool {
 
 /// 1.1: the pairing forgotten on both sides, then `just install`, which
 /// starts the app again: with no Phone, the Setup Window opens by itself.
-pub(super) fn forget_and_install(sitting: &mut Sitting) -> Result<(), Stop> {
-    no_call_left(sitting)?;
-    sitting.say(FORGET_ON_THE_PIXEL, &[]);
+/// Forgets the pairing on this computer first, then on the Pixel. The other
+/// way round, the Desktop still follows the Pixel when it forgets, asks it
+/// for hands-free, and the Pixel reports a wrong PIN (ticket #373).
+fn forget_on_both_sides(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.say(REMOVE_ON_THE_DESKTOP, &["forget-pairing"]);
     sitting.wait_for(
         "Desktop Calls letting go of the Pixel",
         ACT_DEADLINE,
         |state| state.phone_name.is_empty(),
     )?;
+    sitting.say(FORGET_ON_THE_PIXEL, &[]);
+    Ok(())
+}
+
+pub(super) fn forget_and_install(sitting: &mut Sitting) -> Result<(), Stop> {
+    no_call_left(sitting)?;
+    forget_on_both_sides(sitting)?;
     sitting.observed("Desktop Calls let go of the Pixel once it was removed.".to_owned());
     sitting.say(
         "Now install and start Desktop Calls: run `just install` in your Desktop Calls checkout.",
@@ -279,13 +287,7 @@ pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(),
         "So that the Pixel asks again, pair afresh. First forget the pairing on both sides:",
         &[],
     );
-    sitting.say(FORGET_ON_THE_PIXEL, &[]);
-    sitting.say(REMOVE_ON_THE_DESKTOP, &["forget-pairing"]);
-    sitting.wait_for(
-        "Desktop Calls letting go of the Pixel",
-        ACT_DEADLINE,
-        |state| state.phone_name.is_empty(),
-    )?;
+    forget_on_both_sides(sitting)?;
     sitting.say(
         "Then open the Setup Window: run `desktop-calls connect`.",
         &["open-setup-window"],

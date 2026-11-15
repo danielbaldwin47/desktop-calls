@@ -470,6 +470,47 @@ fn a_phone_that_forgets_the_pairing_is_a_problem_not_out_of_range() {
     forgets_the_pairing_and_the_app_says_so(&harness);
 }
 
+/// The real Pixel, on forgetting the Desktop, dropped hands-free but BlueZ
+/// kept it connected: each `ConnectProfile` for hands-free then failed
+/// `"br-connection-key-missing"`, and asked the person holding it to pair,
+/// which it reported as a wrong PIN (ticket #373).
+#[test]
+fn a_phone_that_forgets_the_pairing_while_still_connected_is_a_problem_too() {
+    let harness = connected();
+
+    harness.simulated_phone().forget_pairing_keeping_link();
+
+    let state = harness.wait_for_app(
+        "ConnectionState is pairing-lost",
+        RECONNECT_DEADLINE,
+        |state| state.connection_state == "pairing-lost",
+    );
+    assert_eq!(
+        state
+            .problems
+            .iter()
+            .map(|problem| problem.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["pairing-lost"]
+    );
+    // Each one would ask whoever holds the Phone to pair.
+    let tried = hands_free_connects(&recorded(&harness));
+    let held = harness.simulated_phone().recorded_holds(
+        "no more hands-free connects",
+        Duration::from_secs(4),
+        |recorded| hands_free_connects(recorded) == tried,
+    );
+    assert_eq!(hands_free_connects(&held), tried);
+}
+
+/// The `ConnectProfile`s among `recorded`.
+fn hands_free_connects(recorded: &[RecordedMethodCall]) -> usize {
+    recorded
+        .iter()
+        .filter(|call| call.interface == "org.bluez.Device1" && call.member == "ConnectProfile")
+        .count()
+}
+
 /// The Desktop was already paging the Phone when it came back into range, so
 /// that connect is still under way when the Phone forgets the pairing: it
 /// must fail as any connect made after the Phone forgot would (ticket #171).

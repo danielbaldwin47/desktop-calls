@@ -316,8 +316,8 @@ pub async fn connect_phone(
     Err(failure.0)
 }
 
-/// What a BlueZ error from `Device1.Connect` means, or `None` if the Phone
-/// is connected after all.
+/// What a BlueZ error from `Device1.Connect`, or `ConnectProfile`, means,
+/// or `None` if the Phone is connected after all.
 fn connect_failure(name: &str, message: &str) -> Option<ConnectFailure> {
     match name {
         // BlueZ's error table has both; the real Desktop answered the
@@ -361,6 +361,10 @@ pub enum BounceError {
     NotDropped,
     /// Hands-free dropped, and BlueZ didn't connect it again.
     NotReconnected,
+    /// BlueZ didn't connect hands-free: the Phone no longer has the Desktop
+    /// paired, and each try asks the person holding it to pair (ticket
+    /// #373).
+    PairingLost,
 }
 
 impl BounceError {
@@ -371,6 +375,7 @@ impl BounceError {
             Self::PhoneNotFound => "phone-not-found",
             Self::NotDropped => "hands-free-not-dropped",
             Self::NotReconnected => "hands-free-not-reconnected",
+            Self::PairingLost => "pairing-lost",
         }
     }
 }
@@ -415,14 +420,23 @@ pub async fn bounce_hands_free(system: &Connection, address: &str) -> Result<(),
 pub async fn connect_hands_free(system: &Connection, address: &str) -> Result<(), BounceError> {
     let device = device_path(system, address).await?;
     connect_profile(system, &device).await.map_err(|error| {
+        let failure = match &error {
+            zbus::Error::MethodError(name, message, _)
+                if connect_failure(name.as_str(), message.as_deref().unwrap_or_default())
+                    == Some(ConnectFailure::PairingLost) =>
+            {
+                BounceError::PairingLost
+            }
+            _ => BounceError::NotReconnected,
+        };
         tracing::info!(
             event_kind = %EventKind::PhoneCommandFailed,
-            error_kind = BounceError::NotReconnected.as_str(),
+            error_kind = failure.as_str(),
             phone_address = %address,
             detail = %error,
             "BlueZ couldn't connect hands-free again"
         );
-        BounceError::NotReconnected
+        failure
     })
 }
 

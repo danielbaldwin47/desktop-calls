@@ -172,6 +172,10 @@ pub enum Input {
     PhoneCommandDone(PhoneCommand),
     /// The Phone refused, or never answered, this command.
     PhoneCommandFailed(PhoneCommand),
+    /// BlueZ couldn't connect hands-free, as [`PhoneCommand::ConnectHandsFree`]
+    /// asked, since the Phone no longer has the Desktop paired, though BlueZ
+    /// still has it connected (ticket #373).
+    HandsFreePairingLost,
     /// A timer started by [`Effect::StartTimer`] ran out.
     TimerFired(Timer),
     /// Contacts and Call History cached from an earlier sync were read.

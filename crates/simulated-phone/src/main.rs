@@ -428,6 +428,23 @@ impl Control {
         self.range_changed(change, &emitter).await
     }
 
+    /// The person holding the Phone forgets the Desktop, and the Phone drops
+    /// hands-free while BlueZ keeps it connected, as the real Pixel did
+    /// (ticket #373): each `Connect` and `ConnectProfile` from then on
+    /// fails with `"br-connection-key-missing"`, which on the real Desktop
+    /// also asked the person holding it to pair.
+    async fn forget_pairing_keeping_link(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        let change = {
+            let mut world = lock(&self.world);
+            world.range.forgot_pairing = true;
+            range::hands_free_gone(&mut world)?
+        };
+        self.range_changed(change, &emitter).await
+    }
+
     /// The person holding the Phone taps the Desktop on its "Pair new
     /// device" screen, which needs the Desktop discoverable. Returns the
     /// passkey the Phone shows; `PairingRequests` says how it went.

@@ -378,6 +378,15 @@ fn refusal(world: &World, call: &MethodCall, message: &Message) -> zbus::Result<
             "Operation is not supported".to_owned(),
         )));
     }
+    if world.range.forgot_pairing && call.member == "ConnectProfile" {
+        // The Phone has no link key for the Desktop any more: BlueZ starts
+        // a pairing, which the real Pixel answered as a wrong PIN (ticket
+        // #373).
+        return Ok(Some(Reply::Error(
+            "org.bluez.Error.Failed",
+            "br-connection-key-missing".to_owned(),
+        )));
+    }
     Ok(None)
 }
 

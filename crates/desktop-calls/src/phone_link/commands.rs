@@ -40,11 +40,13 @@ pub(super) async fn execute(
                 Target::Phone(address) => {
                     // Each logs its own failure.
                     let done = if command == PhoneCommand::ConnectHandsFree {
-                        bluez::connect_hands_free(system, &address).await.is_ok()
+                        bluez::connect_hands_free(system, &address).await
                     } else {
-                        bluez::bounce_hands_free(system, &address).await.is_ok()
+                        bluez::bounce_hands_free(system, &address).await
                     };
-                    let input = if done {
+                    let input = if let Err(bluez::BounceError::PairingLost) = done {
+                        Input::HandsFreePairingLost
+                    } else if done.is_ok() {
                         tracing::debug!(
                             event_kind = %EventKind::PhoneCommandSent,
                             command = %command_name(&command),
@@ -54,7 +56,7 @@ pub(super) async fn execute(
                     } else {
                         Input::PhoneCommandFailed(command)
                     };
-                    let failed = matches!(input, Input::PhoneCommandFailed(_));
+                    let failed = !matches!(input, Input::PhoneCommandDone(_));
                     let _ = inputs.unbounded_send(input);
                     if failed {
                         break;

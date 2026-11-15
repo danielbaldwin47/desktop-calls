@@ -38,6 +38,10 @@ const STILL_PAIRED: &str = "The Pixel is still paired, and this step pairs it af
 const GO_BACK_TO_1_1: &str = "Press Enter to go back to step 1.1, which forgets the pairing on both sides, or type skip or quit.";
 const PAIRED_AT_INSTALL: &str = "Desktop Calls found the Pixel still paired when it started again, so this computer kept the pairing through the install.";
 const DO_1_1_AGAIN: &str = "Press Enter to do step 1.1 again, or type skip or quit.";
+/// How the finish page's summary starts when the Phone refused Contacts,
+/// as against "…isn't sharing contacts yet." when nobody answered or the
+/// sync failed.
+const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts. ";
 /// The box on the Pixel's Pair dialog, as the Pixel words it (inferred).
 const CONTACTS_BOX: &str = "\"Allow access to your contacts and call history\"";
 
@@ -424,13 +428,21 @@ fn judge_without_a_prompt(sitting: &mut Sitting, state: &AppState) -> Result<(),
                 )
             },
         );
-    } else {
+    } else if summary.starts_with(REFUSED_SUMMARY) {
         sitting.observed(format!(
             "This Pixel refuses Contacts when {CONTACTS_BOX} is unticked, rather than asking, so it never shows a prompt that could time out. The finish page says: {summary}"
         ));
         sitting.say(
             "So that Calls show names for the rest of the checklist: on the Pixel, open Settings, then Connected devices, tap the settings icon next to this computer, and switch on Contacts and call history.",
             &["contacts-access-on"],
+        );
+    } else {
+        // Not shared for another reason: the sync failed, or the Pixel left.
+        sitting.check(
+            false,
+            format!(
+                "The Pixel neither asked nor said whether it shares Contacts. The finish page says: {summary} Run this step again."
+            ),
         );
     }
     close_the_window(sitting)

@@ -456,6 +456,11 @@ fn run_step(
             flush();
             return Ok((None, Some(id)));
         }
+        // A check that failed before the skip keeps the step failed.
+        Err(Stop::Skipped) if findings.failed => {
+            findings.evidence.push("You skipped this step.".to_owned());
+            Outcome::Fail
+        }
         Err(Stop::Skipped) => {
             findings.evidence.push("You skipped this step.".to_owned());
             Outcome::Skipped
@@ -562,11 +567,7 @@ fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: b
                 }
                 Outcome::Skipped => {
                     not_passed.push(step.id);
-                    println!(
-                        "  {} skipped{when}: {}",
-                        step.id,
-                        record.evidence.last().map_or("", String::as_str)
-                    );
+                    println!("  {} skipped{when}: {}", step.id, record.evidence.join(" "));
                 }
             }
         }
@@ -597,7 +598,7 @@ fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: b
             }),
             group.number
         ),
-        (None, None) => "nothing: every runnable step has passed".to_owned(),
+        (None, None) => "nothing to run; every runnable step has passed".to_owned(),
     };
     println!("Next: {next}.");
     flush();

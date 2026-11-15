@@ -392,19 +392,23 @@ fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
                 .all(|window| window.get("handoff").map(String::as_str) == Some("Moving…")),
         "the Call Window stopped saying Moving… before the audio was here: {call_windows:#?}"
     );
-    // The second `Activate` waits the second out, by the app's own clock: a
-    // timer fires late under load, never early, so this can't flake.
-    let asked = moves_to_desktop_done(&harness);
-    assert_eq!(asked.len(), 2, "the Phone was asked twice: {asked:?}");
-    let apart = Duration::from_micros(asked[1] - asked[0]);
-    assert!(
-        apart >= ASKS_AGAIN_AFTER,
-        "the Phone was asked again {apart:?} after it took the first Activate"
-    );
     let took = since_handoff_requested(&harness, "audio-moved");
     assert!(
         took < RETRIED_HANDOFF_DEADLINE,
         "the audio took {took:?} to reach the Desktop once the app was asked"
+    );
+    // The second `Activate` waits the second out, by the app's own clock: a
+    // timer fires late under load, never early, so this can't flake. Read
+    // once `audio-moved` is logged, which comes after both.
+    let asked = moves_to_desktop_done(&harness);
+    assert_eq!(asked.len(), 2, "the Phone was asked twice: {asked:?}");
+    let apart = asked[1].checked_sub(asked[0]).map_or_else(
+        || panic!("the app logged the second ask before the first: {asked:?}"),
+        Duration::from_micros,
+    );
+    assert!(
+        apart >= ASKS_AGAIN_AFTER,
+        "the Phone was asked again {apart:?} after it took the first Activate"
     );
     assert_eq!(shown(&state, "notice"), None);
     let calls = harness.simulated_phone().wait_for_recorded(

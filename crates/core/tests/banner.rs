@@ -292,6 +292,17 @@ fn the_footer_names_the_keybinding_set_then_the_letters_that_act() {
         footer(&bound, &["H", "E", "D"]).as_deref(),
         Some("Super Alt C then H, E or D")
     );
+    // The comma is a part of its own, which sits against the key before it.
+    assert_eq!(
+        messages::banner_footer(&banner(&bound).footer.expect("a footer"), &["H", "E", "D"])[4..],
+        [
+            FooterPart::Key("H".to_owned()),
+            FooterPart::Comma,
+            FooterPart::Key("E".to_owned()),
+            FooterPart::Words("or"),
+            FooterPart::Key("D".to_owned()),
+        ]
+    );
 
     let unbound = run(
         ringing,

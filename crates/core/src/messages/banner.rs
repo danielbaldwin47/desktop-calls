@@ -6,12 +6,14 @@ use crate::machine::{
     BannerChoice, BannerFooter, BannerView, OtherCall, RingingCaller, WaitingOptions,
 };
 
-/// One piece of the Banner's footer line: a key, in a keycap, or words
-/// between keys.
+/// One piece of the Banner's footer line: a key, in a keycap, words
+/// between keys, or a comma between keys, which sits against the key
+/// before it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FooterPart {
     Key(String),
     Words(&'static str),
+    Comma,
 }
 
 /// The key that makes `choice`, shown on its keycap and in the footer.
@@ -96,12 +98,10 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
                 .collect();
             parts.push(FooterPart::Words("then"));
             for (at, letter) in letters.iter().enumerate() {
-                if at > 0 {
-                    parts.push(FooterPart::Words(if at + 1 == letters.len() {
-                        "or"
-                    } else {
-                        ","
-                    }));
+                if at + 1 == letters.len() && at > 0 {
+                    parts.push(FooterPart::Words("or"));
+                } else if at > 0 {
+                    parts.push(FooterPart::Comma);
                 }
                 parts.push(FooterPart::Key((*letter).to_owned()));
             }
@@ -128,8 +128,12 @@ pub fn footer_text(parts: &[FooterPart]) -> String {
         let words = match part {
             FooterPart::Key(key) => key.as_str(),
             FooterPart::Words(words) => words,
+            FooterPart::Comma => {
+                text.push(',');
+                continue;
+            }
         };
-        if !text.is_empty() && *words != *"," {
+        if !text.is_empty() {
             text.push(' ');
         }
         text.push_str(words);

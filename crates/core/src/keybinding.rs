@@ -128,7 +128,7 @@ pub fn bound_keys(config: &HyprlandConfig) -> Option<Vec<String>> {
     let bindings = config.bindings.as_ref()?;
     let text = bindings.text.as_ref()?;
     let mut ours: Option<String> = None;
-    let mut read = |code: &str| {
+    each_line(bindings, text, |code, _file| {
         let (unbinding, arguments) = if let Some(arguments) = call(code, ".unbind(") {
             (true, arguments)
         } else if let Some(arguments) = call(code, ".bind(") {
@@ -155,18 +155,7 @@ pub fn bound_keys(config: &HyprlandConfig) -> Option<Vec<String>> {
         } else if same {
             ours = None;
         }
-    };
-    for line in text.lines() {
-        let in_line = code(line);
-        if let Some(name) = required_by(in_line)
-            && let Some(file) = bindings.required.iter().find(|file| file.name == name)
-        {
-            for required_line in file.text.lines() {
-                read(code(required_line));
-            }
-        }
-        read(in_line);
-    }
+    });
     ours.map(|keys| {
         keys.split(|character: char| character == '+' || character.is_whitespace())
             .filter(|key| !key.is_empty())
@@ -201,18 +190,31 @@ struct Bound {
 
 fn binding_of(keys: &[String], bindings: &ConfigFile, text: &str) -> Option<Bound> {
     let mut bound = None;
+    each_line(bindings, text, |code, file| {
+        read_line(code, keys, file, &mut bound);
+    });
+    bound
+}
+
+/// Runs `read` on the code of every line `bindings` runs, in the order it
+/// runs them, with the path of the file each is in: `text`'s lines, each
+/// file it requires read where it requires it.
+fn each_line<'config>(
+    bindings: &'config ConfigFile,
+    text: &'config str,
+    mut read: impl FnMut(&'config str, &'config str),
+) {
     for line in text.lines() {
         let in_line = code(line);
         if let Some(name) = required_by(in_line)
             && let Some(file) = bindings.required.iter().find(|file| file.name == name)
         {
             for required_line in file.text.lines() {
-                read_line(code(required_line), keys, &file.path, &mut bound);
+                read(code(required_line), &file.path);
             }
         }
-        read_line(in_line, keys, &bindings.path, &mut bound);
+        read(in_line, &bindings.path);
     }
-    bound
 }
 
 /// What one line does to the keys: binds them, or unbinds them.

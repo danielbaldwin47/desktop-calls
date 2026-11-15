@@ -39,10 +39,10 @@ enum Command {
         /// Where the gallery the review judged is, for the evidence.
         #[arg(long)]
         gallery: Option<String>,
-        /// Print the nextest filter that selects every scenario the
-        /// scorecard reads, and score nothing.
+        /// Print the name of every scenario the scorecard reads, one a
+        /// line, for `cargo test --exact`, and score nothing.
         #[arg(long)]
-        filter: bool,
+        names: bool,
     },
     /// Walk through the Real-Phone Checklist one step at a time, observing
     /// what a machine can and asking only what it can't.
@@ -115,13 +115,13 @@ fn main() -> ExitCode {
             scenarios,
             review,
             gallery,
-            filter,
+            names,
         } => scorecard::run(scorecard::Options {
             results,
             scenarios,
             review,
             gallery,
-            filter,
+            names,
         }),
         Command::RealPhoneChecklist {
             group,

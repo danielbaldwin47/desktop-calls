@@ -1,6 +1,7 @@
 //! The scenarios' results, read from the `JUnit` reports cargo-nextest writes
-//! (`.config/nextest.toml`): one from `just scorecard`'s own run, or one
-//! per scenario shard from CI's run on `main`.
+//! (`.config/nextest.toml`), one per scenario shard from CI's run on
+//! `main`, or from what `cargo test` printed in `just scorecard`'s own run,
+//! which needs no cargo-nextest.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,8 +23,9 @@ pub struct Report {
 }
 
 impl Report {
-    /// Reads `path`: a `JUnit` file, or a directory whose `.xml` files, at
-    /// any depth, are each one. `None` when there is no report there.
+    /// Reads `path`: a `JUnit` file or `cargo test`'s output, or a
+    /// directory whose `.xml` files, at any depth, are each a `JUnit` file.
+    /// `None` when there is no report there.
     pub fn read(path: &Path) -> Option<Self> {
         let mut sources = Vec::new();
         collect(path, &mut sources);
@@ -31,7 +33,12 @@ impl Report {
         let mut results = BTreeMap::new();
         for source in &sources {
             let text = fs::read_to_string(source).ok()?;
-            for (name, ran) in testcases(&text) {
+            let found = if text.contains("<testcase ") {
+                testcases(&text)
+            } else {
+                printed_results(&text)
+            };
+            for (name, ran) in found {
                 // A scenario that failed in one report stays failed.
                 let entry = results.entry(name).or_insert(ran);
                 if ran == Ran::Failed {
@@ -117,6 +124,23 @@ fn testcases(text: &str) -> Vec<(String, Ran)> {
         rest = &rest[head_end.min(rest.len())..];
     }
     found
+}
+
+/// Each `test <name> ... ok` line `cargo test` printed in `text`, and how
+/// the test ended: `FAILED` failed, `ignored` skipped.
+fn printed_results(text: &str) -> Vec<(String, Ran)> {
+    text.lines()
+        .filter_map(|line| {
+            let (name, outcome) = line.strip_prefix("test ")?.split_once(" ... ")?;
+            let ran = match outcome.trim() {
+                "ok" => Ran::Passed,
+                "FAILED" => Ran::Failed,
+                outcome if outcome.starts_with("ignored") => Ran::Skipped,
+                _ => return None,
+            };
+            Some((name.to_owned(), ran))
+        })
+        .collect()
 }
 
 fn attribute<'text>(head: &'text str, name: &str) -> Option<&'text str> {

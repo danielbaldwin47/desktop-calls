@@ -30,18 +30,9 @@ fn scorecard(arguments: &[&str]) -> String {
     String::from_utf8(printed.stdout).expect("the scorecard is text")
 }
 
-/// Every scenario the scorecard reads, from the filter it prints.
+/// Every scenario the scorecard reads, from the names it prints.
 fn scenarios() -> Vec<String> {
-    scorecard(&["--filter"])
-        .trim()
-        .split(" | ")
-        .map(|test| {
-            test.strip_prefix("test(=")
-                .and_then(|name| name.strip_suffix(')'))
-                .unwrap_or_else(|| panic!("a filter term per scenario: {test}"))
-                .to_owned()
-        })
-        .collect()
+    scorecard(&["--names"]).lines().map(str::to_owned).collect()
 }
 
 /// A `JUnit` report, as cargo-nextest writes it, of `scenarios`, with

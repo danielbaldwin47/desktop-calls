@@ -461,19 +461,17 @@ pub struct Options {
     pub review: Option<PathBuf>,
     /// Where the gallery is, for item 8's evidence.
     pub gallery: Option<String>,
-    /// Print the nextest filter that selects every scenario the scorecard
-    /// reads, and score nothing.
-    pub filter: bool,
+    /// Print the name of every scenario the scorecard reads, one a line,
+    /// and score nothing.
+    pub names: bool,
 }
 
 /// `automation scorecard`: prints the table.
 pub fn run(options: Options) -> ExitCode {
-    if options.filter {
-        let filter: Vec<String> = proofs::every_scenario()
-            .iter()
-            .map(|name| format!("test(={name})"))
-            .collect();
-        println!("{}", filter.join(" | "));
+    if options.names {
+        for name in proofs::every_scenario() {
+            println!("{name}");
+        }
         return ExitCode::SUCCESS;
     }
     let directory = match options.results.map_or_else(results::default_directory, Ok) {

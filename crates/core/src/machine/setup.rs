@@ -194,9 +194,28 @@ pub struct SetupWindowView {
     pub problem_has_focus: Option<ProblemKind>,
 }
 
-/// Why the Setup Window's last attempt didn't work.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The Phone the user chose last in the Setup Window: its address, and its
+/// name, which a choice kept before ticket #150 lacks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ChosenPhone {
+    pub(super) address: String,
+    pub(super) name: Option<String>,
+}
+
+impl ChosenPhone {
+    /// Whether this is the Phone with `address`.
+    pub(super) fn is(&self, address: &str) -> bool {
+        self.address.eq_ignore_ascii_case(address)
+    }
+}
+
+/// Why the Setup Window's last attempt didn't work, or why it opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SetupNotice {
+    /// It opened by itself at startup because the Phone the user chose
+    /// last, with this name if it was kept, is no longer paired, and no
+    /// other Phone is followed in its place (ticket #150).
+    ChosenPhoneUnpaired { name: Option<String> },
     /// The Desktop can't look for Phones: its Bluetooth is off or missing.
     /// With Bluetooth off or blocked, the view leaves it to the Problem
     /// card.
@@ -366,7 +385,7 @@ impl State {
         Some(SetupWindowView {
             step,
             desktop_name: setup.desktop_name.clone(),
-            notice: setup.notice.filter(|_| !said_by_a_problem),
+            notice: setup.notice.clone().filter(|_| !said_by_a_problem),
             opened: setup.opened,
             calls_off: self.setup_calls_off_view(),
             problem_has_focus: self
@@ -432,6 +451,17 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
             // Opens by itself once, at startup, with no Phone set up.
             if !std::mem::replace(&mut state.setup_offered, true) && state.phone.is_none() {
                 open(state, effects);
+                // A chosen Phone that is paired is followed, so it's gone.
+                let gone =
+                    state
+                        .chosen_phone
+                        .as_ref()
+                        .map(|chosen| SetupNotice::ChosenPhoneUnpaired {
+                            name: chosen.name.clone(),
+                        });
+                if let (Some(setup), Some(gone)) = (state.setup.as_mut(), gone) {
+                    setup.notice = Some(gone);
+                }
             }
         }
         Input::OpenSetupWindow => open(state, effects),
@@ -669,6 +699,12 @@ fn pairing_failed(state: &mut State, failure: PairingFailure) {
     });
 }
 
+/// An earlier run kept the Phone with `address`, and its `name`, as the
+/// Phone the user chose last.
+pub(super) fn kept(state: &mut State, address: String, name: Option<String>) {
+    state.chosen_phone = Some(ChosenPhone { address, name });
+}
+
 /// The Phone the Setup Window was pairing is paired: Desktop Calls follows
 /// it from now on, instead of any Phone it followed before, trusts it and
 /// connects it.
@@ -679,14 +715,19 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
         .is_some_and(|followed| followed.address.eq_ignore_ascii_case(&phone.address));
     // The user chose it, so a restart follows it, not the Phone BlueZ lists
     // first.
+    // Kept again when only its name is new, or wasn't kept.
+    let chosen = ChosenPhone {
+        address: phone.address.clone(),
+        name: Some(phone.name.clone()),
+    };
     if !state
         .chosen_phone
         .as_ref()
-        .is_some_and(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+        .is_some_and(|kept| kept.is(&phone.address) && kept.name == chosen.name)
     {
-        state.chosen_phone = Some(phone.address.clone());
+        state.chosen_phone = Some(chosen);
         effects.push(Effect::KeepChosenPhone {
-            address: phone.address.clone(),
+            phone: phone.clone(),
         });
     }
     if !already_followed {

@@ -37,7 +37,7 @@ pub struct SetupWindowText {
     /// A tip, on the finish page.
     pub tip: Option<&'static str>,
     /// Why the last attempt didn't work.
-    pub notice: Option<&'static str>,
+    pub notice: Option<String>,
     /// What the list says while no Phone is nearby, while choosing.
     pub empty_list: Option<&'static str>,
     /// The card that says calls are off, with its Turn calls on button,
@@ -68,7 +68,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         progress: Vec::new(),
         line: None,
         tip: None,
-        notice: view.notice.map(notice),
+        notice: view.notice.as_ref().map(notice),
         empty_list: None,
         calls_off: view
             .calls_off
@@ -548,9 +548,16 @@ pub(super) fn shown_keys(keys: &str) -> String {
         .join(" + ")
 }
 
-/// Why the last attempt didn't work, and what to do about it.
-fn notice(notice: SetupNotice) -> &'static str {
-    match notice {
+/// Why the last attempt didn't work, or why the window opened, and what to
+/// do about it.
+fn notice(notice: &SetupNotice) -> String {
+    let text = match notice {
+        SetupNotice::ChosenPhoneUnpaired { name } => {
+            return format!(
+                "{} isn't paired with this computer any more; pair it again, or choose another phone.",
+                name.as_deref().unwrap_or("The phone you chose last")
+            );
+        }
         SetupNotice::BluetoothUnavailable => {
             "This computer's Bluetooth is off or missing; turn it on to connect your phone."
         }
@@ -565,5 +572,6 @@ fn notice(notice: SetupNotice) -> &'static str {
         SetupNotice::KeybindingConfigChanged => {
             "The Hyprland config changed after the line was shown, so nothing was written; this is what it can take now."
         }
-    }
+    };
+    text.to_owned()
 }

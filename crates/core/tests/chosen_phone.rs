@@ -3,7 +3,7 @@
 //! the Setup Window rather than another Phone when that one is gone
 //! (ticket #121).
 
-use desktop_calls_core::{Effect, Input, Phone, SetupStep, State, step};
+use desktop_calls_core::{Effect, Input, Phone, SetupNotice, SetupStep, State, step};
 
 fn setup_step(state: &State) -> Option<SetupStep> {
     state.surfaces().setup_window.map(|window| window.step)
@@ -38,9 +38,11 @@ fn old() -> Phone {
     phone("Old Pixel", OLD)
 }
 
+/// The Pixel's address, as kept, written as `address`.
 fn chosen(address: &str) -> Input {
     Input::ChosenPhoneKept {
         address: address.to_owned(),
+        name: Some("My Pixel".to_owned()),
     }
 }
 
@@ -128,6 +130,60 @@ fn when_the_chosen_phone_is_not_paired_the_setup_window_opens_and_no_other_phone
         }),
         "the Phone that is paired is offered, so the user is not stuck"
     );
+    // And it says why it opened, naming the Phone gone (ticket #150).
+    let window = state.surfaces().setup_window.expect("the window is open");
+    let notice = SetupNotice::ChosenPhoneUnpaired {
+        name: Some("My Pixel".to_owned()),
+    };
+    assert_eq!(window.notice, Some(notice));
+}
+
+/// A first start, with no Phone chosen yet: the window opens without a
+/// notice, as there is nothing gone to explain.
+#[test]
+fn with_no_phone_chosen_the_setup_window_opens_without_a_notice() {
+    let (state, _) = run(State::default(), [Input::PairedPhonesListed]);
+
+    let window = state.surfaces().setup_window.expect("the window is open");
+    assert_eq!(window.notice, None);
+}
+
+/// A choice kept without a name, whose Phone is gone: the window says so
+/// without one, and pairing that Phone again keeps it with its name, so a
+/// later start can say which Phone is gone.
+#[test]
+fn a_choice_kept_without_a_name_is_kept_again_with_it_once_paired_again() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::ChosenPhoneKept {
+                address: PIXEL.to_owned(),
+                name: None,
+            },
+            Input::PairedPhonesListed,
+        ],
+    );
+    let window = state.surfaces().setup_window.expect("the window is open");
+    assert_eq!(
+        window.notice,
+        Some(SetupNotice::ChosenPhoneUnpaired { name: None })
+    );
+    let (state, _) = run(
+        state,
+        [
+            Input::PhoneNearby(pixel()),
+            Input::ChoosePhone {
+                address: PIXEL.to_owned(),
+            },
+            Input::PairingCode {
+                phone: pixel(),
+                code: 1,
+            },
+        ],
+    );
+    let (_, effects) = run(state, [Input::ConfirmPairing, Input::PhonePaired(pixel())]);
+
+    assert!(effects.contains(&Effect::KeepChosenPhone { phone: pixel() }));
 }
 
 #[test]
@@ -149,9 +205,7 @@ fn choosing_a_phone_that_is_paired_already_follows_and_keeps_it_without_pairing(
     );
 
     assert_eq!(state.phone(), Some(&old()));
-    assert!(effects.contains(&Effect::KeepChosenPhone {
-        address: OLD.to_owned()
-    }));
+    assert!(effects.contains(&Effect::KeepChosenPhone { phone: old() }));
     assert!(effects.contains(&Effect::AttachPhone {
         address: OLD.to_owned()
     }));
@@ -247,9 +301,7 @@ fn pairing_a_phone_in_the_setup_window_keeps_it_as_the_chosen_phone() {
             .iter()
             .filter(|effect| matches!(effect, Effect::KeepChosenPhone { .. }))
             .collect::<Vec<_>>(),
-        [&Effect::KeepChosenPhone {
-            address: PIXEL.to_owned()
-        }]
+        [&Effect::KeepChosenPhone { phone: pixel() }]
     );
     assert_eq!(state.phone(), Some(&pixel()));
 }

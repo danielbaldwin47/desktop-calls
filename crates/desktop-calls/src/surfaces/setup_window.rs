@@ -440,7 +440,8 @@ impl SetupWindow {
         self.line.set_visible(text.line.is_some());
         self.tip.set_text(text.tip.unwrap_or_default());
         self.tip.set_visible(text.tip.is_some());
-        self.notice_text.set_text(text.notice.unwrap_or_default());
+        self.notice_text
+            .set_text(text.notice.as_deref().unwrap_or_default());
         self.notice.set_visible(text.notice.is_some());
         self.calls_off
             .show(text.calls_off.as_ref(), waits_for_calls);
@@ -748,7 +749,7 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     if let Some(tip) = text.tip {
         content.insert("tip".to_owned(), tip.to_owned());
     }
-    if let Some(notice) = text.notice {
+    if let Some(notice) = &text.notice {
         content.insert("notice".to_owned(), notice.to_owned());
     }
     if let Some(card) = &text.calls_off {

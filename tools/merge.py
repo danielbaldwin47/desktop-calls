@@ -456,7 +456,15 @@ def review_status(pr: dict, head: str, posted: tuple[reviews.Record, ...] = ()) 
     number, base = pr["number"], pr["baseRefName"]
     git("fetch", "--quiet", "origin", base, f"refs/pull/{number}/head")
     comments = json.loads(gh("pr", "view", str(number), "--json", "comments"))["comments"]
-    records = [record for comment in comments if (record := reviews.parse(comment["body"]))]
+    # The repository is public: anyone may comment, so only those who can
+    # push record reviews, and a hidden (minimized) comment records nothing.
+    records = [
+        record
+        for comment in comments
+        if comment.get("authorAssociation") in reviews.RECORDERS
+        and not comment.get("isMinimized")
+        and (record := reviews.parse(comment["body"]))
+    ]
     return reviews.problems(git, records + list(posted), head, f"origin/{base}")
 
 

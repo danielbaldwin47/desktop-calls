@@ -242,7 +242,17 @@ class Refusing(unittest.TestCase):
         self.assertIn("just review-record 42 <kind> <model> <PASS|FAIL> <findings file>", message)
 
     def test_it_reads_the_records_from_the_prs_comments(self):
-        comments = {"comments": [{"body": "LGTM"}, {"body": reviews.first_line("tooling", "sonnet", SHA, "PASS")}]}
+        record = reviews.first_line("tooling", "sonnet", SHA, "PASS")
+        forged = reviews.first_line("tooling", "opus", SHA, "PASS")
+        comments = {"comments": [
+            {"body": "LGTM", "authorAssociation": "OWNER"},
+            {"body": record, "authorAssociation": "OWNER"},
+            # The repo is public: a drive-by commenter's record counts for nothing.
+            {"body": forged, "authorAssociation": "NONE"},
+            {"body": forged, "authorAssociation": "CONTRIBUTOR"},
+            # Nor does a comment someone hid.
+            {"body": forged, "authorAssociation": "OWNER", "isMinimized": True},
+        ]}
         seen = []
 
         def problems(git, records, head, base):

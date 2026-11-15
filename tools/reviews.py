@@ -38,6 +38,9 @@ TOOLING_KINDS = ("tooling",)
 # Reviewers may be these models. Never Fable (the user's rule, 2026-11-13).
 MODELS = ("sonnet", "opus", "haiku")
 VERDICTS = ("PASS", "FAIL")
+# Whose comments may record a review (GitHub's author association): the repo
+# is public, and anyone else can comment.
+RECORDERS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 PRODUCT_DIRECTORIES = ("crates/", "data/")
 PRODUCT_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")

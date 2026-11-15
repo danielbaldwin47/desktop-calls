@@ -80,9 +80,15 @@ pub struct Nearby {
     #[arg(long)]
     old_phone: Option<String>,
     /// Each pairing's `Paired` is held back: set, so a read says so, but
-    /// never signalled, while `Bonded` is.
+    /// never signalled, while `Bonded` is. Never released: as BlueZ 5.87
+    /// whose resolving of the Phone's services gets nowhere.
     #[arg(long)]
     paired_signal_held: bool,
+    /// The unpaired Phone's services are never resolved: its `UUIDs` stay
+    /// the ones it advertised, without the Hands-Free Audio Gateway, as
+    /// BlueZ keeps them until it has resolved its services.
+    #[arg(long)]
+    services_unresolved: bool,
 }
 
 /// Whether the Phone shares Calls with the Desktop: its "Phone calls"
@@ -150,6 +156,9 @@ impl Pairing {
                     device.insert(name.to_owned(), OwnedVariant::from(false));
                 }
                 device.insert("RSSI".to_owned(), OwnedVariant::from(-52_i16));
+                if nearby.services_unresolved {
+                    device.insert("UUIDs".to_owned(), bluez::advertised_uuids()?);
+                }
             }
             range.reachable = true;
             pairing.undiscovered.push((phone.clone(), interfaces));

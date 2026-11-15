@@ -225,6 +225,16 @@ fn device_interfaces(
     ]))
 }
 
+/// The `UUIDs` of a device not paired, which BlueZ has from what it
+/// advertised: audio sink and hands-free unit, without the Hands-Free Audio
+/// Gateway.
+pub fn advertised_uuids() -> zbus::Result<OwnedVariant> {
+    texts(&[
+        "0000110b-0000-1000-8000-00805f9b34fb",
+        "0000111e-0000-1000-8000-00805f9b34fb",
+    ])
+}
+
 /// A device other than the Phone: headphones or another Phone, with
 /// `class` and, if `paired`, paired with the Desktop.
 pub fn other_device(
@@ -250,13 +260,7 @@ pub fn other_device(
         properties.insert("UUIDs".into(), texts(&PHONE_UUIDS)?);
     } else {
         properties.insert("RSSI".into(), OwnedVariant::from(-60_i16));
-        properties.insert(
-            "UUIDs".into(),
-            texts(&[
-                "0000110b-0000-1000-8000-00805f9b34fb",
-                "0000111e-0000-1000-8000-00805f9b34fb",
-            ])?,
-        );
+        properties.insert("UUIDs".into(), advertised_uuids()?);
     }
     properties.insert(
         "Adapter".into(),

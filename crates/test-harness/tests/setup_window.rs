@@ -400,8 +400,41 @@ fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
     closed(&harness);
     harness.wait_for_app_log(r#""event_kind":"setup-closed""#, DEADLINE);
     harness.open_connect_window();
-    let state = wait_for_step(&harness, "choose", DEADLINE);
-    assert_ne!(field(&state, "phones"), Some(PHONE_NAME), "{state:?}");
+    wait_for_step(&harness, "choose", DEADLINE);
+    // Discovery lists a nearby Phone within a second or so: for longer
+    // than that, the window never lists this one.
+    let until = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < until {
+        let state = harness.app_state();
+        let listed = field(&state, "phones").unwrap_or_default();
+        assert!(
+            !listed.split('\n').any(|name| name == PHONE_NAME),
+            "{state:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// BlueZ holds `Paired` back and never resolves the Phone's services, so
+/// nothing it signals says the Phone is paired with hands-free: `Pair`
+/// returning is all the window has to go on (ticket #372).
+#[test]
+fn a_phone_chosen_in_the_window_goes_on_when_bluez_never_resolves_its_services() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .paired_signal_held()
+        .services_unresolved()
+        .start();
+    wait_for_phone_listed(&harness, STARTUP);
+
+    harness.keyboard().press(Key::Return);
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
 #[test]

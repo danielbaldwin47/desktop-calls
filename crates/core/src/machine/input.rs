@@ -278,6 +278,11 @@ pub enum Input {
     RejectPairing,
     /// Pairing didn't happen, for this reason.
     PairingFailed(PairingFailure),
+    /// BlueZ's `Pair` for the Phone with this address returned, or said it
+    /// was paired already. BlueZ may say no more: it holds `Paired`, and
+    /// the Phone's services, back until it has resolved them, which it may
+    /// never do (ticket #372).
+    PairDone { address: String },
     /// The Phone refused hands-free when asked: its "Phone calls" setting
     /// for the Desktop is off.
     HandsFreeRefused,

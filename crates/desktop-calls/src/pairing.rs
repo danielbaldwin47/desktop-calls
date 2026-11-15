@@ -90,9 +90,11 @@ impl Pairing {
             Effect::AnswerPairingCode { confirm } => answer(&self.pending, confirm),
             Effect::PairPhone { address } => {
                 MainContext::default().spawn_local(async move {
-                    if let Err(failure) = pair(&system, &address).await {
-                        let _ = inputs.unbounded_send(Input::PairingFailed(failure));
-                    }
+                    let input = match pair(&system, &address).await {
+                        Ok(()) => Input::PairDone { address },
+                        Err(failure) => Input::PairingFailed(failure),
+                    };
+                    let _ = inputs.unbounded_send(input);
                 });
             }
             Effect::TrustPhone { address } => {
@@ -240,7 +242,8 @@ async fn stop(system: &Connection) {
 }
 
 /// `Device1.Pair` on the Phone with `address`. Its code comes through the
-/// agent; once paired, BlueZ's `Paired` says so.
+/// agent; its returning, or `AlreadyExists`, means paired, since BlueZ may
+/// hold `Paired` back (ticket #372).
 async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> {
     let Ok(Some(device)) = bluez::find_device(system, address).await else {
         return Err(pairing_failed(
@@ -596,7 +599,7 @@ impl Agent {
         tracing::info!(
             event_kind = %EventKind::PairingCancelled,
             waiting = cancelled,
-            "BlueZ cancelled its pairing request: the Phone turned it down, or it timed out"
+            "BlueZ cancelled its pairing request"
         );
         if cancelled {
             let _ = self

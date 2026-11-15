@@ -326,6 +326,13 @@ impl Builder {
         self
     }
 
+    /// BlueZ never resolves the unpaired Phone's services, so its `UUIDs`
+    /// lack the Hands-Free Audio Gateway, before pairing and after.
+    pub fn services_unresolved(mut self) -> Self {
+        self.nearby.push("--services-unresolved".to_owned());
+        self
+    }
+
     /// Headphones named `name` are nearby, not paired: discovery finds them
     /// beside the Phone.
     pub fn headphones_nearby(mut self, name: &str) -> Self {

@@ -17,6 +17,10 @@ use std::os::fd::AsFd as _;
 use std::os::unix::fs::FileExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::Duration;
 
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
@@ -73,14 +77,41 @@ pub(crate) struct Recorder {
 }
 
 impl Recorder {
-    /// Connects to the compositor at `socket`. Shared-memory buffers are
-    /// files in `directory`. Also returns a handle that ends the recording
-    /// from another thread: [`Stopper::stop`] makes a waiting
+    /// Connects to the compositor at `socket`, giving up if it hasn't
+    /// answered within `deadline`. Shared-memory buffers are files in
+    /// `directory`. Also returns a handle that ends the recording from
+    /// another thread: [`Stopper::stop`] makes a waiting
     /// [`Recorder::next_frame`] return an error.
-    pub fn connect(socket: &Path, directory: &Path) -> Result<(Self, Stopper), String> {
+    pub fn connect(
+        socket: &Path,
+        directory: &Path,
+        deadline: Duration,
+    ) -> Result<(Self, Stopper), String> {
+        let (recorder, stopper, watch) = Self::connect_watched(socket, directory, deadline)?;
+        watch.judge(Ok((recorder, stopper)))
+    }
+
+    /// As [`Recorder::connect`], with the watch on `deadline` left running,
+    /// for the caller to end once it has what it waited for.
+    fn connect_watched(
+        socket: &Path,
+        directory: &Path,
+        deadline: Duration,
+    ) -> Result<(Self, Stopper, Watch), String> {
         let stream = UnixStream::connect(socket)
             .map_err(|error| format!("connect to {}: {error}", socket.display()))?;
-        let stopper = Stopper(stream.try_clone().map_err(|error| error.to_string())?);
+        let clone = || stream.try_clone().map_err(|error| error.to_string());
+        let stopper = Stopper(clone()?);
+        let watch = Watch::start(clone()?, deadline);
+        let (recorder, stopper) = watch.judge(Self::start(stream, stopper, directory))?;
+        Ok((recorder, stopper, watch))
+    }
+
+    fn start(
+        stream: UnixStream,
+        stopper: Stopper,
+        directory: &Path,
+    ) -> Result<(Self, Stopper), String> {
         let connection = Connection::from_socket(stream).map_err(|error| error.to_string())?;
         let (globals, queue) =
             registry_queue_init::<State>(&connection).map_err(|error| error.to_string())?;
@@ -328,8 +359,114 @@ impl Dispatch<ZwlrScreencopyFrameV1, Slot> for State {
     }
 }
 
+/// One frame of the screen as it is now, from the compositor at `socket`,
+/// written to `path` as a binary PPM, with buffers in `directory`.
+/// Gives up if the compositor hasn't sent it within `deadline`.
+pub(crate) fn capture_once(
+    socket: &Path,
+    directory: &Path,
+    path: &Path,
+    deadline: Duration,
+) -> Result<(u32, u32), String> {
+    let (mut recorder, _stopper, watch) = Recorder::connect_watched(socket, directory, deadline)?;
+    watch.judge(recorder.next_frame(path))
+}
+
+/// Shuts a connection to the compositor down if `deadline` passes before
+/// this is dropped, so a call blocked on it returns an error instead of
+/// waiting for ever on a compositor that has hung.
+struct Watch {
+    deadline: Duration,
+    fired: Arc<AtomicBool>,
+    cancel: Option<mpsc::Sender<()>>,
+    watcher: Option<thread::JoinHandle<()>>,
+}
+
+impl Watch {
+    fn start(stream: UnixStream, deadline: Duration) -> Self {
+        let fired = Arc::new(AtomicBool::new(false));
+        let (cancel, cancelled) = mpsc::channel::<()>();
+        let flag = Arc::clone(&fired);
+        let watcher = thread::spawn(move || {
+            if let Err(mpsc::RecvTimeoutError::Timeout) = cancelled.recv_timeout(deadline) {
+                flag.store(true, Ordering::SeqCst);
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        });
+        Self {
+            deadline,
+            fired,
+            cancel: Some(cancel),
+            watcher: Some(watcher),
+        }
+    }
+
+    /// `result`, unless the deadline passed: then the connection is gone,
+    /// and the error says so.
+    fn judge<T>(&self, result: Result<T, String>) -> Result<T, String> {
+        if !self.fired.load(Ordering::SeqCst) {
+            return result;
+        }
+        let detail = result.err().map_or_else(String::new, |error| format!(" ({error})"));
+        Err(format!(
+            "the compositor did not answer within {:?}{detail}",
+            self.deadline
+        ))
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        drop(self.cancel.take());
+        if let Some(watcher) = self.watcher.take() {
+            let _ = watcher.join();
+        }
+    }
+}
+
 delegate_noop!(State: ZwlrScreencopyManagerV1);
 delegate_noop!(State: ignore wl_output::WlOutput);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::net::UnixListener;
+
+    use super::*;
+
+    /// A compositor that takes the connection and never answers, as a hung
+    /// sway does: the capture gives up at its deadline rather than hold the
+    /// test, and the job, until GitHub's limit.
+    #[test]
+    fn a_capture_from_a_compositor_that_never_answers_fails_at_its_deadline() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let socket = directory.path().join("wayland-silent");
+        let listener = UnixListener::bind(&socket).expect("listen");
+        let (release, released) = mpsc::channel::<()>();
+        thread::spawn(move || {
+            let connection = listener.accept();
+            // Kept open, unanswered, until the test ends.
+            let _ = released.recv();
+            drop(connection);
+        });
+        let (done, result) = mpsc::channel();
+        let buffers = directory.path().join("captures");
+        let path = buffers.join("frame.ppm");
+        thread::spawn(move || {
+            let _ = done.send(capture_once(
+                &socket,
+                &buffers,
+                &path,
+                Duration::from_millis(300),
+            ));
+        });
+        let captured = result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the capture gave up at its deadline instead of hanging");
+        drop(release);
+        let error = captured.expect_err("nothing could be captured");
+        assert!(error.contains("within 300ms"), "{error}");
+    }
+}

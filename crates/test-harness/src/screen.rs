@@ -9,7 +9,7 @@
 use std::fs;
 use std::io::{BufRead as _, BufReader, BufWriter, Cursor};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,6 +30,11 @@ pub const LAYOUT_SIZE: (f64, f64) = (2400.0, 1350.0);
 
 /// How long sway may take to start.
 const STARTUP_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long one `grim` capture may take. A whole 3840 by 2160 screen takes
+/// about a second to encode on a CI runner; without a limit, a compositor
+/// that never sent the frame held the scenario until the job's timeout.
+const GRIM_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Where the screen is.
 #[derive(Clone, Debug)]
@@ -431,13 +436,15 @@ impl Screen {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create the screenshot directory");
         }
-        let captured = group
-            .adopt(&mut Command::new("grim"))
-            .env_clear()
-            .envs(environment.iter().cloned())
-            .args(arguments)
-            .arg(path)
-            .output();
+        let captured = output_within(
+            group
+                .adopt(&mut Command::new("grim"))
+                .env_clear()
+                .envs(environment.iter().cloned())
+                .args(arguments)
+                .arg(path),
+            GRIM_DEADLINE,
+        );
         let captured = match captured {
             Ok(captured) => captured,
             Err(error) => panic!("run grim ({error}); install it: sudo pacman -S --needed grim"),
@@ -556,4 +563,77 @@ fn png_size(png: &[u8]) -> Option<(u32, u32)> {
     let width = u32::from_be_bytes(header[16..20].try_into().ok()?);
     let height = u32::from_be_bytes(header[20..24].try_into().ok()?);
     Some((width, height))
+}
+
+/// Runs `command` to the end, as `Command::output` does, but kills it and
+/// fails once `deadline` has passed.
+fn output_within(command: &mut Command, deadline: Duration) -> std::io::Result<Output> {
+    let give_up = Instant::now() + deadline;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    // Read on threads of their own, so a full pipe can't stall the command.
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|pipe| Box::new(pipe) as _));
+    let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= give_up {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("it did not finish within {deadline:?}, so it was killed"),
+            ));
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A capture tool that never finishes, as grim does when the compositor
+    /// never sends the frame, fails at the deadline.
+    #[test]
+    fn a_command_that_never_finishes_fails_at_its_deadline() {
+        let started = Instant::now();
+        let error = output_within(
+            Command::new("sleep").arg("10"),
+            Duration::from_millis(300),
+        )
+        .expect_err("sleep 10 can't finish in 300 ms");
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        assert!(error.to_string().contains("within 300ms"), "{error}");
+    }
+
+    #[test]
+    fn a_command_that_finishes_in_time_gives_its_status_and_output() {
+        let output = output_within(
+            Command::new("sh").args(["-c", "echo said; echo complained >&2; exit 3"]),
+            Duration::from_secs(10),
+        )
+        .expect("sh runs");
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stdout, b"said\n");
+        assert_eq!(output.stderr, b"complained\n");
+    }
 }

@@ -98,9 +98,11 @@ def latest_run() -> str:
         time.sleep(POLL_SECONDS)
     if not runs:
         raise Failed(
-            f"GitHub has no CI run for {branch}: it runs CI only on pushes to main and "
-            f"on `gh workflow run CI --ref {branch}`.\n"
-            "Next: just ci-local (a branch's CI), or `gh workflow run CI` for a run here"
+            f"GitHub has no CI run for {branch}: it runs CI on every push to a PR that "
+            "doesn't conflict with main, on pushes to main, and on "
+            f"`gh workflow run CI --ref {branch}`.\n"
+            f"Next: gh pr view {branch} --json mergeable (a conflict starts no run: merge origin/main, "
+            f"push), or `gh workflow run CI --ref {branch}` for a run here"
         )
     newest = str(runs[0]["databaseId"])
     print(

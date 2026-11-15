@@ -256,15 +256,18 @@ impl SetupProblems {
                 fix_buttons.push(button.clone());
                 Some((button, keycap))
             } else if let Some(NextAction::Command(command)) = message.next_action {
+                // The command on a row of its own, the card's full width, so
+                // it reads as one line to type rather than words split
+                // beside the button (#318); Copy command goes under it.
                 let shown = gtk::Label::new(Some(command));
                 shown.add_css_class("monospace");
                 shown.set_selectable(true);
                 shown.set_xalign(0.0);
                 shown.set_wrap(true);
-                shown.set_wrap_mode(gtk::pango::WrapMode::Word);
-                shown.set_hexpand(true);
-                shown.set_valign(gtk::Align::Center);
-                actions.append(&shown);
+                shown.set_wrap_mode(gtk::pango::WrapMode::Char);
+                shown.set_margin_top(space::XS);
+                body.append(&shown);
+                actions.set_orientation(gtk::Orientation::Vertical);
                 let (button, keycap) = fix_button(messages::copy_command_label());
                 let weak = Rc::downgrade(self);
                 button.connect_clicked(move |button| {

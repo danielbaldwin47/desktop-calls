@@ -525,7 +525,11 @@ impl SetupWindow {
             self.shown_buttons.replace(text.buttons.clone());
         }
 
-        let content = report(view, text);
+        let mut content = report(view, text);
+        // The words in place of the list, as shown (#315).
+        if self.empty.is_visible() {
+            content.insert("looking".to_owned(), self.empty.text().to_string());
+        }
         let unchanged = *self.content.borrow() == content;
         *self.content.borrow_mut() = content;
         if !self.window.is_visible() {

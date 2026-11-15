@@ -454,3 +454,30 @@ fn only_bluetooth_off_and_audio_have_a_fix_button() {
         assert!(effects.is_empty(), "{kind:?}: {effects:?}");
     }
 }
+
+#[test]
+fn while_bluetooth_is_off_or_blocked_the_setup_window_claims_no_search_and_names_no_computer() {
+    // With Bluetooth off nothing is searched for and the Desktop's name on
+    // Phones isn't known yet (#315).
+    for power in [BluetoothPower::Off, BluetoothPower::Blocked] {
+        let state = setup_open(run(
+            all_well(State::default()),
+            [checked(DesktopCheck::Bluetooth(power))],
+        ));
+        let view = state.surfaces().setup_window.expect("the window is open");
+        let text = messages::setup_window(&view, Timestamp(0), None);
+
+        assert_eq!(text.empty_list, None, "{power:?}: nothing is looked for");
+        let here: Vec<String> = text
+            .instructions
+            .iter()
+            .map(messages::Instruction::line)
+            .filter(|line| !line.starts_with("On your phone"))
+            .collect();
+        assert_eq!(
+            here,
+            ["Once Bluetooth is on, choose your phone below."],
+            "{power:?}"
+        );
+    }
+}

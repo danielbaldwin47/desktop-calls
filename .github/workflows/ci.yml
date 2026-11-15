@@ -47,8 +47,9 @@ concurrency:
 # Checklist's group 6 runs; the gallery, in parts; and the harness's
 # scenarios, in shards. If only docs that no code reads changed, they are all
 # skipped. "CI passed" needs every job, so it appears only once they have all
-# finished. The slowest job sets the time from push to "CI passed": the
-# checklist's group 6, which waits out real minutes.
+# finished. The slowest job sets the time from push to "CI passed": on a PR,
+# a scenario shard (run 43680311355: 3 min 49 s from the first job's start); on main, the checklist's
+# group 6, which waits out real minutes.
 jobs:
   changes:
     name: Code changed?

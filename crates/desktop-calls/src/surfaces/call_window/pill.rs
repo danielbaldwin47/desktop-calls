@@ -56,6 +56,8 @@ pub(super) struct CallPill {
     /// The line under the caller, with the state tag and "Calls off after".
     tag_line: gtk::Box,
     tag: gtk::Label,
+    /// The "·" between the two tags, while both show (#319).
+    tag_separator: gtk::Label,
     /// "Calls off after", after the state tag, while a turn-off waits.
     calls_off: gtk::Label,
     status: gtk::Label,
@@ -102,8 +104,13 @@ impl CallPill {
         // Should a tag line ever outgrow the strip, it gives way before the
         // strip's width would.
         calls_off.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+        // Joined as every other line of tags is, so two read as two.
+        let tag_separator = gtk::Label::new(Some(messages::tag_separator()));
+        tag_separator.add_css_class(class::TAG);
+        tag_separator.set_visible(false);
+        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::XS);
         tag_line.append(&tag);
+        tag_line.append(&tag_separator);
         tag_line.append(&calls_off);
         tag_line.set_visible(false);
         let status = gtk::Label::new(None);
@@ -166,6 +173,7 @@ impl CallPill {
             caller,
             tag_line,
             tag,
+            tag_separator,
             calls_off,
             status,
             divider,
@@ -292,6 +300,8 @@ impl CallPill {
         self.tag
             .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
         self.tag.set_visible(tag.is_some());
+        self.tag_separator
+            .set_visible(tag.is_some() && view.calls_off_after);
         self.calls_off.set_visible(view.calls_off_after);
         self.tag_line
             .set_visible(tag.is_some() || view.calls_off_after);
@@ -384,6 +394,18 @@ fn report_tags(
             "calls-off-after".to_owned(),
             messages::calls_off_after_tag().to_owned(),
         );
+    }
+    // The line as it reads, separator and all.
+    let line: Vec<&str> = [
+        tag.map(messages::call_pill_tag),
+        calls_off_after.then(messages::calls_off_after_tag),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !line.is_empty() {
+        let separator = format!(" {} ", messages::tag_separator());
+        content.insert("tag-line".to_owned(), line.join(&separator));
     }
 }
 

@@ -17,7 +17,7 @@ const DEADLINE: Duration = Duration::from_secs(5);
 const STAYS: Duration = Duration::from_secs(4);
 const PHONE_NAME: &str = "My Pixel";
 const NUMBER: &str = "+447700900123";
-const PENDING: &str = "Calls turn off when this call ends";
+const PENDING: &str = "Calls off after this call";
 
 fn connected() -> Harness {
     let harness = Harness::builder().phone_name(PHONE_NAME).start();
@@ -383,6 +383,52 @@ fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and
         "the Call Window shows the number in full",
         LAID_OUT,
         |state| cut_short(state, "call-window") == Some("no"),
+    );
+    harness.simulated_phone().caller_hangs_up(&path);
+}
+
+/// What the Call Pill's line of tags reads, separator and all.
+fn tag_line(state: &AppState) -> Option<&str> {
+    state
+        .surface("call-pill")
+        .and_then(|content| content.get("tag-line"))
+        .map(String::as_str)
+}
+
+#[test]
+fn muted_with_a_long_number_the_call_pill_joins_its_tags_and_cuts_neither_them_nor_the_number() {
+    let harness = on_screen();
+    let path = harness.simulated_phone().ring(LONG_NUMBER);
+    let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    // Answered here, so the audio is here and Mute works.
+    harness.answer(state.calls.first().map_or(0, |call| call.id));
+    harness.wait_for_app("the Call is live", DEADLINE, is_live);
+    cli_ok(&harness, &["calls", "off"]);
+    wait_waiting(&harness);
+    harness
+        .set_muted(true)
+        .unwrap_or_else(|error| panic!("mute: {error:?}"));
+
+    harness.wait_for_app(
+        "the Call Window collapses to a muted, tagged Call Pill, laid out",
+        COLLAPSE_DEADLINE,
+        |state| {
+            state.surface("call-window").is_none()
+                && tag_line(state) == Some("Muted · Calls off after")
+                && cut_short(state, "call-pill").is_some()
+        },
+    );
+    harness.app_holds(
+        "the Call Pill shows the number and both tags in full",
+        LAID_OUT,
+        |state| {
+            cut_short(state, "call-pill") == Some("no")
+                && state
+                    .surface("call-pill")
+                    .and_then(|content| content.get("calls-off-after-cut-short"))
+                    .map(String::as_str)
+                    == Some("no")
+        },
     );
     harness.simulated_phone().caller_hangs_up(&path);
 }

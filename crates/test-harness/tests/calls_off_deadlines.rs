@@ -419,9 +419,9 @@ fn the_menu_offers_an_hour_and_tomorrow_morning_with_their_end_times_across_a_cl
         ["For 1 hour (until 23:00)", "For 1 hour (until 23:01)"].contains(&labels[1].as_str()),
         "{labels:?}"
     );
-    assert_eq!(labels[2], "Until tomorrow morning (07:00)", "{labels:?}");
+    assert_eq!(labels[2], "Until morning (07:00)", "{labels:?}");
 
-    harness.tray().click("Until tomorrow morning (07:00)");
+    harness.tray().click("Until morning (07:00)");
 
     // 07:00 is daylight-saving time by then: an hour sooner than it would
     // be on standard time.

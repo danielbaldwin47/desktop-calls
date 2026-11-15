@@ -26,7 +26,9 @@ mod when;
 pub use banner::{
     FooterPart, banner_consequence, banner_footer, banner_initial, banner_key, footer_text,
 };
-pub use call_pill::{call_pill_tag, call_pill_tooltip, calls_off_after_tag, show_call_tooltip};
+pub use call_pill::{
+    call_pill_tag, call_pill_tooltip, calls_off_after_tag, show_call_tooltip, tag_separator,
+};
 pub use call_window::{call_window_escape, contact_lost, elapsed, live_notice_heading, state_line};
 pub use calls_off::{
     SetupCallsOffText, calls_kept_on, calls_off_for_too_long, calls_off_pending_status,

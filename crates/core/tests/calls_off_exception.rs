@@ -236,7 +236,7 @@ fn enter_while_calls_are_off_unblocks_the_phone_and_says_connecting() {
     assert_eq!(view.status, IndicatorStatus::CallsOffAgain);
     assert_eq!(
         messages::indicator_status(&view.status),
-        "Calls off again when this call ends"
+        "Calls off after this call"
     );
     assert!(view.menu.contains(&IndicatorEntry::KeepCallsOn), "{view:?}");
     assert_ne!(view.look, IndicatorLook::Off);

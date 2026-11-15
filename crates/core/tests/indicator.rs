@@ -371,7 +371,7 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
             [Input::TurnCallsOff { until: None }]
         )),
         [
-            "Calls turn off when this call ends",
+            "Calls off after this call",
             "New call…",
             "Mute",
             "Move audio to phone",

@@ -155,6 +155,12 @@ fn is_live_on_desktop(state: &AppState, call: u32) -> bool {
             .any(|known| known.id == call && known.state == "active")
 }
 
+/// The seconds in a duration as the Call Window shows it, `m:ss`.
+fn seconds(shown: &str) -> Option<u64> {
+    let (minutes, seconds) = shown.split_once(':')?;
+    Some(minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?)
+}
+
 fn is_timer(text: &str) -> bool {
     let mut parts = text.split(':');
     let (Some(minutes), Some(seconds), None) = (parts.next(), parts.next(), parts.next()) else {
@@ -448,15 +454,34 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
             .is_some_and(|status| is_timer(status))
     });
     let hang_up = find_on_screen(&harness, "call-window", RED);
+    // Under the pointer, the Call Window stays expanded past the 5 s after
+    // which it would collapse to the Call Pill.
+    let (x, y) = hang_up.centre();
+    harness.pointer().move_to(x, y);
+    // The Call lasts 2 s or more, so "Call ended" shows how long, not 0:00
+    // (#262).
+    harness.wait_for_app("the Call Window's timer reads 0:02 or more", DEADLINE, |state| {
+        call_window(state)
+            .and_then(|window| window.get("timer"))
+            .and_then(|status| seconds(status))
+            .is_some_and(|lasted| lasted >= 2)
+    });
 
     click(&harness, hang_up);
 
-    harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
+    let state = harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
         state.calls.is_empty()
             && call_window(state)
                 .and_then(|window| window.get("state"))
                 .is_some_and(|line| line.starts_with("Call ended"))
     });
+    // At least what the timer read: the ticker may trail the Call by up to
+    // a second, and on a loaded runner the click and its Hangup take more.
+    let line = call_window(&state).and_then(|window| window.get("state"));
+    let lasted = line
+        .and_then(|line| line.strip_prefix("Call ended · "))
+        .and_then(seconds);
+    assert!(lasted.is_some_and(|lasted| lasted >= 2), "{line:?}");
     harness.wait_for_app("the Call Window closes", DEADLINE, |state| {
         call_window(state).is_none()
     });

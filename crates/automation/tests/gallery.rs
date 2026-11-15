@@ -12,6 +12,7 @@ const STATES: &[&str] = &[
     "incoming-call-banner-keyboard",
     "incoming-call-banner-not-in-contacts",
     "incoming-call-banner-no-keybinding",
+    "incoming-call-banner-withheld",
     "call-waiting-banner-keyboard",
     "call-waiting-banner-without-hold",
     "call-window-live",
@@ -40,9 +41,15 @@ const STATES: &[&str] = &[
     "call-pill-held",
     "call-pill-ended",
     "dialer-call-history",
+    "dialer-new-missed-calls",
     "dialer-results",
     "dialer-not-connected",
     "dialer-calls-off",
+    "dialer-withheld-missed-call",
+    "dialer-call-in-progress",
+    "dialer-undialable",
+    "call-window-audio-not-moved",
+    "call-window-phone-kept-audio",
     "quiet-hours-window-off",
     "quiet-hours-window-on",
     "quiet-hours-window-refused",
@@ -52,6 +59,8 @@ const STATES: &[&str] = &[
     "setup-window-contacts-prompt",
     "setup-window-contacts-syncing",
     "setup-window-done",
+    "setup-window-contacts-prompt-timed-out",
+    "setup-window-done-contacts-denied",
     "setup-window-keybinding",
     "setup-window-calls-off",
     "setup-problem-bluetooth-off",
@@ -154,11 +163,20 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         assert_eq!(&png[16..24], &[0, 0, 0x0f, 0, 0, 0, 0x08, 0x70], "{file}");
     }
 
-    // The Indicator, drawn as Omarchy's bar draws it: a strip of bar 48 by
-    // 26 logical pixels at 2x, each state's icon different.
+    indicator_icons_are_drawn(&output, &index);
+    indicator_menus_are_drawn(&output, &index);
+    missed_call_notifications_are_drawn(&output, &index);
+}
+
+/// The Indicator in the gallery at `output`, whose page is `index`, drawn
+/// as Omarchy's bar draws it: a strip of bar 48 by 26 logical pixels at
+/// 2x, each state's icon different.
+fn indicator_icons_are_drawn(output: &Path, index: &str) {
     let mut icons = Vec::new();
     for state in [
         "connected",
+        "missed-calls",
+        "missed-calls-out-of-range",
         "disconnected",
         "ringing",
         "in-call",
@@ -168,7 +186,8 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         for look in ["omarchy-light", "omarchy-dark"] {
             let file = format!("indicator-{state}-{look}.png");
             assert!(index.contains(&file), "the index shows {file}: {index}");
-            let png = std::fs::read(output.join(&file)).expect("the icon exists");
+            let png = std::fs::read(output.join(&file))
+                .unwrap_or_else(|error| panic!("{file} is drawn: {error}"));
             assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "{file} is a PNG");
             assert_eq!(&png[16..24], &[0, 0, 0, 96, 0, 0, 0, 52], "{file}");
             if look == "omarchy-dark" {
@@ -185,8 +204,6 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
             assert!(index.contains(&file), "the index shows {file}: {index}");
         }
     }
-    indicator_menus_are_drawn(&output, &index);
-    missed_call_notifications_are_drawn(&output, &index);
 }
 
 /// The Missed Call notification in the gallery at `output`, whose page is
@@ -231,6 +248,8 @@ fn indicator_menus_are_drawn(output: &Path, index: &str) {
     for (state, rows, separators) in [
         // Status, Open Dialer, Turn calls off, Quiet Hours…, then setup.
         ("menu-calls-on", 5, 1),
+        // As calls on, with the Missed Calls' line under the status.
+        ("menu-missed-calls", 6, 1),
         // The header, its line, and the three choices.
         ("menu-turn-off-choices", 4, 1),
         // As calls on, with Turn calls on, then the Problem.
@@ -257,7 +276,7 @@ fn indicator_menus_are_drawn(output: &Path, index: &str) {
         index
             .matches("Stand-in: drawn from the menu layout the app publishes")
             .count(),
-        8,
+        10,
         "each menu's caption says it is a stand-in"
     );
 }

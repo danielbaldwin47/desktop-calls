@@ -90,6 +90,9 @@ pub(crate) mod class {
     /// A dot, 8 across, in the answer colour: the Phone is connected, or the
     /// Call is live.
     pub(crate) const LIVE_DOT: &str = "live-dot";
+    /// A dot, 8 across, in the missed colour, at the right of a Dialer row:
+    /// a Missed Call the user hasn't seen (#236).
+    pub(crate) const NEW_DOT: &str = "new-dot";
     /// A row above a rule: the Held Call's.
     pub(crate) const HELD_ROW: &str = "held-row";
     /// A timer struck through and in secondary text: it stopped counting.
@@ -267,6 +270,9 @@ window.call-pill.muted .tag { color: var(--dc-warning-text); font-weight: 600; }
 window.call-pill.muted .tag.calls-off { color: var(--dc-secondary); font-weight: 500; }
 .live-dot {
     min-width: 8px; min-height: 8px; border-radius: 4px; background: var(--dc-answer);
+}
+.new-dot {
+    min-width: 8px; min-height: 8px; border-radius: 4px; background: var(--dc-missed);
 }
 .pill-divider { min-width: 1px; margin: 4px 2px; background: var(--dc-border); }
 window.call-pill.hovered { background-color: var(--dc-selection); }

@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use test_harness::vcards::{self, CallKind};
 use test_harness::{
     Builder, Harness, MenuColours, MenuEntry, OmarchyTheme, draw_tray_icon, draw_tray_menu,
 };
@@ -79,6 +80,23 @@ fn quiet_hours(harness: &Harness) {
         });
 }
 
+/// Connected: a Call from [`NUMBER`] rings out, and the Phone lists it as
+/// missed.
+fn missed_call(harness: &Harness) {
+    connect(harness);
+    let phone = harness.simulated_phone();
+    let path = phone.ring(NUMBER);
+    harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
+    phone.set_pbap_folder(
+        "cch",
+        &vcards::call(CallKind::Missed, Some(NUMBER), "20261115T115500"),
+    );
+    phone.caller_hangs_up(&path);
+}
+
+/// What the Indicator says once [`missed_call`] is counted.
+const MISSED_TOOLTIP: &str = "Simulated Pixel connected · 1 missed call";
+
 /// The Quiet Hours entry, with the times `quiet_hours` sets as its hint.
 const QUIET_HOURS_ENTRY: &str = "Quiet Hours…  22:00–07:00";
 
@@ -102,6 +120,37 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             harness.simulated_phone().disconnect();
         },
         tooltip: "Simulated Pixel out of range",
+        submenu: None,
+        menu_shows: &[],
+    },
+    IndicatorState {
+        name: "missed-calls",
+        title: "The Indicator, the Phone connected, after a Missed Call: the missed-call arrow, unlike a Problem's filled badge",
+        prepare: as_is,
+        reach: missed_call,
+        tooltip: MISSED_TOOLTIP,
+        submenu: None,
+        menu_shows: &[],
+    },
+    IndicatorState {
+        name: "missed-calls-out-of-range",
+        title: "The Indicator, the Phone out of range, after a Missed Call",
+        prepare: as_is,
+        reach: |harness| {
+            missed_call(harness);
+            harness.wait_for_app("the Missed Call is counted", DEADLINE, |state| {
+                state.calls.is_empty()
+            });
+            harness
+                .tray()
+                .wait_for("the Indicator counts it", DEADLINE, |items| {
+                    items
+                        .iter()
+                        .any(|item| item.tooltip.as_deref() == Some(MISSED_TOOLTIP))
+                });
+            harness.simulated_phone().disconnect();
+        },
+        tooltip: "Simulated Pixel out of range · 1 missed call",
         submenu: None,
         menu_shows: &[],
     },
@@ -204,6 +253,15 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
             "Turn calls off",
             QUIET_HOURS_ENTRY,
         ],
+    },
+    IndicatorState {
+        name: "menu-missed-calls",
+        title: "The Indicator's menu after a Missed Call: the line under the status opens the Dialer",
+        prepare: at_noon,
+        reach: missed_call,
+        tooltip: MISSED_TOOLTIP,
+        submenu: None,
+        menu_shows: &["1 missed call…"],
     },
     IndicatorState {
         name: "menu-turn-off-choices",

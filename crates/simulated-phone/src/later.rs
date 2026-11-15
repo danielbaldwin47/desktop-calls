@@ -4,7 +4,23 @@
 use zbus::{Connection, Message};
 
 use crate::objects::Reply;
-use crate::{SharedWorld, lock, obex, telephony};
+use crate::{SharedWorld, TelephonyConnection, lock, obex, range, telephony};
+
+/// Sends a change in range `after` a delay, on a thread of its own so the
+/// services keep answering meanwhile.
+pub(crate) fn run_range_change_later(
+    system: Connection,
+    telephony: TelephonyConnection,
+    change: range::Change,
+    after: std::time::Duration,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(after);
+        if let Err(error) = zbus::block_on(range::emit(&system, &telephony, change)) {
+            eprintln!("simulated-phone: a delayed change in range failed: {error}");
+        }
+    });
+}
 
 /// Has the Phone act on an `Activate` once its delay has passed, on a
 /// thread of its own so the service keeps answering meanwhile.

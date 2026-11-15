@@ -45,8 +45,9 @@ pub(super) struct Dialer {
     /// The query the rows are for, so the frame that first shows the rows
     /// for a new one can be logged.
     query: RefCell<String>,
-    /// The rows the list shows.
-    rows: RefCell<Vec<DialerRow>>,
+    /// The rows the list shows, and how many from the top it marks as
+    /// Missed Calls the user hasn't seen.
+    rows: RefCell<(Vec<DialerRow>, usize)>,
 }
 
 impl Dialer {
@@ -191,8 +192,11 @@ impl Dialer {
             self.entry.set_position(-1);
             self.writing.set(false);
         }
-        if *self.rows.borrow() != view.rows {
-            self.show_rows(&view.rows);
+        let shown = self.rows.borrow();
+        let changed = shown.0 != view.rows || shown.1 != view.new_missed;
+        drop(shown);
+        if changed {
+            self.show_rows(&view.rows, view.new_missed);
         }
         if let Some(row) = view
             .selected
@@ -226,6 +230,9 @@ impl Dialer {
             ("query".to_owned(), view.query.clone()),
             ("rows".to_owned(), view.rows.len().to_string()),
         ]);
+        if view.new_missed > 0 {
+            content.insert("new-missed".to_owned(), view.new_missed.to_string());
+        }
         if let Some(selected) = view.selected {
             content.insert("selected".to_owned(), selected.to_string());
         }
@@ -298,11 +305,12 @@ impl Dialer {
         });
     }
 
-    /// Fills the list with `rows`, from the top.
-    fn show_rows(&self, rows: &[DialerRow]) {
+    /// Fills the list with `rows`, from the top, the first `new_missed`
+    /// with a dot at their right: Missed Calls the user hasn't seen.
+    fn show_rows(&self, rows: &[DialerRow], new_missed: usize) {
         self.list.remove_all();
         let (now, offset) = (now(), utc_offset_seconds());
-        for row in rows {
+        for (index, row) in rows.iter().enumerate() {
             let text = row_text(row, now, offset);
             let title = gtk::Label::new(Some(&text.title));
             title.add_css_class("title");
@@ -332,11 +340,22 @@ impl Dialer {
             let list_row = gtk::ListBoxRow::new();
             // The entry keeps the keyboard; the list only shows.
             list_row.set_focusable(false);
-            list_row.set_child(Some(&lines));
+            if index < new_missed {
+                lines.set_hexpand(true);
+                let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                dot.add_css_class(class::NEW_DOT);
+                dot.set_valign(gtk::Align::Center);
+                let marked = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                marked.append(&lines);
+                marked.append(&dot);
+                list_row.set_child(Some(&marked));
+            } else {
+                list_row.set_child(Some(&lines));
+            }
             self.list.append(&list_row);
         }
         self.scrolled.vadjustment().set_value(0.0);
-        *self.rows.borrow_mut() = rows.to_vec();
+        *self.rows.borrow_mut() = (rows.to_vec(), new_missed);
     }
 
     /// Scrolls the list just enough to show `row`.

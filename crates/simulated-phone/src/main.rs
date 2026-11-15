@@ -329,15 +329,38 @@ impl Control {
     /// `ModemRemoved`; the device loses `Battery1`, and BlueZ marks the Phone
     /// disconnected. The Calls carry on on the Phone. The Desktop's
     /// `Connect` fails after BlueZ's page timeout until the Phone is back.
+    /// With the quirk `calls-go-apart`, what follows the first Call going is
+    /// sent [`telephony::CALLS_GO_APART`] later, though the Phone is out of
+    /// range at once: a scenario waits that out before acting as the Phone
+    /// again, or the rest arrives after what it did.
     async fn disconnect(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let change = {
+        let (change, apart) = {
             let mut world = lock(&self.world);
             world.range.reachable = false;
             world.obex.link_lost();
-            range::hands_free_down(&mut world)?
+            let apart = world
+                .behaviour
+                .quirks
+                .contains(&telephony::Quirk::CallsGoApart);
+            (range::hands_free_down(&mut world)?, apart)
+        };
+        let change = match change {
+            Some(change) if apart => {
+                let (first, rest) = change.split_after_first_call();
+                if !rest.is_empty() {
+                    later::run_range_change_later(
+                        self.system.clone(),
+                        Arc::clone(&self.telephony),
+                        rest,
+                        telephony::CALLS_GO_APART,
+                    );
+                }
+                Some(first)
+            }
+            change => change,
         };
         self.range_changed(change, &emitter).await
     }
@@ -636,12 +659,13 @@ impl Control {
     /// `"connect-profile-fails"`, `"connect-profile-fails-once"`,
     /// `"late-line-identification"`, `"chld-unsupported"`,
     /// `"hangup-ignored"`, `"hangup-unanswered-once"`,
-    /// `"slow-service-level"`, `"calls-listed-late"`, `"connected-unannounced"`,
+    /// `"slow-service-level"`, `"calls-listed-late"`, `"calls-go-apart"`,
+    /// `"connected-unannounced"`,
     /// `"connect-never-answers-once"` or `"connect-busy-after-unblock"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, connected-unannounced, connect-never-answers-once and connect-busy-after-unblock"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, calls-go-apart, connected-unannounced, connect-never-answers-once and connect-busy-after-unblock"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

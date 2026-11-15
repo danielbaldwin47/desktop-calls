@@ -21,9 +21,11 @@ lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _
 # Run the full Simulated Phone suite. Scenarios run the built binaries, so build them first.
 # Screen scenarios need sway, grim and wl-clipboard: sudo pacman -S --needed sway grim wl-clipboard
 # A failing scenario keeps its directory under $TMPDIR; KEEP_SCENARIO_LOGS=1 keeps passing ones too.
+# Every scenario starts from a shared Mesa shader cache filled first, as on a
+# Desktop that has run the app before (#298, tools/scenario_shader_cache.py).
 test *args:
     cargo build --workspace --bins --locked
-    cargo test --workspace --locked {{args}}
+    python3 tools/scenario_shader_cache.py cargo test --workspace --locked {{args}}
 
 # CI splits `just test --exclude test-harness` across three jobs, which took
 # 12 minutes as one (#286): `ci-tests`, `ci-checklist-group-6` and
@@ -58,9 +60,10 @@ ci-gallery shard="" look="":
 # CI passes `--partition count:k/N` to run shard k of N; `just ci-local` runs
 # them whole.
 # Build the binaries the harness's scenarios run, then run them with cargo-nextest.
+# Every scenario starts from a shared Mesa shader cache filled first (#298).
 ci-scenarios *args:
     cargo build --workspace --bins --locked
-    cargo nextest run -p test-harness --locked --no-fail-fast {{args}}
+    python3 tools/scenario_shader_cache.py cargo nextest run -p test-harness --locked --no-fail-fast {{args}}
 
 # Judged one scenario at a time as on the Desktop, which runs one app (issue
 # #47): in the whole run, every scenario's app at once slows each first paint
@@ -83,7 +86,8 @@ ci-first-frame-timings:
     files=(dialer_surface incoming_call_surfaces)
     echo "First frames with a cold Mesa shader cache (reported, not judged):"
     for file in "${files[@]}"; do
-        just test-file "$file" --ignored --test-threads=1 --nocapture 2>&1 \
+        # Set but empty: each scenario's own empty cache (#298).
+        SCENARIO_SHADER_CACHE= just test-file "$file" --ignored --test-threads=1 --nocapture 2>&1 \
             | grep -E "first frame|first Banner|the app took" || true
     done
     echo "Warming the shared Mesa shader cache in $cache (not judged)"

@@ -165,6 +165,8 @@ pub enum Input {
     CallBack(CallId),
     /// The user dismissed the Missed Call notification with this id.
     MissedCallDismissed(CallId),
+    /// How many Missed Calls an earlier run's cue counted, at startup.
+    MissedCallsKept(u32),
     /// The Phone did this command.
     PhoneCommandDone(PhoneCommand),
     /// The Phone refused, or never answered, this command.
@@ -547,6 +549,9 @@ pub enum Effect {
     /// Keep `record` of Calls Off for the next run, replacing what was
     /// kept; with `None`, keep nothing.
     KeepCallsOff(Option<CallsOffRecord>),
+    /// Keep the Missed Call cue's count for the next run, replacing what
+    /// was kept; with 0, keep nothing.
+    KeepMissedCalls(u32),
     /// Have BlueZ block (`blocked`) or unblock the Phone with this address.
     /// Ends in [`Input::PhoneBlocked`] or
     /// [`Input::PhoneBlockFailed`].

@@ -169,9 +169,40 @@ pub(super) fn ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
             "The notification didn't show a missed-call icon, the caller and the time.".to_owned()
         },
     );
+    let badged = sitting.ask(
+        "Does the Desktop Calls icon in the top bar now carry a small arrow at its top right?",
+    )?;
+    sitting.check(
+        badged,
+        if badged {
+            "The Indicator carries the missed-call badge.".to_owned()
+        } else {
+            "The Indicator didn't show the missed-call badge.".to_owned()
+        },
+    );
+    let counted = sitting.ask(
+        "Right-click the icon: does the menu say \"1 missed call…\" under the first line? Press Escape to close it.",
+    )?;
+    sitting.check(
+        counted,
+        if counted {
+            "The Indicator's menu counts the Missed Call.".to_owned()
+        } else {
+            "The Indicator's menu didn't count the Missed Call.".to_owned()
+        },
+    );
     let Some(selected) = notification_opens_the_dialer(sitting)? else {
         return Ok(());
     };
+    let cleared = sitting.ask("Is the arrow on the Desktop Calls icon gone?")?;
+    sitting.check(
+        cleared,
+        if cleared {
+            "Opening the Dialer cleared the missed-call badge.".to_owned()
+        } else {
+            "The missed-call badge stayed after the Dialer opened.".to_owned()
+        },
+    );
     // The row reads the caller's name or number, which stay out of the
     // result file.
     let on_the_missed_call = selected.contains("Missed");

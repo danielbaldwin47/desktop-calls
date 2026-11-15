@@ -38,6 +38,32 @@ pub(crate) struct MissedCalls {
     /// The notifications shown, one per caller, until the user acts on or
     /// dismisses one.
     pub(crate) notified: Vec<Notified>,
+    /// The lasting Missed Call cue (#236): the Missed Calls since the user
+    /// last opened the Dialer or called back, notified or not. The
+    /// Indicator shows it, and its count is kept across a restart.
+    pub(crate) unseen: Cue,
+    /// The Missed Calls the open Dialer marks at the top of its Call
+    /// History: the cue as it was when the Dialer opened, and any missed
+    /// while it is open.
+    pub(crate) marked: Cue,
+}
+
+/// Some Missed Calls the user hasn't seen.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Cue {
+    /// How many.
+    pub(crate) count: u32,
+    /// Who called, for those missed during this run, so the Dialer marks
+    /// their rows and not others; only the count of those from an earlier
+    /// run is kept, so no number is written to disk.
+    pub(crate) callers: Vec<Caller>,
+}
+
+impl Cue {
+    pub(crate) fn add(&mut self, caller: Caller) {
+        self.count = self.count.saturating_add(1);
+        self.callers.push(caller);
+    }
 }
 
 /// A Call that rang out here, before the Phone's Call History confirms it.

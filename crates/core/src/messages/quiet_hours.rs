@@ -52,7 +52,11 @@ pub fn quiet_hours_window(view: &QuietHoursWindowView) -> QuietHoursWindowText {
         until: "until",
         start: field(QuietHoursField::Start, view.start),
         end: field(QuietHoursField::End, view.end),
-        sentence: sentence(view.sentence),
+        sentence: if view.refused {
+            kept(view.sentence)
+        } else {
+            sentence(view.sentence)
+        },
         notice: view.refused.then_some("Start and end must differ"),
         keys: if view.on {
             vec![
@@ -75,6 +79,18 @@ fn typing(digits: &str) -> String {
         .collect();
     shown.insert(2, ':');
     shown.into_iter().collect()
+}
+
+/// While times are refused, what is still saved (#314).
+fn kept(sentence: QuietHoursSentence) -> String {
+    match sentence {
+        QuietHoursSentence::Saved { start, end, .. }
+        | QuietHoursSentence::OffNow { start, end }
+        | QuietHoursSentence::Pending { start, end } => {
+            format!("Still {start}–{end}: nothing changed.")
+        }
+        QuietHoursSentence::Off => "Nothing changed.".to_owned(),
+    }
 }
 
 fn sentence(sentence: QuietHoursSentence) -> String {

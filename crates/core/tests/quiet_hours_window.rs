@@ -251,6 +251,11 @@ fn up_and_down_step_a_time_by_15_minutes_round_midnight_saving_each_step() {
         messages::quiet_hours_window(&view).notice,
         Some("Start and end must differ")
     );
+    // No "Saved." beside the refusal: what is still saved (#314).
+    assert_eq!(
+        messages::quiet_hours_window(&view).sentence,
+        "Still 23:45–00:00: nothing changed."
+    );
     let (state, effects) = run(
         state,
         [Input::QuietHoursStep {

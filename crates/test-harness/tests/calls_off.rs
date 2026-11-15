@@ -140,8 +140,11 @@ fn calls_off_from_the_indicator_keeps_the_phone_away_through_its_pages_the_waits
     );
     assert_eq!(harness.wireplumber_drop_ins(), drop_ins);
 
-    // The restarted app's Indicator turns them on again.
-    harness.tray().click("Turn calls on");
+    // The restarted app's Indicator turns them on again, once it offers
+    // to: a restarted app answers on the control interface before it
+    // registers its Indicator, and until then the tray still lists the
+    // gone app's item (`ServiceUnknown` reading its menu; #293, #331).
+    harness.tray().click_when_shown("Turn calls on", DEADLINE);
     wait_connected(&harness, RECONNECT_DEADLINE);
 }
 

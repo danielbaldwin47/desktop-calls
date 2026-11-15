@@ -15,14 +15,14 @@ pub(super) fn audio_reaches_the_desktop(
     call: u32,
     answered: &Seen,
 ) -> Result<bool, Stop> {
+    sitting.expect("audio_latency_ms");
+    sitting.expect("wideband");
     let audio = sitting.wait_for(
         "the Call audio reaching the Desktop",
         APP_DEADLINE,
         |state| state.audio_location == "desktop" || state.call(call).is_none(),
     )?;
     if audio.state.audio_location != "desktop" {
-        // No latency, and the scorecard's item 2 must see that it failed.
-        sitting.measure("audio_latency_ms", serde_json::Value::Null);
         sitting.check(
             false,
             "The Call ended before its audio reached the Desktop.".to_owned(),
@@ -30,7 +30,7 @@ pub(super) fn audio_reaches_the_desktop(
         return Ok(false);
     }
     let latency = audio.at - answered.at;
-    sitting.measure("audio_latency_ms", millis(latency));
+    sitting.measure_slowest("audio_latency_ms", millis(latency));
     sitting.check(
         latency <= AUDIO_TARGET,
         format!(
@@ -48,8 +48,7 @@ pub(super) fn audio_reaches_the_desktop(
     } else {
         audio.state
     };
-    sitting.measure("codec", codec.codec.clone());
-    sitting.measure("wideband", codec.wideband);
+    sitting.measure_codec(&codec.codec, codec.wideband);
     sitting.observed(format!(
         "Codec: {} ({}).",
         codec.codec,

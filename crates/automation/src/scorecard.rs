@@ -17,10 +17,11 @@ use std::process::ExitCode;
 
 use crate::checklist::{
     self,
-    results::{self, Mode, Outcome, ResultFile},
+    results::{self, Mode, Outcome, ResultFile, StepRecord},
 };
 use report::{Ran, Report};
 use review::Standing;
+use serde_json::Value;
 
 /// An item's standing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,11 +182,20 @@ fn timed(evidence: &Evidence, names: &[&str], key: &str, bound: u64, group: &str
         Err(failed) => return failed,
     };
     // A step records `null` when what it times never happened: slower
-    // than any bound.
+    // than any bound. Unless the user skipped the step: then it is only
+    // not measured.
+    let unmeasured = |step: &&StepRecord| {
+        step.outcome == Outcome::Skipped && step.measurements.get(key).is_some_and(Value::is_null)
+    };
+    let skipped = evidence
+        .checklist
+        .and_then(|checklist| checklist.steps.iter().find(unmeasured))
+        .map(|step| step.id.as_str());
     let measured = evidence.checklist.and_then(|checklist| {
         checklist
             .steps
             .iter()
+            .filter(|step| !unmeasured(step))
             .filter_map(|step| {
                 let value = step.measurements.get(key)?;
                 Some((
@@ -204,17 +214,25 @@ fn timed(evidence: &Evidence, names: &[&str], key: &str, bound: u64, group: &str
                 checklist.started
             ),
         ),
-        Some((checklist, step, millis)) => Score::new(
-            if millis <= bound {
-                Status::Pass
-            } else {
+        Some((checklist, step, millis)) => {
+            let status = if millis > bound {
                 Status::Fail
-            },
-            format!(
-                "{simulated}; real Phone: {millis} ms against {bound} ms, Real-Phone Checklist {}, step {step}",
-                checklist.started
-            ),
-        ),
+            } else if skipped.is_some() {
+                Status::Manual
+            } else {
+                Status::Pass
+            };
+            let skipped = skipped.map_or_else(String::new, |skipped| {
+                format!("; step {skipped}, skipped, didn't measure it")
+            });
+            Score::new(
+                status,
+                format!(
+                    "{simulated}; real Phone: {millis} ms against {bound} ms, Real-Phone Checklist {}, step {step}{skipped}",
+                    checklist.started
+                ),
+            )
+        }
         None => Score::new(
             Status::Manual,
             format!(
@@ -232,9 +250,23 @@ fn wideband(checklist: Option<&ResultFile>) -> Score {
             .steps
             .iter()
             .filter_map(|step| {
-                let codec = step.measurements.get("codec")?.as_str()?;
-                let wideband = step.measurements.get("wideband")?.as_bool()?;
-                Some((checklist, step.id.as_str(), codec, wideband))
+                let wideband = step.measurements.get("wideband")?;
+                // `null`: the codec was never reported, which fails, unless
+                // the user skipped the step.
+                if wideband.is_null() && step.outcome == Outcome::Skipped {
+                    return None;
+                }
+                let codec = step
+                    .measurements
+                    .get("codec")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no codec reported");
+                Some((
+                    checklist,
+                    step.id.as_str(),
+                    codec,
+                    wideband.as_bool() == Some(true),
+                ))
             })
             .collect();
         calls

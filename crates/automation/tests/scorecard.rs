@@ -230,6 +230,16 @@ fn checklist_steps() -> Vec<String> {
 /// passed, with `measurements` for the steps it names, and scores it
 /// beside every scenario passing.
 fn score_checklist(directory: &Path, ids: &[String], measurements: &[(&str, &str)]) -> String {
+    score_checklist_skipping(directory, ids, measurements, &[])
+}
+
+/// As [`score_checklist`], with the steps `skipped` skipped.
+fn score_checklist_skipping(
+    directory: &Path,
+    ids: &[String],
+    measurements: &[(&str, &str)],
+    skipped: &[&str],
+) -> String {
     let report = junit(directory, &scenarios(), &[]);
     let steps: Vec<String> = ids
         .iter()
@@ -238,8 +248,13 @@ fn score_checklist(directory: &Path, ids: &[String], measurements: &[(&str, &str
                 .iter()
                 .find(|(named, _)| named == id)
                 .map_or("{}", |(_, measured)| measured);
+            let result = if skipped.contains(&id.as_str()) {
+                "skipped"
+            } else {
+                "pass"
+            };
             format!(
-                r#"{{ "id": "{id}", "title": "Step {id}", "result": "pass", "evidence": [], "measurements": {measured}, "started_us": 0, "ended_us": 0, "journal": [] }}"#
+                r#"{{ "id": "{id}", "title": "Step {id}", "result": "{result}", "evidence": [], "measurements": {measured}, "started_us": 0, "ended_us": 0, "journal": [] }}"#
             )
         })
         .collect();
@@ -319,6 +334,41 @@ fn a_banner_that_never_showed_fails_item_1_whatever_else_was_measured() {
         "{text}"
     );
     assert!(row(&text, 1).contains("step 2.1"), "{text}");
+}
+
+#[test]
+fn a_skipped_step_that_measured_nothing_leaves_item_1_manual() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist_skipping(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("2.1", r#"{ "banner_latency_ms": 300 }"#),
+            ("3.2", r#"{ "banner_latency_ms": null }"#),
+        ],
+        &["3.2"],
+    );
+
+    assert_eq!(status(&text, 1), "MANUAL", "{text}");
+    assert!(row(&text, 1).contains("step 3.2, skipped"), "{text}");
+}
+
+#[test]
+fn a_codec_never_reported_fails_item_3() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("2.2", r#"{ "codec": "msbc", "wideband": true }"#),
+            ("2.3", r#"{ "wideband": null }"#),
+        ],
+    );
+
+    assert_eq!(status(&text, 3), "FAIL", "{text}");
+    assert!(row(&text, 3).contains("no codec reported"), "{text}");
 }
 
 #[test]

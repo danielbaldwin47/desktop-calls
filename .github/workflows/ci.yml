@@ -46,8 +46,8 @@ concurrency:
 # runners: `just lint`; the tests outside the harness; the Real-Phone
 # Checklist's group 6 runs; the gallery, in parts; and the harness's
 # scenarios, in shards. On main, the polish scorecard follows the shards.
-# If only docs that no code reads changed, they are all skipped. "CI passed" needs every job, so it appears only once they have all
-# finished. The slowest job sets the time from push to "CI passed": on a PR,
+# If only docs that no code reads changed, they are all skipped. "CI
+# passed" needs every job, so it appears only once they have all finished. The slowest job sets the time from push to "CI passed": on a PR,
 # a scenario shard (run 43680311355: "CI passed" 3 min 49 s after the first
 # job's start); on main, the checklist's group 6, which waits out real minutes.
 jobs:

@@ -442,6 +442,7 @@ fn helper_calls(sitting: &mut Sitting, request: &str) -> Result<u32, Stop> {
 
 /// As [`helper_calls`], with `demo_action` ringing the Simulated Phone.
 fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> Result<u32, Stop> {
+    sitting.expect("banner_latency_ms");
     no_call_left(sitting)?;
     sitting.say(request, &[demo_action]);
     let rang = sitting.wait_for("the helper's Call ringing", CALL_DEADLINE, |state| {
@@ -454,8 +455,6 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
         state.shows("banner") || state.call(call).is_none()
     })?;
     if !banner.state.shows("banner") {
-        // No latency, and the scorecard's item 1 must see that it failed.
-        sitting.measure("banner_latency_ms", serde_json::Value::Null);
         return Err(Stop::TimedOut(
             "the Incoming Call Banner showing before the Call stopped ringing".to_owned(),
         ));
@@ -487,7 +486,7 @@ fn check_banner_latency(sitting: &mut Sitting, call: u32, appeared: Instant, ban
             "the Call appeared on the control interface (the log had no call-added line)",
         ),
     };
-    sitting.measure("banner_latency_ms", millis(latency));
+    sitting.measure_slowest("banner_latency_ms", millis(latency));
     sitting.check(
         latency <= BANNER_TARGET,
         format!(

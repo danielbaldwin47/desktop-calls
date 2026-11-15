@@ -72,8 +72,8 @@ pub(crate) struct Unconfirmed {
     pub(crate) call: CallId,
     pub(crate) caller: Caller,
     pub(crate) at: Timestamp,
-    /// The Call History as it was when the Call ended: a Missed Call the
-    /// refresh lists that isn't in it is this Call.
+    /// The Call History as it was when the Phone reported the Call: a
+    /// Missed Call the refresh lists that isn't in it is this Call.
     pub(crate) before: CallHistory,
     /// The refresh asked for when the Call ended.
     pub(crate) refresh: u32,

@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::contacts::CallHistory;
+
 /// The app-assigned stable id of a Call. It stays the same for the whole
 /// Call, even when the Phone's own object for it is replaced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -218,6 +220,10 @@ pub struct Call {
     /// When the Phone reported the Call.
     pub(crate) added_at: Timestamp,
     pub(crate) request: Request,
+    /// The Call History as it was when the Phone reported the Call: none of
+    /// it can be this Call, which a Call History read later may already
+    /// list, before the app learns the Call is over (#356).
+    pub(crate) history_before: CallHistory,
 }
 
 impl Call {

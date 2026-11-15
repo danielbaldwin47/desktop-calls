@@ -1,9 +1,7 @@
 //! The Call state machine: one function from (state, input) to (new state,
 //! effects). Every policy decision lives here.
 
-use crate::call::{
-    AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Request, Transport,
-};
+use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Transport};
 use crate::clock::{Deadline, QuietHours, WallClock};
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{CallHistory, Contacts, ContactsState, Unavailable};
@@ -37,7 +35,7 @@ use audio::{
 use call_waiting::{end_and_answer, hold_and_answer, swap};
 pub use calls::keypad_tones;
 use calls::{
-    answer, call_added, call_changed, caller_changed, decline, hang_up, phone_ended_call,
+    answer, call_changed, caller_changed, decline, hang_up, phone_added_call, phone_ended_call,
     send_tones, timer_fired,
 };
 use calls_off::CallsOff;
@@ -924,47 +922,10 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     (state, effects)
 }
 
-/// The Phone reported a Call: `input` is `Input::CallAdded`.
-fn phone_added_call(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
-    let Input::CallAdded {
-        call,
-        state: call_state,
-        caller,
-        at,
-    } = input
-    else {
-        return;
-    };
-    let call = Call {
-        id: call,
-        direction: Direction::from_first_state(call_state),
-        state: call_state,
-        caller,
-        active_since: call_state.is_connected().then_some(at),
-        added_at: at,
-        request: Request::None,
-    };
-    await_number(state, &call, effects);
-    call_added(state, call, effects);
-}
-
 fn codec_changed(state: &mut State, codec: Option<Codec>) {
     state.reported_codec = codec;
     if codec.is_some() && state.transport.is_up() {
         state.codec = codec;
-    }
-}
-
-/// An incoming Call that rings with no number may get one a moment later:
-/// until [`NUMBER_LATE_MS`] has passed, the Banner doesn't say the number
-/// is withheld.
-fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
-    if call.caller == Caller::Withheld && call.direction == Direction::Incoming {
-        state.awaiting_number.push(call.id);
-        effects.push(Effect::StartTimer {
-            timer: Timer::NumberLate(call.id),
-            after_ms: NUMBER_LATE_MS,
-        });
     }
 }
 

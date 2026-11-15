@@ -109,7 +109,12 @@ impl AppState {
         dialer.get(&format!("row-{selected}")).map(String::as_str)
     }
 
-    fn apply(&mut self, name: &str, value: OwnedVariant) -> zbus::Result<()> {
+    fn apply(
+        &mut self,
+        name: &str,
+        value: OwnedVariant,
+        locale_region: Option<&str>,
+    ) -> zbus::Result<()> {
         match name {
             "ConnectionState" => self.connection_state = String::try_from(value)?,
             "Phone" => {
@@ -122,7 +127,7 @@ impl AppState {
                         id,
                         direction,
                         state,
-                        number: Fingerprint::of(&number),
+                        number: Fingerprint::of_call(&number, locale_region),
                     })
                     .collect();
             }
@@ -157,28 +162,36 @@ pub enum WatchError {
 
 /// Starts watching the control interface on `bus`. Each change is added to
 /// the returned timeline, and announced on `events`.
-pub fn start(bus: &Connection, events: Sender<Event>) -> Result<Timeline, WatchError> {
-    let (stream, first) = zbus::block_on(subscribe(bus)).map_err(|error| match &error {
-        zbus::Error::FDO(fdo)
-            if matches!(
-                **fdo,
-                zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
-            ) =>
-        {
-            WatchError::NotRunning
-        }
-        _ => WatchError::Unexpected(error.to_string()),
-    })?;
+pub fn start(
+    bus: &Connection,
+    events: Sender<Event>,
+    locale_region: Option<String>,
+) -> Result<Timeline, WatchError> {
+    let (stream, first) =
+        zbus::block_on(subscribe(bus, locale_region.as_deref())).map_err(|error| match &error {
+            zbus::Error::FDO(fdo)
+                if matches!(
+                    **fdo,
+                    zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
+                ) =>
+            {
+                WatchError::NotRunning
+            }
+            _ => WatchError::Unexpected(error.to_string()),
+        })?;
     let timeline: Timeline = Arc::new(Mutex::new(vec![(Instant::now(), first)]));
     let kept = timeline.clone();
-    thread::spawn(move || zbus::block_on(follow(stream, &kept, &events)));
+    thread::spawn(move || zbus::block_on(follow(stream, &kept, &events, locale_region.as_deref())));
     Ok(timeline)
 }
 
 /// Subscribes to the control interface's signals (its `PropertiesChanged`
 /// and `MissedCall`), then reads it whole, so no change slips between the
 /// two.
-async fn subscribe(bus: &Connection) -> zbus::Result<(MessageStream, AppState)> {
+async fn subscribe(
+    bus: &Connection,
+    locale_region: Option<&str>,
+) -> zbus::Result<(MessageStream, AppState)> {
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
         .path(PATH)
@@ -194,15 +207,20 @@ async fn subscribe(bus: &Connection) -> zbus::Result<(MessageStream, AppState)> 
         .await?;
     let mut state = AppState::default();
     for (name, value) in &all {
-        state.apply(name, value.try_clone()?)?;
+        state.apply(name, value.try_clone()?, locale_region)?;
     }
     Ok((stream, state))
 }
 
-async fn follow(mut stream: MessageStream, timeline: &Timeline, events: &Sender<Event>) {
+async fn follow(
+    mut stream: MessageStream,
+    timeline: &Timeline,
+    events: &Sender<Event>,
+    locale_region: Option<&str>,
+) {
     while let Some(Ok(message)) = stream.next().await {
         let arrived = Instant::now();
-        let Some(change) = Change::from(&message) else {
+        let Some(change) = Change::from(&message, locale_region) else {
             continue;
         };
         let mut timeline = timeline.lock().unwrap_or_else(PoisonError::into_inner);
@@ -215,7 +233,7 @@ async fn follow(mut stream: MessageStream, timeline: &Timeline, events: &Sender<
                 for (name, value) in changed {
                     // A value the runner can't read leaves that property as
                     // it was; the step that needs it then says what it saw.
-                    let _ = state.apply(&name, value);
+                    let _ = state.apply(&name, value, locale_region);
                 }
             }
             Change::MissedCall(missed) => state.missed_calls.push(missed),
@@ -235,7 +253,7 @@ enum Change {
 }
 
 impl Change {
-    fn from(message: &zbus::Message) -> Option<Self> {
+    fn from(message: &zbus::Message, locale_region: Option<&str>) -> Option<Self> {
         let header = message.header();
         match header.member().map(zbus::names::MemberName::as_str) {
             Some("PropertiesChanged") => {
@@ -256,7 +274,7 @@ impl Change {
                 Some(Self::MissedCall(AppMissedCall {
                     call,
                     withheld: number.is_empty(),
-                    number: Fingerprint::of(&number),
+                    number: Fingerprint::of_call(&number, locale_region),
                 }))
             }
             _ => None,

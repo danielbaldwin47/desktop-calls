@@ -25,7 +25,7 @@ import sys
 VARIABLE = "SCENARIO_SHADER_CACHE"
 CACHE = pathlib.Path(__file__).resolve().parent.parent / "target" / "scenario-shader-cache"
 WARM_UP_SCENARIO = (
-    "shader_cache::the_app_prepares_every_surfaces_first_frame_into_the_shared_shader_cache"
+    "shader_cache::the_app_shows_every_surface_once_into_the_shared_shader_cache"
 )
 WARM_UP = [
     "cargo", "test", "--locked", "--quiet", "-p", "test-harness", "--test", "scenarios", "--",

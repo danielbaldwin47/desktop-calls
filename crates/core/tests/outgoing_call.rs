@@ -240,9 +240,17 @@ fn a_dialled_call_the_phone_reports_without_a_number_shows_the_number_dialled() 
 
 #[test]
 fn dialling_while_disconnected_is_refused_with_the_reason() {
-    let disconnected = run(
+    // Hands-free dropped with the Phone still in range (ticket #152).
+    let without_hands_free = run(
         connected(),
         [Input::PhoneDisconnected {
+            address: ADDRESS.to_owned(),
+        }],
+    )
+    .0;
+    let out_of_range = run(
+        without_hands_free.clone(),
+        [Input::PhoneAbsent {
             address: ADDRESS.to_owned(),
         }],
     )
@@ -250,7 +258,8 @@ fn dialling_while_disconnected_is_refused_with_the_reason() {
     for (state, failure) in [
         (State::default(), Failure::PhoneNotSetUp),
         (paired(), Failure::PhoneConnecting),
-        (disconnected, Failure::PhoneOutOfRange),
+        (without_hands_free, Failure::PhoneReconnecting),
+        (out_of_range, Failure::PhoneOutOfRange),
     ] {
         let (state, effects) = run(state, [Input::Dial("07700 900123".to_owned())]);
 
@@ -532,9 +541,14 @@ fn a_dial_is_placed_once_the_phone_reports_its_call() {
 fn a_dial_refused_at_once_is_not_placed_with_the_reason_in_the_same_step() {
     let (state, _) = run(
         connected(),
-        [Input::PhoneDisconnected {
-            address: ADDRESS.to_owned(),
-        }],
+        [
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+        ],
     );
     let (_, first) = run(state.clone(), [Input::Dial("07700 900123".to_owned())]);
     let (_, second) = run(state, [Input::Dial("call mum".to_owned())]);

@@ -558,7 +558,7 @@ impl State {
         match self.connection {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
             ConnectionState::Connecting => Some(Failure::PhoneConnecting),
-            ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+            ConnectionState::Disconnected => Some(self.disconnected_refusal()),
             ConnectionState::PairingLost => Some(Failure::PhonePairingLost),
             ConnectionState::Connected if !self.calls.is_empty() || self.dialling.is_some() => {
                 Some(Failure::CallInProgress)

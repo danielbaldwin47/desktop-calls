@@ -7,15 +7,15 @@ The latest verdict of a screenshot-review agent on the gallery (`just screenshot
 
 To record a new review: render the gallery, have a screenshot-review agent judge every state in every look, file each defect as a sub-issue of #1, then replace the lines below with the new commit, date, verdict (`no defects` or `defects found`), each path's object id (`git rev-parse <commit>:<path>`) and one `Defect:` line per open issue.
 
-Reviewed commit: 24300ac
+Reviewed commit: afa0433
 Date: 2026-11-15
-Reviewer: two Opus screenshot-review agents, one for the light looks (stock and Omarchy) and one for the dark, from 248 screenshots of 62 states and the Indicator's 13 drawings at 5a93755; the three states changed since then (`setup-window-done-contacts-denied`, `call-window-held-third-call-waiting`, and the new `call-window-phone-kept-audio`) rechecked at 24300ac, where the app's code is unchanged
+Reviewer: two Opus screenshot-review agents, one for the light looks (stock and Omarchy) and one for the dark, from 248 screenshots of 62 states and the Indicator's 13 drawings at 5a93755; the five states changed since then (`setup-window-done-contacts-denied`, `call-window-held-third-call-waiting`, `call-window-ended`, `call-window-connection-lost`, and the new `call-window-phone-kept-audio`) rechecked at afa0433, where the app's code is unchanged
 Verdict: defects found
 
 Reviewed path: crates/desktop-calls/src 327e6e08be222f978c1ea8511d10aa628c9379f9
 Reviewed path: crates/core/src f277c0a208462cb3c22ebfdbf17b2e5bf34f40f6
 Reviewed path: data/icons 6c7fcbb884ce0c15c638989e44ab75c4daec9fca
-Reviewed path: crates/automation/src/gallery eabcc7fad2aa545cd551c4dedaafe73d8e18cc7e
+Reviewed path: crates/automation/src/gallery 14eb34b0ce7a1f131940219c13b6916b42d41590
 Reviewed path: crates/automation/src/gallery.rs 3a7deba3bed3b878636356ee284bc24c84e64369
 Reviewed path: crates/test-harness/src 82278e85af8970c11fb1812a5200ff8b7b59589a
 Reviewed path: crates/test-harness/fixtures/omarchy-themes 611945734f7bbac1c7ed24b6e3cc5d1348d765d1

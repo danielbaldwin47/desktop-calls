@@ -29,6 +29,9 @@ pub struct DialerView {
     pub query: String,
     /// Who to Call, best first; with nothing typed, the Call History.
     pub rows: Vec<DialerRow>,
+    /// How many of `rows`, from the top, are Missed Calls the user hasn't
+    /// seen: those the Missed Call cue counted when the Dialer opened.
+    pub new_missed: usize,
     /// The row Enter Calls, while there are rows.
     pub selected: Option<usize>,
     /// Why Enter can't Call the selected row, or why what is typed can't be
@@ -660,9 +663,19 @@ impl State {
                 Some(DialerKey::QuietHours),
                 Some(DialerKey::Close),
             ];
+            // The marked rows are at the top: see `missed_first`.
+            let new_missed = if dialer.query.trim().is_empty() {
+                self.marks(&dialer.rows)
+                    .into_iter()
+                    .take_while(|marked| *marked)
+                    .count()
+            } else {
+                0
+            };
             DialerView {
                 query: dialer.query.clone(),
                 rows: dialer.rows.clone(),
+                new_missed,
                 selected,
                 notice: dialer.notice,
                 keys: keys.into_iter().flatten().collect(),

@@ -180,8 +180,7 @@ fn assert_selected_row_reads(
         band(screenshot, selection).is_some()
     });
     let see = screenshot.path.display();
-    let (_, row) = band(&screenshot, selection)
-        .unwrap_or_else(|| panic!("no selected row: {see}"));
+    let (_, row) = band(&screenshot, selection).unwrap_or_else(|| panic!("no selected row: {see}"));
     // The 3 px bar, inside the Dialer's 2 px padding; the row below has none.
     let middle = f64::midpoint(row.top, row.bottom);
     let bar = screenshot.colour_at(row.left + 1.5, middle);
@@ -232,7 +231,13 @@ fn the_selected_row_reads_and_a_notice_is_a_strip(theme: OmarchyTheme) {
     harness.wait_for_app("the second row is selected", DEADLINE, |state| {
         shown(state, "selected") == Some("1")
     });
-    assert_selected_row_reads(theme, &harness, "dialer-outgoing-selected", selection, false);
+    assert_selected_row_reads(
+        theme,
+        &harness,
+        "dialer-outgoing-selected",
+        selection,
+        false,
+    );
 
     // Enter with the Phone out of range: the notice is a tinted strip, the
     // Dialer's full width, between the search row and the rows.
@@ -244,16 +249,13 @@ fn the_selected_row_reads_and_a_notice_is_a_strip(theme: OmarchyTheme) {
     harness.wait_for_app("the Dialer says why not", DEADLINE, |state| {
         shown(state, "notice").is_some()
     });
-    let tint = mix(
-        background,
-        theme.colour("orange"),
-        WARNING_TINT_PERCENT,
-    );
+    let tint = mix(background, theme.colour("orange"), WARNING_TINT_PERCENT);
     let screenshot = harness.screenshot_when("dialer-notice", SCREEN_DEADLINE, |screenshot| {
         band(screenshot, tint).is_some() && band(screenshot, selection).is_some()
     });
     let see = screenshot.path.display();
-    let (dialer, strip) = band(&screenshot, tint).unwrap_or_else(|| panic!("no notice strip: {see}"));
+    let (dialer, strip) =
+        band(&screenshot, tint).unwrap_or_else(|| panic!("no notice strip: {see}"));
     let (_, row) = band(&screenshot, selection).unwrap_or_else(|| panic!("no selected row: {see}"));
     let right = screenshot.colour_at(strip.right - 4.0, f64::midpoint(strip.top, strip.bottom));
     assert!(
@@ -288,7 +290,8 @@ fn the_selected_row_reads_and_a_notice_is_a_strip(theme: OmarchyTheme) {
     };
     assert!(
         screenshot
-            .region_within(words, |pixel| contrast(pixel, tint) >= READABLE - ANTIALIASING)
+            .region_within(words, |pixel| contrast(pixel, tint)
+                >= READABLE - ANTIALIASING)
             .is_some(),
         "the strip has no words at {READABLE}:1 on {tint:02x?}; see {see}"
     );

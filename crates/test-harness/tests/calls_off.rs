@@ -170,7 +170,10 @@ fn calls_on_from_the_cli_connects_the_phone_within_10_s_and_clears_the_record() 
     let took = reconnect_took(&harness);
 
     assert_eq!(said, "Calls are on: connecting your phone.\n");
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after unblocking");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after unblocking"
+    );
     assert!(!harness.simulated_phone().blocked());
     assert!(!record(&harness).exists(), "the record is cleared");
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
@@ -191,7 +194,10 @@ fn calls_on_connects_within_10_s_when_the_first_connect_fails_busy() {
     wait_connected(&harness, RECONNECT_DEADLINE);
     let took = reconnect_took(&harness);
 
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after unblocking");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after unblocking"
+    );
     harness.wait_for_app_log("br-connection-busy", DEADLINE);
 }
 
@@ -285,10 +291,15 @@ fn a_phone_blocked_with_no_record_is_left_blocked() {
     fs::remove_file(record(&harness)).expect("remove the record");
     harness.start_app_by_hand();
 
-    harness.app_holds("calls stay on, as nobody turned them off", DEADLINE, |state| {
-        state.calls_off == "on"
-    });
-    assert!(harness.simulated_phone().blocked(), "the Phone is still blocked");
+    harness.app_holds(
+        "calls stay on, as nobody turned them off",
+        DEADLINE,
+        |state| state.calls_off == "on",
+    );
+    assert!(
+        harness.simulated_phone().blocked(),
+        "the Phone is still blocked"
+    );
 }
 
 /// What the app notified, in order: its summary, body and what it
@@ -332,7 +343,10 @@ fn confirmation(harness: &Harness, summary: &str) -> Notification {
     );
     assert_eq!(notification.app_name, "Desktop Calls");
     assert!(
-        notification.hints.get("transient").is_some_and(|value| value == "true"),
+        notification
+            .hints
+            .get("transient")
+            .is_some_and(|value| value == "true"),
         "marked transient, so Omarchy doesn't keep it in history: {notification:?}"
     );
     assert!(
@@ -394,11 +408,12 @@ fn turning_calls_off_from_the_cli_and_on_from_the_indicator_confirm_too() {
 #[test]
 fn turning_calls_off_for_an_hour_gives_the_end_time_the_menu_showed() {
     let harness = connected();
-    let menu = harness.tray().wait_for_menu(
-        "the menu offers the timed choices",
-        DEADLINE,
-        |menu| label_starting(menu, "For 1 hour").is_some(),
-    );
+    let menu =
+        harness
+            .tray()
+            .wait_for_menu("the menu offers the timed choices", DEADLINE, |menu| {
+                label_starting(menu, "For 1 hour").is_some()
+            });
     let label = label_starting(&menu, "For 1 hour").expect("a For 1 hour choice");
     // "For 1 hour (until 21:30)".
     let until = label
@@ -429,7 +444,9 @@ fn turning_calls_off_until_a_time_from_the_control_interface_says_when() {
     let summaries = summaries(&harness);
     assert_eq!(summaries.len(), 1, "{summaries:?}");
     // "Calls off until 21:30": the time of day in the Desktop's time zone.
-    let shown = summaries[0].strip_prefix("Calls off until ").unwrap_or_default();
+    let shown = summaries[0]
+        .strip_prefix("Calls off until ")
+        .unwrap_or_default();
     assert!(
         shown.len() == 5 && shown.as_bytes()[2] == b':',
         "no end time in {summaries:?}"
@@ -452,7 +469,10 @@ fn a_timed_break_ending_turns_calls_on_with_no_notification() {
 
     let summaries = summaries(&harness);
     assert_eq!(summaries.len(), 2, "{summaries:?}");
-    assert!(summaries[0].starts_with("Calls off until "), "{summaries:?}");
+    assert!(
+        summaries[0].starts_with("Calls off until "),
+        "{summaries:?}"
+    );
     assert_eq!(summaries[1], "Calls off");
 }
 

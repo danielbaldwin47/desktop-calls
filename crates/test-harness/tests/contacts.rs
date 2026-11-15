@@ -768,7 +768,10 @@ fn a_failed_older_page_keeps_call_history_cached_before_a_restart() {
     assert_ne!(state.connection_state, "connected");
     assert_eq!(state.contacts.call_history, 120);
     assert_eq!(
-        harness.call_history().last().map(|entry| entry.number.as_str()),
+        harness
+            .call_history()
+            .last()
+            .map(|entry| entry.number.as_str()),
         Some(vcards::number(119).as_str()),
         "the oldest cached Call survives another restart"
     );

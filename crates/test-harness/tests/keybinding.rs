@@ -137,16 +137,15 @@ fn enter_on_the_banner_with_the_keyboard_answers_and_never_declines() {
     });
     harness.keyboard().press(Key::Return);
 
-    harness.wait_for_app("the Call is live", ROUND_TRIP, |state| {
-        is_live(state, call)
-    });
-    let recorded = harness
-        .simulated_phone()
-        .wait_for_recorded("the Call is answered", DEADLINE, |recorded| {
-            recorded
-                .iter()
-                .any(|recorded| recorded.path == path && recorded.member == "Answer")
-        });
+    harness.wait_for_app("the Call is live", ROUND_TRIP, |state| is_live(state, call));
+    let recorded =
+        harness
+            .simulated_phone()
+            .wait_for_recorded("the Call is answered", DEADLINE, |recorded| {
+                recorded
+                    .iter()
+                    .any(|recorded| recorded.path == path && recorded.member == "Answer")
+            });
     assert!(
         !recorded
             .iter()
@@ -219,7 +218,9 @@ fn the_banner_names_the_keybinding_set_and_follows_the_config_as_it_changes() {
 
     write_bindings(
         &harness,
-        &format!("{DESKTOP_CALLS_BINDING}o.bind(\"SUPER + ALT + C\", \"Calendar\", \"calendar\")\n"),
+        &format!(
+            "{DESKTOP_CALLS_BINDING}o.bind(\"SUPER + ALT + C\", \"Calendar\", \"calendar\")\n"
+        ),
     );
     harness.wait_for_app(
         "the footer says no keybinding is set once another app takes the keys",
@@ -297,7 +298,7 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
 
 #[test]
 fn during_a_live_call_the_keybinding_focuses_the_call_window_and_escape_collapses_it_leaving_the_call_live()
-{
+ {
     let (harness, _client) = connected_with_a_focused_window();
     let (_, call) = ring_until_banner(&harness);
     harness.answer(call);

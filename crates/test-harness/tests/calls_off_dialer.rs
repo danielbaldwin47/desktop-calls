@@ -134,9 +134,13 @@ fn record(harness: &Harness) -> PathBuf {
 }
 
 fn says_again(harness: &Harness) {
-    harness.tray().wait_for("the Indicator says calls go off again", DEADLINE, |items| {
-        items.iter().any(|item| item.tooltip.as_deref() == Some(AGAIN))
-    });
+    harness
+        .tray()
+        .wait_for("the Indicator says calls go off again", DEADLINE, |items| {
+            items
+                .iter()
+                .any(|item| item.tooltip.as_deref() == Some(AGAIN))
+        });
 }
 
 #[test]
@@ -173,7 +177,8 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     says_again(&harness);
     let menu = harness.tray().menu();
     assert!(
-        menu.iter().any(|entry| entry.label == "Keep calls on" && entry.enabled),
+        menu.iter()
+            .any(|entry| entry.label == "Keep calls on" && entry.enabled),
         "{menu:?}"
     );
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");

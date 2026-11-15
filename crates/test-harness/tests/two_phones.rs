@@ -83,7 +83,9 @@ fn field<'state>(state: &'state AppState, name: &str) -> Option<&'state str> {
 }
 
 fn chosen_phone_file(harness: &Harness) -> std::path::PathBuf {
-    harness.directory().join("state/desktop-calls/chosen-phone.json")
+    harness
+        .directory()
+        .join("state/desktop-calls/chosen-phone.json")
 }
 
 /// The user unpairs the Phone at `address` in Bluetooth settings. The
@@ -92,7 +94,8 @@ fn chosen_phone_file(harness: &Harness) -> std::path::PathBuf {
 /// Phone before removing it is inferred, not seen.
 fn unpair(harness: &Harness, address: &str) {
     let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
-    let path = zbus::ObjectPath::try_from(path.as_str()).unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
+    let path = zbus::ObjectPath::try_from(path.as_str())
+        .unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
     harness.call_phone_method(
         Bus::System,
         "org.bluez",
@@ -114,7 +117,10 @@ fn after_a_restart_the_app_follows_the_phone_chosen_last() {
         STARTUP,
         |state| phone_is(state, PIXEL) && state.connection_state == "connected",
     );
-    assert!(setup_window(&state).is_none(), "the Setup Window stays closed");
+    assert!(
+        setup_window(&state).is_none(),
+        "the Setup Window stays closed"
+    );
 }
 
 #[test]
@@ -130,7 +136,8 @@ fn the_choice_is_kept_across_more_than_one_restart() {
 }
 
 #[test]
-fn with_both_phones_connected_before_a_restart_the_chosen_one_is_followed_and_the_other_is_ignored() {
+fn with_both_phones_connected_before_a_restart_the_chosen_one_is_followed_and_the_other_is_ignored()
+{
     let mut harness = pixel_chosen_over_the_old_phone();
     harness.simulated_phone().connect_other_phone();
     harness.restart_app();
@@ -169,7 +176,10 @@ fn with_the_chosen_phone_out_of_range_at_start_it_is_still_the_one_followed() {
         STARTUP,
         |state| phone_is(state, PIXEL) && state.connection_state != "connected",
     );
-    assert!(setup_window(&state).is_none(), "the Setup Window stays closed");
+    assert!(
+        setup_window(&state).is_none(),
+        "the Setup Window stays closed"
+    );
 
     harness.simulated_phone().return_to_range();
     harness.wait_for_app(
@@ -197,7 +207,10 @@ fn when_the_chosen_phone_was_unpaired_the_setup_window_opens_and_no_other_phone_
     );
     // The window opens once BlueZ has listed every Phone, the old one among
     // them: it was left alone.
-    assert!(state.phone.is_none(), "no other Phone is followed: {state:?}");
+    assert!(
+        state.phone.is_none(),
+        "no other Phone is followed: {state:?}"
+    );
     assert_eq!(state.connection_state, "not-set-up");
     // And says why it opened, naming the Phone that is gone (ticket #150).
     assert_eq!(field(&state, "notice"), Some(PIXEL_GONE), "{state:?}");
@@ -276,7 +289,10 @@ fn with_the_chosen_phone_unpaired_the_paired_phone_can_be_chosen_and_stays_chose
         STARTUP,
         |state| phone_is(state, OLD_PIXEL) && state.connection_state == "connected",
     );
-    assert!(setup_window(&state).is_none(), "the Setup Window stays closed");
+    assert!(
+        setup_window(&state).is_none(),
+        "the Setup Window stays closed"
+    );
 }
 
 #[test]

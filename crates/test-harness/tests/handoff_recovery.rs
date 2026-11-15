@@ -69,8 +69,7 @@ fn live_here(harness: &Harness) -> AppCall {
         panic!("MoveAudio(\"desktop\") was refused: {error:?}");
     }
     let state = harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
-        state.audio_location == "desktop"
-            && shown(state, "handoff").as_deref() == Some("To phone")
+        state.audio_location == "desktop" && shown(state, "handoff").as_deref() == Some("To phone")
     });
     state.calls[0].clone()
 }
@@ -137,7 +136,8 @@ fn with_connect_profile_failing_once_the_call_is_picked_back_up_when_hands_free_
             state.connection_state == "connected"
                 && state.calls.len() == 1
                 && shown(state, "notice").is_none()
-                && shown(state, "state").as_deref() == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "state").as_deref()
+                    == Some("On your phone. Mute there, or move the audio here")
                 && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
@@ -250,7 +250,8 @@ fn with_the_calls_listed_late_after_hands_free_returns_the_call_keeps_its_id_and
             watch(state);
             state.connection_state == "connected"
                 && state.calls.len() == 1
-                && shown(state, "state").as_deref() == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "state").as_deref()
+                    == Some("On your phone. Mute there, or move the audio here")
                 && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );

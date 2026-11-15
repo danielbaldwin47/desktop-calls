@@ -152,9 +152,10 @@ scorecard *args:
     set -euo pipefail
     cargo build --quiet --workspace --bins --locked
     log=target/scorecard-scenarios.log
+    names=$(target/debug/automation scorecard --names)
     python3 tools/scenario_shader_cache.py cargo test -p test-harness --test scenarios --locked \
-        -- --exact --test-threads 4 $(target/debug/automation scorecard --names) > "$log" 2>&1 \
-        || echo "Some scenarios failed; their items say which. Log: $log"
+        -- --exact --test-threads 4 $names > "$log" 2>&1 \
+        || echo "cargo test exited non-zero: a failed scenario fails its item; anything else is in $log"
     gallery=target/screenshots/gallery/index.html
     [ -f "$gallery" ] || gallery="not rendered here: just screenshot"
     target/debug/automation scorecard --scenarios "$log" --gallery "$gallery" {{args}}

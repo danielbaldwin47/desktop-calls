@@ -30,9 +30,14 @@ impl Report {
         let mut sources = Vec::new();
         collect(path, &mut sources);
         sources.sort();
+        // A file that can't be read is left out; the scenarios it held
+        // then fail their items as not run.
+        sources.retain(|source| fs::read_to_string(source).is_ok());
         let mut results = BTreeMap::new();
         for source in &sources {
-            let text = fs::read_to_string(source).ok()?;
+            let Ok(text) = fs::read_to_string(source) else {
+                continue;
+            };
             let found = if text.contains("<testcase ") {
                 testcases(&text)
             } else {

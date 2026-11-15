@@ -15,7 +15,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::checklist::results::{self, Mode, Outcome, ResultFile};
+use crate::checklist::{
+    self,
+    results::{self, Mode, Outcome, ResultFile},
+};
 use report::{Ran, Report};
 use review::Standing;
 
@@ -157,7 +160,7 @@ fn simulated(scenarios: Option<&Report>, names: &[&str]) -> Result<String, Score
     let Some(report) = scenarios else {
         return Err(Score::new(
             Status::Fail,
-            "no scenario report: `just scorecard` runs the scenarios first",
+            "no scenario report found (locally, `just scorecard` runs the scenarios first)",
         ));
     };
     let tally = Tally::of(report, names);
@@ -170,17 +173,22 @@ fn simulated(scenarios: Option<&Report>, names: &[&str]) -> Result<String, Score
 }
 
 /// Items 1 and 2: the scenarios hold the bound against the Simulated
-/// Phone, and the latest real Checklist measured it on the real Phone.
+/// Phone, and the latest real Checklist measured it on the real Phone:
+/// the slowest of its steps that measured it, since each must hold.
 fn timed(evidence: &Evidence, names: &[&str], key: &str, bound: u64, group: &str) -> Score {
     let simulated = match simulated(evidence.scenarios, names) {
         Ok(summary) => summary,
         Err(failed) => return failed,
     };
     let measured = evidence.checklist.and_then(|checklist| {
-        checklist.steps.iter().rev().find_map(|step| {
-            let millis = step.measurements.get(key)?.as_u64()?;
-            Some((checklist, step.id.as_str(), millis))
-        })
+        checklist
+            .steps
+            .iter()
+            .filter_map(|step| {
+                let millis = step.measurements.get(key)?.as_u64()?;
+                Some((checklist, step.id.as_str(), millis))
+            })
+            .max_by_key(|(_, _, millis)| *millis)
     });
     match measured {
         Some((checklist, step, millis)) => Score::new(
@@ -266,7 +274,7 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
     let Some(report) = evidence.scenarios else {
         return Score::new(
             Status::Fail,
-            "no scenario report: `just scorecard` runs the scenarios first",
+            "no scenario report found (locally, `just scorecard` runs the scenarios first)",
         );
     };
     let canonical: Vec<(&str, Tally)> = proofs::CANONICAL
@@ -317,21 +325,42 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
         count(Outcome::Fail),
         count(Outcome::Skipped),
     );
+    let not_run = groups_not_run(checklist, "");
     let status = if failed > 0 {
         Status::Fail
-    } else if skipped > 0 || passed == 0 {
+    } else if skipped > 0 || !not_run.is_empty() {
         Status::Manual
     } else {
         Status::Pass
     };
+    let not_run = if not_run.is_empty() {
+        String::new()
+    } else {
+        format!(", not run: group {}", not_run.join(", "))
+    };
     Score::new(
         status,
         format!(
-            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped, {}",
+            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped{not_run}, {}",
             checklist.started,
             checklist.path.display()
         ),
     )
+}
+
+/// The groups, by number, with a step whose id starts with `prefix` that
+/// `checklist` has no record of: a run of one group, or one quit partway,
+/// records only the steps it ran.
+fn groups_not_run(checklist: &ResultFile, prefix: &str) -> Vec<String> {
+    let mut groups: Vec<String> = Vec::new();
+    for id in checklist::step_ids() {
+        let recorded = checklist.steps.iter().any(|step| step.id == id);
+        let group = id.split('.').next().unwrap_or(id).to_owned();
+        if id.starts_with(prefix) && !recorded && !groups.contains(&group) {
+            groups.push(group);
+        }
+    }
+    groups
 }
 
 /// Item 6: the reconnect scenarios, then the Checklist's group 6 on the
@@ -366,9 +395,15 @@ fn reconnects(evidence: &Evidence) -> Score {
         .iter()
         .filter(|step| step.outcome == Outcome::Pass)
         .count();
+    // Every step of group 6 the Checklist has, run or not: a run quit
+    // partway records only some.
+    let scripted = checklist::step_ids()
+        .iter()
+        .filter(|id| id.starts_with("6."))
+        .count();
     let status = if !failed.is_empty() {
         Status::Fail
-    } else if passed < group.len() {
+    } else if passed < scripted {
         Status::Manual
     } else {
         Status::Pass
@@ -376,8 +411,7 @@ fn reconnects(evidence: &Evidence) -> Score {
     Score::new(
         status,
         format!(
-            "{simulated}; real Phone: {passed} of {} group 6 steps pass, Real-Phone Checklist {}",
-            group.len(),
+            "{simulated}; real Phone: {passed} of {scripted} group 6 steps pass, Real-Phone Checklist {}",
             checklist.started
         ),
     )
@@ -464,13 +498,21 @@ pub struct Options {
     /// Print the name of every scenario the scorecard reads, one a line,
     /// and score nothing.
     pub names: bool,
+    /// Print every Real-Phone Checklist step's id, one a line, and score
+    /// nothing.
+    pub checklist_steps: bool,
 }
 
 /// `automation scorecard`: prints the table.
 pub fn run(options: Options) -> ExitCode {
-    if options.names {
-        for name in proofs::every_scenario() {
-            println!("{name}");
+    if options.names || options.checklist_steps {
+        let lines = if options.names {
+            proofs::every_scenario()
+        } else {
+            checklist::step_ids()
+        };
+        for line in lines {
+            println!("{line}");
         }
         return ExitCode::SUCCESS;
     }

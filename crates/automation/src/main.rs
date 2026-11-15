@@ -43,6 +43,10 @@ enum Command {
         /// line, for `cargo test --exact`, and score nothing.
         #[arg(long)]
         names: bool,
+        /// Print every Real-Phone Checklist step's id, one a line, and
+        /// score nothing: for the scorecard's tests.
+        #[arg(long, hide = true)]
+        checklist_steps: bool,
     },
     /// Walk through the Real-Phone Checklist one step at a time, observing
     /// what a machine can and asking only what it can't.
@@ -116,12 +120,14 @@ fn main() -> ExitCode {
             review,
             gallery,
             names,
+            checklist_steps,
         } => scorecard::run(scorecard::Options {
             results,
             scenarios,
             review,
             gallery,
             names,
+            checklist_steps,
         }),
         Command::RealPhoneChecklist {
             group,

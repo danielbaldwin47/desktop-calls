@@ -134,10 +134,9 @@ fn with_no_evidence_simulated_items_fail_real_phone_items_are_manual() {
 
     for item in [1, 2, 5, 6, 7] {
         assert_eq!(status(&text, item), "FAIL", "{text}");
-        assert!(
-            row(&text, item)
-                .ends_with("no scenario report: `just scorecard` runs the scenarios first")
-        );
+        assert!(row(&text, item).ends_with(
+            "no scenario report found (locally, `just scorecard` runs the scenarios first)"
+        ));
     }
     assert_eq!(status(&text, 3), "MANUAL", "{text}");
     assert!(row(&text, 3).contains("group 2"), "{text}");
@@ -219,38 +218,147 @@ fn a_failing_or_missing_scenario_fails_its_item_and_is_named() {
     );
 }
 
-#[test]
-fn the_latest_real_checklist_decides_the_items_that_need_the_real_phone() {
-    let directory = tempfile::tempdir().expect("a directory");
-    let scenarios = scenarios();
-    let report = junit(directory.path(), &scenarios, &[]);
-    let step = |id: &str, measurements: &str| {
-        format!(
-            r#"{{ "id": "{id}", "title": "Step {id}", "result": "pass", "evidence": [], "measurements": {measurements}, "started_us": 0, "ended_us": 0, "journal": [] }}"#
-        )
-    };
-    let steps = [
-        step("1.2", r#"{ "pairing_to_first_call_ms": 150000 }"#),
-        step("2.1", r#"{ "banner_latency_ms": 210 }"#),
-        step(
-            "2.2",
-            r#"{ "audio_latency_ms": 2000, "codec": "msbc", "wideband": true }"#,
-        ),
-        step("6.1", "{}"),
-        step("6.2", "{}"),
-    ];
+/// Every Checklist step's id, from the scorecard.
+fn checklist_steps() -> Vec<String> {
+    scorecard(&["--checklist-steps"])
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A real Checklist result file in `directory` recording `ids`, each
+/// passed, with `measurements` for the steps it names, and scores it
+/// beside every scenario passing.
+fn score_checklist(directory: &Path, ids: &[String], measurements: &[(&str, &str)]) -> String {
+    let report = junit(directory, &scenarios(), &[]);
+    let steps: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            let measured = measurements
+                .iter()
+                .find(|(named, _)| named == id)
+                .map_or("{}", |(_, measured)| measured);
+            format!(
+                r#"{{ "id": "{id}", "title": "Step {id}", "result": "pass", "evidence": [], "measurements": {measured}, "started_us": 0, "ended_us": 0, "journal": [] }}"#
+            )
+        })
+        .collect();
     let file = format!(
         r#"{{ "mode": "real", "started": "2026-11-20T10:00:00Z", "updated": "2026-11-20T10:40:00Z", "phone": "My Pixel", "steps": [{}] }}"#,
         steps.join(", ")
     );
-    std::fs::write(directory.path().join("2026-11-20T10-00-00Z.json"), file)
+    std::fs::write(directory.join("2026-11-20T10-00-00Z.json"), file)
         .expect("write the result file");
-    let text = scorecard(&[
+    scorecard(&[
         "--results",
-        directory.path().to_str().unwrap(),
+        directory.to_str().unwrap(),
         "--scenarios",
         report.to_str().unwrap(),
-    ]);
+    ])
+}
+
+#[test]
+fn a_checklist_of_one_group_leaves_the_other_groups_manual() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let group_2: Vec<String> = checklist_steps()
+        .into_iter()
+        .filter(|id| id.starts_with("2.") || id == "6.1")
+        .collect();
+
+    let text = score_checklist(directory.path(), &group_2, &[]);
+
+    assert_eq!(status(&text, 5), "MANUAL", "{text}");
+    assert!(
+        row(&text, 5).contains("not run: group 1, 3, 4, 5, 6, 7"),
+        "{text}"
+    );
+    assert_eq!(status(&text, 6), "MANUAL", "{text}");
+    assert!(
+        row(&text, 6).contains("1 of 7 group 6 steps pass"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_slowest_real_measurement_decides_a_timed_item() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("2.1", r#"{ "banner_latency_ms": 210 }"#),
+            ("3.2", r#"{ "banner_latency_ms": 1400 }"#),
+        ],
+    );
+
+    assert_eq!(status(&text, 1), "FAIL", "{text}");
+    assert!(
+        row(&text, 1).contains("real Phone: 1400 ms against 1000 ms"),
+        "{text}"
+    );
+    assert!(row(&text, 1).contains("step 3.2"), "{text}");
+}
+
+#[test]
+fn what_cargo_test_printed_counts_as_a_report() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let scenarios = scenarios();
+    let reconnect = "out_of_range::after_a_connect_that_is_never_answered_hands_free_dropped_comes_back_within_10_s";
+    assert!(scenarios.iter().any(|name| name == reconnect));
+    let mut printed = String::from("running 80 tests\n");
+    for name in &scenarios {
+        let outcome = if name == reconnect { "FAILED" } else { "ok" };
+        writeln!(printed, "test {name} ... {outcome}").unwrap();
+    }
+    printed += "\nfailures:\n\ntest result: FAILED. 79 passed; 1 failed\n";
+    let log = directory.path().join("scenarios.log");
+    std::fs::write(&log, printed).expect("write the log");
+
+    let text = scorecard(&["--scenarios", log.to_str().unwrap()]);
+
+    assert_eq!(status(&text, 1), "MANUAL", "{text}");
+    assert_eq!(status(&text, 6), "FAIL", "{text}");
+    assert!(
+        row(&text, 6).contains(&format!("{reconnect} failed")),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_directory_of_shard_reports_counts_every_shard() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let scenarios = scenarios();
+    let (first, second) = scenarios.split_at(scenarios.len() / 2);
+    for (shard, names) in [("1", first), ("2", second)] {
+        let shard = directory.path().join(format!("scenario-results-{shard}"));
+        std::fs::create_dir(&shard).expect("a shard's directory");
+        junit(&shard, names, &[]);
+    }
+
+    let text = scorecard(&["--scenarios", directory.path().to_str().unwrap()]);
+
+    assert!(row(&text, 1).contains("2 reports under"), "{text}");
+    for item in [1, 2, 5, 6] {
+        assert_eq!(status(&text, item), "MANUAL", "item {item}: {text}");
+    }
+}
+
+#[test]
+fn the_latest_real_checklist_decides_the_items_that_need_the_real_phone() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let text = score_checklist(
+        directory.path(),
+        &checklist_steps(),
+        &[
+            ("1.2", r#"{ "pairing_to_first_call_ms": 150000 }"#),
+            ("2.1", r#"{ "banner_latency_ms": 210 }"#),
+            (
+                "2.2",
+                r#"{ "audio_latency_ms": 2000, "codec": "msbc", "wideband": true }"#,
+            ),
+        ],
+    );
 
     assert_eq!(status(&text, 1), "PASS", "{text}");
     assert!(
@@ -274,12 +382,12 @@ fn the_latest_real_checklist_decides_the_items_that_need_the_real_phone() {
     );
     assert_eq!(status(&text, 5), "PASS", "{text}");
     assert!(
-        row(&text, 5).contains("5 pass, 0 fail, 0 skipped"),
+        row(&text, 5).contains("36 pass, 0 fail, 0 skipped"),
         "{text}"
     );
     assert_eq!(status(&text, 6), "PASS", "{text}");
     assert!(
-        row(&text, 6).contains("2 of 2 group 6 steps pass"),
+        row(&text, 6).contains("7 of 7 group 6 steps pass"),
         "{text}"
     );
 }

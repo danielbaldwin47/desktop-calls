@@ -13,20 +13,24 @@ pub(super) const UNTIL_TURNED_ON: &str = "Until I turn them on";
 pub(super) const TURN_CALLS_ON: &str = "Turn calls on";
 /// The menu entry that cancels a turn-off waiting for the last Call.
 pub(super) const KEEP_CALLS_ON: &str = "Keep calls on";
-/// The Indicator's status while a turn-off waits for the last Call.
-pub(super) const PENDING: &str = "Calls turn off when this call ends";
+/// The Indicator's status while a turn-off waits for the last Call, in the
+/// words of the Call Window's tag, short enough for Omarchy's tray menu to
+/// show whole (#313).
+pub(super) const PENDING: &str = "Calls off after this call";
 /// The Indicator's status during a Call placed while calls were off: they
-/// go off again once it ends (ticket #206).
-pub(super) const AGAIN: &str = "Calls off again when this call ends";
+/// go off again once it ends (ticket #206). "again" would not fit the tray
+/// menu, and what happens next is the same as for [`PENDING`].
+pub(super) const AGAIN: &str = PENDING;
 /// Calls turned off until a time that has already passed.
 pub(super) const UNTIL_PASSED: &str =
     "That time has already passed, so calls stay on; choose a time ahead.";
 
 /// The Indicator's status while calls are off: until `until`, or until the
-/// user turns them on; for Quiet Hours, until they end.
+/// user turns them on; for Quiet Hours, until they end. Each fits Omarchy's
+/// tray menu whole (#313).
 pub(super) fn calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> String {
     match (until, quiet_hours) {
-        (Some(until), true) => format!("Calls off until {until} (quiet hours)"),
+        (Some(until), true) => format!("Quiet hours until {until}"),
         (Some(until), false) => format!("Calls off until {until}"),
         (None, _) => "Calls off".to_owned(),
     }
@@ -100,9 +104,11 @@ pub(super) fn for_an_hour(until: TimeOfDay) -> String {
 }
 
 /// The choice under Turn calls off that turns them off until the morning,
-/// at `until`.
+/// at `until`: "Until morning", as `calls off --until-morning` says it, so
+/// that it fits Omarchy's tray menu whole (#313) and is right after
+/// midnight too.
 pub(super) fn until_morning(until: TimeOfDay) -> String {
-    format!("Until tomorrow morning ({until})")
+    format!("Until morning ({until})")
 }
 
 /// The line `desktop-calls status` adds while calls are off, until `until`

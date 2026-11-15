@@ -263,7 +263,7 @@ fn a_turn_off_while_a_lost_call_carries_on_on_the_phone_waits_for_it() {
 }
 
 #[test]
-fn the_indicator_says_calls_turn_off_when_this_call_ends() {
+fn the_indicator_says_calls_off_after_this_call() {
     let (state, _) = run(
         with_call(CallState::Active),
         [Input::TurnCallsOff { until: None }],
@@ -274,7 +274,7 @@ fn the_indicator_says_calls_turn_off_when_this_call_ends() {
     assert_eq!(view.look, IndicatorLook::InCall);
     assert_eq!(
         messages::indicator_status(&view.status),
-        "Calls turn off when this call ends"
+        "Calls off after this call"
     );
     assert_eq!(
         messages::indicator_entry(&IndicatorEntry::KeepCallsOn, &view),

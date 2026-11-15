@@ -56,6 +56,8 @@ pub(super) struct CallPill {
     /// The line under the caller, with the state tag and "Calls off after".
     tag_line: gtk::Box,
     tag: gtk::Label,
+    /// The "·" between the two tags, while both show (#319).
+    tag_separator: gtk::Label,
     /// "Calls off after", after the state tag, while a turn-off waits.
     calls_off: gtk::Label,
     status: gtk::Label,
@@ -102,8 +104,15 @@ impl CallPill {
         // Should a tag line ever outgrow the strip, it gives way before the
         // strip's width would.
         calls_off.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
+        // Joined as every other line of tags is, so two read as two.
+        let tag_separator = gtk::Label::new(Some(messages::tag_separator()));
+        tag_separator.add_css_class(class::TAG);
+        // In the secondary colour, so it reads as neither tag's.
+        tag_separator.add_css_class(class::CALLS_OFF);
+        tag_separator.set_visible(false);
+        let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::XS);
         tag_line.append(&tag);
+        tag_line.append(&tag_separator);
         tag_line.append(&calls_off);
         tag_line.set_visible(false);
         let status = gtk::Label::new(None);
@@ -166,6 +175,7 @@ impl CallPill {
             caller,
             tag_line,
             tag,
+            tag_separator,
             calls_off,
             status,
             divider,
@@ -262,6 +272,7 @@ impl CallPill {
             content.insert("mute-tooltip".to_owned(), mute_tooltip);
         }
         report_tags(tag, view.calls_off_after, &mut content);
+        self.report_tag_line(&mut content);
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
@@ -285,6 +296,25 @@ impl CallPill {
         }
     }
 
+    /// Adds the line under the caller as it reads on screen: the text of
+    /// each label shown on it, separator and all (#319).
+    fn report_tag_line(&self, content: &mut BTreeMap<String, String>) {
+        if !self.tag_line.is_visible() {
+            return;
+        }
+        let mut shown = Vec::new();
+        let mut child = self.tag_line.first_child();
+        while let Some(widget) = child {
+            if widget.is_visible()
+                && let Some(label) = widget.downcast_ref::<gtk::Label>()
+            {
+                shown.push(label.text().to_string());
+            }
+            child = widget.next_sibling();
+        }
+        content.insert("tag-line".to_owned(), shown.join(" "));
+    }
+
     /// Shows the tags on the line under the caller: the state tag, then
     /// "Calls off after" while a turn-off waits. Returns the state tag.
     fn show_tags(&self, view: &CallWindowView) -> Option<CallPillTag> {
@@ -292,6 +322,8 @@ impl CallPill {
         self.tag
             .set_text(tag.map(messages::call_pill_tag).unwrap_or_default());
         self.tag.set_visible(tag.is_some());
+        self.tag_separator
+            .set_visible(tag.is_some() && view.calls_off_after);
         self.calls_off.set_visible(view.calls_off_after);
         self.tag_line
             .set_visible(tag.is_some() || view.calls_off_after);

@@ -193,6 +193,32 @@ fn call_entry(kind: CallKind, name: Option<&str>, number: Option<&str>, at: &str
     vcard
 }
 
+/// The date `days` before today in UTC, as `X-IRMC-CALL-DATETIME` writes
+/// it (`20261115`), so a Call History can read as recent whenever it is
+/// shown: "14:05" today, "Tue 14:05" within the week.
+#[must_use]
+pub fn days_ago(days: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let day = i64::try_from(now / 86_400 - days.min(now / 86_400)).unwrap_or(0);
+    // Howard Hinnant's `civil_from_days`.
+    let shifted = day + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let of_era = shifted.rem_euclid(146_097);
+    let year_of_era = (of_era - of_era / 1_460 + of_era / 36_524 - of_era / 146_096) / 365;
+    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * of_year + 2) / 153;
+    let day_of_month = of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}{month:02}{day_of_month:02}")
+}
+
 /// `count` made-up Call History entries (at most 720), newest first, one a
 /// minute back from 2026-11-04 12:00, cycling through received, dialed and
 /// missed. As on the Pixel, some name a Contact ("Contact `i`") and the

@@ -133,10 +133,24 @@ impl Harness {
     ///
     /// If `deadline` passes first.
     pub fn wait_for_app_log(&self, needle: &str, deadline: Duration) -> String {
+        self.wait_for_app_log_after(0, needle, deadline)
+    }
+
+    /// Waits until the app's log, past its first `from` bytes, has a line
+    /// containing `needle`, and returns that line: `from` is the log's
+    /// length before the step under test, so an earlier run's line can't
+    /// answer for it.
+    ///
+    /// # Panics
+    ///
+    /// If `deadline` passes first.
+    pub fn wait_for_app_log_after(&self, from: usize, needle: &str, deadline: Duration) -> String {
         let log = self.app_log_path();
         let started = std::time::Instant::now();
         loop {
             if let Some(line) = app_log::read(&log)
+                .get(from..)
+                .unwrap_or_default()
                 .lines()
                 .find(|line| line.contains(needle))
             {

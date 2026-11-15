@@ -521,8 +521,11 @@ impl Harness {
         None
     }
 
-    /// Stops the app if the session bus started it: such an app is the
-    /// bus's child, not the harness's.
+    /// Stops an app that owns the app's bus name though the harness didn't
+    /// start it. The systemd stand-in starts the installed service and stops
+    /// it as it is dropped, before this runs; this catches one the bus ran
+    /// from a service file's `Exec=` itself, as it does for a service file
+    /// with no `SystemdService=`.
     fn stop_activated_app(&self) {
         if self
             .processes

@@ -120,10 +120,11 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
 /// Indicator's own words for the entry (a test holds them alike).
 const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
 
-/// What the footer says when `bindings.lua` couldn't be read: that, and
-/// where the Setup Window's last page says what to do, rather than a guess
-/// that no keybinding is set (#366).
-const KEYBINDING_UNREADABLE: &str = "Couldn't read bindings.lua. Phone setup… shows what to do.";
+/// What the footer says when `bindings.lua` couldn't be read: one short,
+/// calm line on a ringing Banner, that the keybinding is unknown, rather than
+/// a guess that none is set (#366), and the Indicator's entry whose last
+/// page names the file and what to bind (the owner's decision, 2026-11-15).
+const KEYBINDING_UNREADABLE: &str = "Keybinding unknown. Phone setup… explains.";
 
 /// The footer as one line of text, as the control interface reports it: a
 /// comma sits against the key before it.

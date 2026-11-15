@@ -244,7 +244,7 @@ fn a_deadline_that_passes_during_the_call_leaves_calls_on() {
 /// How long the Call Window may take to collapse by itself: the 5 s, and a
 /// margin for a loaded runner.
 const COLLAPSE_DEADLINE: Duration = Duration::from_secs(9);
-const TAG: &str = "Calls off after";
+const TAG: &str = "Off after call";
 
 /// The app on a headless screen, so its surfaces are reported, with the
 /// Phone connected.
@@ -261,7 +261,7 @@ fn on_screen() -> Harness {
     harness
 }
 
-/// What `surface` says its "Calls off after" tag reads, if it shows one.
+/// What `surface` says its "Off after call" tag reads, if it shows one.
 fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
     state
         .surface(surface)
@@ -270,7 +270,7 @@ fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
 }
 
 /// What the Call Window, or once it has collapsed the Call Pill, says its
-/// "Calls off after" tag reads.
+/// "Off after call" tag reads.
 fn tagged(state: &AppState) -> Option<&str> {
     tag(state, "call-window").or_else(|| tag(state, "call-pill"))
 }
@@ -414,7 +414,7 @@ fn muted_with_a_long_number_the_call_pill_joins_its_tags_and_cuts_neither_them_n
         COLLAPSE_DEADLINE,
         |state| {
             state.surface("call-window").is_none()
-                && tag_line(state) == Some("Muted · Calls off after")
+                && tag_line(state) == Some("Muted · Off after call")
                 && cut_short(state, "call-pill").is_some()
         },
     );

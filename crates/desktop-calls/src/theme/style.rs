@@ -82,7 +82,7 @@ pub(crate) mod class {
     /// A tag on the line under who a Call is with, on the Call Window and
     /// the Call Pill: monospace 11/500, in secondary text.
     pub(crate) const TAG: &str = "tag";
-    /// With [`TAG`]: "Calls off after", which stays in secondary text even
+    /// With [`TAG`]: "Off after call", which stays in secondary text even
     /// on a muted Call Pill.
     pub(crate) const CALLS_OFF: &str = "calls-off";
     /// A notice on the warning tint, its icon in warning text.
@@ -282,7 +282,7 @@ window.call-pill .tag { line-height: 0.95; }
 .pill-state { color: var(--dc-secondary); }
 .pill-state.muted,
 window.call-pill.muted .tag { color: var(--dc-warning-text); font-weight: 600; }
-/* Only the Muted tag takes the warning colour; "Calls off after" stays as
+/* Only the Muted tag takes the warning colour; "Off after call" stays as
    quiet as every other tag. */
 window.call-pill.muted .tag.calls-off { color: var(--dc-secondary); font-weight: 500; }
 .live-dot {

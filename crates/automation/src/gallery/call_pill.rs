@@ -101,7 +101,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-window-calls-off-after",
-        title: "The Call Window while a turn-off waits for the Call to end: the Calls off after tag on the line under who, below the timer",
+        title: "The Call Window while a turn-off waits for the Call to end: the Off after call tag on the line under who, below the timer",
         still: |state| expanded(state) && window_has(state, "calls-off-after"),
         prepare: as_is,
         reach: |harness| {
@@ -117,7 +117,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-calls-off-after",
-        title: "The Call Pill while a turn-off waits for the Call to end: the Calls off after tag on the small line under the caller",
+        title: "The Call Pill while a turn-off waits for the Call to end: the Off after call tag on the small line under the caller",
         still: |state| collapsed(state) && pill_has(state, "calls-off-after"),
         prepare: as_is,
         reach: |harness| {
@@ -136,12 +136,12 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-muted-calls-off-after",
-        title: "The Call Pill, muted while a turn-off waits for the Call to end, with a long number not in Contacts: Muted and Calls off after under the number, which reads in full",
+        title: "The Call Pill, muted while a turn-off waits for the Call to end, with a number not in Contacts: Muted and Off after call under the number, which reads in full",
         still: |state| muted_and_calls_off_after(state),
         prepare: as_is,
         reach: |harness| {
             connect(harness);
-            on_a_call_from(harness, LONG_NUMBER);
+            on_a_call_from(harness, NUMBER);
             turn_calls_off(harness);
             wait_until_collapsed(harness);
             harness
@@ -161,7 +161,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-window-calls-off-after-long-number",
-        title: "The Call Window with a long number not in Contacts while a turn-off waits: the number reads in full, Calls off after under the timer",
+        title: "The Call Window with a number too long for the Call Pill, not in Contacts, while a turn-off waits: the number reads in full, Off after call under the timer",
         still: |state| {
             expanded(state)
                 && window_has(state, "calls-off-after")
@@ -187,11 +187,11 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-calls-off-after-long-number",
-        title: "The Call Pill with a long number not in Contacts while a turn-off waits: the number reads in full, Calls off after under it",
+        title: "The Call Pill with a number too long for it, not in Contacts, while a turn-off waits: the number cut at its end with …, Off after call under it",
         still: |state| {
             collapsed(state)
                 && pill_has(state, "calls-off-after")
-                && says(state, "call-pill", "caller-cut-short", "no")
+                && says(state, "call-pill", "caller-cut-short", "yes")
         },
         prepare: as_is,
         reach: |harness| {
@@ -199,12 +199,12 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             on_a_call_from(harness, LONG_NUMBER);
             turn_calls_off(harness);
             harness.wait_for_app(
-                "the Call Pill is tagged, the number in full",
+                "the Call Pill is tagged, the number cut at its end",
                 DEADLINE,
                 |state| {
                     collapsed(state)
                         && pill_has(state, "calls-off-after")
-                        && says(state, "call-pill", "caller-cut-short", "no")
+                        && says(state, "call-pill", "caller-cut-short", "yes")
                 },
             );
         },
@@ -216,9 +216,9 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-muted-long-number",
-        title: "The Call Pill, muted, with a long number not in Contacts: the number reads in full, Muted under it",
+        title: "The Call Pill, muted, with a number too long for it, not in Contacts: the number cut at its end with …, Muted under it",
         still: |state| {
-            collapsed(state) && state.muted && says(state, "call-pill", "caller-cut-short", "no")
+            collapsed(state) && state.muted && says(state, "call-pill", "caller-cut-short", "yes")
         },
         prepare: as_is,
         reach: |harness| {
@@ -229,12 +229,12 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                 .set_muted(true)
                 .unwrap_or_else(|error| panic!("mute: {error:?}"));
             harness.wait_for_app(
-                "the Call Pill is muted, the number in full",
+                "the Call Pill is muted, the number cut at its end",
                 DEADLINE,
                 |state| {
                     pill_has(state, "muted")
                         && says(state, "call-pill", "tag", "Muted")
-                        && says(state, "call-pill", "caller-cut-short", "no")
+                        && says(state, "call-pill", "caller-cut-short", "yes")
                 },
             );
         },
@@ -316,7 +316,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
     },
     State {
         name: "call-pill-held-calls-off-after",
-        title: "The Call Pill with a Call on hold while a turn-off waits: 1 on hold and Calls off after under the caller, who reads in full",
+        title: "The Call Pill with a Call on hold while a turn-off waits: 1 on hold and Off after call under the caller, who reads in full",
         still: |state| held_and_calls_off_after(state),
         prepare: as_is,
         reach: |harness| {
@@ -324,7 +324,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             turn_calls_off(harness);
             collapse_by_hand(harness);
             harness.wait_for_app(
-                "the Call Pill says 1 on hold and Calls off after",
+                "the Call Pill says 1 on hold and Off after call",
                 DEADLINE,
                 held_and_calls_off_after,
             );
@@ -390,7 +390,7 @@ fn says(state: &AppState, surface: &str, key: &str, value: &str) -> bool {
         .is_some_and(|shown| shown == value)
 }
 
-/// The Call Pill shows Muted and Calls off after, the caller in full.
+/// The Call Pill shows Muted and Off after call, the caller in full.
 fn muted_and_calls_off_after(state: &AppState) -> bool {
     collapsed(state)
         && state.muted
@@ -400,7 +400,7 @@ fn muted_and_calls_off_after(state: &AppState) -> bool {
         && says(state, "call-pill", "height", "44")
 }
 
-/// The Call Pill shows 1 on hold and Calls off after, the widest tag line,
+/// The Call Pill shows 1 on hold and Off after call, the widest tag line,
 /// the caller and both tags in full.
 fn held_and_calls_off_after(state: &AppState) -> bool {
     collapsed(state)

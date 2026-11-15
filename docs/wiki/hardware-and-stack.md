@@ -33,3 +33,11 @@
 - 2026-11-14: `/home` (one 426 GB partition, `/dev/nvme0n1p5`) filled to 100% and every agent's writes failed. Cause, from the chief of staff: 34 agent worktrees each held its own `target/`, about 134 GB in all, and 23 of the 34 belonged to PRs that had already merged. A merged worktree's `target/` is dead weight, 5 to 6 GB each. Free space afterwards was 81 GB (`df`, 81% used, after the user ordered the caches deleted and the 23 merged worktrees removed).
 - Rule, the user's instruction of 2026-11-14: every agent clears its build cache when its work is done, and says so in its report ([implementer brief](../agents/implementer-brief.md), Finishing step 6). Unneeded worktrees are cleaned up as work goes, with `claude-steward --dry-run --full` first; removals and their recovery commands are in `~/.claude/steward/steward.log`. Making `just land` do the cache part after a merge is #277.
 - A full disk looks like ENOSPC on any write, a failed commit or a failed `just ci-local`, not like a repo problem. Check `df -h /home` first.
+
+## `/tmp` quota, 2026-11-15
+
+- 2026-11-15: the per-user quota on `/tmp` was hit, and every tool that writes to `/tmp` failed until folders were deleted by hand. The chief of staff put it at about 8 GB; #346 counts 158 `/tmp/desktop-calls-test-*` folders at 3.1 GB, which does not reach 8 GB alone, so other files were probably in `/tmp` too (inferred, not checked). A screen scenario's folder holds about 90 MB of captures (#346).
+- Cause: failing scenarios keep their folders as evidence, and killed test processes (a timeout, an interrupted `cargo test`, nextest ending a hung scenario) never run `Harness::drop`. Fixed by #349 (`92ade21`): the harness prunes folders over a day old before its first scenario ([testing](testing.md)).
+- Earlier, 2026-11-05: 473 folders (5.6 GB) were found and deleted by hand ([testing](testing.md), "CI runs locally"). `/tmp` has a per-user quota on this machine, which is why the CI image, cargo cache and logs live in `~/.cache/desktop-calls-ci`.
+- Rule: agents never sweep shared `/tmp` folders ([chief-of-staff-practice](chief-of-staff-practice.md)); on 2026-11-15 one deleted scenario folders older than 5 minutes (relayed).
+- A full `/tmp` quota looks like a write failure in any tool, not a repo problem; check how much `/tmp/desktop-calls-test-*` holds before blaming the code.

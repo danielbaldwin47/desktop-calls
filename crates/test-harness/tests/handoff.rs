@@ -42,6 +42,10 @@ const PHONE_OPENS_LINK: Duration = Duration::from_millis(300);
 /// [`PHONE_OPENS_LINK`], so about 1.3 s. Waiting the full limit before
 /// asking again took about 3.3 s (ticket #70).
 const RETRIED_HANDOFF_DEADLINE: Duration = Duration::from_millis(2_500);
+/// How long the app waits after the Phone took the first `Activate` before
+/// asking again, if the audio link hasn't started: the core's
+/// `HANDOFF_NOT_STARTED_MS`.
+const ASKS_AGAIN_AFTER: Duration = Duration::from_secs(1);
 /// How long a Handoff to the Phone may take once the app is asked, until
 /// the audio is on the Phone. Hands-free drops at once, so this is mostly
 /// the app's own part; the Call coming back takes the Pixel up to 1.01 s
@@ -204,6 +208,19 @@ fn since_handoff_requested(harness: &Harness, kind: &str) -> Duration {
     )
 }
 
+/// When the Phone took each Handoff to the Desktop (`RejectSCO=false`, then
+/// `Activate`), by the app's log, in microseconds.
+fn moves_to_desktop_done(harness: &Harness) -> Vec<u64> {
+    harness
+        .app_log()
+        .lines()
+        .filter(|line| line.contains("\"event_kind\":\"phone-command-sent\""))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["command"] == "MoveAudioToDesktop")
+        .map(|event| timestamp_us(&event))
+        .collect()
+}
+
 /// The app's first log event of `kind`, parsed.
 fn logged(harness: &Harness, kind: &str) -> serde_json::Value {
     let line = harness.wait_for_app_log(&format!("\"event_kind\":\"{kind}\""), DEADLINE);
@@ -348,25 +365,41 @@ fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
     });
     // The audio can't arrive before the second `Activate` a second in, so
     // the Call Window says it is coming the whole time, from the request
-    // until the audio is here. Judged on what the app published, in order,
-    // rather than over a second the harness times: that second starts only
-    // once the app answers the harness, and a main loop held 561 ms pushed
-    // it past the second `Activate` (#146). That the audio stayed on the
-    // Phone until then is pinned by the order the Phone was asked, below.
+    // until the audio is here, with no notice at any point before it is.
+    // Judged on what the app published, in order, rather than over a second
+    // the harness times: that second starts only once the app answers the
+    // harness, and a main loop held 561 ms pushed it past the second
+    // `Activate` (#146). That the audio stayed on the Phone until then is
+    // pinned by the order the Phone was asked, below.
     let call_windows = harness.surfaces_seen();
-    let until_here: Vec<_> = call_windows
+    let before_here: Vec<_> = call_windows
         .iter()
         .filter_map(|shown| shown.get("call-window"))
-        .skip_while(|window| window.get("handoff").map(String::as_str) != Some("Moving…"))
         .take_while(|window| window.get("state").map(String::as_str) != Some("On this computer"))
         .collect();
     assert!(
-        !until_here.is_empty()
-            && until_here.iter().all(|window| {
-                window.get("handoff").map(String::as_str) == Some("Moving…")
-                    && !window.contains_key("notice")
-            }),
+        before_here.iter().all(|window| !window.contains_key("notice")),
+        "the Call Window showed a notice before the audio was here: {call_windows:#?}"
+    );
+    let moving: Vec<_> = before_here
+        .iter()
+        .skip_while(|window| window.get("handoff").map(String::as_str) != Some("Moving…"))
+        .collect();
+    assert!(
+        !moving.is_empty()
+            && moving
+                .iter()
+                .all(|window| window.get("handoff").map(String::as_str) == Some("Moving…")),
         "the Call Window stopped saying Moving… before the audio was here: {call_windows:#?}"
+    );
+    // The second `Activate` waits the second out, by the app's own clock: a
+    // timer fires late under load, never early, so this can't flake.
+    let asked = moves_to_desktop_done(&harness);
+    assert_eq!(asked.len(), 2, "the Phone was asked twice: {asked:?}");
+    let apart = Duration::from_micros(asked[1] - asked[0]);
+    assert!(
+        apart >= ASKS_AGAIN_AFTER,
+        "the Phone was asked again {apart:?} after it took the first Activate"
     );
     let took = since_handoff_requested(&harness, "audio-moved");
     assert!(

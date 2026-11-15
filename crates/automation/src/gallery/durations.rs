@@ -4,15 +4,13 @@
 
 use test_harness::{AppState, Harness};
 
+use super::call_pill::hold_call_window_expanded;
 use super::{DEADLINE, State, as_is, connect, ring, shows, without_controls};
 
-/// How long each Call runs before it ends or contact is lost, as the
-/// Call Window's timer shows it.
-const LASTED: &str = "0:03";
-
-/// What the Call Window may show once the Call has lasted [`LASTED`]: the
-/// app may take up to a second more to see it end.
-const SHOWN: [&str; 2] = ["0:03", "0:04"];
+/// How long, in seconds, each Call runs before it ends or contact is lost,
+/// at least, by the Call Window's timer. The Call Window would collapse 5 s
+/// after the Call connected; the pointer holds it open meanwhile.
+const LASTED: u64 = 2;
 
 pub(super) const DURATION_STATES: &[State] = &[
     State {
@@ -29,7 +27,8 @@ pub(super) const DURATION_STATES: &[State] = &[
                 |state| {
                     call_window(state, "state").is_some_and(|line| {
                         line.strip_prefix("Call ended · ")
-                            .is_some_and(|lasted| SHOWN.contains(&lasted))
+                            .and_then(seconds)
+                            .is_some_and(|lasted| lasted >= LASTED)
                     })
                 },
             );
@@ -55,7 +54,9 @@ pub(super) const DURATION_STATES: &[State] = &[
                 DEADLINE,
                 |state| {
                     call_window(state, "notice-heading").is_some()
-                        && call_window(state, "timer").is_some_and(|timer| timer != "0:00")
+                        && call_window(state, "timer")
+                            .and_then(|timer| seconds(timer))
+                            .is_some_and(|lasted| lasted >= LASTED)
                 },
             );
         },
@@ -73,15 +74,28 @@ fn call_window<'state>(state: &'state AppState, key: &str) -> Option<&'state Str
         .and_then(|window| window.get(key))
 }
 
-/// Answers a Call here and waits until its audio is on the Desktop and
-/// its timer reads [`LASTED`]. Returns the Call's id.
+/// The seconds in a duration as the Call Window shows it, `m:ss`.
+fn seconds(shown: &str) -> Option<u64> {
+    let (minutes, seconds) = shown.split_once(':')?;
+    Some(minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?)
+}
+
+/// Answers a Call here, holds the Call Window open, and waits until the
+/// audio is on the Desktop and the timer reads [`LASTED`] seconds or more.
+/// Returns the Call's id.
 fn live_for(harness: &Harness) -> u32 {
     connect(harness);
     let call = ring(harness);
     harness.answer(call);
+    harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
+        call_window(state, "timer").is_some()
+    });
+    hold_call_window_expanded(harness);
     harness.wait_for_app("the Call has lasted a few seconds", DEADLINE, |state| {
         state.audio_location == "desktop"
-            && call_window(state, "timer").is_some_and(|timer| timer == LASTED)
+            && call_window(state, "timer")
+                .and_then(|timer| seconds(timer))
+                .is_some_and(|lasted| lasted >= LASTED)
     });
     call
 }

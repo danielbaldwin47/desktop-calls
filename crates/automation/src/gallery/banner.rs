@@ -1,7 +1,7 @@
 //! The Incoming Call Banner's states in the gallery (#226): ringing, with
 //! the keyboard, identifying, not in Contacts, withheld and with no
-//! keybinding, and a Waiting Call with and without hold. A third Call waiting, beside the
-//! Call Window with two Calls, is in the main list.
+//! keybinding, and a Waiting Call with and without hold. A third Call
+//! waiting, beside the Call Window with two Calls, is in the main list.
 
 use std::time::{Duration, Instant};
 
@@ -107,16 +107,23 @@ pub(super) const BANNER_STATES: &[State] = &[
     State {
         name: "incoming-call-banner-withheld",
         title: "The Incoming Call Banner for a withheld number, once no number came: Withheld number, and nothing to call back",
-        still: |state| caller(state).is_some_and(|caller| caller == "Withheld number"),
+        still: |state| {
+            caller(state).is_some_and(|caller| caller == "Withheld number")
+                && names_the_keybinding(state)
+        },
         prepare: with_keybinding,
         reach: |harness| {
             connect(harness);
             let _path = harness.simulated_phone().ring("");
             // The Banner identifies the caller for 2 s first.
-            harness.wait_for_app("the Banner says Withheld number", DEADLINE, |state| {
-                caller(state).is_some_and(|caller| caller == "Withheld number")
-            });
-            wait_for_footer(harness);
+            harness.wait_for_app(
+                "the Banner says Withheld number, with the keybinding",
+                DEADLINE,
+                |state| {
+                    caller(state).is_some_and(|caller| caller == "Withheld number")
+                        && names_the_keybinding(state)
+                },
+            );
         },
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
@@ -183,7 +190,7 @@ fn footer(state: &AppState) -> Option<&String> {
         .and_then(|banner| banner.get("footer"))
 }
 
-fn names_the_keybinding(state: &AppState) -> bool {
+pub(super) fn names_the_keybinding(state: &AppState) -> bool {
     footer(state).is_some_and(|footer| footer.starts_with("Super Alt C then"))
 }
 

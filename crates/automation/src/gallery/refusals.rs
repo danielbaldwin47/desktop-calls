@@ -1,12 +1,12 @@
 //! The gallery's states that say why not (#26): the Dialer refusing a
-//! withheld Missed Call, a second Call and a number no phone can dial, and
-//! the Call Window after a Handoff to the Phone didn't happen.
+//! withheld Missed Call, another Call during a Call and a number no phone
+//! can dial, and the Call Window after the audio didn't move where asked.
 
 use test_harness::{AppState, Harness, Key};
 
 use super::{
-    DEADLINE, State, as_is, dialer_shows, live_here, on_a_call, open_dialer, shows, shows_dialer,
-    sync,
+    DEADLINE, State, as_is, connect, dialer_shows, live_here, on_a_call, open_dialer, ring, shows,
+    shows_dialer, sync,
 };
 
 pub(super) const REFUSAL_STATES: &[State] = &[
@@ -29,7 +29,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
     },
     State {
         name: "dialer-call-in-progress",
-        title: "The Dialer, after Enter during a Call: hang up the current Call first, and the Call Window still there",
+        title: "The Dialer, after Enter during a Call: hang up the current Call first, as a strip under the search row",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -55,7 +55,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
     },
     State {
         name: "call-window-audio-not-moved",
-        title: "The Call Window after the Phone kept the audio here: a notice to use the phone's audio button, and the Call still live",
+        title: "The Call Window after the Phone refused to take the audio: it stayed here, a notice to use the phone's audio button, and the Call still live",
         still: |_| true,
         prepare: as_is,
         reach: |harness| {
@@ -72,6 +72,28 @@ pub(super) const REFUSAL_STATES: &[State] = &[
                 |state| {
                     call_window_notice(state)
                         .is_some_and(|notice| notice.starts_with("The audio stayed here"))
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.red()),
+    },
+    State {
+        name: "call-window-phone-kept-audio",
+        title: "The Call Window after a Call answered here stayed on the Phone's earbuds: a notice to use the phone's audio button, and the Call still live",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            connect(harness);
+            harness.simulated_phone().set_earbuds(true);
+            harness.simulated_phone().enable_quirk("earbuds-keep-audio");
+            let call = ring(harness);
+            harness.answer(call);
+            harness.wait_for_app(
+                "the Call Window says the Phone kept the audio",
+                DEADLINE,
+                |state| {
+                    call_window_notice(state)
+                        .is_some_and(|notice| notice.starts_with("Your phone kept the audio"))
                 },
             );
         },

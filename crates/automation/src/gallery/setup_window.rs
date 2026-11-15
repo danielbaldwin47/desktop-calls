@@ -11,7 +11,7 @@ use test_harness::{AppState, Builder, Harness};
 
 use super::{
     DEADLINE, PHONE_NAME, State, app_region, as_is, fresh_install, pair_through_setup_window,
-    setup_window_shows, sync,
+    setup_window_shows, sync, with_hyprland_config,
 };
 
 /// Audio settings that leave out hands-free, so Calls' audio isn't set up.
@@ -85,8 +85,9 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
     },
 ];
 
-/// Longer than the Phone's 30 s contacts prompt.
-const PROMPT_TIMEOUT: Duration = Duration::from_secs(40);
+/// Longer than the Phone's 30 s contacts prompt, which starts only once
+/// the Phone has paired and connected.
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(50);
 
 /// The Setup Window when the Phone didn't share Contacts (#26).
 pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
@@ -110,15 +111,17 @@ pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
         name: "setup-window-done-contacts-denied",
         title: "The Setup Window's finish page after the Phone refused Contacts: Calls still work, and where to allow it later",
         still: |_| true,
-        prepare: fresh_install,
+        prepare: |builder| fresh_install(builder).config_under_home(),
         reach: |harness| {
+            with_hyprland_config(harness);
             harness.simulated_phone().set_contacts_prompt("deny");
             pair_through_setup_window(harness);
             harness.wait_for_app(
-                "the finish page says Contacts aren't shared",
-                PROMPT_TIMEOUT,
+                "the finish page says Contacts aren't shared, and offers the keybinding",
+                DEADLINE,
                 |state| {
-                    setup_window_shows(state, "step", "done")
+                    setup_window_shows(state, "buttons", "Add keybinding\nDone")
+                        && setup_window_shows(state, "step", "done")
                         && state
                             .surface("setup-window")
                             .and_then(|window| window.get("summary"))

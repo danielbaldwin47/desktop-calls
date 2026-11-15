@@ -29,7 +29,7 @@ mod render;
 mod setup_window;
 mod shard;
 
-use banner::{BANNER_STATES, with_keybinding};
+use banner::{BANNER_STATES, names_the_keybinding, with_keybinding};
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use durations::DURATION_STATES;
 use indicator::{
@@ -221,7 +221,7 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-held-third-call-waiting",
-        title: "Three Calls: one live and one on hold, neither with Hang up, and a Waiting Call's Banner with End & Answer and Decline only",
+        title: "Three Calls: one live and one on hold, Swap gone and Hang up dimmed until the Waiting Call is answered or declined, and a Waiting Call's Banner with End & Answer, Decline and the keybinding",
         still: |_| true,
         prepare: with_keybinding,
         reach: |harness| {
@@ -237,6 +237,7 @@ const STATES: &[State] = &[
                         && state
                             .surface("banner")
                             .is_some_and(|banner| banner.contains_key("options"))
+                        && names_the_keybinding(state)
                 },
             );
         },
@@ -915,8 +916,8 @@ pub fn run(options: &Options) -> ExitCode {
 fn all_states() -> impl Iterator<Item = &'static State> {
     STATES
         .iter()
-        .chain(DURATION_STATES)
         .chain(BANNER_STATES)
+        .chain(DURATION_STATES)
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
         .chain(SETUP_PROBLEM_STATES)

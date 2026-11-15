@@ -48,6 +48,7 @@ const STATES: &[&str] = &[
     "dialer-call-in-progress",
     "dialer-undialable",
     "call-window-audio-not-moved",
+    "call-window-phone-kept-audio",
     "quiet-hours-window-off",
     "quiet-hours-window-on",
     "quiet-hours-window-refused",

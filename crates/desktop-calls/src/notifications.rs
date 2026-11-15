@@ -28,10 +28,11 @@ use crate::surfaces;
 const NAME: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const APP_NAME: &str = "Desktop Calls";
-const ICON: &str = "call-missed-symbolic";
-/// The desktop file, so the notification server can find the app's name,
-/// icon and settings.
-const DESKTOP_ENTRY: &str = "io.github.danielbaldwin47.DesktopCalls";
+/// No app icon and no `desktop-entry` hint: Omarchy's notification card
+/// draws an icon it can find, from either, in place of the glyph its
+/// `omarchy-glyph` hint asks for (`Toast.qml`'s `thumb`, `Store.js`'s
+/// `appIcon`), and the desktop entry's icon is the app's.
+const NO_ICON: &str = "";
 /// The notification specification's category for a Missed Call.
 const CATEGORY: &str = "call.unanswered";
 /// Normal urgency: a Missed Call, and the confirmation of calls turned off
@@ -41,9 +42,11 @@ const URGENCY_NORMAL: u8 = 1;
 const SERVER_TIMEOUT: i32 = -1;
 
 /// Omarchy's hint for a glyph in the notification's icon slot: a Nerd Font
-/// phone with a diagonal through it (`md-phone_off`) for calls off, a phone
-/// with a tick (`md-phone_check`) for calls on.
+/// phone with an arrow bent away from it (`md-phone_missed`) for a Missed
+/// Call, a phone with a diagonal through it (`md-phone_off`) for calls off,
+/// a phone with a tick (`md-phone_check`) for calls on.
 const GLYPH_HINT: &str = "omarchy-glyph";
+const GLYPH_MISSED_CALL: &str = "\u{f03fa}";
 const GLYPH_CALLS_OFF: &str = "\u{f0def}";
 const GLYPH_CALLS_ON: &str = "\u{f11a9}";
 /// The hint that keeps a notification out of Omarchy's history, also once
@@ -176,7 +179,7 @@ async fn show(session: &Connection, notice: &MissedCallNotice, replaces: u32) ->
     actions.extend([DISMISS, messages::label(Label::Dismiss)]);
     let hints = HashMap::from([
         ("category", Variant::from(CATEGORY)),
-        ("desktop-entry", Variant::from(DESKTOP_ENTRY)),
+        (GLYPH_HINT, Variant::from(GLYPH_MISSED_CALL)),
         ("urgency", Variant::from(URGENCY_NORMAL)),
     ]);
     let reply = session
@@ -188,7 +191,7 @@ async fn show(session: &Connection, notice: &MissedCallNotice, replaces: u32) ->
             &(
                 APP_NAME,
                 replaces,
-                ICON,
+                NO_ICON,
                 text.summary.as_str(),
                 text.body.as_str(),
                 actions,
@@ -209,7 +212,6 @@ async fn show_calls_turned(session: &Connection, notice: &CallsTurnedNotice) -> 
     let hints = HashMap::from([
         (GLYPH_HINT, Variant::from(glyph)),
         (TRANSIENT_HINT, Variant::from(true)),
-        ("desktop-entry", Variant::from(DESKTOP_ENTRY)),
         ("urgency", Variant::from(URGENCY_NORMAL)),
     ]);
     let reply = session
@@ -221,7 +223,7 @@ async fn show_calls_turned(session: &Connection, notice: &CallsTurnedNotice) -> 
             &(
                 APP_NAME,
                 0_u32,
-                "",
+                NO_ICON,
                 text.summary.as_str(),
                 text.body.as_str(),
                 Vec::<&str>::new(),

@@ -21,6 +21,9 @@ FROM archlinux:base-20261108.0.623074
 # client of the notification stand-in. python-dbus and python-gobject let
 # the Real-Phone Checklist's --demo run the PBAP probe (tools/real-phone)
 # against the Simulated Phone. cargo-nextest runs the harness's shards.
+# ttf-nerd-fonts-symbols-mono draws the glyph that Omarchy's omarchy-glyph
+# hint names, as Omarchy's Nerd Font does, in the gallery's stand-in for
+# the Missed Call notification.
 #
 # The package gives sway the file capability cap_sys_nice, which is outside
 # a CI container's bounding set, so exec fails with EPERM. sway runs
@@ -28,7 +31,7 @@ FROM archlinux:base-20261108.0.623074
 RUN pacman -Syu --noconfirm --needed \
         gcc pkgconf git rustup just cargo-deny cargo-nextest \
         gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject \
-        sway grim wl-clipboard libnotify \
+        sway grim wl-clipboard libnotify ttf-nerd-fonts-symbols-mono \
     && pacman -Scc --noconfirm \
     && rm -rf /var/cache/pacman/pkg/* /usr/share/man /usr/share/doc /usr/share/gtk-doc \
     && setcap -r /usr/bin/sway

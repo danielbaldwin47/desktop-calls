@@ -6,17 +6,37 @@ use std::path::PathBuf;
 use test_harness::OmarchyTheme;
 
 use super::indicator::IndicatorState;
+use super::notification::NotificationState;
 use super::{Look, State};
 
 /// The gallery page: one row per state, stock light and dark, then Omarchy
 /// light and dark; then the Indicator, one row per state, Omarchy light and
 /// dark, enlarged without smoothing so each pixel shows; then its menu,
-/// one row per state, the stand-in for Omarchy's.
+/// one row per state, the stand-in for Omarchy's; then the Missed Call
+/// notification, the stand-in for Omarchy's card.
 pub(super) fn index_html(
     shots: &[(&State, Look, PathBuf)],
     indicators: &[(&IndicatorState, OmarchyTheme, PathBuf)],
     menus: &[(&IndicatorState, OmarchyTheme, PathBuf)],
+    notifications: &[(&NotificationState, OmarchyTheme, PathBuf)],
 ) -> String {
+    let mut cards = String::new();
+    for (state, theme, path) in notifications {
+        let file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let _ = writeln!(
+            cards,
+            "<figure><a href=\"{file}\"><img class=\"card\" src=\"{file}\" \
+             alt=\"{title}, {look}, a stand-in\"></a>\
+             <figcaption>{title} ({look}). Stand-in: drawn from the notification the app \
+             sends, in Omarchy's card style; Omarchy's shell draws the real one.\
+             </figcaption></figure>",
+            title = state.title,
+            look = theme.as_str(),
+        );
+    }
     let mut figures = String::new();
     for (state, look, path) in shots {
         let file = path
@@ -70,6 +90,7 @@ pub(super) fn index_html(
          img{{width:100%;border:1px solid #888}}\
          img.icon{{image-rendering:pixelated}}\
          img.menu{{width:248px;border:0}}\
+         img.card{{width:380px;border:0}}\
          main.indicator{{grid-template-columns:repeat(2,minmax(0,384px))}}</style>\n\
          </head>\n<body>\n\
          <h1>Desktop Calls screenshot gallery</h1>\n<main>\n{figures}</main>\n\
@@ -83,6 +104,14 @@ pub(super) fn index_html(
          reads it, drawn in the style of Omarchy's tray menu (<code>Tray.qml</code>) at 2× \
          scale. A disabled entry is dimmed, <code>›</code> marks a submenu, and an opened \
          submenu replaces the menu under a <code>‹</code> header, as Omarchy draws them.</p>\n\
-         <main class=\"indicator\">\n{menu_figures}</main>\n</body>\n</html>\n"
+         <main class=\"indicator\">\n{menu_figures}</main>\n\
+         <h2>The Missed Call notification: a stand-in</h2>\n\
+         <p>Omarchy's shell draws notifications, and the gallery runs none, so these are \
+         stand-ins: the notification the app sends, as the notification server received it \
+         (summary, body, the <code>omarchy-glyph</code> hint's glyph and the actions but \
+         <code>default</code>), drawn in the style of Omarchy's notification card \
+         (<code>Toast.qml</code>) at 2× scale, with its buttons along the bottom as on the \
+         front card.</p>\n\
+         <main class=\"indicator\">\n{cards}</main>\n</body>\n</html>\n"
     )
 }

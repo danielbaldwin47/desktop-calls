@@ -336,6 +336,12 @@ fn confirmation(harness: &Harness, summary: &str) -> Notification {
         notification.hints.contains_key("omarchy-glyph"),
         "a glyph for the icon slot: {notification:?}"
     );
+    // Omarchy draws the desktop entry's icon, if it can find it, in place
+    // of the glyph.
+    assert!(
+        notification.app_icon.is_empty() && !notification.hints.contains_key("desktop-entry"),
+        "nothing that Omarchy draws over the glyph: {notification:?}"
+    );
     assert!(notification.actions.is_empty(), "{notification:?}");
     assert!(!notification.silenced, "{notification:?}");
     notification

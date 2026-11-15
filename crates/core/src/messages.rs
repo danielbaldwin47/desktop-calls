@@ -803,13 +803,13 @@ pub struct NotificationText {
     pub body: String,
 }
 
-/// What the Missed Call notification says: who, with the Contact's number
-/// label, and when, as [`when`] shows it; for repeats, how many and when
-/// the latest was. Omarchy lets a notification through Do Not Disturb if it
-/// looks like a verification code (4 to 8 digits near a word such as code,
-/// pin or confirm), so none of these words is used, and in a Contact's name
-/// or number label each is hidden from Omarchy (see
-/// [`hide_verification_code_keywords`]).
+/// What the Missed Call notification says: who, in the summary; under it
+/// the Contact's number label and when, as [`when`] shows it ("mobile ·
+/// 14:05"); for repeats, how many and when the latest was. Omarchy lets a
+/// notification through Do Not Disturb if it looks like a verification code
+/// (4 to 8 digits near a word such as code, pin or confirm), so none of
+/// these words is used, and in a Contact's name or number label each is
+/// hidden from Omarchy (see [`hide_verification_code_keywords`]).
 #[must_use]
 pub fn missed_call(
     notice: &MissedCallNotice,
@@ -819,12 +819,6 @@ pub fn missed_call(
     let who = match (&notice.caller, notice.count) {
         (Caller::Withheld, 1) => "a withheld number".to_owned(),
         (Caller::Withheld, _) => "withheld numbers".to_owned(),
-        (caller, 1) => match &notice.contact {
-            Some(contact) if !contact.name.trim().is_empty() => {
-                format!("{} ({})", contact.name, number_label(&contact.label))
-            }
-            _ => self::caller(caller),
-        },
         (caller, _) => caller_name(caller, notice.contact.as_ref()),
     };
     let summary = if notice.count == 1 {
@@ -834,7 +828,12 @@ pub fn missed_call(
     };
     let time = when(notice.at, now, utc_offset_seconds);
     let mut body = if notice.count == 1 {
-        time
+        match &notice.contact {
+            Some(contact) if !contact.name.trim().is_empty() => {
+                caller_detail(&number_label(&contact.label), &time)
+            }
+            _ => time,
+        }
     } else {
         format!("Latest {time}")
     };

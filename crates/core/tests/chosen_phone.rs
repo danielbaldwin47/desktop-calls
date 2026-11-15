@@ -3,7 +3,8 @@
 //! the Setup Window rather than another Phone when that one is gone
 //! (ticket #121).
 
-use desktop_calls_core::{Effect, Input, Phone, SetupNotice, SetupStep, State, step};
+use desktop_calls_core::messages;
+use desktop_calls_core::{Effect, Input, Phone, SetupNotice, SetupStep, State, Timestamp, step};
 
 fn setup_step(state: &State) -> Option<SetupStep> {
     state.surfaces().setup_window.map(|window| window.step)
@@ -136,6 +137,14 @@ fn when_the_chosen_phone_is_not_paired_the_setup_window_opens_and_no_other_phone
         name: Some("My Pixel".to_owned()),
     };
     assert_eq!(window.notice, Some(notice));
+    assert_eq!(
+        messages::setup_window(&window, Timestamp(0), None)
+            .notice
+            .as_deref(),
+        Some(
+            "My Pixel isn't paired with this computer any more; pair it again, or choose another phone."
+        )
+    );
 }
 
 /// A first start, with no Phone chosen yet: the window opens without a
@@ -274,6 +283,42 @@ fn a_chosen_phone_paired_after_the_listing_is_followed() {
     );
 
     assert_eq!(state.phone(), Some(&pixel()));
+}
+
+/// The chosen Phone paired again outside the window, which stays open:
+/// it no longer says the Phone is gone (ticket #150).
+#[test]
+fn a_chosen_phone_paired_again_with_the_window_open_takes_its_notice_away() {
+    let (state, _) = run(
+        State::default(),
+        [
+            chosen(PIXEL),
+            Input::PairedPhonesListed,
+            Input::PhonePaired(pixel()),
+        ],
+    );
+
+    assert_eq!(state.phone(), Some(&pixel()));
+    let window = state.surfaces().setup_window.expect("the window is open");
+    assert_eq!(window.notice, None);
+}
+
+/// The window opened by hand before BlueZ listed the Phones keeps what it
+/// says: it didn't open because the chosen Phone is gone.
+#[test]
+fn a_window_opened_by_hand_before_the_listing_gets_no_notice() {
+    let (state, _) = run(
+        State::default(),
+        [
+            chosen(PIXEL),
+            Input::OpenSetupWindow,
+            Input::SetupUnavailable,
+            Input::PairedPhonesListed,
+        ],
+    );
+
+    let window = state.surfaces().setup_window.expect("the window is open");
+    assert_eq!(window.notice, Some(SetupNotice::BluetoothUnavailable));
 }
 
 #[test]

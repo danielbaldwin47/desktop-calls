@@ -382,10 +382,14 @@ impl State {
         // Fix: the window says it once.
         let said_by_a_problem =
             setup.notice == Some(SetupNotice::BluetoothUnavailable) && self.desktop.bluetooth_off();
+        // A Phone followed since, paired again outside the window: no
+        // longer true.
+        let back = matches!(setup.notice, Some(SetupNotice::ChosenPhoneUnpaired { .. }))
+            && self.phone.is_some();
         Some(SetupWindowView {
             step,
             desktop_name: setup.desktop_name.clone(),
-            notice: setup.notice.clone().filter(|_| !said_by_a_problem),
+            notice: setup.notice.clone().filter(|_| !said_by_a_problem && !back),
             opened: setup.opened,
             calls_off: self.setup_calls_off_view(),
             problem_has_focus: self
@@ -450,15 +454,15 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
         Input::PairedPhonesListed => {
             // Opens by itself once, at startup, with no Phone set up.
             if !std::mem::replace(&mut state.setup_offered, true) && state.phone.is_none() {
+                // Opened by hand already: its notice, if any, stays.
+                let opens = state.setup.is_none();
                 open(state, effects);
                 // A chosen Phone that is paired is followed, so it's gone.
-                let gone =
-                    state
-                        .chosen_phone
-                        .as_ref()
-                        .map(|chosen| SetupNotice::ChosenPhoneUnpaired {
-                            name: chosen.name.clone(),
-                        });
+                let gone = state.chosen_phone.as_ref().filter(|_| opens).map(|chosen| {
+                    SetupNotice::ChosenPhoneUnpaired {
+                        name: chosen.name.clone(),
+                    }
+                });
                 if let (Some(setup), Some(gone)) = (state.setup.as_mut(), gone) {
                     setup.notice = Some(gone);
                 }
@@ -714,11 +718,12 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
         .as_ref()
         .is_some_and(|followed| followed.address.eq_ignore_ascii_case(&phone.address));
     // The user chose it, so a restart follows it, not the Phone BlueZ lists
-    // first.
-    // Kept again when only its name is new, or wasn't kept.
+    // first. Kept again when only its name is new, or wasn't kept. A name
+    // that is only the address, as BlueZ gives for a Phone with none, isn't
+    // one.
     let chosen = ChosenPhone {
         address: phone.address.clone(),
-        name: Some(phone.name.clone()),
+        name: Some(phone.name.clone()).filter(|name| !phone.address.eq_ignore_ascii_case(name)),
     };
     if !state
         .chosen_phone

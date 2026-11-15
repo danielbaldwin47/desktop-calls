@@ -20,8 +20,10 @@ What it does, holding the lock:
      conflict it aborts the merge, changes nothing, and names the command to
      run next. A gap of docs alone is let through, as `just merge` always has.
   3. Pushes the branch if GitHub lacks the head (a fast-forward; never a force).
-  4. The checklist `lands_with` check (tools/checklist_tickets.py) runs before
-     any of that, so a PR it would refuse waits for nothing.
+  4. The checklist `lands_with` check (tools/checklist_tickets.py) runs on the
+     head as it will be merged, after step 2 and before step 3, so a script
+     that landed on main counts, and a PR it refuses waits for no CI run. A
+     merge of main it made stays in the branch, unpushed.
   5. Squash-merges through the checks `just merge` makes (tools/merge.py),
      which wait for GitHub's run on the head and refuse a red or missing
      "CI passed", with the head pinned (`--match-head-commit`).
@@ -263,7 +265,6 @@ def holding_the_lane(number: int) -> int:
     merge.require_open(pr)
     require_here(pr)
     ci_local.require_clean_head()  # HEAD may have moved while this waited for its turn
-    merge.require_no_step_waits_on_a_closed_ticket(pr)
     look = survey(pr, level=True)
     sha, base = look.sha, look.base
     if look.must_update:
@@ -273,6 +274,9 @@ def holding_the_lane(number: int) -> int:
         sha = git("rev-parse", "HEAD").strip()
     elif look.behind:
         print(f"Letting through the commits on origin/{base} it lacks: {look.why}", flush=True)
+    # On the head as it will be merged: a step whose script is on main only
+    # must not refuse a branch behind main.
+    merge.require_no_step_waits_on_a_closed_ticket(pr, head=sha)
     if not is_ancestor(sha, f"origin/{look.branch}"):
         print(f"Pushing {sha[:7]} to {look.branch}; GitHub's CI runs on it.", flush=True)
         push(look.branch, sha)

@@ -186,8 +186,8 @@ class Landing(unittest.TestCase):
             if conflict:
                 raise merge.Refused("Merging origin/main into the branch conflicts in x.\nNext: ...")
 
-        def ticket(pr):
-            steps.append("ticket check")
+        def ticket(pr, head=None):
+            steps.append(f"ticket check {(head or pr['headRefOid'])[:7]}")
             if ticket_refused:
                 raise merge.Refused("Real-Phone Checklist steps wait on closed tickets")
 
@@ -221,28 +221,31 @@ class Landing(unittest.TestCase):
     def test_a_head_behind_main_by_code_takes_main_pushes_and_merges_once_github_passes_it(self):
         self.assertEqual(
             self.land(behind=True, gap_has_code=True),
-            ["ticket check", "look", "merge main in", f"push {MERGED[:7]}", f"wait for {MERGED[:7]}", MERGE],
+            ["look", "merge main in", f"ticket check {MERGED[:7]}", f"push {MERGED[:7]}",
+             f"wait for {MERGED[:7]}", MERGE],
         )
 
     def test_a_docs_only_gap_pushes_nothing_and_merges_once_github_passes_the_head(self):
         self.assertEqual(self.land(behind=True, gap_has_code=False),
-                         ["ticket check", "look", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_head_that_contains_main_pushes_nothing_and_merges_once_github_passes_it(self):
         self.assertEqual(self.land(behind=False, gap_has_code=False),
-                         ["ticket check", "look", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"ticket check {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_head_github_lacks_is_pushed_first(self):
         self.assertEqual(self.land(behind=False, gap_has_code=False, on_github=False),
-                         ["ticket check", "look", f"push {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
+                         ["look", f"ticket check {SHA[:7]}", f"push {SHA[:7]}", f"wait for {SHA[:7]}", MERGE])
 
     def test_a_conflict_pushes_and_merges_nothing(self):
         self.assertEqual(self.land(behind=True, gap_has_code=True, conflict=True),
-                         ["ticket check", "look", "merge main in", "refused"])
+                         ["look", "merge main in", "refused"])
 
-    def test_a_ticket_the_checklist_waits_on_is_refused_before_anything(self):
+    def test_the_checklist_is_judged_on_the_head_with_main_merged_in_before_any_push(self):
+        # A step whose script landed on main must not refuse a branch behind
+        # main: the check reads the head as it will be merged.
         self.assertEqual(self.land(behind=True, gap_has_code=True, ticket_refused=True),
-                         ["ticket check", "refused"])
+                         ["look", "merge main in", f"ticket check {MERGED[:7]}", "refused"])
 
     def test_it_merges_the_commit_it_pushed_not_the_one_it_started_with(self):
         steps = self.land(behind=True, gap_has_code=True)

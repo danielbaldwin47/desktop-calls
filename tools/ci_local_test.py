@@ -150,6 +150,45 @@ class Folders(unittest.TestCase):
             self.assertTrue(target.exists())
 
 
+class TruncatedArtifacts(unittest.TestCase):
+    """A run killed mid-write left a 0-byte .rmeta in the shared cache that
+    broke linking for every later run (#255)."""
+
+    def test_a_crate_with_an_empty_artifact_is_removed_whole_and_others_are_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            profile = target / "debug"
+            deps = profile / "deps"
+            deps.mkdir(parents=True)
+            (deps / "libtest_harness-7a66.rmeta").write_bytes(b"")
+            (deps / "libtest_harness-7a66.rlib").write_bytes(b"rlib")
+            (deps / "test_harness-7a66.d").write_text("deps")
+            (profile / ".fingerprint" / "test-harness-7a66").mkdir(parents=True)
+            (profile / "incremental" / "test_harness-1abc").mkdir(parents=True)
+            (deps / "libzbus-5f5f.rmeta").write_bytes(b"rmeta")
+            (profile / ".fingerprint" / "zbus-5f5f").mkdir()
+            (profile / "incremental" / "scenarios-2def").mkdir()
+
+            removed = ci_local.clear_truncated_artifacts(target)
+
+            self.assertEqual(removed, ["test_harness-7a66"])
+            self.assertEqual(
+                sorted(path.name for path in deps.iterdir()), ["libzbus-5f5f.rmeta"]
+            )
+            self.assertEqual(
+                [path.name for path in (profile / ".fingerprint").iterdir()], ["zbus-5f5f"]
+            )
+            self.assertEqual(
+                [path.name for path in (profile / "incremental").iterdir()], ["scenarios-2def"]
+            )
+
+    def test_a_cache_with_no_target_yet_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                ci_local.clear_truncated_artifacts(pathlib.Path(directory) / "target"), []
+            )
+
+
 class Stopping(unittest.TestCase):
     def test_sigterm_stops_the_run_and_its_child(self):
         previous = signal.getsignal(signal.SIGTERM)

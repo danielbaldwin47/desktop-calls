@@ -15,6 +15,10 @@ check: lint
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
 lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets
     cargo fmt --all --check
+    # The harness's scenario files reach the compiler only through
+    # build.rs's generated `#[path]` modules and `include!`, which cargo fmt
+    # doesn't follow (#330).
+    rustfmt --check crates/test-harness/tests/*.rs crates/test-harness/tests/moved/*.rs
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo deny --locked check
 

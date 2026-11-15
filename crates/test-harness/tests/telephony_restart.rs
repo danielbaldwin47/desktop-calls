@@ -334,7 +334,11 @@ fn rings_back_as_a_new_call(number: &str) {
     let rings_anew = |state: &AppState| {
         state.calls.len() == 1 && state.calls[0].id != call && state.calls[0].state == "ringing"
     };
-    harness.wait_for_app("the caller rings again, as a new Call", DEADLINE, rings_anew);
+    harness.wait_for_app(
+        "the caller rings again, as a new Call",
+        DEADLINE,
+        rings_anew,
+    );
     harness.simulated_phone().recorded_holds(
         "the new Call is never declined",
         LISTED_LATE_WATCH,
@@ -447,9 +451,9 @@ fn a_hang_up_that_never_reaches_the_phone_says_the_call_may_still_be_live() {
         "{windows:#?}"
     );
     assert!(
-        !windows
-            .iter()
-            .any(|window| window.get("state").is_some_and(|line| line.starts_with("Call ended"))),
+        !windows.iter().any(|window| window
+            .get("state")
+            .is_some_and(|line| line.starts_with("Call ended"))),
         "{windows:#?}"
     );
     harness.simulated_phone().recorded_holds(
@@ -468,7 +472,9 @@ fn a_call_that_ends_while_the_service_is_away_ends_here_soon_after_it_is_back() 
     let harness = connected(Harness::builder());
     let (path, call) = answered_here(&harness);
 
-    harness.simulated_phone().restart_telephony(ENDS_MEANWHILE_GAP);
+    harness
+        .simulated_phone()
+        .restart_telephony(ENDS_MEANWHILE_GAP);
     harness.simulated_phone().caller_hangs_up(&path);
     harness.wait_for_app("the Phone is connected again", DEADLINE, |state| {
         state.connection_state == "connected"

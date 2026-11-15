@@ -191,7 +191,10 @@ fn clicking_mute_mutes_the_microphone_recolours_the_window_and_moves_nothing() {
     // The Mute tile is filled with it, just inside its corner.
     let tile_top = hang_up.top - ROW_GAP - TILE_HEIGHT;
     assert!(
-        close_to(screenshot.colour_at(hang_up.left + 8.0, tile_top + 8.0), WARNING),
+        close_to(
+            screenshot.colour_at(hang_up.left + 8.0, tile_top + 8.0),
+            WARNING
+        ),
         "the Mute tile isn't in the warning colour; see {}",
         screenshot.path.display()
     );
@@ -202,11 +205,26 @@ fn clicking_mute_mutes_the_microphone_recolours_the_window_and_moves_nothing() {
         "the state line isn't in the warning colour; see {}",
         screenshot.path.display()
     );
-    assert_eq!(amber_above_tiles(&before_shot, before.top, hang_up), None, "{}", before_shot.path.display());
+    assert_eq!(
+        amber_above_tiles(&before_shot, before.top, hang_up),
+        None,
+        "{}",
+        before_shot.path.display()
+    );
     // Nothing moved: the window is the size it was, and Hang up is where it
     // was.
-    assert_eq!(app_region(&screenshot), Some(before), "{}", screenshot.path.display());
-    assert_eq!(find(&screenshot, RED), Some(hang_up), "{}", screenshot.path.display());
+    assert_eq!(
+        app_region(&screenshot),
+        Some(before),
+        "{}",
+        screenshot.path.display()
+    );
+    assert_eq!(
+        find(&screenshot, RED),
+        Some(hang_up),
+        "{}",
+        screenshot.path.display()
+    );
     harness.simulated_phone().wait_for_recorded(
         "MicrophoneVolume is set to 0",
         DEADLINE,
@@ -473,16 +491,22 @@ fn a_lone_call_on_hold_offers_resume_and_s_resumes_it() {
     harness.wait_for_app("the second Call waits", DEADLINE, |state| {
         state.calls.len() == 2 && state.calls[1].state == "waiting"
     });
-    harness.hold_and_answer().expect("Hold & Answer is passed on");
+    harness
+        .hold_and_answer()
+        .expect("Hold & Answer is passed on");
     harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
         state.calls.len() == 2 && state.calls[0].state == "held"
     });
     harness.simulated_phone().caller_hangs_up(&other);
-    let state = harness.wait_for_app("the first Call is alone on hold, offered Resume", DEADLINE, |state| {
-        state.calls.len() == 1
-            && state.calls[0].state == "held"
-            && shown(state, "swap").as_deref() == Some("Resume")
-    });
+    let state = harness.wait_for_app(
+        "the first Call is alone on hold, offered Resume",
+        DEADLINE,
+        |state| {
+            state.calls.len() == 1
+                && state.calls[0].state == "held"
+                && shown(state, "swap").as_deref() == Some("Resume")
+        },
+    );
     assert_eq!(shown(&state, "swap-shortcut").as_deref(), Some("S"));
     assert_eq!(shown(&state, "mute"), None, "the tiles give way to Resume");
     focus_call_window(&harness);

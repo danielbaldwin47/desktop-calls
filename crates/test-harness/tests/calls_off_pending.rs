@@ -105,10 +105,17 @@ fn calls_off_from_the_indicator_during_a_call_waits_for_it_to_end() {
 
     wait_waiting(&harness);
     harness.app_holds("the Call carries on, calls on", STAYS, waiting);
-    assert!(!harness.simulated_phone().blocked(), "the Phone isn't blocked");
-    let items = harness.tray().wait_for("the Indicator says calls turn off", DEADLINE, |items| {
-        items.iter().any(|item| item.tooltip.as_deref() == Some(PENDING))
-    });
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone isn't blocked"
+    );
+    let items = harness
+        .tray()
+        .wait_for("the Indicator says calls turn off", DEADLINE, |items| {
+            items
+                .iter()
+                .any(|item| item.tooltip.as_deref() == Some(PENDING))
+        });
     assert_eq!(
         items[0].icon_name.as_deref(),
         Some("desktop-calls-in-call-symbolic"),
@@ -116,12 +123,19 @@ fn calls_off_from_the_indicator_during_a_call_waits_for_it_to_end() {
     );
     let menu = harness.tray().menu();
     assert!(
-        menu.iter().any(|entry| entry.label == "Keep calls on" && entry.enabled),
+        menu.iter()
+            .any(|entry| entry.label == "Keep calls on" && entry.enabled),
         "{menu:?}"
     );
-    assert!(!menu.iter().any(|entry| entry.label == "Turn calls off"), "{menu:?}");
+    assert!(
+        !menu.iter().any(|entry| entry.label == "Turn calls off"),
+        "{menu:?}"
+    );
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");
-    assert!(record_text.contains(r#""state":"pending""#), "{record_text}");
+    assert!(
+        record_text.contains(r#""state":"pending""#),
+        "{record_text}"
+    );
 
     harness.simulated_phone().caller_hangs_up(&call);
 
@@ -144,12 +158,16 @@ fn calls_off_from_the_cli_while_a_call_rings_waits_and_calls_on_keeps_them_on() 
     );
     let state = wait_waiting(&harness);
     assert!(state.ringing, "the Call still rings");
-    assert!(cli_ok(&harness, &["status"]).ends_with(
-        "Calls turn off when this Call ends, until you turn them on.\n"
-    ));
+    assert!(
+        cli_ok(&harness, &["status"])
+            .ends_with("Calls turn off when this Call ends, until you turn them on.\n")
+    );
 
     let said = cli_ok(&harness, &["calls", "on"]);
-    assert_eq!(said, "Calls stay on: they won't turn off when this Call ends.\n");
+    assert_eq!(
+        said,
+        "Calls stay on: they won't turn off when this Call ends.\n"
+    );
     harness.wait_for_app("nothing waits", DEADLINE, |state| !state.calls_off_pending);
     assert!(!record(&harness).exists(), "the record is cleared");
 
@@ -188,7 +206,10 @@ fn a_waiting_turn_off_survives_an_app_restart_mid_call() {
         DEADLINE,
         |state| waiting(state) && is_live(state),
     );
-    assert!(!harness.simulated_phone().blocked(), "the Phone isn't blocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone isn't blocked"
+    );
 
     harness.simulated_phone().caller_hangs_up(&call);
     wait_off(&harness);
@@ -203,7 +224,10 @@ fn a_deadline_that_passes_during_the_call_leaves_calls_on() {
 
     harness.turn_calls_off(until).expect("the turn-off waits");
     let state = wait_waiting(&harness);
-    assert_eq!(state.calls_off_until, until, "it keeps the deadline it was given");
+    assert_eq!(
+        state.calls_off_until, until,
+        "it keeps the deadline it was given"
+    );
 
     harness.wait_for_app(
         "past the deadline, nothing waits and the Call carries on",
@@ -319,8 +343,7 @@ fn cut_short<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and_the_call_window()
- {
+fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and_the_call_window() {
     let harness = on_screen();
     let path = harness.simulated_phone().ring(LONG_NUMBER);
     harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
@@ -338,9 +361,11 @@ fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and
                 && cut_short(state, "call-pill").is_some()
         },
     );
-    harness.app_holds("the Call Pill shows the number in full", LAID_OUT, |state| {
-        cut_short(state, "call-pill") == Some("no")
-    });
+    harness.app_holds(
+        "the Call Pill shows the number in full",
+        LAID_OUT,
+        |state| cut_short(state, "call-pill") == Some("no"),
+    );
 
     harness.activate();
 
@@ -405,7 +430,10 @@ fn a_turn_off_during_a_call_confirms_when_asked_and_says_nothing_when_it_applies
         |notification| notification.summary == "Calls on",
     );
 
-    assert_eq!(summaries(&harness), ["Calls off after this Call", "Calls on"]);
+    assert_eq!(
+        summaries(&harness),
+        ["Calls off after this Call", "Calls on"]
+    );
 }
 
 #[test]
@@ -425,5 +453,8 @@ fn keeping_calls_on_while_a_turn_off_waits_confirms_that_the_phone_stays_connect
     assert_eq!(notification.body, "My Pixel stays connected.");
     harness.simulated_phone().caller_hangs_up(&call);
     harness.wait_for_app("the Call ended", DEADLINE, |state| state.calls.is_empty());
-    assert_eq!(summaries(&harness), ["Calls off after this Call", "Calls on"]);
+    assert_eq!(
+        summaries(&harness),
+        ["Calls off after this Call", "Calls on"]
+    );
 }

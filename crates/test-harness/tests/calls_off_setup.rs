@@ -108,7 +108,11 @@ fn while_calls_are_off_the_setup_window_says_so_and_enter_turns_them_on() {
         "{state:?}"
     );
     assert_eq!(field(&state, "dimmed"), Some("true"), "the step waits");
-    assert_eq!(field(&state, "phones").unwrap_or_default(), "", "no Phone to choose");
+    assert_eq!(
+        field(&state, "phones").unwrap_or_default(),
+        "",
+        "no Phone to choose"
+    );
 
     harness.keyboard().press(Key::Return);
 
@@ -121,7 +125,10 @@ fn while_calls_are_off_the_setup_window_says_so_and_enter_turns_them_on() {
                 && field(state, "calls-off").is_none()
         },
     );
-    assert!(!harness.simulated_phone().blocked(), "the Phone is unblocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone is unblocked"
+    );
     // Ticket #231: Turn calls on confirms, as from the Indicator.
     let notification = harness.notifications().wait_for(
         "the confirmation that calls are on",
@@ -160,7 +167,10 @@ fn pairing_waits_while_calls_are_off() {
             .all(|(_, outcome)| outcome != "confirmed"),
         "no pairing was confirmed"
     );
-    assert!(harness.simulated_phone().blocked(), "the Phone stays blocked");
+    assert!(
+        harness.simulated_phone().blocked(),
+        "the Phone stays blocked"
+    );
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
 }
 
@@ -176,10 +186,18 @@ fn a_phone_paired_during_quiet_hours_is_not_blocked_the_moment_it_pairs() {
     harness
         .set_quiet_hours(22 * 60, 7 * 60)
         .expect("Quiet Hours set");
-    harness.wait_for_app("the Setup Window lists the Phone", Duration::from_secs(10), |state| {
-        field(state, "phones") == Some(PHONE_NAME) && field(state, "focused") == Some("true")
-    });
-    assert_eq!(harness.app_state().calls_off, "on", "no Phone to turn off yet");
+    harness.wait_for_app(
+        "the Setup Window lists the Phone",
+        Duration::from_secs(10),
+        |state| {
+            field(state, "phones") == Some(PHONE_NAME) && field(state, "focused") == Some("true")
+        },
+    );
+    assert_eq!(
+        harness.app_state().calls_off,
+        "on",
+        "no Phone to turn off yet"
+    );
 
     harness.keyboard().press(Key::Return);
     harness.wait_for_app("the same code on both screens", CONNECT_DEADLINE, |state| {
@@ -199,6 +217,9 @@ fn a_phone_paired_during_quiet_hours_is_not_blocked_the_moment_it_pairs() {
     harness.app_holds("calls stay on", STAYS, |state| {
         state.calls_off == "on" && state.connection_state == "connected"
     });
-    assert!(!harness.simulated_phone().blocked(), "the Phone isn't blocked");
+    assert!(
+        !harness.simulated_phone().blocked(),
+        "the Phone isn't blocked"
+    );
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
 }

@@ -50,9 +50,11 @@ fn wait_for_problem_button(harness: &Harness, button: &str) -> AppState {
 }
 
 fn wait_for_step(harness: &Harness, step: &str, deadline: Duration) -> AppState {
-    harness.wait_for_app(&format!("the Setup Window is at {step:?}"), deadline, |state| {
-        setup_window(state, "step") == Some(step) && focused(state, "setup-window")
-    })
+    harness.wait_for_app(
+        &format!("the Setup Window is at {step:?}"),
+        deadline,
+        |state| setup_window(state, "step") == Some(step) && focused(state, "setup-window"),
+    )
 }
 
 /// Audio settings that leave out hands-free, so the Setup Window offers to
@@ -109,7 +111,9 @@ fn first_run_in_the_setup_window_by_keys_alone() {
         DEADLINE,
         restarts_wireplumber,
     );
-    harness.wait_for_app("no Problem is left", DEADLINE, |state| state.problems.is_empty());
+    harness.wait_for_app("no Problem is left", DEADLINE, |state| {
+        state.problems.is_empty()
+    });
     performed.did("Set up audio: Shift+Tab, Enter");
 
     let state = wait_for_enter_on(&harness, "Pair", DEADLINE);
@@ -125,7 +129,11 @@ fn first_run_in_the_setup_window_by_keys_alone() {
     performed.did("Confirm the pairing code: Enter");
 
     wait_for_step(&harness, "contacts-prompt", CONNECT_DEADLINE);
-    wait_for_step(&harness, "contacts-prompt-timed-out", PROMPT_TIMEOUT_DEADLINE);
+    wait_for_step(
+        &harness,
+        "contacts-prompt-timed-out",
+        PROMPT_TIMEOUT_DEADLINE,
+    );
     wait_for_enter_on(&harness, "Try again", DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "contacts-prompt", CONNECT_DEADLINE);
@@ -225,17 +233,28 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     assert_eq!(prompts.len(), 2, "the Phone asks again: {prompts:?}");
     performed.did("Carry on once the Phone is back: Enter on Continue");
 
-    wait_for_step(&harness, "contacts-prompt-timed-out", PROMPT_TIMEOUT_DEADLINE);
+    wait_for_step(
+        &harness,
+        "contacts-prompt-timed-out",
+        PROMPT_TIMEOUT_DEADLINE,
+    );
     let state = wait_for_enter_on(&harness, "Try again", DEADLINE);
     let keys = setup_window(&state, "keys").unwrap_or_default();
-    assert!(keys.split(" · ").any(|shown| shown == "Tab Next button"), "{keys:?}");
+    assert!(
+        keys.split(" · ").any(|shown| shown == "Tab Next button"),
+        "{keys:?}"
+    );
     harness.keyboard().press(Key::Tab);
     // The footer still names Try again for Enter once Tab has moved to
     // Skip (#296), so the outcome shows which button Enter pressed.
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "done", DEADLINE);
     let prompts = phone.contacts_prompts();
-    assert_eq!(prompts.len(), 2, "the Phone is not asked a third time: {prompts:?}");
+    assert_eq!(
+        prompts.len(),
+        2,
+        "the Phone is not asked a third time: {prompts:?}"
+    );
     performed.did("Skip Contacts once the prompt timed out: Tab, Enter on Skip");
     performed.all_done();
 }
@@ -262,7 +281,10 @@ fn a_setup_window_fix_that_copies_a_command_by_keys_alone() {
 
     let state = harness.app_state();
     let keys = setup_window(&state, "keys").unwrap_or_default();
-    assert!(keys.split(" · ").any(|shown| shown == "Esc Close"), "{keys:?}");
+    assert!(
+        keys.split(" · ").any(|shown| shown == "Esc Close"),
+        "{keys:?}"
+    );
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("Escape closes the Setup Window", DEADLINE, |state| {
         state.surface("setup-window").is_none()

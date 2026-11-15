@@ -149,9 +149,7 @@ fn a_missed_call_badges_the_indicator_and_its_menu_line_opens_the_dialer_which_c
 fn a_missed_call_under_do_not_disturb_sets_the_cue_too() {
     let harness = synced();
     harness.set_do_not_disturb(true);
-    harness.wait_for_app("DoNotDisturb is on", DEADLINE, |state| {
-        state.do_not_disturb
-    });
+    harness.wait_for_app("DoNotDisturb is on", DEADLINE, |state| state.do_not_disturb);
 
     alice_rings_out(&harness, &["20261115T090000"], "Missed call from Alice");
 

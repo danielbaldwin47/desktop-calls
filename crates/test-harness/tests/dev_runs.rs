@@ -81,8 +81,13 @@ fn hand_over(pipe: PathBuf, bytes: Vec<u8>) {
         let _ = written.send(fs::write(pipe, bytes));
     });
     match wrote.recv_timeout(DEADLINE) {
-        Ok(result) => result.expect("hand the record to the dev run's read"),
-        Err(_) => panic!("the dev run didn't read the record within {DEADLINE:?}"),
+        Ok(result) => {
+            result.unwrap_or_else(|error| panic!("hand the record to the dev run's read: {error}"));
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            panic!("the dev run didn't read the record within {DEADLINE:?}")
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("the hand-over stopped before writing"),
     }
 }
 

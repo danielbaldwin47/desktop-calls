@@ -199,13 +199,6 @@ const UNSHOWN: &[(&str, u32)] = &[
     ("Move a page up the Call History: Page Up", 301),
     ("Erase a digit typed in a time: Backspace", 301),
     ("Switch Quiet Hours off: Shift+Tab, Space", 301),
-    // The footer names the first button for Enter after Tab.
-    ("Reject the pairing code: Tab, Enter on Reject", 296),
-    ("Cancel the keybinding's line: Tab, Enter on Cancel", 296),
-    (
-        "Skip Contacts once the prompt timed out: Tab, Enter on Skip",
-        296,
-    ),
 ];
 
 const BANNER: &str = "the_banner_by_keys_alone";
@@ -235,7 +228,7 @@ const CASES: [&str; 8] = [
 ];
 
 /// Open tickets that add a missing key path, or show a key.
-const OPEN_TICKETS: [u32; 4] = [292, 296, 300, 301];
+const OPEN_TICKETS: [u32; 3] = [292, 300, 301];
 
 #[test]
 fn every_action_is_performed_by_a_case_or_names_its_ticket() {

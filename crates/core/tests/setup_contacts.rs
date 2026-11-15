@@ -8,8 +8,8 @@ use desktop_calls_core::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Caller, ConfigFile, Contact, ContactNumber,
     Contacts, ContactsOutcome, ContactsState, Directory, Effect, HyprlandConfig, Input,
     KeybindingCheck, KeybindingStage, NumberLabel, Phone, PhoneCommand, ReadingContacts,
-    SetupNotice, SetupStep, State, SyncFailure, SyncProgress, Timer, Timestamp, Unavailable,
-    messages, step,
+    SetupFocus, SetupNotice, SetupStep, State, SyncFailure, SyncProgress, Timer, Timestamp,
+    Unavailable, messages, step,
 };
 
 const PHONE: &str = "AA:BB:CC:DD:EE:FF";
@@ -703,6 +703,26 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
         text.instructions[0].starts_with("Place your first Call: press Super + Alt + C"),
         "{:?}",
         text.instructions
+    );
+}
+
+#[test]
+fn cancel_focused_on_the_keybinding_line_is_named_until_cancelling_shows_new_buttons() {
+    let (state, _) = run(
+        synced(),
+        [
+            Input::KeybindingChecked(config(BINDINGS)),
+            Input::AddKeybinding,
+            Input::SetupWindowFocus(Some(SetupFocus::Button(1))),
+        ],
+    );
+    assert_eq!(text(&state).keys.first(), Some(&(&["Enter"][..], "Cancel")));
+    // Done is the second button now, but the window has put the keyboard
+    // on Add keybinding and not yet said so.
+    let (state, _) = run(state, [Input::CancelKeybinding]);
+    assert_eq!(
+        text(&state).keys.first(),
+        Some(&(&["Enter"][..], "Add keybinding"))
     );
 }
 

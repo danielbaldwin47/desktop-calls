@@ -145,10 +145,24 @@ screenshot *args:
     cargo build --workspace --bins --locked
     target/debug/automation screenshot "$@"
 
+# Runs the scenarios the scorecard reads (a few minutes, four at a time as
+# CI's limits allow, so a deadline isn't missed for load), then scores them
+# with the latest real Real-Phone Checklist and the screenshot review. A
+# failing scenario fails its item rather than stop the report. CI's run on
+# main scores its own shards' results instead (`--scenarios DIR`).
 # Report every polish-scorecard item with its status and evidence.
-scorecard:
-    @cargo build --quiet --workspace --bins --locked
-    @target/debug/automation scorecard
+scorecard *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --quiet --workspace --bins --locked
+    log=target/scorecard-scenarios.log
+    names=$(target/debug/automation scorecard --names)
+    python3 tools/scenario_shader_cache.py cargo test -p test-harness --test scenarios --locked \
+        -- --exact --test-threads 4 $names > "$log" 2>&1 \
+        || echo "cargo test exited non-zero: a failed scenario fails its item; anything else is in $log"
+    gallery=target/screenshots/gallery/index.html
+    [ -f "$gallery" ] || gallery="not rendered here: just screenshot"
+    target/debug/automation scorecard --scenarios "$log" --gallery "$gallery" {{args}}
 
 # Run the app against the Simulated Phone in a nested compositor window,
 # acting out SCENARIO. Close the window or press Ctrl-C to stop. Needs sway.

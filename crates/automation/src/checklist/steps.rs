@@ -13,6 +13,7 @@ use super::sitting::{Seen, Sitting, Stop, seconds};
 use super::watch::AppState;
 
 mod audio_location;
+mod call_waiting;
 mod calls_off_call;
 mod during_a_call;
 mod first_run;
@@ -22,6 +23,10 @@ mod missed_calls;
 mod range_and_power;
 
 use audio_location::{earbuds_answer_on_the_desktop, earbuds_answer_on_the_earbuds, handoff_twice};
+use call_waiting::{
+    answer_beside_a_held_call, decline, end_and_answer, end_and_answer_with_one_on_hold,
+    hold_and_answer_then_swap, ring_out_while_waiting,
+};
 use calls_off_call::call_while_calls_off;
 use during_a_call::{call_pill, calls_off_during_a_call, keypad_tones, mute};
 use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
@@ -249,43 +254,43 @@ pub const GROUPS: &[Group] = &[
                 id: "4.1",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Call the Test Number from the Desktop while the second helper calls you: Hold & Answer, then Swap, then hang up one; the other stays live",
-                script: None,
-                lands_with: &[148],
+                script: Some(hold_and_answer_then_swap),
+                lands_with: &[],
             },
             Step {
                 id: "4.2",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat with End & Answer: your Call ends and the second helper's connects",
-                script: None,
-                lands_with: &[148],
+                script: Some(end_and_answer),
+                lands_with: &[],
             },
             Step {
                 id: "4.3",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat with Decline: only the second helper's Call ends",
-                script: None,
-                lands_with: &[148],
+                script: Some(decline),
+                lands_with: &[],
             },
             Step {
                 id: "4.4",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
                 title: "Repeat, leaving the second helper's Call to ring out: a Missed Call notification appears",
-                script: None,
-                lands_with: &[148],
+                script: Some(ring_out_while_waiting),
+                lands_with: &[],
             },
             Step {
                 id: "4.5",
                 needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
                 title: "Repeat 4.1 up to Hold & Answer, so the Test Number's Call is on hold and the second helper's live, then have the second helper call you from the third phone: the Banner offers only End & Answer and Decline, and End & Answer ends only the second helper's first Call while the Test Number's stays on hold. If the Test Number's Call comes back live instead, note it, and which Call the Call Window shows",
-                script: None,
-                lands_with: &[148],
+                script: Some(end_and_answer_with_one_on_hold),
+                lands_with: &[],
             },
             Step {
                 id: "4.6",
                 needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
                 title: "Then have the third phone hang up, leaving the Test Number's Call on hold alone, and have the second helper call again from their first phone: the Banner offers Answer and Decline, and Answer connects them while the Test Number's Call stays on hold. If the Test Number's Call comes back live when the third phone hangs up, or the new Call rings as an ordinary incoming Call, note it",
-                script: None,
-                lands_with: &[148],
+                script: Some(answer_beside_a_held_call),
+                lands_with: &[],
             },
         ],
     },
@@ -410,17 +415,23 @@ pub fn order() -> Vec<&'static str> {
 
 /// Makes sure no Call is left over from an earlier step.
 fn no_call_left(sitting: &mut Sitting) -> Result<(), Stop> {
-    if sitting.now().calls.is_empty() {
-        return Ok(());
+    loop {
+        let left = sitting.now().calls.len();
+        if left == 0 {
+            return Ok(());
+        }
+        sitting.say(
+            if left == 1 {
+                "A Call is still going. End it, on either device."
+            } else {
+                "Calls are still going. End them, on either device."
+            },
+            &["hang-up"],
+        );
+        sitting.wait_for("a Call ending", TALK_DEADLINE, |state| {
+            state.calls.len() < left
+        })?;
     }
-    sitting.say(
-        "A Call is still going. End it, on either device.",
-        &["hang-up"],
-    );
-    sitting.wait_for("the last Call ending", TALK_DEADLINE, |state| {
-        state.calls.is_empty()
-    })?;
-    Ok(())
 }
 
 /// The helper calls: waits for the Call to ring and the Banner to show,
@@ -447,11 +458,18 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
             "the Incoming Call Banner showing before the Call stopped ringing".to_owned(),
         ));
     }
-    // The app logs `call-added` as soon as its Phone link sees the Call,
-    // before the control interface lists it, so the latency counts from
-    // there when the log has it.
-    let banner_us = unix_micros_at(banner.at);
-    let rang_us = unix_micros_at(rang.at);
+    check_banner_latency(sitting, call, rang.at, banner.at);
+    Ok(call)
+}
+
+/// Checks how long the Banner took to show a Call, and records it. The app
+/// logs `call-added` as soon as its Phone link sees the Call, before the
+/// control interface lists it, so the latency counts from there when the log
+/// has it, and otherwise from `appeared`, when the Call appeared on the
+/// control interface.
+fn check_banner_latency(sitting: &mut Sitting, call: u32, appeared: Instant, banner: Instant) {
+    let banner_us = unix_micros_at(banner);
+    let rang_us = unix_micros_at(appeared);
     let seen_by_phone_link = sitting
         .log_since(rang_us.saturating_sub(LOG_LOOKBACK_US))
         .iter()
@@ -463,7 +481,7 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
             "the Desktop first saw the Call",
         ),
         None => (
-            banner.at - rang.at,
+            banner - appeared,
             "the Call appeared on the control interface (the log had no call-added line)",
         ),
     };
@@ -476,7 +494,6 @@ fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> R
             seconds(BANNER_TARGET)
         ),
     );
-    Ok(call)
 }
 
 /// How often the runner reads the app's log while it waits on a line.

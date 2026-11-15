@@ -85,6 +85,14 @@ impl AppState {
             .is_some_and(|focused| focused == "true")
     }
 
+    /// What `surface` says under `key`, while it is shown.
+    pub fn surface_field(&self, surface: &str, key: &str) -> Option<&str> {
+        self.surfaces
+            .get(surface)
+            .and_then(|content| content.get(key))
+            .map(String::as_str)
+    }
+
     /// The first incoming Call that is ringing, if any.
     pub fn ringing_call(&self) -> Option<&AppCall> {
         self.calls

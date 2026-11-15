@@ -199,6 +199,41 @@ fn when_the_chosen_phone_was_unpaired_the_setup_window_opens_and_no_other_phone_
     // them: it was left alone.
     assert!(state.phone.is_none(), "no other Phone is followed: {state:?}");
     assert_eq!(state.connection_state, "not-set-up");
+    // And says why it opened, naming the Phone that is gone (ticket #150).
+    assert_eq!(field(&state, "notice"), Some(PIXEL_GONE), "{state:?}");
+}
+
+/// The Setup Window, opened because the chosen Phone is no longer paired,
+/// says so.
+const PIXEL_GONE: &str =
+    "My Pixel isn't paired with this computer any more; pair it again, or choose another phone.";
+
+/// A choice kept before the app kept the Phone's name too: the window
+/// still says why it opened, without the name (ticket #150).
+#[test]
+fn when_a_chosen_phone_kept_without_its_name_was_unpaired_the_setup_window_says_so() {
+    let mut harness = pixel_chosen_over_the_old_phone();
+    harness.simulated_phone().disconnect();
+    let address = harness.phone().address.clone();
+    unpair(&harness, &address);
+    harness.wait_for_app("the Pixel is forgotten", STARTUP, |state| {
+        state.phone.is_none()
+    });
+    let kept = format!(r#"{{"version":1,"address":"{address}"}}"#);
+    fs::write(chosen_phone_file(&harness), kept).unwrap_or_else(|error| panic!("{error}"));
+
+    harness.restart_app();
+
+    let state = harness.wait_for_app("the Setup Window opens", STARTUP, |state| {
+        field(state, "step") == Some("choose")
+    });
+    assert_eq!(
+        field(&state, "notice"),
+        Some(
+            "The phone you chose last isn't paired with this computer any more; pair it again, or choose another phone."
+        ),
+        "{state:?}"
+    );
 }
 
 #[test]

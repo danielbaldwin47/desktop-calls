@@ -115,14 +115,22 @@ impl Group {
         // Numbered when there is more than one thing to do.
         let numbered = lines.len() > 1;
         for (number, line) in (1..).zip(lines) {
-            let text = if numbered {
-                format!("{number}. {line}")
-            } else {
-                line.clone()
-            };
             let label = wrapping_label();
-            keep_runs_whole(&label, &text);
-            self.lines.append(&label);
+            keep_runs_whole(&label, line);
+            if numbered {
+                // The number in a column of its own, so a step's wrapped
+                // lines start under its text, not under its number (#326).
+                let mark = gtk::Label::new(Some(&format!("{number}.")));
+                mark.set_xalign(0.0);
+                mark.set_valign(gtk::Align::Start);
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, space::XS);
+                label.set_hexpand(true);
+                row.append(&mark);
+                row.append(&label);
+                self.lines.append(&row);
+            } else {
+                self.lines.append(&label);
+            }
         }
         self.lines.set_visible(!lines.is_empty());
         self.label

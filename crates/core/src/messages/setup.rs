@@ -91,12 +91,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         keys: Vec::new(),
     };
     let (heading, instructions, buttons): Page = match &view.step {
-        SetupStep::Choose { .. } => {
-            // Nothing to look for while pairing waits for calls.
-            let waits = view.calls_off.is_some_and(|off| off.blocks_step);
-            text.empty_list = (!waits).then_some("Looking for phones nearby…");
-            choose(&desktop)
-        }
+        SetupStep::Choose { .. } => choosing(view, &desktop, &mut text.empty_list),
         SetupStep::Pairing { phone } => (
             format!("Pairing with {}…", phone.name),
             vec![Instruction::phone("Keep the Pair new device screen open.")],
@@ -186,6 +181,33 @@ fn choose(desktop: &str) -> Page {
         ],
         vec!["Cancel"],
     )
+}
+
+/// The first page, and in `empty_list` what shows while no Phone is listed.
+fn choosing(view: &SetupWindowView, desktop: &str, empty_list: &mut Option<&'static str>) -> Page {
+    // Nothing to look for while pairing waits for calls.
+    let waits = view.calls_off.is_some_and(|off| off.blocks_step);
+    // A Problem blocks choosing only while Bluetooth is off or blocked:
+    // nothing is looked for, and how this computer shows on phones isn't
+    // known yet (#315).
+    let bluetooth_off = view.problem_has_focus.is_some();
+    *empty_list = (!waits && !bluetooth_off).then_some("Looking for phones nearby…");
+    if bluetooth_off {
+        choose_once_bluetooth_is_on()
+    } else {
+        choose(desktop)
+    }
+}
+
+/// The first page while Bluetooth is off or blocked: the phone's steps as
+/// ever, and here, what follows once the Problem card's fix is done.
+fn choose_once_bluetooth_is_on() -> Page {
+    let (heading, mut instructions, buttons) = choose("");
+    instructions.pop();
+    instructions.push(Instruction::here(
+        "Once Bluetooth is on, choose your phone below.",
+    ));
+    (heading, instructions, buttons)
 }
 
 const ENTER: &[&str] = &["Enter"];
@@ -505,18 +527,17 @@ fn finish(
         }) => {
             *line = Some(shown.clone());
             let file = shown_path(file, home);
+            // One instruction ahead of the line it is about, so nothing to
+            // do sits between the line and its buttons (#326).
             let place = if *before_return {
-                format!("This line goes into {file}, just before its final return:")
+                format!("{file}, just before its final return")
             } else {
-                format!("This line goes at the end of {file}:")
+                format!("the end of {file}")
             };
             return (
-                vec![
-                    Instruction::here(place),
-                    Instruction::here(
-                        "Choose Confirm to add it, or Cancel to leave the file as it is.",
-                    ),
-                ],
+                vec![Instruction::here(format!(
+                    "Choose Confirm to add this line to {place}, or Cancel to leave the file as it is:"
+                ))],
                 None,
                 vec!["Confirm", "Cancel"],
             );

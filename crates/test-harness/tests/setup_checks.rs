@@ -227,6 +227,33 @@ fn a_problem_is_said_once_on_screen_as_one_card_with_its_fix() {
 }
 
 #[test]
+fn while_bluetooth_is_off_the_setup_window_claims_no_search_and_names_no_computer() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .bluetooth_off()
+        .start();
+
+    let state = wait_for_problems(&harness, "bluetooth-off", STARTUP);
+    // Nothing is looked for, and the Desktop's name on phones isn't known
+    // yet, so neither is claimed (#315).
+    assert_eq!(window_field(&state, "looking"), None);
+    let instructions = window_field(&state, "instructions").unwrap_or_default();
+    assert!(
+        instructions.ends_with("Once Bluetooth is on, choose your phone below."),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("this computer"), "{instructions}");
+
+    // Once Bluetooth is on, the window looks for phones after all.
+    harness.set_bluetooth_power("on");
+    harness.wait_for_app("the Setup Window looks for phones", DEADLINE, |state| {
+        window_field(state, "looking").is_some() || window_field(state, "phones").is_some()
+    });
+}
+
+#[test]
 fn bluetooth_blocked_explains_how_to_unblock_it() {
     let harness = Harness::builder()
         .headless_screen()

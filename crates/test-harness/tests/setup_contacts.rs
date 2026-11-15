@@ -520,6 +520,13 @@ fn the_finish_page_names_the_config_file_from_a_tilde_and_writes_the_line_as_sho
         field(&state, "instructions").is_some_and(|text| text.contains(named)),
         "{state:?}"
     );
+    // One instruction, ahead of the line: nothing to do sits between the
+    // line and its buttons (#326).
+    let instructions = field(&state, "instructions").unwrap_or_default();
+    assert!(
+        !instructions.contains('\n') && instructions.ends_with("leave the file as it is:"),
+        "{instructions}"
+    );
     // What is written is the line shown, with no `~` in it.
     let line = field(&state, "line").unwrap_or_default().to_owned();
     assert!(!line.contains('~'), "{line}");

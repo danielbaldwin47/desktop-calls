@@ -169,6 +169,18 @@ pub(super) fn ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
             "The notification didn't show a missed-call icon, the caller and the time.".to_owned()
         },
     );
+    let badged = sitting.ask(
+        "Does the Desktop Calls icon in the top bar now carry a small arrow, and does its menu count the missed call, such as \"1 missed call…\", under the first line?",
+    )?;
+    sitting.check(
+        badged,
+        if badged {
+            "The Indicator carries the missed-call badge and its menu counts the Missed Call."
+                .to_owned()
+        } else {
+            "The Indicator didn't show the missed-call badge and the menu's count.".to_owned()
+        },
+    );
     let Some(selected) = notification_opens_the_dialer(sitting)? else {
         return Ok(());
     };

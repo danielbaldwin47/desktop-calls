@@ -1,5 +1,5 @@
-//! Missed Calls: deciding whether a Call that rang out was missed, and calling
-//! back.
+//! Missed Calls: deciding whether a Call that rang out was missed, calling
+//! back, and the lasting cue that counts them until the Dialer opens.
 
 use super::State;
 use super::dialling::{dial, open_dialer};
@@ -7,6 +7,7 @@ use super::input::{Effect, Input};
 use super::phone::contacts_sync;
 use crate::call::{CallId, Caller, Timestamp};
 use crate::contacts::{CallHistory, CallHistoryKind};
+use crate::matching::{DialerRow, DialerRowKind};
 use crate::messages::Failure;
 use crate::missed::{MissedCallNotice, Notified};
 
@@ -27,14 +28,57 @@ pub(super) fn missed_call_input(state: &mut State, input: Input, effects: &mut V
         }
         Input::CallBack(notification) => {
             if let Some(notified) = state.missed.take(notification) {
+                state.missed.unseen = 0;
                 call_back(state, &notified, effects);
             }
         }
         Input::MissedCallDismissed(notification) => {
             state.missed.take(notification);
         }
+        Input::MissedCallsKept(count) => {
+            state.missed.unseen = state.missed.unseen.max(count);
+        }
         _ => {}
     }
+}
+
+impl State {
+    /// How many Missed Calls the lasting cue counts: those since the user
+    /// last opened the Dialer or called back.
+    #[must_use]
+    pub fn unseen_missed_calls(&self) -> u32 {
+        self.missed.unseen
+    }
+}
+
+/// Keeps the Missed Call cue for the next run whenever this step changed
+/// it from `before`.
+pub(super) fn keep_cue(before: u32, state: &State, effects: &mut Vec<Effect>) {
+    if state.missed.unseen != before {
+        effects.push(Effect::KeepMissedCalls(state.missed.unseen));
+    }
+}
+
+/// The Dialer opens: it marks the Missed Calls the cue counted, which the
+/// user now sees, so the cue clears.
+pub(super) fn seen_in_dialer(state: &mut State) {
+    state.missed.marked = std::mem::take(&mut state.missed.unseen);
+}
+
+/// With nothing typed, the Dialer lists the Call History newest first: the
+/// newest `marked` Missed Calls in it go to the top, in their order, the
+/// rest after them in theirs.
+pub(super) fn missed_first(rows: Vec<DialerRow>, marked: u32) -> Vec<DialerRow> {
+    let mut left = marked;
+    let (mut first, rest): (Vec<DialerRow>, Vec<DialerRow>) = rows.into_iter().partition(|row| {
+        let missed = left > 0 && row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed);
+        if missed {
+            left -= 1;
+        }
+        missed
+    });
+    first.extend(rest);
+    first
 }
 
 /// A Call History refresh finished with `refreshed`, or failed. A Call
@@ -93,6 +137,7 @@ pub(super) fn missed(
         state.missed.notified.push(notified.clone());
         notified
     };
+    state.missed.unseen = state.missed.unseen.saturating_add(1);
     effects.push(Effect::NotifyMissedCall(MissedCallNotice {
         notification: notified.notification,
         call: notified.call,

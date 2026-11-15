@@ -15,6 +15,7 @@ mod indicator;
 mod keybinding;
 mod logging;
 mod logind;
+mod missed_calls;
 mod notifications;
 mod object_manager;
 mod pairing;

@@ -24,6 +24,7 @@ use support::{Runner, result_file, says, step};
 /// interface.
 const HEARD_CLEARLY: &str = "Does your helper hear you clearly, with no echo of their own voice?";
 const MISSED_CALL_SHOWN: &str = "Does a notification with a missed-call icon say you missed a call from your helper, by name or number, with the time under it?";
+const MISSED_CALL_BADGE: &str = "Does the Desktop Calls icon in the top bar now carry a small arrow, and does its menu count the missed call, such as \"1 missed call…\", under the first line?";
 const WITHHELD_SHOWN: &str = "Does a notification say you missed a call from a withheld number, and that it can't be called back?";
 const DESKTOP_SILENT: &str =
     "Apart from the Pixel itself, was the Desktop silent while the Call rang?";
@@ -42,6 +43,7 @@ fn group_2_measures_banner_and_audio_latency_and_the_codec_and_asks_only_what_it
         [
             HEARD_CLEARLY,
             MISSED_CALL_SHOWN,
+            MISSED_CALL_BADGE,
             WITHHELD_SHOWN,
             DESKTOP_SILENT
         ],

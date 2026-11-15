@@ -6,8 +6,9 @@ use super::setup::SetupWindowView;
 use super::{Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
 use crate::clock::TimeOfDay;
+use crate::contacts::CallHistoryKind;
 use crate::indicator::PhoneStatus;
-use crate::matching::{ContactMatch, DialerRow};
+use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
 use crate::messages::Failure;
 
 /// What the Desktop surfaces show, worked out from the state.
@@ -29,6 +30,9 @@ pub struct DialerView {
     pub query: String,
     /// Who to Call, best first; with nothing typed, the Call History.
     pub rows: Vec<DialerRow>,
+    /// How many of `rows`, from the top, are Missed Calls the user hasn't
+    /// seen: those the Missed Call cue counted when the Dialer opened.
+    pub new_missed: usize,
     /// The row Enter Calls, while there are rows.
     pub selected: Option<usize>,
     /// Why Enter can't Call the selected row, or why what is typed can't be
@@ -660,9 +664,23 @@ impl State {
                 Some(DialerKey::QuietHours),
                 Some(DialerKey::Close),
             ];
+            let marked = usize::try_from(self.missed.marked).unwrap_or(usize::MAX);
+            let new_missed = if dialer.query.trim().is_empty() {
+                dialer
+                    .rows
+                    .iter()
+                    .take(marked)
+                    .take_while(|row| {
+                        row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed)
+                    })
+                    .count()
+            } else {
+                0
+            };
             DialerView {
                 query: dialer.query.clone(),
                 rows: dialer.rows.clone(),
+                new_missed,
                 selected,
                 notice: dialer.notice,
                 keys: keys.into_iter().flatten().collect(),

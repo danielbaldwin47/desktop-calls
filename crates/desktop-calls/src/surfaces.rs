@@ -130,6 +130,7 @@ const CSS: &str = "
 .desktop-calls-surface.dialer { padding: 2px; }
 .desktop-calls-surface.dialer list { background: none; }
 .desktop-calls-surface .dialer-row { padding: 6px 14px; }
+.desktop-calls-surface.dialer .new-dot { margin-right: 14px; }
 .desktop-calls-surface.dialer .footer-line { padding-left: 14px; padding-right: 14px; padding-bottom: 12px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
 .desktop-calls-surface.call-pill { padding: 6px 6px 6px 12px; }

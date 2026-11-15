@@ -38,6 +38,13 @@ pub(crate) struct MissedCalls {
     /// The notifications shown, one per caller, until the user acts on or
     /// dismisses one.
     pub(crate) notified: Vec<Notified>,
+    /// The lasting cue (#236): how many Missed Calls there have been since
+    /// the user last opened the Dialer or called back, notified or not. The
+    /// Indicator shows it, and it is kept across a restart.
+    pub(crate) unseen: u32,
+    /// How many of the newest Missed Calls the open Dialer marks at the
+    /// top of its Call History: the cue as it was when the Dialer opened.
+    pub(crate) marked: u32,
 }
 
 /// A Call that rang out here, before the Phone's Call History confirms it.

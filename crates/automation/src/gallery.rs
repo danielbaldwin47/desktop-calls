@@ -3,7 +3,7 @@
 //! Omarchy theme, with an `index.html` for a screenshot-review agent.
 //!
 //! Each surface ticket adds its states to [`STATES`], or to a list of its
-//! own in a module here, such as [`call_pill::CALL_PILL_STATES`] or
+//! own in a module here, such as [`dialer::DIALER_STATES`], [`call_pill::CALL_PILL_STATES`] or
 //! [`banner::BANNER_STATES`] or [`setup_window::SETUP_PROBLEM_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark, and its menu's, in [`indicator::MENU_STATES`], as
@@ -21,6 +21,7 @@ use test_harness::vcards::{self, CallKind};
 
 mod banner;
 mod call_pill;
+mod dialer;
 mod indicator;
 mod look;
 mod notification;
@@ -32,6 +33,7 @@ mod shard;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
+use dialer::DIALER_STATES;
 use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, MENU_STATES, draw_indicator, indicator_path,
 };
@@ -349,73 +351,6 @@ const STATES: &[State] = &[
         shown: without_controls,
     },
     State {
-        name: "dialer-call-history",
-        title: "The Dialer, before typing: the Call History, newest first, the selected Missed Call in red at 4.5:1, and the footer of keys with the Phone connected",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            sync(harness);
-            open_dialer(harness, "");
-        },
-        shown: |screenshot, _| shows_dialer(screenshot),
-    },
-    State {
-        name: "dialer-results",
-        title: "The Dialer, searching for smith, the second match selected as Omarchy's cursor row",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            sync(harness);
-            open_dialer(harness, "smith");
-            harness.keyboard().press(Key::Down);
-            harness.wait_for_app("the second row is selected", DEADLINE, |state| {
-                dialer_shows(state, "selected", "1")
-            });
-        },
-        shown: |screenshot, _| shows_dialer(screenshot),
-    },
-    State {
-        name: "dialer-not-connected",
-        title: "The Dialer, after Enter with the Phone out of range: the notice as a strip under the search row, and the footer says Out of range",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            sync(harness);
-            harness.simulated_phone().disconnect();
-            harness.wait_for_app("the Phone is disconnected", DEADLINE, |state| {
-                state.connection_state == "disconnected"
-            });
-            open_dialer(harness, "jose");
-            harness.keyboard().press(Key::Return);
-            harness.wait_for_app("the Dialer says why not", DEADLINE, |state| {
-                state
-                    .surface("dialer")
-                    .is_some_and(|dialer| dialer.contains_key("notice"))
-            });
-        },
-        shown: |screenshot, _| shows_dialer(screenshot),
-    },
-    State {
-        name: "dialer-calls-off",
-        title: "The Dialer while calls are off until 07:00: the strip says Enter calls anyway, and the footer's Enter reads Call anyway",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            sync(harness);
-            let _output = harness.cli(&["calls", "off", "--until-morning"]);
-            harness.wait_for_app("calls are off", DEADLINE, |state| {
-                state.calls_off == "off" && state.connection_state == "disconnected"
-            });
-            open_dialer(harness, "smith");
-            harness.wait_for_app("the Dialer says calls are off", DEADLINE, |state| {
-                state
-                    .surface("dialer")
-                    .is_some_and(|dialer| dialer.contains_key("calls-off"))
-            });
-        },
-        shown: |screenshot, _| shows_dialer(screenshot),
-    },
-    State {
         name: "setup-window-choose",
         title: "The Setup Window on a fresh install, listing the Phone nearby",
         still: |_| true,
@@ -578,26 +513,6 @@ fn sync(harness: &Harness) {
     harness.wait_for_app("Contacts and Call History are synced", DEADLINE, |state| {
         state.contacts.state == "ready" && state.contacts.call_history == 4
     });
-}
-
-/// Opens the Dialer with `query` typed, and waits until it has the keyboard.
-fn open_dialer(harness: &Harness, query: &str) {
-    harness.open_dialer(query, 0);
-    harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, |state| {
-        dialer_shows(state, "focused", "true") && dialer_shows(state, "query", query)
-    });
-}
-
-fn dialer_shows(state: &AppState, key: &str, value: &str) -> bool {
-    state
-        .surface("dialer")
-        .and_then(|dialer| dialer.get(key))
-        .is_some_and(|shown| shown == value)
-}
-
-/// Whether the Dialer, wider than the other surfaces, is on screen.
-fn shows_dialer(screenshot: &Screenshot) -> bool {
-    app_region(screenshot).is_some_and(|region| region.right - region.left > 500.0)
 }
 
 /// Asks the app to Call [`NUMBER`] and waits for "Calling…" and for the
@@ -982,6 +897,7 @@ pub fn run(options: &Options) -> ExitCode {
 fn all_states() -> impl Iterator<Item = &'static State> {
     STATES
         .iter()
+        .chain(DIALER_STATES)
         .chain(BANNER_STATES)
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)

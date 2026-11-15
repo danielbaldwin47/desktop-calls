@@ -4,7 +4,7 @@
 
 use test_harness::{AppState, Harness};
 
-use super::call_pill::hold_call_window_expanded;
+use super::call_pill::{expanded, hold_call_window_expanded};
 use super::{DEADLINE, State, as_is, connect, ring, shows, without_controls};
 
 /// How long, in seconds, each Call runs before it ends or contact is lost,
@@ -87,9 +87,15 @@ fn live_for(harness: &Harness) -> u32 {
     connect(harness);
     let call = ring(harness);
     harness.answer(call);
-    harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
-        call_window(state, "timer").is_some()
-    });
+    harness.wait_for_app(
+        "the Call Window shows a timer, expanded, the Banner gone",
+        DEADLINE,
+        |state| {
+            expanded(state)
+                && state.surface("banner").is_none()
+                && call_window(state, "timer").is_some()
+        },
+    );
     hold_call_window_expanded(harness);
     harness.wait_for_app("the Call has lasted a few seconds", DEADLINE, |state| {
         state.audio_location == "desktop"

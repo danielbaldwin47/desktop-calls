@@ -1,5 +1,6 @@
-//! The Dialer in the gallery: its Call History, a search, its notice and
-//! Calls Off strips, and the Missed Calls it marks as new.
+//! The Dialer in the gallery: its Call History, a search, one that
+//! matches nothing, its notice and Calls Off strips, and the Missed Calls
+//! it marks as new.
 
 use test_harness::vcards::{self, CallKind};
 use test_harness::{AppState, Harness, Key, Screenshot};
@@ -45,6 +46,21 @@ pub(super) const DIALER_STATES: &[State] = &[
             harness.keyboard().press(Key::Down);
             harness.wait_for_app("the second row is selected", DEADLINE, |state| {
                 dialer_shows(state, "selected", "1")
+            });
+        },
+        shown: |screenshot, _| shows_dialer(screenshot),
+    },
+    State {
+        name: "dialer-no-matches",
+        title: "The Dialer after typing what matches nothing: the rows the Call History showed go, and it says so",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            open_dialer(harness, "");
+            harness.keyboard().type_text("zzq");
+            harness.wait_for_app("the Dialer shows no rows", DEADLINE, |state| {
+                dialer_shows(state, "query", "zzq") && dialer_shows(state, "rows", "0")
             });
         },
         shown: |screenshot, _| shows_dialer(screenshot),

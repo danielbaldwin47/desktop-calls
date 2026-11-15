@@ -106,6 +106,13 @@ impl State {
             Reach::HandsFreeLost | Reach::HandsFreeDropped
         )
     }
+
+    /// Whether the Desktop has lost contact with the live Call, which
+    /// carries on on the Phone: for as long as the Call Window says so.
+    #[must_use]
+    pub fn contact_lost(&self) -> bool {
+        self.connection_lost.is_some()
+    }
 }
 
 /// What BlueZ and logind report about reaching the Phone.

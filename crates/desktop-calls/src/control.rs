@@ -99,6 +99,7 @@ impl From<Failure> for Refused {
             | Failure::PhoneNotSetUp
             | Failure::PhoneConnecting
             | Failure::PhoneOutOfRange
+            | Failure::PhoneReconnecting
             | Failure::CallInProgress
             | Failure::NumberRefused
             | Failure::PhoneBusy
@@ -139,6 +140,13 @@ impl ControlInterface {
     #[zbus(property)]
     fn hands_free_lost(&self) -> bool {
         self.state().hands_free_lost()
+    }
+
+    /// Whether the Desktop has lost contact with the live Call, which
+    /// carries on on the Phone, while the Call Window says so (ticket #152).
+    #[zbus(property)]
+    fn contact_lost(&self) -> bool {
+        self.state().contact_lost()
     }
 
     /// The Phone's name and Bluetooth address, or two empty strings while no
@@ -430,7 +438,10 @@ impl ControlInterface {
         let _ = self.dials.unbounded_send((number, verdict));
         match outcome.await {
             Ok(None) => Ok(()),
-            Ok(Some(failure)) => Err(failure.into()),
+            // Whatever the reason, the Call wasn't placed.
+            Ok(Some(failure)) => Err(Refused::CallNotPlaced(
+                messages::failure(failure).text.to_owned(),
+            )),
             // The service is stopping, so the Call won't be followed.
             Err(oneshot::Canceled) => Err(Failure::DialFailed.into()),
         }
@@ -675,6 +686,9 @@ impl Publisher {
         }
         if old.hands_free_lost() != state.hands_free_lost() {
             published.hands_free_lost_changed(emitter).await?;
+        }
+        if old.contact_lost() != state.contact_lost() {
+            published.contact_lost_changed(emitter).await?;
         }
         // A Call's display name changes when Contacts do.
         if old.calls() != state.calls() || old.contacts() != state.contacts() {

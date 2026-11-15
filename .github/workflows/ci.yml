@@ -143,8 +143,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
-          # TEMPORARY, for measuring PR #287's warm runs; removed before it lands.
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/pull/287/merge' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: just lint
         env: { GH_TOKEN: "${{ github.token }}" }
         run: just lint

@@ -50,6 +50,11 @@ fn the_app_shows_every_surface_once_into_the_shared_shader_cache() {
 
     harness.open_dialer("", 0);
     first_frame(&harness, "dialer");
+    // It takes the keyboard apart from drawing; a key before that is lost.
+    harness.wait_for_app("the Dialer has the keyboard", DEADLINE, |state| {
+        state.surface("dialer").and_then(|dialer| dialer.get("focused")).map(String::as_str)
+            == Some("true")
+    });
     harness.keyboard().press(Key::Escape);
     harness.wait_for_app("the Dialer closed", DEADLINE, |state| {
         state.surface("dialer").is_none()
@@ -73,7 +78,8 @@ fn first_frame(harness: &Harness, surface: &str) {
 }
 
 /// Waits until the cache holds something and its size stays the same for
-/// [`SETTLED`].
+/// [`SETTLED`]. The cache outlives a run in `target/`, so on a rerun only
+/// the steady size says this run's writes are done.
 fn settled(cache: &Path) {
     let started = Instant::now();
     let mut last = (size(cache), Instant::now());

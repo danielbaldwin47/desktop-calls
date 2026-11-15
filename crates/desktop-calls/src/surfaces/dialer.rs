@@ -223,7 +223,8 @@ impl Dialer {
         let shown = self.rows.borrow();
         let changed = shown.0 != view.rows || shown.1 != view.new_missed;
         drop(shown);
-        if changed {
+        // Afresh on opening too, so the time column follows the clock.
+        if changed || opening {
             self.show_rows(&view.rows, view.new_missed);
         }
         if let Some(row) = view
@@ -584,7 +585,8 @@ fn underlined(ranges: &[std::ops::Range<usize>], colour: &gtk::gdk::RGBA) -> gtk
         let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else {
             continue;
         };
-        let mut line = gtk::pango::AttrInt::new_underline(gtk::pango::Underline::Single);
+        // Low: below the descenders, nearer the mockup's 3 px offset.
+        let mut line = gtk::pango::AttrInt::new_underline(gtk::pango::Underline::Low);
         line.set_start_index(start);
         line.set_end_index(end);
         attributes.insert(line);

@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 use super::{Tier, Typed, fold_char};
+use unicode_normalization::char::is_combining_mark;
 
 /// Where each of `typed` starts one of `words`, in order: the index of the
 /// word each starts.
@@ -118,6 +119,14 @@ impl Letters {
         let mut words: Vec<Vec<(char, Range<usize>)>> = vec![Vec::new()];
         for (at, character) in name.char_indices() {
             let source = at..at + character.len_utf8();
+            // A combining mark written on its own belongs to the letter
+            // before it, so "Jose\u{301}" underlines its accent too.
+            if is_combining_mark(character) {
+                if let Some(last) = words.last_mut().and_then(|word| word.last_mut()) {
+                    last.1.end = source.end;
+                }
+                continue;
+            }
             fold_char(character, |letter| {
                 if letter.is_whitespace() {
                     if words.last().is_some_and(|word| !word.is_empty()) {

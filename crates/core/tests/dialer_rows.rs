@@ -28,6 +28,7 @@ fn held() -> (Contacts, CallHistory) {
             mobile("Alice Smith", "+447700900123"),
             mobile("José Smith", "+447700900001"),
             mobile("Joanna Smithers", "+447700900002"),
+            mobile("Zoe\u{301} Ball", "+447700900003"),
         ],
         Some("GB"),
     );
@@ -70,6 +71,8 @@ fn the_letters_that_matched_are_reported_however_the_name_matched() {
     assert_eq!(underlined("jsr", "Joanna Smithers"), ["J", "S", "r"]);
     // Folded: the accent is part of the letter typed without it.
     assert_eq!(underlined("jose", "José Smith"), ["José"]);
+    // An accent written as a combining mark goes with its letter.
+    assert_eq!(underlined("zoe", "Zoe\u{301} Ball"), ["Zoe\u{301}"]);
     // A Call History caller found by name.
     assert_eq!(underlined("bob", "Bob Jones"), ["Bob"]);
 }

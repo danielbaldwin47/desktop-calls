@@ -430,9 +430,10 @@ impl Control {
 
     /// The person holding the Phone forgets the Desktop, and the Phone drops
     /// hands-free while BlueZ keeps it connected, as the real Pixel did
-    /// (ticket #373): each `Connect` and `ConnectProfile` from then on
-    /// fails with `"br-connection-key-missing"`, which on the real Desktop
-    /// also asked the person holding it to pair.
+    /// (ticket #373): each `ConnectProfile` from then on fails with
+    /// `"br-connection-key-missing"`, which on the real Desktop also asked
+    /// the person holding it to pair; that prompt isn't modelled. As for a
+    /// Phone going away, `Battery1` goes with hands-free.
     async fn forget_pairing_keeping_link(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,

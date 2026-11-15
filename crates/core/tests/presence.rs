@@ -433,6 +433,69 @@ fn a_phone_that_forgot_the_pairing_is_a_problem_not_out_of_range() {
     );
 }
 
+/// The real Pixel, having forgotten the Desktop, stayed connected without
+/// hands-free; each hands-free connect asked it to pair (ticket #373).
+#[test]
+fn a_phone_still_connected_that_forgot_the_pairing_is_a_problem_and_not_asked_again() {
+    let (state, effects) = run(
+        connected(),
+        [hands_free_down(), Input::HandsFreePairingLost],
+    );
+    assert_eq!(state.connection_state(), &ConnectionState::PairingLost);
+    assert_eq!(
+        state
+            .problems()
+            .iter()
+            .map(|problem| problem.kind)
+            .collect::<Vec<_>>(),
+        [ProblemKind::PairingLost]
+    );
+    let waits = reconnect_waits(&effects);
+    // A wait already under way changes nothing once it runs out.
+    let (_, effects) = run(
+        state,
+        waits
+            .iter()
+            .map(|(timer, _)| Input::TimerFired(*timer))
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(connects(&effects), 0, "{effects:?}");
+}
+
+/// A hands-free connect that spanned a suspend says nothing sure about the
+/// pairing: the Phone is connected again after resume as usual.
+#[test]
+fn a_pairing_lost_answer_across_a_suspend_does_not_stop_connecting() {
+    let (state, _) = run(
+        connected(),
+        [
+            hands_free_down(),
+            Input::Suspending,
+            Input::HandsFreePairingLost,
+        ],
+    );
+    assert_ne!(state.connection_state(), &ConnectionState::PairingLost);
+    let (state, effects) = run(state, [Input::Resumed]);
+    assert!(state.problems().is_empty(), "{:?}", state.problems());
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Phone(PhoneCommand::ConnectHandsFree))),
+        "{effects:?}"
+    );
+}
+
+/// Gone out of range while hands-free was being connected, the Phone still
+/// answered without the pairing: not a silent stall.
+#[test]
+fn a_phone_gone_away_while_hands_free_found_the_pairing_lost_is_a_problem() {
+    let (state, _) = run(
+        connected(),
+        [hands_free_down(), absent(), Input::HandsFreePairingLost],
+    );
+    assert_eq!(state.connection_state(), &ConnectionState::PairingLost);
+}
+
 #[test]
 fn a_phone_that_connects_after_all_is_no_longer_a_pairing_problem() {
     let (state, _) = run(

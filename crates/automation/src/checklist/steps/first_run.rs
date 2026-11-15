@@ -24,7 +24,7 @@ const PROMPT_DEADLINE: Duration = Duration::from_secs(90);
 /// How long the Phone may take to ask again after Try again.
 const ASK_AGAIN_DEADLINE: Duration = Duration::from_secs(30);
 
-const FORGET_ON_THE_PIXEL: &str = "On the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and tap Forget.";
+const FORGET_ON_THE_PIXEL: &str = "Straight away, on the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and tap Forget.";
 const REMOVE_ON_THE_DESKTOP: &str = "On this computer: remove the Pixel in Bluetooth settings, or with `bluetoothctl remove` and its address.";
 const STILL_PAIRED: &str = "The Pixel is still paired, and this step pairs it afresh. Run `just real-phone-checklist 1 --fresh` instead: step 1.1 forgets the pairing on both sides first.";
 
@@ -56,8 +56,6 @@ fn already_added(state: &AppState) -> bool {
         .is_some_and(|text| text.contains("Place your first call: press Super+Alt+C"))
 }
 
-/// 1.1: the pairing forgotten on both sides, then `just install`, which
-/// starts the app again: with no Phone, the Setup Window opens by itself.
 /// Forgets the pairing on this computer first, then on the Pixel. The other
 /// way round, the Desktop still follows the Pixel when it forgets, asks it
 /// for hands-free, and the Pixel reports a wrong PIN (ticket #373).
@@ -72,6 +70,8 @@ fn forget_on_both_sides(sitting: &mut Sitting) -> Result<(), Stop> {
     Ok(())
 }
 
+/// 1.1: the pairing forgotten on both sides, then `just install`, which
+/// starts the app again: with no Phone, the Setup Window opens by itself.
 pub(super) fn forget_and_install(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     forget_on_both_sides(sitting)?;

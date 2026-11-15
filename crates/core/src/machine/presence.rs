@@ -253,18 +253,22 @@ pub(super) fn hands_free_dropped(state: &mut State, effects: &mut Vec<Effect>) {
 }
 
 /// BlueZ couldn't connect hands-free, as the Phone no longer has the
-/// Desktop paired, while it still has the Phone connected: the real Pixel,
+/// Desktop paired, while it still had the Phone connected: the real Pixel,
 /// having forgotten the Desktop (ticket #373). Each try would ask the
 /// person holding it to pair, so there are no more until it is paired
 /// again.
-pub(super) fn hands_free_pairing_lost(state: &mut State) {
+pub(super) fn hands_free_pairing_lost(state: &mut State, effects: &mut Vec<Effect>) {
+    // Gone away meanwhile, it still answered without the pairing. Across a
+    // suspend, the answer is too stale to stop connecting for good.
+    if state.phone.is_none() || state.presence.reach == Reach::Present || state.presence.suspended {
+        connect_failed(state, ConnectFailure::Unreachable, effects);
+        return;
+    }
     state.presence.reconnect.connecting = false;
     state.presence.reconnect.at_once = false;
     state.presence.reconnect.wait += 1;
-    if state.phone.is_some() && state.hands_free_lost() {
-        state.presence.pairing_lost = true;
-        state.connection = ConnectionState::PairingLost;
-    }
+    state.presence.pairing_lost = true;
+    state.connection = ConnectionState::PairingLost;
 }
 
 /// Hands-free is up: any connect it needed is over.

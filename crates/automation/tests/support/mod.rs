@@ -44,10 +44,20 @@ impl Runner {
 
     /// Starts the runner on a Desktop whose locale is `lang`.
     pub fn start_in_locale(arguments: &[&str], results: &Path, lang: &str) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_automation"))
-            .env_remove("LC_ALL")
-            .env_remove("LC_TELEPHONE")
-            .env("LANG", lang)
+        Self::start_with_environment(arguments, results, &[("LANG", lang)])
+    }
+
+    /// Starts the runner on a Desktop whose environment has `variables`
+    /// and none of the locale's others (`LC_ALL`, `LC_TELEPHONE`).
+    pub fn start_with_environment(
+        arguments: &[&str],
+        results: &Path,
+        variables: &[(&str, &str)],
+    ) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_automation"));
+        command.env_remove("LC_ALL").env_remove("LC_TELEPHONE");
+        command.envs(variables.iter().copied());
+        let mut child = command
             .arg("real-phone-checklist")
             .args(arguments)
             .arg("--demo")

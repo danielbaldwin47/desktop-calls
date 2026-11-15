@@ -22,6 +22,8 @@ struct Status {
     phone: Option<Phone>,
     /// The Phone is in range, without hands-free.
     hands_free_lost: bool,
+    /// The Desktop has lost contact with the live Call.
+    contact_lost: bool,
     /// Calls Off, as the control interface's `CallsOff` has it.
     calls_off: (String, u64, bool),
     /// The Quiet Hours set, if any.
@@ -60,7 +62,8 @@ pub fn status(json: bool) -> ExitCode {
                     messages::status(
                         &status.connection_state,
                         status.phone.as_ref(),
-                        status.hands_free_lost
+                        status.hands_free_lost,
+                        status.contact_lost,
                     )
                 ),
             }
@@ -431,6 +434,11 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         .get("HandsFreeLost")
         .and_then(|value| bool::try_from(value).ok())
         .unwrap_or(false);
+    // Nor this, from before ticket #152.
+    let contact_lost = properties
+        .get("ContactLost")
+        .and_then(|value| bool::try_from(value).ok())
+        .unwrap_or(false);
     // Nor does one from before ticket #202.
     let calls_off = properties
         .get("CallsOff")
@@ -455,6 +463,7 @@ async fn read_status(runtime: GlibRuntime) -> Result<Status, Failure> {
         connection_state,
         phone: (!address.is_empty()).then_some(Phone { name, address }),
         hands_free_lost,
+        contact_lost,
         calls_off,
         quiet_hours,
     })

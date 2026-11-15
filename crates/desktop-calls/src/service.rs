@@ -146,8 +146,8 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
     }
     // Before BlueZ lists the paired Phones, so the one chosen last is the
     // one followed.
-    if let Some(address) = chosen_phone::load() {
-        let _ = input_sender.unbounded_send(Input::ChosenPhoneKept { address });
+    if let Some((address, name)) = chosen_phone::load() {
+        let _ = input_sender.unbounded_send(Input::ChosenPhoneKept { address, name });
     }
     // Before the clock is first read, so it reads them too.
     let quiet_hours = quiet_hours::load();
@@ -376,7 +376,7 @@ impl Shell {
                         let _ = inputs.unbounded_send(input);
                     });
                 }
-                Effect::KeepChosenPhone { address } => chosen_phone::save(&address),
+                Effect::KeepChosenPhone { phone } => chosen_phone::save(&phone),
                 effect @ (Effect::KeepCallsOff(_)
                 | Effect::ReadClockAt(_)
                 | Effect::KeepQuietHours(_)

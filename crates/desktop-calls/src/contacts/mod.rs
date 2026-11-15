@@ -806,15 +806,12 @@ fn pull_target(folder: &str) -> Option<PathBuf> {
 /// The region of the Desktop's locale for telephone numbers, such as `GB`
 /// for `en_GB.UTF-8`.
 fn locale_region() -> Option<String> {
-    ["LC_ALL", "LC_TELEPHONE", "LANG"]
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.is_empty())
-        .and_then(|locale| {
-            let (_, rest) = locale.split_once('_')?;
-            let region: String = rest.chars().take_while(char::is_ascii_alphabetic).collect();
-            (region.len() == 2).then_some(region)
-        })
+    let read = |name| std::env::var(name).ok();
+    desktop_calls_core::locale_region(
+        read("LC_ALL").as_deref(),
+        read("LC_TELEPHONE").as_deref(),
+        read("LANG").as_deref(),
+    )
 }
 
 /// Runs `work` on a thread of its own and waits for it without blocking

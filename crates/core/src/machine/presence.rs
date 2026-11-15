@@ -106,6 +106,32 @@ impl State {
             Reach::HandsFreeLost | Reach::HandsFreeDropped
         )
     }
+
+    /// Whether the Desktop has lost contact with the live Call, which
+    /// carries on on the Phone, and the Phone is still disconnected: for as
+    /// long as the Call Window says the Call continues there. Not while it
+    /// says the Call may still be live, after a Hang up that may have been
+    /// lost.
+    #[must_use]
+    pub fn contact_lost(&self) -> bool {
+        self.connection == ConnectionState::Disconnected
+            && self
+                .connection_lost
+                .as_ref()
+                .is_some_and(|lost| lost.notice == Failure::ConnectionLost)
+    }
+
+    /// Why a Call can't be placed while the Phone is disconnected, in the
+    /// words the Call Window and the Dialer's footer use (ticket #152):
+    /// what the Call Window says while contact with a Call is lost, else
+    /// that the Phone in range is reconnecting, else out of range.
+    pub(super) fn disconnected_refusal(&self) -> Failure {
+        match &self.connection_lost {
+            Some(lost) => lost.notice,
+            None if self.hands_free_lost() => Failure::PhoneReconnecting,
+            None => Failure::PhoneOutOfRange,
+        }
+    }
 }
 
 /// What BlueZ and logind report about reaching the Phone.

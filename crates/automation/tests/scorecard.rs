@@ -2,6 +2,13 @@
 //! MANUAL or NEEDS-REVIEW, and its evidence (#27), scored from made-up
 //! scenario reports, Real-Phone Checklist result files and review verdicts.
 
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test code: a failed step fails the test with its message"
+)]
+
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -37,7 +44,7 @@ fn scenarios() -> Vec<String> {
         .collect()
 }
 
-/// A JUnit report, as cargo-nextest writes it, of `scenarios`, with
+/// A `JUnit` report, as cargo-nextest writes it, of `scenarios`, with
 /// `failed` among them failing.
 fn junit(directory: &Path, scenarios: &[String], failed: &[&str]) -> PathBuf {
     let mut xml = String::from(
@@ -45,13 +52,17 @@ fn junit(directory: &Path, scenarios: &[String], failed: &[&str]) -> PathBuf {
     );
     for name in scenarios {
         if failed.contains(&name.as_str()) {
-            xml.push_str(&format!(
-                "<testcase name=\"{name}\" classname=\"test-harness::scenarios\" time=\"1.0\"><failure type=\"test failure\">thread panicked</failure></testcase>\n"
-            ));
+            writeln!(
+                xml,
+                "<testcase name=\"{name}\" classname=\"test-harness::scenarios\" time=\"1.0\"><failure type=\"test failure\">thread panicked</failure></testcase>"
+            )
+            .unwrap();
         } else {
-            xml.push_str(&format!(
-                "<testcase name=\"{name}\" classname=\"test-harness::scenarios\" time=\"1.0\"/>\n"
-            ));
+            writeln!(
+                xml,
+                "<testcase name=\"{name}\" classname=\"test-harness::scenarios\" time=\"1.0\"/>"
+            )
+            .unwrap();
         }
     }
     xml.push_str("</testsuite>\n</testsuites>\n");
@@ -307,10 +318,10 @@ fn verdict(directory: &Path, verdict: &str, defects: &[&str], ids: &[(&str, &str
             },
             |(_, id)| (*id).to_owned(),
         );
-        text.push_str(&format!("Reviewed path: {path} {id}\n"));
+        writeln!(text, "Reviewed path: {path} {id}").unwrap();
     }
     for defect in defects {
-        text.push_str(&format!("Defect: {defect}\n"));
+        writeln!(text, "Defect: {defect}").unwrap();
     }
     let path = directory.join("screenshot-review.md");
     std::fs::write(&path, text).expect("write the verdict");

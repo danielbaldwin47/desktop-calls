@@ -486,10 +486,11 @@ impl QuietHoursWindow {
         let mut content = self.content.borrow().clone();
         let focus = GtkWindowExt::focus(&self.window);
         let on_switch = focus.as_ref() == Some(self.switch.upcast_ref());
-        // Space flips the switch only while it has keyboard focus, so its
-        // keycap shows only then.
-        self.switch_key.set_visible(on_switch);
-        if on_switch {
+        // Space flips the switch only while it has keyboard focus in the
+        // active window, so its keycap shows only then.
+        let space_flips = on_switch && self.window.is_active();
+        self.switch_key.set_visible(space_flips);
+        if space_flips {
             content.insert("switch-key".to_owned(), self.switch_key.text().into());
         }
         let focus = if on_switch {

@@ -21,6 +21,9 @@ use crate::checklist::watch::AppState;
 ///   and `ring-out` gives up while it rings, leaving a Missed Call in the
 ///   Phone's Call History;
 /// - the person holding the Phone: `answer-on-phone`, `decline-on-phone`;
+/// - call waiting: `call-third` rings from a third phone; `hold-and-answer`,
+///   `end-and-answer`, `swap`, `answer-waiting` and `decline-waiting` are the
+///   Banner's and the Call Window's choices, made on the Waiting Call;
 /// - the Phone itself: `phone-dials` places the Call the app asked for;
 /// - the user at the Desktop, through the control interface, the
 ///   notification server and the keyboard: `answer`, `decline`, `hang-up`,
@@ -73,6 +76,9 @@ pub struct Demo {
 
 /// The number the demo's helper calls from: an Ofcom drama number.
 const DEMO_NUMBER: &str = "+447700900461";
+
+/// The number the demo's second helper calls from, on a third phone.
+const DEMO_THIRD_NUMBER: &str = "+447700900782";
 
 /// The demo's Test Number, for the PBAP probe to redact: another Ofcom
 /// drama number.
@@ -343,12 +349,24 @@ impl Demo {
     }
 
     pub(super) fn act(&mut self, action: &str, state: &AppState) {
-        let call = state.calls.first().map(|call| call.id);
+        // The Call the user acts on: the live one when there are several,
+        // else the first.
+        let call = state
+            .calls
+            .iter()
+            .find(|call| call.state == "active")
+            .or(state.calls.first())
+            .map(|call| call.id);
+        let waiting = state
+            .calls
+            .iter()
+            .find(|call| call.state == "waiting")
+            .map(|call| call.id);
         // The harness is test code: an action it can't carry out panics with
         // the reason. A demo goes on after a mistyped or ill-timed action,
         // so the panic is caught and reported.
         let acted = panic::catch_unwind(AssertUnwindSafe(|| {
-            self.act_or_panic(action, call);
+            self.act_or_panic(action, call, waiting);
         }));
         if acted.is_err() {
             println!("  demo: {action} didn't work now; see the message above.");
@@ -356,7 +374,7 @@ impl Demo {
         }
     }
 
-    fn act_or_panic(&mut self, action: &str, call: Option<u32>) {
+    fn act_or_panic(&mut self, action: &str, call: Option<u32>, waiting: Option<u32>) {
         match action {
             "call" => {
                 self.calling_from = Some(DEMO_NUMBER);
@@ -458,7 +476,12 @@ impl Demo {
                     println!("  demo: {}", error.message);
                 }
             }
-            other => self.act_on_call(other, call),
+            // The second helper rings from another phone.
+            "call-third" => {
+                self.calling_from = Some(DEMO_THIRD_NUMBER);
+                self.call_path = Some(self.harness.simulated_phone().ring(DEMO_THIRD_NUMBER));
+            }
+            other => self.act_on_call(other, call, waiting),
         }
         flush();
     }
@@ -487,7 +510,7 @@ impl Demo {
         }
     }
 
-    fn act_on_call(&self, action: &str, call: Option<u32>) {
+    fn act_on_call(&self, action: &str, call: Option<u32>, waiting: Option<u32>) {
         let harness = &self.harness;
         let phone = harness.simulated_phone();
         let on_phone = |act: &dyn Fn(&str)| match &self.call_path {
@@ -498,7 +521,21 @@ impl Demo {
             Some(call) => act(call),
             None => println!("  demo: there is no Call to act on."),
         };
+        let on_waiting = |act: &dyn Fn(u32)| match waiting {
+            Some(call) => act(call),
+            None => println!("  demo: no Call is waiting."),
+        };
+        let refused = |result: Result<(), test_harness::AppError>| {
+            if let Err(error) = result {
+                println!("  demo: {}", error.message);
+            }
+        };
         match action {
+            "hold-and-answer" => refused(harness.hold_and_answer()),
+            "end-and-answer" => refused(harness.end_and_answer()),
+            "swap" => refused(harness.swap()),
+            "answer-waiting" => on_waiting(&|call| harness.answer(call)),
+            "decline-waiting" => on_waiting(&|call| harness.decline(call)),
             "answer-on-phone" => on_phone(&|path| phone.answer_on_phone(path)),
             "decline-on-phone" => on_phone(&|path| phone.decline_on_phone(path)),
             "hang-up-on-phone" => on_phone(&|path| phone.caller_hangs_up(path)),
@@ -540,7 +577,8 @@ impl Demo {
                 None => println!(
                     "  demo: unknown action {other:?}. The actions: call, call-withheld, \
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
-                     decline, hang-up, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
+                     decline, hang-up, hold-and-answer, end-and-answer, swap, answer-waiting, \
+                     decline-waiting, call-third, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
                      open-setup-window, contacts-access-off, allow-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm,indicator-click, indicator-mute, \

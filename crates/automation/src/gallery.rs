@@ -431,6 +431,19 @@ fn with_contacts(harness: &Harness) {
     phone.set_pbap_folder("cch", &vcards::call_history(200));
 }
 
+/// The Call History [`sync`] sets, newest first, dated from today so the
+/// Dialer's time column shows each of its forms: today's time, a weekday
+/// and time, and a date.
+fn recent_calls() -> [String; 4] {
+    let at = |days, time| format!("{}T{time}", vcards::days_ago(days));
+    [
+        vcards::call(CallKind::Missed, Some("+447700900999"), &at(0, "094000")),
+        vcards::call(CallKind::Missed, None, &at(1, "181200")),
+        vcards::call(CallKind::Dialed, Some(NUMBER), &at(2, "100000")),
+        vcards::call(CallKind::Received, Some("+447700900001"), &at(9, "090000")),
+    ]
+}
+
 /// Syncs Contacts and a Call History with a Missed Call from the Phone,
 /// connected.
 fn sync(harness: &Harness) {
@@ -445,16 +458,7 @@ fn sync(harness: &Harness) {
     }
     contacts.push_str(&vcards::contacts(20, 1_000));
     phone.set_pbap_folder("pb", &contacts);
-    phone.set_pbap_folder(
-        "cch",
-        &[
-            vcards::call(CallKind::Missed, Some("+447700900999"), "20261104T110000"),
-            vcards::call(CallKind::Missed, None, "20261104T103000"),
-            vcards::call(CallKind::Dialed, Some(NUMBER), "20261104T100000"),
-            vcards::call(CallKind::Received, Some("+447700900001"), "20261103T090000"),
-        ]
-        .concat(),
-    );
+    phone.set_pbap_folder("cch", &recent_calls().concat());
     connect(harness);
     harness.wait_for_app("Contacts and Call History are synced", DEADLINE, |state| {
         state.contacts.state == "ready" && state.contacts.call_history == 4

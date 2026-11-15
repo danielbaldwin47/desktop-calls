@@ -23,10 +23,16 @@ path = "junit.xml"
 # Window counts down), Quiet Hours' boundaries, the 5 s collapse of the
 # Call Window, and a restart's give-up. So they can't be made shorter
 # without a path only tests take. A scenario added later that is as slow
-# belongs here; the shards' logs list each scenario's time.
+# belongs here; the shards' logs list each scenario's time, and so does
+# each shard's `scenario-results` artifact. The keyboard-only Setup Window
+# scenarios (#25) wait out the same 30 s prompt; unlisted, in run
+# 43711226948 they started 48 s and 30 s into their shards and ended both
+# (39 s and 42 s long).
 [[profile.default.overrides]]
 filter = '''
 test(=setup_contacts::an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again)
+| test(=keyboard_only_setup::a_refused_phone_then_skipped_contacts_by_keys_alone)
+| test(=keyboard_only_setup::first_run_in_the_setup_window_by_keys_alone)
 | test(=contacts::an_unanswered_prompt_needs_permission_until_the_phone_gives_up)
 | test(=crash_restart::a_call_that_ended_while_the_app_was_down_is_forgotten_and_the_log_says_so)
 | test(=quiet_hours::quiet_hours_across_midnight_turn_calls_off_when_they_begin)

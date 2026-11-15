@@ -251,9 +251,9 @@ impl Dialer {
                 glib::markup_escape_text(enter)
             ));
         }
-        self.notice
-            .set_visible(notice.is_some() || calls_off.is_some());
-        self.fit();
+        let strip_shows = notice.is_some() || calls_off.is_some();
+        self.notice.set_visible(strip_shows);
+        self.fit(strip_shows);
 
         let mut content = BTreeMap::from([
             ("query".to_owned(), view.query.clone()),
@@ -373,10 +373,11 @@ impl Dialer {
     /// Keeps the window as tall as a full Dialer, the list as tall as its
     /// rows up to the list's height, less the notice strip's while it
     /// shows, so the card never outgrows the window.
-    fn fit(&self) {
+    /// `strip_shows` while the notice strip does.
+    fn fit(&self, strip_shows: bool) {
         let natural =
             |widget: &gtk::Widget| widget.measure(gtk::Orientation::Vertical, DIALER_WIDTH).1;
-        let notice = if self.notice.is_visible() {
+        let notice = if strip_shows {
             natural(self.notice.upcast_ref())
         } else {
             0

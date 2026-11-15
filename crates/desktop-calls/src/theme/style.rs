@@ -186,8 +186,8 @@ const STATIC: &str = r#"
 
 window.desktop-calls-surface:not(.dialer) { box-shadow: inset 0 0 0 1px var(--dc-border); }
 window.desktop-calls-surface:not(.dialer).has-keyboard { box-shadow: inset 0 0 0 2px var(--dc-accent); }
-window.desktop-calls-surface.muted,
-window.desktop-calls-surface.contact-lost { box-shadow: inset 0 0 0 2px var(--dc-warning); }
+window.desktop-calls-surface:not(.dialer).muted,
+window.desktop-calls-surface:not(.dialer).contact-lost { box-shadow: inset 0 0 0 2px var(--dc-warning); }
 
 .desktop-calls-surface button:checked { background-color: var(--dc-checked); }
 .desktop-calls-surface button:checked:hover { background-color: var(--dc-checked-hover); }

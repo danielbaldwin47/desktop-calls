@@ -442,8 +442,8 @@ fn helper_calls(sitting: &mut Sitting, request: &str) -> Result<u32, Stop> {
 
 /// As [`helper_calls`], with `demo_action` ringing the Simulated Phone.
 fn helper_calls_as(sitting: &mut Sitting, request: &str, demo_action: &str) -> Result<u32, Stop> {
-    sitting.expect("banner_latency_ms");
     no_call_left(sitting)?;
+    sitting.expect("banner_latency_ms");
     sitting.say(request, &[demo_action]);
     let rang = sitting.wait_for("the helper's Call ringing", CALL_DEADLINE, |state| {
         state.ringing_call().is_some()

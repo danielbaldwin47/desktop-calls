@@ -148,6 +148,12 @@ impl Sitting {
         }
     }
 
+    /// Takes back [`Sitting::expect`]: the step stopped before `name` could
+    /// be timed, for a fault another item answers for.
+    pub fn not_timed(&mut self, name: &str) {
+        self.findings.pending.retain(|pending| pending != name);
+    }
+
     /// Records `millis` for `name`, keeping the slowest of the step's
     /// measurements of it: each must meet the target. One that never
     /// happened (`null`) stays.

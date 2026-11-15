@@ -222,6 +222,8 @@ fn waiting_call_arrives(
         return Err(Stop::TimedOut("the helper's Call arriving".to_owned()));
     };
     if call.state != "waiting" {
+        // The Phone's fault, not the Banner's: item 1 doesn't count it.
+        sitting.not_timed("banner_latency_ms");
         sitting.check(
             false,
             format!(

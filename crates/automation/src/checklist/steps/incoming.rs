@@ -16,7 +16,6 @@ pub(super) fn audio_reaches_the_desktop(
     answered: &Seen,
 ) -> Result<bool, Stop> {
     sitting.expect("audio_latency_ms");
-    sitting.expect("wideband");
     let audio = sitting.wait_for(
         "the Call audio reaching the Desktop",
         APP_DEADLINE,
@@ -29,6 +28,8 @@ pub(super) fn audio_reaches_the_desktop(
         );
         return Ok(false);
     }
+    // A Call that ended first has no codec to hear: item 2 answers for it.
+    sitting.expect("wideband");
     let latency = audio.at - answered.at;
     sitting.measure_slowest("audio_latency_ms", millis(latency));
     sitting.check(

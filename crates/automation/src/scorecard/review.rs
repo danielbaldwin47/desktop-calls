@@ -64,6 +64,13 @@ pub fn standing(root: &Path, verdict: &Path) -> Standing {
         .lines()
         .filter_map(|line| line.strip_prefix("Reviewed path: ")?.split_once(' '))
         .collect();
+    // Without git's answer, nothing can be said about the review: not that
+    // every surface changed. A watched path gone from HEAD has changed.
+    if let Err(why) = object_id(root, "") {
+        return Standing::Unrecorded(format!(
+            "can't compare the review with HEAD, git says: {why}"
+        ));
+    }
     let changed: Vec<String> = WATCHED
         .iter()
         .filter(|path| {
@@ -71,7 +78,7 @@ pub fn standing(root: &Path, verdict: &Path) -> Standing {
                 .iter()
                 .find(|(reviewed, _)| reviewed == *path)
                 .map(|(_, id)| id.trim());
-            then.is_none() || then != object_id(root, path).as_deref()
+            then.is_none() || then != object_id(root, path).ok().as_deref()
         })
         .map(|path| (*path).to_owned())
         .collect();
@@ -91,16 +98,18 @@ pub fn standing(root: &Path, verdict: &Path) -> Standing {
     Standing::Current { commit, defects }
 }
 
-/// The git object id of `path` at `HEAD` in the repository at `root`.
-pub fn object_id(root: &Path, path: &str) -> Option<String> {
+/// The git object id of `path` at `HEAD` in the repository at `root`, or
+/// what git said instead.
+pub fn object_id(root: &Path, path: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["rev-parse", &format!("HEAD:{path}")])
         .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
 }

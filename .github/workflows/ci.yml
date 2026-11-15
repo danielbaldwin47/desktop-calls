@@ -46,8 +46,9 @@ concurrency:
 # runners: `just lint`; the tests outside the harness; the Real-Phone
 # Checklist's group 6 runs; the gallery, in parts; and the harness's
 # scenarios, in shards. On main, the polish scorecard follows the shards.
-# If only docs that no code reads changed, they are all skipped. "CI
-# passed" needs every job, so it appears only once they have all finished. The slowest job sets the time from push to "CI passed": on a PR,
+# If only docs that no code reads changed, they are all skipped.
+# "CI passed" needs every job, so it appears only once they have all
+# finished. The slowest job sets the time from push to "CI passed": on a PR,
 # a scenario shard (run 43680311355: "CI passed" 3 min 49 s after the first
 # job's start); on main, the checklist's group 6, which waits out real minutes.
 jobs:
@@ -163,6 +164,12 @@ jobs:
     steps:
       - *checkout
       - *cache
+      # The container runs as root, and the checkout belongs to the runner's
+      # user, so git refuses the repository as of dubious ownership. The
+      # scorecard reads git object ids for item 8, and its tests do too.
+      - &git-trusts-checkout
+        name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: just ci-tests
         run: just ci-tests
       # Every scenario directory left: those of failed scenarios, and of
@@ -342,6 +349,7 @@ jobs:
     steps:
       - *checkout
       - *cache
+      - *git-trusts-checkout
       - name: Fetch the shards' results
         uses: actions/download-artifact@v4
         with:

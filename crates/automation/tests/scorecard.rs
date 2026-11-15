@@ -579,6 +579,31 @@ fn a_current_review_with_defects_fails_and_names_their_issues() {
 }
 
 #[test]
+fn a_review_git_cannot_compare_with_head_says_why_and_names_no_surface() {
+    let directory = tempfile::tempdir().expect("a directory");
+    let review = verdict(directory.path(), "no defects", &[], &[]);
+    let printed = Command::new(env!("CARGO_BIN_EXE_automation"))
+        .current_dir(directory.path())
+        .env(
+            "GIT_CEILING_DIRECTORIES",
+            directory.path().parent().unwrap(),
+        )
+        .args(["scorecard", "--review"])
+        .arg(&review)
+        .output()
+        .expect("run automation scorecard");
+    let text = String::from_utf8(printed.stdout).expect("the scorecard is text");
+    let row = row(&text, 8);
+
+    assert!(row.contains("  NEEDS-REVIEW "), "{row}");
+    assert!(
+        row.contains("can't compare the review with HEAD, git says: fatal:"),
+        "{row}"
+    );
+    assert!(!row.contains("changed since"), "{row}");
+}
+
+#[test]
 fn a_review_of_surfaces_that_changed_since_needs_a_new_review() {
     let directory = tempfile::tempdir().expect("a directory");
     let row = item_8(&verdict(

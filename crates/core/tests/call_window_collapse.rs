@@ -4,7 +4,7 @@
 
 use desktop_calls_core::{
     AudioLocation, CallId, CallPillLead, CallPillTag, CallState, Caller, Effect, Input, Phone,
-    PhoneCommand, State, SyncFailure, Timer, Timestamp, Transport, step,
+    PhoneCommand, State, SyncFailure, Timer, Timestamp, Transport, messages, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -351,6 +351,56 @@ fn escape_collapses_it_and_gives_the_keyboard_back_even_with_the_keypad_open() {
     assert!(collapsed(&state));
     assert!(!focused(&state));
     assert_eq!(state.calls()[0].state(), CallState::Active);
+}
+
+/// What the Call Window shows for Escape, as one line: `Esc Collapse`.
+fn escape_hint(state: &State) -> Option<String> {
+    let Some(window) = state.surfaces().call_window else {
+        panic!("the Call Window shows");
+    };
+    messages::call_window_escape(&window).map(|(keys, does)| format!("{} {does}", keys.join(" ")))
+}
+
+#[test]
+fn the_call_window_shows_esc_collapse_exactly_while_escape_collapses_it() {
+    // Ringing out: Escape only gives the keyboard back, so no hint.
+    let (calling, _) = run(
+        connected(),
+        [
+            Input::Dial("+447700900123".to_owned()),
+            Input::CallAdded {
+                call: CALL,
+                state: CallState::Alerting,
+                caller: Caller::Number("+447700900123".to_owned()),
+                at: Timestamp(1_000),
+            },
+        ],
+    );
+    assert_eq!(escape_hint(&calling), None);
+
+    // Live: the hint shows, and Escape does what it says.
+    let state = live();
+    assert_eq!(escape_hint(&state).as_deref(), Some("Esc Collapse"));
+    let (state, _) = run(state, [Input::Activate, Input::CollapseCallWindow]);
+    assert!(collapsed(&state));
+
+    // Contact lost: Escape still collapses it, so the hint stays.
+    let (lost, _) = run(
+        live(),
+        [
+            Input::PhoneAbsent {
+                address: ADDRESS.to_owned(),
+            },
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::CallEnded {
+                call: CALL,
+                at: Timestamp(90_000),
+            },
+        ],
+    );
+    assert_eq!(escape_hint(&lost).as_deref(), Some("Esc Collapse"));
 }
 
 #[test]

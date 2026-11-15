@@ -51,6 +51,8 @@ pub(super) struct SetupProblems {
     shown: RefCell<Shown>,
     /// Each fix button.
     fix_buttons: RefCell<Vec<gtk::Button>>,
+    /// Each card's button, fix or copy, and its Problem.
+    buttons: RefCell<Vec<(gtk::Button, ProblemKind)>>,
     /// The first button, which takes focus, and its keycap, shown while
     /// Enter presses it.
     first_button: RefCell<Option<(gtk::Button, gtk::Label)>>,
@@ -90,6 +92,7 @@ impl SetupProblems {
             focused: Cell::default(),
             shown: RefCell::default(),
             fix_buttons: RefCell::default(),
+            buttons: RefCell::default(),
             first_button: RefCell::default(),
             copied: RefCell::default(),
             blocking: Cell::default(),
@@ -215,6 +218,7 @@ impl SetupProblems {
             self.problems.remove(&child);
         }
         let mut fix_buttons = Vec::new();
+        let mut buttons = Vec::new();
         let mut first_button = None;
         for kind in problems {
             let message = messages::problem(*kind);
@@ -285,6 +289,7 @@ impl SetupProblems {
                 button.set_valign(gtk::Align::Center);
                 actions.append(&button);
                 body.append(&actions);
+                buttons.push((button.clone(), *kind));
                 first_button.get_or_insert((button, keycap));
             }
             card.append(&icon.area);
@@ -292,7 +297,19 @@ impl SetupProblems {
             self.problems.append(&card);
         }
         self.fix_buttons.replace(fix_buttons);
+        self.buttons.replace(buttons);
         self.first_button.replace(first_button);
+    }
+
+    /// The Problem whose card's button is `widget`, or holds it.
+    pub(super) fn problem_of(&self, widget: &gtk::Widget) -> Option<ProblemKind> {
+        self.buttons
+            .borrow()
+            .iter()
+            .find(|(button, _)| {
+                widget == button.upcast_ref::<gtk::Widget>() || widget.is_ancestor(button)
+            })
+            .map(|(_, kind)| *kind)
     }
 
     fn report_content(&self, view: &SetupProblemsView) -> BTreeMap<String, String> {

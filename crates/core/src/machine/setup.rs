@@ -30,7 +30,12 @@
 //!    which it offers to add to the Hyprland config, writing nothing until
 //!    the user confirms the exact line.
 
+mod focus;
 mod keybinding;
+mod step;
+
+pub use focus::SetupFocus;
+pub use step::SetupStep;
 
 use super::dialling::phone_unpaired;
 use super::input::{Effect, Input, PairingFailure, Timer};
@@ -88,6 +93,8 @@ pub(super) struct Setup {
     /// The sync failed a moment ago, and the finish page shows it: if the
     /// Phone leaves now, the failure was the link dropping.
     just_failed: bool,
+    /// What the window reported has the keyboard, and on which page.
+    focus: Option<focus::ReportedFocus>,
 }
 
 /// How far the sync the Setup Window follows has got.
@@ -189,9 +196,12 @@ pub struct SetupWindowView {
     pub opened: u32,
     /// Calls are off: the window says so, with Turn calls on.
     pub calls_off: Option<SetupCallsOff>,
-    /// The Problem whose button has keyboard focus, so Enter presses it
-    /// instead of the step's default button.
+    /// The Problem whose button takes keyboard focus by itself, so Enter
+    /// presses it instead of the step's default button.
     pub problem_has_focus: Option<ProblemKind>,
+    /// What the window last reported has the keyboard on this page, while
+    /// it is still there: after Tab or Shift+Tab, Enter presses it.
+    pub focus: Option<SetupFocus>,
 }
 
 /// The Phone the user chose last in the Setup Window: its address, and its
@@ -233,79 +243,10 @@ pub enum SetupNotice {
     KeybindingConfigChanged,
 }
 
-/// The Setup Window's step.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SetupStep {
-    /// Choose from the nearby Phones, in the order found.
-    Choose { phones: Vec<Phone> },
-    /// Waiting for the chosen Phone's pairing code.
-    Pairing { phone: Phone },
-    /// The code both screens should show, and Confirm.
-    Confirm { phone: Phone, code: u32 },
-    /// Confirmed; waiting for the pairing to finish.
-    Confirmed { phone: Phone },
-    /// Paired; connecting for Calls.
-    Connecting { phone: Phone },
-    /// The Phone refused hands-free: "Phone calls" is off for the Desktop.
-    PhoneCallsOff { phone: Phone },
-    /// The Phone didn't answer: out of range, or its Bluetooth is off.
-    PhoneUnreachable { phone: Phone },
-    /// Connected for Calls; the Phone is about to ask whether to share
-    /// Contacts.
-    ContactsWarning { phone: Phone },
-    /// The Phone is asking whether to share Contacts, until `deadline`.
-    ContactsPrompt { phone: Phone, deadline: Timestamp },
-    /// Nobody answered the Phone before its prompt timed out.
-    ContactsPromptTimedOut { phone: Phone },
-    /// Shared: the sync is reading. `call_history` once the newest Calls
-    /// are read, `contacts` while Contacts are read, and `contacts_read`
-    /// once they are, while older Calls still are.
-    ContactsSyncing {
-        phone: Phone,
-        call_history: bool,
-        contacts: Option<ReadingContacts>,
-        contacts_read: bool,
-    },
-    /// The Phone left before Contacts were read; `back` once it is
-    /// connected again, to carry on.
-    ContactsPhoneAway { phone: Phone, back: bool },
-    /// Finished: what became of Contacts, and the keybinding. `connected`
-    /// while the Phone is.
-    Done {
-        phone: Phone,
-        connected: bool,
-        contacts: ContactsOutcome,
-        keybinding: KeybindingStage,
-    },
-}
-
 impl Setup {
     /// Whether the window is at its first step, choosing a Phone.
     pub(super) fn choosing(&self) -> bool {
         matches!(self.step, Step::Choose)
-    }
-}
-
-impl SetupStep {
-    /// The lower-case name the control interface's `Surfaces` and the
-    /// journal use.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Choose { .. } => "choose",
-            Self::Pairing { .. } => "pairing",
-            Self::Confirm { .. } => "confirm",
-            Self::Confirmed { .. } => "confirmed",
-            Self::Connecting { .. } => "connecting",
-            Self::PhoneCallsOff { .. } => "phone-calls-off",
-            Self::PhoneUnreachable { .. } => "phone-unreachable",
-            Self::ContactsWarning { .. } => "contacts-warning",
-            Self::ContactsPrompt { .. } => "contacts-prompt",
-            Self::ContactsPromptTimedOut { .. } => "contacts-prompt-timed-out",
-            Self::ContactsSyncing { .. } => "contacts-syncing",
-            Self::ContactsPhoneAway { .. } => "contacts-phone-away",
-            Self::Done { .. } => "done",
-        }
     }
 }
 
@@ -387,6 +328,7 @@ impl State {
         let back = matches!(setup.notice, Some(SetupNotice::ChosenPhoneUnpaired { .. }))
             && self.phone.is_some();
         Some(SetupWindowView {
+            focus: self.setup_focus(setup.focus.as_ref(), &step),
             step,
             desktop_name: setup.desktop_name.clone(),
             notice: setup.notice.clone().filter(|_| !said_by_a_problem && !back),
@@ -517,6 +459,7 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
             }
         }
         Input::RetryHandsFree => retry(state, effects),
+        Input::SetupWindowFocus(focus) => focus::moved(state, focus),
         Input::RetryContacts => {
             if state.contacts_sync == ContactsState::Unavailable(Unavailable::PromptTimedOut)
                 && state.phone_is_here()
@@ -839,10 +782,17 @@ fn wait(setup: &mut Setup, after_ms: u32, effects: &mut Vec<Effect>) {
     });
 }
 
-/// After every step: the Phone being set up is connected for Calls once
-/// hands-free is up, and the window warns that it is about to ask whether
-/// to share Contacts.
-pub(super) fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
+/// After every step: the window follows the connection and the sync, and
+/// forgets what had the keyboard once the page it was on is gone.
+pub(super) fn follow(state: &mut State, effects: &mut Vec<Effect>) {
+    follow_connection(state, effects);
+    follow_contacts(state, effects);
+    focus::forget_once_gone(state);
+}
+
+/// The Phone being set up is connected for Calls once hands-free is up,
+/// and the window warns that it is about to ask whether to share Contacts.
+fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
     let connected = state.connection == ConnectionState::Connected;
     let followed = state.phone.clone();
     let Some(setup) = state.setup.as_mut() else {
@@ -859,12 +809,12 @@ pub(super) fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
-/// After every step: the sync the window follows is over once the Phone
-/// refused, the sync failed, or it finished, and the window goes on to the
-/// finish page. An unanswered prompt waits for Try again or Skip. If the
-/// Phone leaves before Contacts are read, the window says so instead; once
-/// they are, only older Calls are missing, and the window finishes.
-pub(super) fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
+/// The sync the window follows is over once the Phone refused, the sync
+/// failed, or it finished, and the window goes on to the finish page. An
+/// unanswered prompt waits for Try again or Skip. If the Phone leaves
+/// before Contacts are read, the window says so instead; once they are,
+/// only older Calls are missing, and the window finishes.
+fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
     let here = state.phone_is_here();
     let sync = state.contacts_sync;
     let Some(setup) = state.setup.as_mut() else {

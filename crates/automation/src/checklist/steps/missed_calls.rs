@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     ACT_DEADLINE, APP_DEADLINE, LOG_LOOKBACK_US, TALK_DEADLINE, call_ends, helper_calls,
-    helper_calls_as, millis, no_call_left, stopped_ringing, unix_micros_at,
+    helper_calls_as, millis, no_call_left, unix_micros_at,
 };
 use crate::checklist::sitting::{Seen, Sitting, Stop, seconds};
 use crate::checklist::watch::{AppMissedCall, AppState};
@@ -59,15 +59,20 @@ pub(super) fn call_history_refresh(sitting: &mut Sitting, ended: &Seen) -> Resul
 const LOG_POLL: Duration = Duration::from_millis(250);
 
 /// Waits for the helper's Call to ring out, then for its Missed Call
-/// notification. Returns the Missed Call, or `None` if the step can't go
-/// on, with the reason in the findings.
-fn rings_out(sitting: &mut Sitting, call: u32) -> Result<Option<AppMissedCall>, Stop> {
+/// notification. `ringing` is the state the Call rings in: `ringing`, or
+/// `waiting` for a Call that rings during another. Returns the Missed Call,
+/// or `None` if the step can't go on, with the reason in the findings.
+pub(super) fn rings_out(
+    sitting: &mut Sitting,
+    call: u32,
+    ringing: &str,
+) -> Result<Option<AppMissedCall>, Stop> {
     sitting.say(
         "Don't answer or decline, on either device: let it ring until it stops.",
         &["ring-out"],
     );
     let ended = sitting.wait_for("the Call ringing out", TALK_DEADLINE, |state| {
-        stopped_ringing(state, call)
+        state.call(call).is_none_or(|known| known.state != ringing)
     })?;
     if ended.state.call(call).is_some() {
         sitting.check(
@@ -149,7 +154,7 @@ pub(super) fn ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
         sitting,
         "Ask your helper to call you, and to let it ring until it stops.",
     )?;
-    let Some(missed) = rings_out(sitting, call)? else {
+    let Some(missed) = rings_out(sitting, call, "ringing")? else {
         return Ok(());
     };
     let shown = sitting.ask(
@@ -251,7 +256,7 @@ pub(super) fn withheld_ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
                 .to_owned()
         },
     );
-    let Some(missed) = rings_out(sitting, call)? else {
+    let Some(missed) = rings_out(sitting, call, "ringing")? else {
         return Ok(());
     };
     sitting.check(

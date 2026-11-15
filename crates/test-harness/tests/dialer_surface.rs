@@ -259,14 +259,14 @@ fn the_footer_shows_the_keys_and_follows_the_phone_out_of_range() {
 
     assert_eq!(
         shown(&state, "keys"),
-        Some("Enter Call · ↑ ↓ Move · Alt Q Quiet Hours · Esc Close")
+        Some("Enter Call · ↑ ↓ Move · Alt Q Quiet hours · Esc Close")
     );
     assert_eq!(shown(&state, "phone"), Some("Simulated Pixel"));
     assert_eq!(shown(&state, "phone-live"), Some("true"));
     let state = type_query(&harness, "zzzz");
     assert_eq!(
         shown(&state, "keys"),
-        Some("Alt Q Quiet Hours · Esc Close"),
+        Some("Alt Q Quiet hours · Esc Close"),
         "nothing to Call or move to"
     );
 
@@ -440,7 +440,7 @@ fn during_a_live_call_enter_in_the_dialer_says_hang_up_the_current_call_first() 
     });
     assert_eq!(
         shown(&state, "notice"),
-        Some("Hang up the current Call first.")
+        Some("Hang up the current call first.")
     );
     never_dialled(&harness);
 }
@@ -596,8 +596,8 @@ fn every_way_of_opening_the_dialer_logs_that_it_was_asked() {
         ("a left click on the Indicator", |harness| {
             harness.tray().activate();
         }),
-        ("Open Dialer in the Indicator's menu", |harness| {
-            harness.tray().click("Open Dialer");
+        ("New call… in the Indicator's menu", |harness| {
+            harness.tray().click("New call…");
         }),
         ("the keybinding's command", |harness| run(harness, &[])),
         ("`desktop-calls dialer`", |harness| {

@@ -20,7 +20,7 @@ use std::rc::Rc;
 
 mod rows;
 
-use rows::RowView;
+use rows::{Dot, RowView};
 
 /// The Dialer.
 pub(super) struct Dialer {
@@ -366,7 +366,16 @@ impl Dialer {
         }
         for (index, view) in views.iter().enumerate() {
             match rows.get(index).zip(texts.get(index)) {
-                Some((row, text)) => view.show(row, text, &underline, index < new_missed),
+                Some((row, text)) => {
+                    let dot = if index < new_missed {
+                        Dot::Shown
+                    } else if new_missed > 0 {
+                        Dot::Room
+                    } else {
+                        Dot::None
+                    };
+                    view.show(row, text, &underline, dot);
+                }
                 None => view.hide(),
             }
         }

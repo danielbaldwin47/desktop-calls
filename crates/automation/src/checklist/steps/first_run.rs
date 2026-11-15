@@ -53,7 +53,7 @@ fn keybinding_said(state: &AppState) -> Option<&str> {
 
 fn already_added(state: &AppState) -> bool {
     window_field(state, "keybinding")
-        .is_some_and(|text| text.contains("Place your first Call: press Super + Alt + C"))
+        .is_some_and(|text| text.contains("Place your first call: press Super+Alt+C"))
 }
 
 /// 1.1: the pairing forgotten on both sides, then `just install`, which
@@ -169,7 +169,7 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
     }
     close_the_window(sitting)?;
     sitting.say(
-        "Press Super + Alt + C, type the Test Number, and press Enter.",
+        "Press Super+Alt+C, type the Test Number, and press Enter.",
         &["keybinding", "type-test-number", "enter", "phone-dials"],
     );
     let placed = sitting.wait_for("your first Call being placed", CALL_DEADLINE, |state| {
@@ -208,7 +208,7 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
 }
 
 /// Adds the keybinding from the finish page, if it offers it: the line is
-/// shown first, and written once confirmed. Returns whether Super + Alt + C
+/// shown first, and written once confirmed. Returns whether Super+Alt+C
 /// is bound to the Dialer now; if not, the step has failed, and says why.
 fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
     // The page checks the Hyprland config as it opens: the offer, or the
@@ -229,7 +229,7 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
             sitting.check(
                 false,
                 format!(
-                    "The finish page offered no keybinding to add, so Super + Alt + C won't open the Dialer. It says: {said}"
+                    "The finish page offered no keybinding to add, so Super+Alt+C won't open the Dialer. It says: {said}"
                 ),
             );
             return Ok(false);

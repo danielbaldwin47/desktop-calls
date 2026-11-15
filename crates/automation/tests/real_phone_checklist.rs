@@ -513,7 +513,7 @@ fn group_6_times_the_reconnect_after_out_of_range_suspend_a_wireplumber_restart_
         "went off when the Quiet Hours began",
         "disconnected when the Quiet Hours began",
         "came back on when the Quiet Hours ended",
-        "Quiet Hours are off",
+        "Quiet hours are off",
     ] {
         assert!(says(quiet, said), "{said}: {quiet:#}");
     }

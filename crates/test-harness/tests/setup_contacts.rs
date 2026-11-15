@@ -39,7 +39,7 @@ const COUNTDOWN_TOLERANCE_MS: u64 = 1_500;
 /// read reaches it within milliseconds.
 const CACHE_SETTLE: Duration = Duration::from_secs(1);
 const PHONE_NAME: &str = "My Pixel";
-const SYNCED: &str = "Synced 312 Contacts and 200 recent Calls.";
+const SYNCED: &str = "Synced 312 contacts and 200 recent calls.";
 
 /// A fresh install, with the Phone nearby holding 312 Contacts and 200
 /// Calls, which it gives at the Pixel's pace, and asking whether to share
@@ -166,7 +166,7 @@ fn add_the_keybinding(harness: &Harness) -> String {
     let state = harness.wait_for_app("the keybinding is added", DEADLINE, |state| {
         field(state, "buttons") == Some("Done")
             && field(state, "keybinding")
-                .is_some_and(|text| text.contains("Place your first Call: press Super + Alt + C"))
+                .is_some_and(|text| text.contains("Place your first call: press Super+Alt+C"))
     });
     // Every step is done, the shortcut too.
     assert!(
@@ -233,11 +233,11 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
 
     // The Call History lands in under 2 s; Contacts take about 9 s more.
     let state = harness.wait_for_app(
-        "Recent Calls are done while Contacts are read",
+        "Recent calls are done while Contacts are read",
         PROMPT_DEADLINE,
         |state| {
             field(state, "progress").is_some_and(|progress| {
-                progress.starts_with("✓ Recent Calls\nContacts · 312 · about ")
+                progress.starts_with("✓ Recent calls\nContacts · 312 · about ")
             })
         },
     );
@@ -245,7 +245,7 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
     assert_eq!(field(&state, "stage"), Some("Sync"));
     assert_eq!(
         field(&state, "sync-note"),
-        Some("Calls already work. Names appear as Contacts arrive.")
+        Some("Calls already work. Names appear as contacts arrive.")
     );
     // The bar has moved, and isn't full while Contacts are read.
     let bar: u32 = field(&state, "sync-bar")
@@ -377,11 +377,11 @@ fn a_phone_leaving_during_the_contacts_pull_leaves_contacts_not_synced_across_a_
     wait_for_prompt(&harness);
     harness.simulated_phone().answer_contacts_prompt("grant");
     harness.wait_for_app(
-        "Recent Calls are done while Contacts are read",
+        "Recent calls are done while Contacts are read",
         PROMPT_DEADLINE,
         |state| {
             field(state, "progress")
-                .is_some_and(|progress| progress.starts_with("✓ Recent Calls\nContacts · 312"))
+                .is_some_and(|progress| progress.starts_with("✓ Recent calls\nContacts · 312"))
         },
     );
 
@@ -439,13 +439,13 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
         "how to allow it later: {summary}"
     );
     assert!(
-        field(&state, "keybinding").is_some_and(|text| text.contains("Open the Dialer")),
+        field(&state, "keybinding").is_some_and(|text| text.contains("Open the dialer")),
         "{state:?}"
     );
     // Without a keybinding yet, the first Call starts from the bar.
     assert!(
         field(&state, "instructions").is_some_and(|text| text
-            .contains("Place your first Call: choose Open Dialer from Desktop Calls in the bar")),
+            .contains("Place your first call: choose New call… from Desktop Calls in the bar")),
         "{state:?}"
     );
     // Sharing was refused, so neither it nor the sync is ticked.
@@ -462,7 +462,7 @@ fn the_keybinding_is_written_exactly_as_shown_once_confirmed_and_not_at_all_when
     let state = at_the_finish_page_offering_the_keybinding(&harness);
     // The keybinding and the pin tip: two cards.
     assert!(
-        field(&state, "keybinding").is_some_and(|text| text.contains("Super + Alt + C")),
+        field(&state, "keybinding").is_some_and(|text| text.contains("Super+Alt+C")),
         "{state:?}"
     );
     assert!(
@@ -543,7 +543,7 @@ fn keys_the_user_already_bound_are_left_alone_and_the_finish_page_names_the_comm
 
     let state = harness.wait_for_app("the finish page names the clash", DEADLINE, |state| {
         field(state, "keybinding")
-            .is_some_and(|text| text.contains("Super + Alt + C already does something else"))
+            .is_some_and(|text| text.contains("Super+Alt+C already does something else"))
     });
     assert_eq!(field(&state, "buttons"), Some("Done"), "{state:?}");
     assert!(

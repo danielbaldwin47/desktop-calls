@@ -252,7 +252,7 @@ fn a_connected_call_collapses_to_the_call_pill_in_the_bottom_right_corner_after_
             shown.get("hang-up-tooltip").map(String::as_str),
         ),
         (
-            Some("Show Call · Super+Alt+C"),
+            Some("Show call · Super+Alt+C"),
             Some("Mute · M"),
             Some("Hang up · Ctrl+H")
         )
@@ -656,7 +656,7 @@ fn a_waiting_calls_banner_takes_its_usual_place_while_the_call_pill_shows() {
     let screenshot = harness.screenshot_when("call-pill-and-banner", SCREEN_DEADLINE, |shot| {
         find(shot, GREEN).is_some()
     });
-    let hold_and_answer = find(&screenshot, GREEN).unwrap_or_else(|| panic!("no Hold & Answer"));
+    let hold_and_answer = find(&screenshot, GREEN).unwrap_or_else(|| panic!("no Hold & answer"));
     // Flush top right, as always. The Banner's heading and caller sit above
     // Hold & Answer.
     assert!(
@@ -762,7 +762,7 @@ fn hold_and_answer_expands_the_call_pill_and_collapsed_again_it_says_one_on_hold
     live_on_desktop(&harness);
     wait_until_collapsed(&harness);
     let _path = harness.simulated_phone().ring(SECOND_NUMBER);
-    harness.wait_for_app("the Banner offers Hold & Answer", DEADLINE, |state| {
+    harness.wait_for_app("the Banner offers Hold & answer", DEADLINE, |state| {
         state
             .surface("banner")
             .is_some_and(|banner| banner.contains_key("options"))
@@ -775,10 +775,10 @@ fn hold_and_answer_expands_the_call_pill_and_collapsed_again_it_says_one_on_hold
 
     harness
         .hold_and_answer()
-        .unwrap_or_else(|error| panic!("Hold & Answer: {error:?}"));
+        .unwrap_or_else(|error| panic!("Hold & answer: {error:?}"));
 
     harness.wait_for_app(
-        "Hold & Answer expands the Call Window with the Call on hold",
+        "Hold & answer expands the Call Window with the Call on hold",
         DEADLINE,
         |state| {
             pill(state).is_none()
@@ -820,7 +820,7 @@ fn end_and_answer_expands_the_call_pill_for_the_new_call_which_collapses_again()
     live_on_desktop(&harness);
     wait_until_collapsed(&harness);
     let _path = harness.simulated_phone().ring(SECOND_NUMBER);
-    harness.wait_for_app("the Banner offers End & Answer", DEADLINE, |state| {
+    harness.wait_for_app("the Banner offers End & answer", DEADLINE, |state| {
         state
             .surface("banner")
             .is_some_and(|banner| banner.contains_key("options"))
@@ -828,10 +828,10 @@ fn end_and_answer_expands_the_call_pill_for_the_new_call_which_collapses_again()
 
     harness
         .end_and_answer()
-        .unwrap_or_else(|error| panic!("End & Answer: {error:?}"));
+        .unwrap_or_else(|error| panic!("End & answer: {error:?}"));
 
     harness.wait_for_app(
-        "End & Answer expands the Call Window for the new Call",
+        "End & answer expands the Call Window for the new Call",
         DEADLINE,
         |state| {
             pill(state).is_none()

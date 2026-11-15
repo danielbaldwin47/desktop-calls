@@ -284,7 +284,7 @@ impl Demo {
         }
     }
 
-    /// The user's Hyprland config already binds Super + Alt + C to another
+    /// The user's Hyprland config already binds Super+Alt+C to another
     /// program, so the finish page can't offer that keybinding.
     fn bind_super_alt_c_elsewhere(&self) {
         let bindings = self.harness.directory().join("config/hypr/bindings.lua");

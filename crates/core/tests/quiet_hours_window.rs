@@ -93,7 +93,7 @@ fn open(state: State) -> State {
         .menu
         .into_iter()
         .find(|entry| matches!(entry, IndicatorEntry::QuietHours(_)))
-        .expect("the menu has Quiet Hours…");
+        .expect("the menu has Quiet hours…");
     run(state, [entry.intent().expect("it opens the window")]).0
 }
 
@@ -138,7 +138,7 @@ fn the_menu_has_one_quiet_hours_entry_whether_calls_are_on_or_off_or_no_phone_is
     let view = state.indicator(&state.surfaces());
     assert_eq!(
         messages::indicator_entry(&IndicatorEntry::QuietHours(None), &view),
-        "Quiet Hours…"
+        "Quiet hours…"
     );
 }
 
@@ -153,7 +153,7 @@ fn opened_with_no_quiet_hours_it_is_switched_off_and_offers_22_00_to_07_00() {
     let text = messages::quiet_hours_window(&view);
     assert_eq!(
         text.sentence,
-        "Off. Calls stay on unless you turn them off from the Indicator."
+        "Off. Calls stay on unless you turn them off from Desktop Calls in the bar."
     );
     assert_eq!(
         text.keys,
@@ -359,7 +359,7 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     assert_eq!(
         messages::quiet_hours_window(&view).keys,
         [
-            (&["Tab"][..], "Next"),
+            (&["Tab"][..], "Next field"),
             (&["↑", "↓"][..], "15 min"),
             (&["Esc"][..], "Close")
         ]

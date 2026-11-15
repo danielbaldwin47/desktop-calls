@@ -391,7 +391,7 @@ impl Banner {
 
     /// Who is calling: the initial tile (the Contact's initial, or `#`),
     /// the name or the number, and under it the number's label and the
-    /// number, or "Not in Contacts" for a bare number.
+    /// number, or "Not in contacts" for a bare number.
     fn show_who(&self, view: &BannerView, content: &mut BTreeMap<String, String>) {
         let who = match &view.caller {
             RingingCaller::Identifying => Who {

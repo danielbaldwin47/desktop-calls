@@ -144,7 +144,7 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
         .set_quiet_hours(minutes(23, 59), minutes(6, 0))
         .expect("Quiet Hours set");
 
-    harness.wait_for_app("Quiet Hours are set", DEADLINE, |state| {
+    harness.wait_for_app("Quiet hours are set", DEADLINE, |state| {
         state.quiet_hours == Some((minutes(23, 59), minutes(6, 0)))
     });
     assert!(now() < start, "the setup took too long to test the start");
@@ -273,9 +273,9 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let said = cli_ok(&harness, &["quiet-hours", "22:00-06:30"]);
     assert_eq!(
         said,
-        "Quiet Hours are 22:00 to 06:30: calls are off then every day, and on again after.\n"
+        "Quiet hours are 22:00 to 06:30: calls are off then every day, and on again after.\n"
     );
-    harness.wait_for_app("Quiet Hours are set", DEADLINE, |state| {
+    harness.wait_for_app("Quiet hours are set", DEADLINE, |state| {
         state.quiet_hours == Some((minutes(22, 0), minutes(6, 30)))
     });
     assert_eq!(
@@ -290,7 +290,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     assert_eq!(
         cli_ok(&harness, &["status"]),
         format!(
-            "Connected to My Pixel ({address}).\nQuiet Hours: calls are off every day from 22:00 to 06:30.\n"
+            "Connected to My Pixel ({address}).\nQuiet hours: calls are off every day from 22:00 to 06:30.\n"
         )
     );
     let json: serde_json::Value =
@@ -317,14 +317,14 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     assert!(!refused.status.success());
     assert_eq!(
         String::from_utf8_lossy(&refused.stderr),
-        "Give Quiet Hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them.\n"
+        "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them.\n"
     );
 
     assert_eq!(
         cli_ok(&harness, &["quiet-hours", "off"]),
-        "Quiet Hours are off.\n"
+        "Quiet hours are off.\n"
     );
-    harness.wait_for_app("Quiet Hours are off", DEADLINE, |state| {
+    harness.wait_for_app("Quiet hours are off", DEADLINE, |state| {
         state.quiet_hours.is_none()
     });
     assert!(!quiet_hours_file(&harness).exists());
@@ -344,7 +344,7 @@ fn set_quiet_hours_refuses_a_time_past_23_59() {
     assert!(
         refused
             .message
-            .starts_with("Give Quiet Hours as HH:MM-HH:MM"),
+            .starts_with("Give quiet hours as HH:MM-HH:MM"),
         "{refused:?}"
     );
     assert_eq!(harness.app_state().quiet_hours, None);

@@ -96,19 +96,19 @@ fn menu_reads(harness: &Harness, labels: &[&str]) {
 const CUE_MENU: [&str; 7] = [
     "My Pixel connected",
     "1 missed call…",
-    "Open Dialer",
+    "New call…",
     "Turn calls off",
-    "Quiet Hours…",
+    "Quiet hours…",
     "---",
-    "Connect your phone…",
+    "Phone setup…",
 ];
 const PLAIN_MENU: [&str; 6] = [
     "My Pixel connected",
-    "Open Dialer",
+    "New call…",
     "Turn calls off",
-    "Quiet Hours…",
+    "Quiet hours…",
     "---",
-    "Connect your phone…",
+    "Phone setup…",
 ];
 
 #[test]

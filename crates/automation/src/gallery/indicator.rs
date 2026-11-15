@@ -98,7 +98,7 @@ fn missed_call(harness: &Harness) {
 const MISSED_TOOLTIP: &str = "Simulated Pixel connected · 1 missed call";
 
 /// The Quiet Hours entry, with the times `quiet_hours` sets as its hint.
-const QUIET_HOURS_ENTRY: &str = "Quiet Hours…  22:00–07:00";
+const QUIET_HOURS_ENTRY: &str = "Quiet hours…  22:00–07:00";
 
 /// The icon's states.
 pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
@@ -171,7 +171,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
         title: "The Indicator, in a Call",
         prepare: as_is,
         reach: live,
-        tooltip: "In a Call with +44 7700 900123",
+        tooltip: "In a call with +44 7700 900123",
         submenu: None,
         menu_shows: &[],
     },
@@ -183,7 +183,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this Call ends",
+        tooltip: "Calls turn off when this call ends",
         submenu: None,
         menu_shows: &[],
     },
@@ -295,7 +295,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this Call ends",
+        tooltip: "Calls turn off when this call ends",
         submenu: None,
         menu_shows: &["Hang up", "Keep calls on"],
     },

@@ -14,10 +14,10 @@ pub(super) const TURN_CALLS_ON: &str = "Turn calls on";
 /// The menu entry that cancels a turn-off waiting for the last Call.
 pub(super) const KEEP_CALLS_ON: &str = "Keep calls on";
 /// The Indicator's status while a turn-off waits for the last Call.
-pub(super) const PENDING: &str = "Calls turn off when this Call ends";
+pub(super) const PENDING: &str = "Calls turn off when this call ends";
 /// The Indicator's status during a Call placed while calls were off: they
 /// go off again once it ends (ticket #206).
-pub(super) const AGAIN: &str = "Calls off again when this Call ends";
+pub(super) const AGAIN: &str = "Calls off again when this call ends";
 /// Calls turned off until a time that has already passed.
 pub(super) const UNTIL_PASSED: &str =
     "That time has already passed, so calls stay on; choose a time ahead.";
@@ -65,7 +65,7 @@ pub fn setup_calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> SetupCall
 #[must_use]
 pub fn quiet_hours_set(hours: QuietHours) -> String {
     format!(
-        "Quiet Hours are {} to {}: calls are off then every day, and on again after.",
+        "Quiet hours are {} to {}: calls are off then every day, and on again after.",
         hours.start(),
         hours.end()
     )
@@ -74,14 +74,14 @@ pub fn quiet_hours_set(hours: QuietHours) -> String {
 /// What `desktop-calls quiet-hours off` said.
 #[must_use]
 pub fn quiet_hours_cleared() -> &'static str {
-    "Quiet Hours are off."
+    "Quiet hours are off."
 }
 
 /// The line `desktop-calls status` adds while Quiet Hours are set.
 #[must_use]
 pub fn quiet_hours_status(hours: QuietHours) -> String {
     format!(
-        "Quiet Hours: calls are off every day from {} to {}.",
+        "Quiet hours: calls are off every day from {} to {}.",
         hours.start(),
         hours.end()
     )
@@ -90,7 +90,7 @@ pub fn quiet_hours_status(hours: QuietHours) -> String {
 /// Why `desktop-calls quiet-hours` or `SetQuietHours` refused the times.
 #[must_use]
 pub fn quiet_hours_unreadable() -> &'static str {
-    "Give Quiet Hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them."
+    "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them."
 }
 
 /// The choice under Turn calls off that turns them off for an hour, ending
@@ -123,9 +123,9 @@ pub fn calls_off_status(off: bool, until: Option<TimeOfDay>) -> Option<String> {
 pub fn calls_off_pending_status(until: Option<TimeOfDay>) -> String {
     match until {
         Some(until) => format!(
-            "Calls turn off when this Call ends, until {until}; if the Call lasts past {until}, they stay on."
+            "Calls turn off when this call ends, until {until}; if the call lasts past {until}, they stay on."
         ),
-        None => "Calls turn off when this Call ends, until you turn them on.".to_owned(),
+        None => "Calls turn off when this call ends, until you turn them on.".to_owned(),
     }
 }
 
@@ -134,7 +134,7 @@ pub fn calls_off_pending_status(until: Option<TimeOfDay>) -> String {
 #[must_use]
 pub fn calls_off_waits(until: Option<TimeOfDay>) -> String {
     format!(
-        "{} Your Call carries on; run desktop-calls calls on to keep calls on.",
+        "{} Your call carries on; run desktop-calls calls on to keep calls on.",
         calls_off_pending_status(until)
     )
 }
@@ -143,7 +143,7 @@ pub fn calls_off_waits(until: Option<TimeOfDay>) -> String {
 /// last Call to end.
 #[must_use]
 pub fn calls_kept_on() -> &'static str {
-    "Calls stay on: they won't turn off when this Call ends."
+    "Calls stay on: they won't turn off when this call ends."
 }
 
 /// What `desktop-calls calls off` or `calls on` did. Calls turned off come
@@ -222,8 +222,8 @@ pub fn calls_turned_notice(notice: &CallsTurnedNotice) -> NotificationText {
         ),
         CallsTurned::OffAfterCall { until } => (
             until.map_or_else(
-                || "Calls off after this Call".to_owned(),
-                |until| format!("Calls off after this Call (until {})", until.shown),
+                || "Calls off after this call".to_owned(),
+                |until| format!("Calls off after this call (until {})", until.shown),
             ),
             format!("{phone} stays connected until then. Keep calls on from the bar to cancel."),
         ),

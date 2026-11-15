@@ -211,7 +211,7 @@ pub(super) fn sync(
     let rows = vec![
         SyncRow {
             done: call_history,
-            name: "Recent Calls",
+            name: "Recent calls",
             meta: None,
         },
         SyncRow {
@@ -231,7 +231,7 @@ pub(super) fn sync(
     SyncText {
         rows,
         bar: u16::try_from(bar).unwrap_or(1_000),
-        note: "Calls already work. Names appear as Contacts arrive.",
+        note: "Calls already work. Names appear as contacts arrive.",
     }
 }
 

@@ -701,9 +701,9 @@ fn quiet_hours_off(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.check(
         cleared.is_some(),
         if cleared.is_some() {
-            "Quiet Hours are off.".to_owned()
+            "Quiet hours are off.".to_owned()
         } else {
-            "The app logged no quiet-hours-cleared line: Quiet Hours are still set.".to_owned()
+            "The app logged no quiet-hours-cleared line: Quiet hours are still set.".to_owned()
         },
     );
     Ok(())

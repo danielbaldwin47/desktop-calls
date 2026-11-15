@@ -245,7 +245,7 @@ fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_go
     });
     harness
         .hold_and_answer()
-        .unwrap_or_else(|error| panic!("Hold & Answer: {error:?}"));
+        .unwrap_or_else(|error| panic!("Hold & answer: {error:?}"));
     harness.wait_for_app("Bob's Call is on hold", DEADLINE, |state| {
         shown(state, "held-caller").is_some() && state.surface("banner").is_none()
     });

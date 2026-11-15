@@ -95,11 +95,11 @@ const ACTIONS: &[(&str, KeyPath)] = &[
         "Give a Waiting Call's Banner the keyboard back, the Call still waiting: Escape",
         Case(CALL_WAITING),
     ),
-    ("Hold & Answer: H", Case(CALL_WAITING)),
+    ("Hold & answer: H", Case(CALL_WAITING)),
     ("Swap: S", Case(CALL_WAITING)),
     ("Hang up the live Call of two: Ctrl+H", Case(CALL_WAITING)),
     ("Resume the Call left on hold: S", Case(CALL_WAITING)),
-    ("End & Answer: E", Case(CALL_WAITING)),
+    ("End & answer: E", Case(CALL_WAITING)),
     ("Decline a Waiting Call: D", Case(CALL_WAITING)),
     ("Hang up the Call on hold: Shift+Ctrl+H", Case(CALL_WAITING)),
     // The Dialer and the Quiet Hours Window.
@@ -118,7 +118,7 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ),
     ("Call back a Missed Call: Enter", Case(DIALER)),
     ("Open the Quiet Hours Window: Alt+Q", Case(DIALER)),
-    ("Switch Quiet Hours on: Space", Case(DIALER)),
+    ("Switch Quiet hours on: Space", Case(DIALER)),
     ("Step the start of Quiet Hours: Tab, Up", Case(DIALER)),
     ("Step the start of Quiet Hours back: Down", Case(DIALER)),
     ("Type the end of Quiet Hours: Tab, digits", Case(DIALER)),
@@ -176,7 +176,7 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ),
     ("Close the Setup Window: Escape", Case(SETUP_COPY)),
     (
-        "Open the Setup Window again: Connect your phone…",
+        "Open the Setup Window again: Phone setup…",
         Missing { ticket: 292 },
     ),
     // A Missed Call's notification.
@@ -649,7 +649,7 @@ fn call_waiting_by_keys_alone() {
     harness.wait_for_app("Alice is live and Bob on hold", DEADLINE, |state| {
         state_of(state, alice) == Some("active") && state_of(state, bob) == Some("held")
     });
-    performed.did("Hold & Answer: H");
+    performed.did("Hold & answer: H");
 
     focus_the_call_window_showing(&harness, "swap", "S");
     harness.keyboard().type_text("s");
@@ -676,7 +676,7 @@ fn call_waiting_by_keys_alone() {
     harness.wait_for_app("only Carol is left, live", DEADLINE, |state| {
         state.calls.len() == 1 && state_of(state, carol) == Some("active")
     });
-    performed.did("End & Answer: E");
+    performed.did("End & answer: E");
 
     let hang_ups = asked(&wait_for_asked(&harness, "Hangup", 1), "Hangup");
     let (dave_path, _) = waits(&harness, DAVE, 2);

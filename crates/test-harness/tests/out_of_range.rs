@@ -309,7 +309,7 @@ fn a_connected_phone_without_hands_free_is_not_called_out_of_range() {
     let printed = harness.cli(&["status"]);
     let status = String::from_utf8_lossy(&printed.stdout);
     assert!(
-        status.contains("is in range, but not connected for Calls"),
+        status.contains("is in range, but not connected for calls"),
         "{printed:?}"
     );
 }
@@ -446,7 +446,7 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
             state
                 .surface("call-window")
                 .and_then(|window| window.get("notice"))
-                .is_some_and(|notice| notice == "The Call continues on your phone. Hang up there.")
+                .is_some_and(|notice| notice == "The call continues on your phone. Hang up there.")
         },
     );
     assert_eq!(state.connection_state, "disconnected");

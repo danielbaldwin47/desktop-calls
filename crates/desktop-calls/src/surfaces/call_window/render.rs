@@ -130,7 +130,7 @@ impl CallWindow {
     }
 
     /// Who the Call is with, and under it the number's label and the
-    /// number, or "Not in Contacts" for a bare number.
+    /// number, or "Not in contacts" for a bare number.
     fn show_who(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         let who = Who::of(&view.caller, view.contact.as_ref());
         who.show(&self.caller);
@@ -241,7 +241,7 @@ impl CallWindow {
 
     /// The notice: while contact with the Call is lost, a heading and what
     /// to do; for a Call not placed, that, and why; otherwise why something
-    /// failed, if anything did.
+    /// failed, if anything did, under a heading for audio that didn't move.
     fn show_notice(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         let (heading, text) = match view.notice {
             Some(notice) if view.connection_lost => {
@@ -252,7 +252,10 @@ impl CallWindow {
                 Some(messages::label(Label::CallNotPlaced)),
                 Some(messages::failure(notice).text),
             ),
-            Some(notice) => (None, Some(messages::failure(notice).text)),
+            Some(notice) => (
+                messages::live_notice_heading(notice),
+                Some(messages::failure(notice).text),
+            ),
             None => (None, None),
         };
         self.notice.heading.set_text(heading.unwrap_or_default());

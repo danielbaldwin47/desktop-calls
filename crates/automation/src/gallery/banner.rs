@@ -129,7 +129,7 @@ pub(super) const BANNER_STATES: &[State] = &[
     },
     State {
         name: "call-waiting-banner",
-        title: "A Waiting Call that can be held: Hold & Answer says who waits on hold, End & Answer whose Call ends; the Banner top right, the Call Window bottom right",
+        title: "A Waiting Call that can be held: Hold & answer says who waits on hold, End & answer whose Call ends; the Banner top right, the Call Window bottom right",
         still: expanded,
         prepare: with_keybinding,
         reach: |harness| {
@@ -159,12 +159,12 @@ pub(super) const BANNER_STATES: &[State] = &[
     },
     State {
         name: "call-waiting-banner-without-hold",
-        title: "A Waiting Call while a Call is still being placed, which can't be held: only Decline and End & Answer, naming the Call it ends",
+        title: "A Waiting Call while a Call is still being placed, which can't be held: only Decline and End & answer, naming the Call it ends",
         still: |state| {
             state
                 .surface("banner")
                 .and_then(|banner| banner.get("options"))
-                .is_some_and(|options| options == "End & Answer, Decline")
+                .is_some_and(|options| options == "End & answer, Decline")
         },
         prepare: with_keybinding,
         reach: |harness| {

@@ -20,7 +20,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
         prepare: at_noon,
         reach: |harness| {
             connect(harness);
-            harness.tray().click("Quiet Hours…");
+            harness.tray().click("Quiet hours…");
             wait_for(harness, &[("switch", "off"), ("focus", "switch")]);
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
@@ -37,7 +37,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             }
             harness
                 .tray()
-                .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
+                .click_when_shown("Quiet hours…  22:00–07:00", DEADLINE);
             wait_for(harness, &[("switch", "on"), ("focus", "switch")]);
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start"), ("start", "22:00")]);
@@ -56,7 +56,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             }
             harness
                 .tray()
-                .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
+                .click_when_shown("Quiet hours…  22:00–07:00", DEADLINE);
             wait_for(harness, &[("switch", "on"), ("focus", "switch")]);
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start")]);

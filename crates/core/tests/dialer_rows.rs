@@ -133,7 +133,7 @@ fn a_call_history_row_shows_its_direction_and_at_the_right_when() {
     );
     assert_eq!(row.glyph, DialerGlyph::Incoming);
     assert!(!row.missed, "only a Missed Call says so in words");
-    assert_eq!(row.detail, "Not in Contacts");
+    assert_eq!(row.detail, "Not in contacts");
     assert_eq!(row.time, "Thu 14:05");
 
     let row = messages::dialer_row(

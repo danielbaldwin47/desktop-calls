@@ -31,7 +31,7 @@ const HOLD: Duration = Duration::from_millis(300);
 const NUMBER: &str = "+447700900123";
 
 /// The Banner's footer on a Desktop with no Desktop Calls keybinding.
-const NO_KEYBINDING: &str = "No keybinding set. Add one in Connect your phone…";
+const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
 
 /// The Answer button's green.
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
@@ -247,7 +247,7 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
             state.surface("banner").is_some_and(|banner| {
                 banner.get("keycaps").map(String::as_str) == Some("A, D")
                     && banner.get("footer").map(String::as_str)
-                        == Some("Esc gives the keyboard back; the Call keeps ringing")
+                        == Some("Esc gives the keyboard back; the call keeps ringing")
             })
         },
     );

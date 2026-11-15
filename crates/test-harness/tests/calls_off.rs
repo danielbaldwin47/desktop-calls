@@ -278,7 +278,7 @@ fn unpairing_the_phone_while_calls_are_off_turns_them_on() {
         state.calls_off == "on" && state.phone.is_none()
     });
     assert!(!record(&harness).exists(), "the record is cleared");
-    indicator_says(&harness, "No Phone set up");
+    indicator_says(&harness, "No phone set up");
 }
 
 #[test]

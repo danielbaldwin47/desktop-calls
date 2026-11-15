@@ -29,9 +29,9 @@ pub fn call_pill_tooltip(name: Label, shortcut: &str) -> String {
     format!("{} · {shortcut}", label(name))
 }
 
-/// The tooltip of the Call Pill's body, which a click expands: "Show Call ·
+/// The tooltip of the Call Pill's body, which a click expands: "Show call ·
 /// Super+Alt+C", with the Desktop Calls keybinding, which expands it too.
 #[must_use]
 pub fn show_call_tooltip() -> String {
-    format!("Show Call · {}", shown_keys(KEYS).replace(" + ", "+"))
+    format!("Show call · {}", shown_keys(KEYS))
 }

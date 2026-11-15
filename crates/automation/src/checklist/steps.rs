@@ -253,14 +253,14 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "4.1",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
-                title: "Call the Test Number from the Desktop while the second helper calls you: Hold & Answer, then Swap, then hang up one; the other stays live",
+                title: "Call the Test Number from the Desktop while the second helper calls you: Hold & answer, then Swap, then hang up one; the other stays live",
                 script: Some(hold_and_answer_then_swap),
                 lands_with: &[],
             },
             Step {
                 id: "4.2",
                 needs: &[TWO_HELPERS, TEST_NUMBER],
-                title: "Repeat with End & Answer: your Call ends and the second helper's connects",
+                title: "Repeat with End & answer: your Call ends and the second helper's connects",
                 script: Some(end_and_answer),
                 lands_with: &[],
             },
@@ -281,7 +281,7 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "4.5",
                 needs: &[TWO_HELPERS, TEST_NUMBER, THIRD_PHONE],
-                title: "Repeat 4.1 up to Hold & Answer, so the Test Number's Call is on hold and the second helper's live, then have the second helper call you from the third phone: the Banner offers only End & Answer and Decline, and End & Answer ends only the second helper's first Call while the Test Number's stays on hold. If the Test Number's Call comes back live instead, note it, and which Call the Call Window shows",
+                title: "Repeat 4.1 up to Hold & answer, so the Test Number's Call is on hold and the second helper's live, then have the second helper call you from the third phone: the Banner offers only End & answer and Decline, and End & answer ends only the second helper's first Call while the Test Number's stays on hold. If the Test Number's Call comes back live instead, note it, and which Call the Call Window shows",
                 script: Some(end_and_answer_with_one_on_hold),
                 lands_with: &[],
             },

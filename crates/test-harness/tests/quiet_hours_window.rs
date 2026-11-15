@@ -89,7 +89,7 @@ fn wait_for_window(harness: &Harness, fields: &[(&str, &str)]) -> AppState {
 }
 
 fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
-    harness.wait_for_app(&format!("Quiet Hours are {hours:?}"), DEADLINE, |state| {
+    harness.wait_for_app(&format!("Quiet hours are {hours:?}"), DEADLINE, |state| {
         state.quiet_hours == hours
     })
 }
@@ -99,16 +99,16 @@ fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
 /// Indicator, so until then the tray still lists the item of the app that
 /// is gone (CI run 43681715594: `ServiceUnknown` reading its menu).
 fn open(harness: &Harness) {
-    let quiet_hours = |entry: &&MenuEntry| entry.label.starts_with("Quiet Hours…");
+    let quiet_hours = |entry: &&MenuEntry| entry.label.starts_with("Quiet hours…");
     let menu = harness
         .tray()
-        .wait_for_menu("the menu has Quiet Hours…", DEADLINE, |menu| {
+        .wait_for_menu("the menu has Quiet hours…", DEADLINE, |menu| {
             menu.iter().any(|entry| quiet_hours(&entry))
         });
     let entry = menu
         .iter()
         .find(quiet_hours)
-        .unwrap_or_else(|| panic!("the menu has Quiet Hours…: {menu:#?}"));
+        .unwrap_or_else(|| panic!("the menu has Quiet hours…: {menu:#?}"));
     harness.tray().click(&entry.label);
 }
 
@@ -123,7 +123,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     // The menu shows the times as a hint.
     harness
         .tray()
-        .click_when_shown("Quiet Hours…  22:00–07:00", DEADLINE);
+        .click_when_shown("Quiet hours…  22:00–07:00", DEADLINE);
     let state = wait_for_window(
         &harness,
         &[
@@ -140,7 +140,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     assert_eq!(field(&state, "bar"), Some("00:00-07:00 22:00-24:00"));
     assert_eq!(
         field(&state, "keys"),
-        Some("Tab Next\n↑ ↓ 15 min\nEsc Close")
+        Some("Tab Next field\n↑ ↓ 15 min\nEsc Close")
     );
     assert_eq!(field(&state, "notice"), None);
 
@@ -166,7 +166,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     );
     assert_eq!(
         field(&state, "sentence"),
-        Some("Off. Calls stay on unless you turn them off from the Indicator.")
+        Some("Off. Calls stay on unless you turn them off from Desktop Calls in the bar.")
     );
     assert_eq!(field(&state, "keys"), Some("Space Switch on\nEsc Close"));
 }
@@ -339,7 +339,7 @@ fn alt_q_in_the_dialer_opens_it_with_the_keyboard() {
     });
     let keys = dialer(&state, "keys").unwrap_or_default();
     assert!(
-        keys.ends_with("Alt Q Quiet Hours · Esc Close"),
+        keys.ends_with("Alt Q Quiet hours · Esc Close"),
         "the footer shows Alt+Q: {keys:?}"
     );
 

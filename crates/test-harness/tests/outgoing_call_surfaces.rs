@@ -240,15 +240,15 @@ fn each_phone_failure_shows_one_plain_sentence_in_the_call_window() {
         ),
         (
             "invalid-state",
-            "Your phone is busy with another Call; try again in a moment.",
+            "Your phone is busy with another call; try again in a moment.",
         ),
         (
             "not-supported",
-            "Your phone doesn't let this computer place Calls; call from your phone instead.",
+            "Your phone doesn't let this computer place calls; call from your phone instead.",
         ),
         (
             "failed",
-            "Your phone couldn't place the Call; check it has signal and isn't in airplane mode.",
+            "Your phone couldn't place the call; check it has signal and isn't in airplane mode.",
         ),
         (
             "cme:30",

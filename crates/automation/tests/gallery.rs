@@ -248,7 +248,7 @@ fn missed_call_notifications_are_drawn(output: &Path, index: &str) {
 /// below, 30 for each row and 11 for each separator.
 fn indicator_menus_are_drawn(output: &Path, index: &str) {
     for (state, rows, separators) in [
-        // Status, Open Dialer, Turn calls off, Quiet Hours…, then setup.
+        // Status, New call…, Turn calls off, Quiet hours…, then setup.
         ("menu-calls-on", 5, 1),
         // As calls on, with the Missed Calls' line under the status.
         ("menu-missed-calls", 6, 1),

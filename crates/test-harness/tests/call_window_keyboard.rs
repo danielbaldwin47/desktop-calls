@@ -493,7 +493,7 @@ fn a_lone_call_on_hold_offers_resume_and_s_resumes_it() {
     });
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     harness.wait_for_app("the first Call is on hold", DEADLINE, |state| {
         state.calls.len() == 2 && state.calls[0].state == "held"
     });

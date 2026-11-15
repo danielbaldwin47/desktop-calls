@@ -225,7 +225,7 @@ fn the_key_hint_does_not_promise_enter_pairs_while_a_problem_button_has_focus() 
         Some(vec![
             (&["Enter"][..], "Turn on"),
             (&["Tab"][..], "Next button"),
-            (&["Esc"][..], "Close"),
+            (&["Esc"][..], "Cancel"),
         ]),
         "Enter presses the Problem's button"
     );
@@ -236,7 +236,7 @@ fn the_key_hint_does_not_promise_enter_pairs_while_a_problem_button_has_focus() 
     );
     assert_eq!(
         key_hint(&state),
-        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")]),
+        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Cancel")]),
         "with Bluetooth on, Enter pairs again"
     );
 }
@@ -264,7 +264,7 @@ fn the_key_hint_keeps_enter_pairs_when_a_problem_takes_no_focus() {
     );
     assert_eq!(
         key_hint(&state),
-        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Close")])
+        Some(vec![(&["Enter"][..], "Pair"), (&["Esc"][..], "Cancel")])
     );
     let shown = state.surfaces().setup_problems.expect("shown");
     assert!(

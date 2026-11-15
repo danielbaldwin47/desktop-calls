@@ -13,7 +13,8 @@
 
 use desktop_calls_core::{
     BluetoothPower, CallsOffRecord, Deadline, DesktopCheck, Effect, Input, Phone, QuietHours,
-    QuietHoursClock, SetupStep, SetupWindowView, State, TimeOfDay, Timestamp, WallClock,
+    QuietHoursClock, SetupFocus, SetupStep, SetupWindowView, State, TimeOfDay, Timestamp,
+    WallClock,
     messages::{self, ProblemKind},
     step,
 };
@@ -169,6 +170,21 @@ fn while_choosing_turn_calls_on_has_enter_and_nothing_is_listed_to_choose() {
     let text = text(&state);
     assert_eq!(text.keys[0], (&["Enter"][..], "Turn calls on"));
     assert_eq!(text.empty_list, None, "no \"Looking for phones nearby…\"");
+}
+
+#[test]
+fn a_phone_listed_with_the_keyboard_while_calls_are_off_does_not_promise_enter_pairs() {
+    let state = run(
+        opened(off()),
+        [Input::SetupWindowFocus(Some(SetupFocus::Phone))],
+    )
+    .0;
+
+    assert!(
+        text(&state).keys.iter().all(|(keys, _)| *keys != ["Enter"]),
+        "Enter pairs nothing until calls are on: {:?}",
+        text(&state).keys
+    );
 }
 
 #[test]

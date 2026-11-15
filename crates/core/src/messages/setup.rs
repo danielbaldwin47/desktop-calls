@@ -129,7 +129,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         SetupStep::Connecting { phone } => (
             format!("Connecting to {}…", phone.name),
             vec![Instruction::phone(
-                "If it asks to share contacts and call history, tap Allow, so Calls show names.",
+                "If it asks to share contacts and call history, tap Allow, so calls show names.",
             )],
             vec!["Close"],
         ),
@@ -155,6 +155,15 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         ),
     };
     text.keys = keys(view, &buttons, text.calls_off.as_ref());
+    // Escape does what a lone Cancel does: the footer says it in the
+    // button's word, not a second word beside it.
+    if buttons == ["Cancel"] {
+        for key in &mut text.keys {
+            if *key == CLOSE {
+                key.1 = "Cancel";
+            }
+        }
+    }
     text.heading = heading;
     text.instructions = instructions;
     text.buttons = buttons;
@@ -194,38 +203,42 @@ fn keys(
     buttons: &[&'static str],
     calls_off: Option<&SetupCallsOffText>,
 ) -> Keys {
+    let blocked = view.calls_off.is_some_and(|off| off.blocks_step);
     let reported = match (view.focus, &view.step) {
         (Some(SetupFocus::TurnCallsOn), _) => calls_off.map(turn_calls_on_keys),
         (Some(SetupFocus::Problem(problem)), _) => Some(problem_keys(problem)),
         (Some(SetupFocus::Button(index)), _) => buttons
             .get(index)
             .map(|button| button_keys(buttons, button)),
-        (Some(SetupFocus::Phone), SetupStep::Choose { phones }) => Some(choose_keys(phones)),
+        (Some(SetupFocus::Phone), SetupStep::Choose { phones }) => {
+            Some(choose_keys(phones, blocked))
+        }
         (Some(SetupFocus::Phone) | None, _) => None,
     };
     if let Some(keys) = reported {
         return keys;
     }
-    if let Some(off) = calls_off.filter(|_| view.calls_off.is_some_and(|off| off.blocks_step)) {
+    if let Some(off) = calls_off.filter(|_| blocked) {
         return turn_calls_on_keys(off);
     }
     if let Some(problem) = view.problem_has_focus {
         return problem_keys(problem);
     }
     match (&view.step, buttons.first()) {
-        (SetupStep::Choose { phones }, _) => choose_keys(phones),
+        (SetupStep::Choose { phones }, _) => choose_keys(phones, blocked),
         (_, Some(default)) => button_keys(buttons, default),
         (_, None) => vec![CLOSE],
     }
 }
 
-/// While choosing, a Phone listed has the keyboard.
-fn choose_keys(phones: &[Phone]) -> Keys {
+/// While choosing, a Phone listed has the keyboard. Enter pairs it unless
+/// calls are off and `blocked` pairing until they are on.
+fn choose_keys(phones: &[Phone], blocked: bool) -> Keys {
     let mut keys = Keys::new();
     if phones.len() > 1 {
         keys.push((&["↑", "↓"], "Choose"));
     }
-    if !phones.is_empty() {
+    if !phones.is_empty() && !blocked {
         keys.push((ENTER, "Pair"));
     }
     keys.push(CLOSE);
@@ -235,8 +248,8 @@ fn choose_keys(phones: &[Phone]) -> Keys {
 /// `button`, one of the step's `buttons`, has the keyboard.
 fn button_keys(buttons: &[&'static str], button: &'static str) -> Keys {
     match buttons {
-        // Enter and Escape do one thing: one entry says it.
-        ["Close"] => vec![(&["Enter", "Esc"], "Close")],
+        // Enter and Escape do one thing, but two keycaps in one entry
+        // read as a chord, as Alt Q does: an entry each.
         [_] => vec![(ENTER, button), CLOSE],
         _ => vec![(ENTER, button), NEXT, CLOSE],
     }
@@ -302,7 +315,7 @@ fn phone_unreachable(text: &mut SetupWindowText, phone: &Phone) -> Page {
 
 fn phone_calls_off(text: &mut SetupWindowText, phone: &Phone, desktop: &str) -> Page {
     text.summary = Some(format!(
-        "{} is paired, but isn't sharing Calls with this computer.",
+        "{} is paired, but isn't sharing calls with this computer.",
         phone.name
     ));
     (
@@ -319,7 +332,7 @@ fn phone_calls_off(text: &mut SetupWindowText, phone: &Phone, desktop: &str) -> 
 
 fn contacts_warning(text: &mut SetupWindowText, phone: &Phone) -> Page {
     text.summary = Some(format!(
-        "{} is connected. Next it asks whether to share contacts and call history with this computer, so Calls show names.",
+        "{} is connected. Next it asks whether to share contacts and call history with this computer, so calls show names.",
         phone.name
     ));
     (
@@ -398,7 +411,7 @@ fn contacts_syncing(
 ) -> Page {
     text.sync = Some(sync(call_history, contacts, contacts_read, now));
     (
-        "Reading Contacts and recent Calls…".to_owned(),
+        "Reading contacts and recent calls…".to_owned(),
         Vec::new(),
         vec!["Close"],
     )
@@ -407,7 +420,7 @@ fn contacts_syncing(
 /// The Phone left before Contacts were read: wait for it, then carry on.
 fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
     if back {
-        text.summary = Some("Contacts and recent Calls aren't read yet.".to_owned());
+        text.summary = Some("Contacts and recent calls aren't read yet.".to_owned());
         return (
             format!("{} is back", phone.name),
             vec![Instruction::here(
@@ -417,7 +430,7 @@ fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
         );
     }
     text.summary = Some(format!(
-        "{} disconnected before contacts and recent Calls were read.",
+        "{} disconnected before contacts and recent calls were read.",
         phone.name
     ));
     (
@@ -441,8 +454,8 @@ fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
     match outcome {
         ContactsOutcome::Synced { contacts, calls } => format!(
             "Synced {} and {}.",
-            plural(count(contacts), "Contact", "Contacts"),
-            plural(count(calls), "recent Call", "recent Calls")
+            plural(count(contacts), "contact", "contacts"),
+            plural(count(calls), "recent call", "recent calls")
         ),
         ContactsOutcome::Denied => format!(
             "Your phone isn't sharing contacts. Calls still work, and show numbers instead of names. To allow it later: on your phone open Settings, then Connected devices, tap the settings icon next to {desktop} and turn on Contacts and call history."
@@ -469,14 +482,14 @@ fn finish(
 ) -> (Vec<Instruction>, Option<SetupCard>, Vec<&'static str>) {
     let card = |text: String| {
         Some(SetupCard {
-            title: "Open the Dialer from anywhere",
+            title: "Open the dialer from anywhere",
             text,
         })
     };
     // Until a key opens the Dialer, the first Call starts from the bar.
     let from_the_bar = || {
         vec![Instruction::here(
-            "Place your first Call: choose Open Dialer from Desktop Calls in the bar, type a name or number, then press Enter.",
+            "Place your first call: choose New call… from Desktop Calls in the bar, type a name or number, then press Enter.",
         )]
     };
     let check = match keybinding {
@@ -521,7 +534,7 @@ fn finish(
         ),
         KeybindingCheck::Added { keys, .. } => (
             format!(
-                "Place your first Call: press {} to open the Dialer, type a name or number, then press Enter.",
+                "Place your first call: press {} to open the dialer, type a name or number, then press Enter.",
                 shown_keys(keys)
             ),
             vec!["Done"],
@@ -532,7 +545,7 @@ fn finish(
             command,
         } => (
             format!(
-                "{} already does something else in {}; to open the Dialer from a key, bind another one to run {command}",
+                "{} already does something else in {}; to open the dialer from a key, bind another one to run {command}",
                 shown_keys(keys),
                 shown_path(file, home)
             ),
@@ -540,13 +553,13 @@ fn finish(
         ),
         KeybindingCheck::Unreadable { file, command } => (
             format!(
-                "{} couldn't be read, so no keybinding can be added to it; to open the Dialer from a key, bind one to run {command}",
+                "{} couldn't be read, so no keybinding can be added to it; to open the dialer from a key, bind one to run {command}",
                 shown_path(file, home)
             ),
             vec!["Done"],
         ),
         KeybindingCheck::NoConfig { command } => (
-            format!("To open the Dialer from a key, bind one to run {command}"),
+            format!("To open the dialer from a key, bind one to run {command}"),
             vec!["Done"],
         ),
     };
@@ -560,7 +573,7 @@ fn finish(
 }
 
 /// Keys as Hyprland names them, `SUPER + ALT + C`, as people read them:
-/// `Super + Alt + C`.
+/// `Super+Alt+C`, written as tooltips write `Ctrl+H`.
 pub(super) fn shown_keys(keys: &str) -> String {
     keys.split('+')
         .map(|key| {
@@ -574,7 +587,7 @@ pub(super) fn shown_keys(keys: &str) -> String {
             })
         })
         .collect::<Vec<_>>()
-        .join(" + ")
+        .join("+")
 }
 
 /// Why the last attempt didn't work, or why the window opened, and what to

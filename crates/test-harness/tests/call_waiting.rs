@@ -310,7 +310,7 @@ fn a_call_during_a_live_one_waits_with_three_options_and_the_desktop_stays_silen
     let shown = banner(&state).expect("the Banner shows");
     assert_eq!(
         shown.get("options").map(String::as_str),
-        Some("Hold & Answer, End & Answer, Decline")
+        Some("Hold & answer, End & answer, Decline")
     );
     assert_eq!(
         shown.get("heading").map(String::as_str),
@@ -327,7 +327,7 @@ fn a_call_during_a_live_one_waits_with_three_options_and_the_desktop_stays_silen
     );
     assert_eq!(
         shown.get("end-and-answer-consequence").map(String::as_str),
-        Some("Ends the Call with +44\u{a0}7700\u{a0}900123")
+        Some("Ends the call with +44\u{a0}7700\u{a0}900123")
     );
     assert_eq!(shown.get("decline-consequence"), None);
     assert!(state.surface("call-window").is_some());
@@ -350,7 +350,7 @@ fn scenario_14_hold_and_answer_then_swap_then_hanging_up_one_leaves_the_other_li
 
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
     wait_for_phone_asked(&harness, "HoldAndAnswer");
     let state = wait_for_alice_live_bob_held(&harness, bob, alice);
     assert_eq!(
@@ -389,7 +389,7 @@ fn scenario_15_end_and_answer_ends_the_live_call_and_connects_the_waiting_one() 
     on_a_call(&harness);
     let (_, alice) = alice_waits(&harness);
 
-    harness.end_and_answer().expect("End & Answer is passed on");
+    harness.end_and_answer().expect("End & answer is passed on");
 
     wait_for_phone_asked(&harness, "ReleaseAndAnswer");
     let state = harness.wait_for_app("only Alice's Call is left, live", DEADLINE, |state| {
@@ -480,11 +480,11 @@ fn when_the_phone_refuses_to_hold_the_user_is_told_and_both_calls_stay_as_they_w
 
     harness
         .hold_and_answer()
-        .expect("Hold & Answer is passed on");
+        .expect("Hold & answer is passed on");
 
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "hold-and-answer-failed");
-    let sentence = "Your phone didn't put your Call on hold, so both Calls are as they were; answer on your phone instead.";
+    let sentence = "Your phone didn't put your call on hold, so both calls are as they were; answer on your phone instead.";
     assert_eq!(error.message, sentence);
     let state = harness.wait_for_app("the Call Window says why", DEADLINE, |state| {
         call_window(state, "notice").as_deref() == Some(sentence)
@@ -503,7 +503,7 @@ fn swap_with_no_call_on_hold_is_refused_with_the_reason() {
     let error = harness.swap().expect_err("Swap is refused");
 
     assert!(error.kind.ends_with("NoHeldCall"), "{error:?}");
-    assert_eq!(error.message, "There's no Call on hold to swap to.");
+    assert_eq!(error.message, "There's no call on hold to swap to.");
 }
 
 fn close_to(colour: [u8; 3], target: [u8; 3]) -> bool {
@@ -668,11 +668,11 @@ fn when_the_phone_refuses_end_and_answer_the_user_is_told_and_the_banner_comes_b
     let (_, bob) = on_a_call(&harness);
     let (_, alice) = alice_waits(&harness);
 
-    harness.end_and_answer().expect("End & Answer is passed on");
+    harness.end_and_answer().expect("End & answer is passed on");
 
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "end-and-answer-failed");
-    let sentence = "Your phone didn't end your Call, so both Calls are as they were; end it on your phone instead.";
+    let sentence = "Your phone didn't end your call, so both calls are as they were; end it on your phone instead.";
     assert_eq!(error.message, sentence);
     let state = harness.wait_for_app(
         "the Call Window says why and the Banner is back",

@@ -18,15 +18,15 @@ pub(super) fn problem(problem: ProblemKind) -> Option<Message> {
             Some(NextAction::Command("rfkill unblock bluetooth")),
         ),
         ProblemKind::ContactsSupportMissing => (
-            "This computer is missing the Bluetooth file transfer service that brings Contacts and Call History over from your phone; copy this command and run it in a terminal to install it.",
+            "This computer is missing the Bluetooth file transfer service that brings contacts and call history over from your phone; copy this command and run it in a terminal to install it.",
             Some(NextAction::Command("sudo pacman -S --needed bluez-obex")),
         ),
         ProblemKind::AudioNotSetUp => (
-            "This computer's audio isn't set up to connect to your phone for Calls by itself and keep their audio on the phone until you move it here; choose Set up audio to save that setting and restart the audio.",
+            "This computer's audio isn't set up to connect to your phone for calls by itself and keep their audio on the phone until you move it here; choose Set up audio to save that setting and restart the audio.",
             None,
         ),
         ProblemKind::BluezHandsFree => (
-            "An experimental calling feature of this computer's Bluetooth is on and takes your phone's Calls before Desktop Calls can; to turn it off, set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line if it is there), then copy this command and run it in a terminal.",
+            "An experimental calling feature of this computer's Bluetooth is on and takes your phone's calls before Desktop Calls can; to turn it off, set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line if it is there), then copy this command and run it in a terminal.",
             Some(NextAction::Command("sudo systemctl restart bluetooth")),
         ),
         ProblemKind::ContactsDenied
@@ -43,7 +43,7 @@ pub(super) fn heading(problem: ProblemKind) -> Option<&'static str> {
         ProblemKind::BluetoothOff => "Bluetooth is off",
         ProblemKind::BluetoothBlocked => "Bluetooth is blocked",
         ProblemKind::ContactsSupportMissing => "Contacts support not installed",
-        ProblemKind::AudioNotSetUp => "Audio not set up for Calls",
+        ProblemKind::AudioNotSetUp => "Audio not set up for calls",
         ProblemKind::BluezHandsFree => "Bluetooth's own calling is on",
         ProblemKind::ContactsDenied
         | ProblemKind::ContactsPromptUnanswered
@@ -88,7 +88,7 @@ pub fn fix_failed(failure: FixFailure, settings_folder: &str) -> String {
             "The audio setting is saved, but the audio didn't restart; log out and back in to use it."
         }
         FixFailure::CallInProgress => {
-            "Setting up audio restarts it, which would cut off your Call; try again once the Call ends."
+            "Setting up audio restarts it, which would cut off your call; try again once the call ends."
         }
     };
     text.to_owned()
@@ -103,7 +103,7 @@ pub fn copy_command_label() -> &'static str {
 /// The keycap on a Problem's button while Enter presses it.
 #[must_use]
 pub fn problem_keycap() -> &'static str {
-    "↵"
+    "Enter"
 }
 
 /// What the Setup Window says once a command is copied.

@@ -274,7 +274,7 @@ fn the_indicator_says_calls_turn_off_when_this_call_ends() {
     assert_eq!(view.look, IndicatorLook::InCall);
     assert_eq!(
         messages::indicator_status(&view.status),
-        "Calls turn off when this Call ends"
+        "Calls turn off when this call ends"
     );
     assert_eq!(
         messages::indicator_entry(&IndicatorEntry::KeepCallsOn, &view),

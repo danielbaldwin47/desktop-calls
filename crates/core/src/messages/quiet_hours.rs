@@ -10,8 +10,8 @@ use crate::machine::{QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHo
 /// the label.
 pub(super) fn menu_entry(hours: Option<QuietHours>) -> String {
     match hours {
-        Some(hours) => format!("Quiet Hours…  {}–{}", hours.start(), hours.end()),
-        None => "Quiet Hours…".to_owned(),
+        Some(hours) => format!("Quiet hours…  {}–{}", hours.start(), hours.end()),
+        None => "Quiet hours…".to_owned(),
     }
 }
 
@@ -45,9 +45,9 @@ pub fn quiet_hours_window(view: &QuietHoursWindowView) -> QuietHoursWindowText {
         _ => time.to_string(),
     };
     QuietHoursWindowText {
-        title: "Quiet Hours",
-        heading: "Quiet Hours",
-        switch: "Quiet Hours on",
+        title: "Quiet hours",
+        heading: "Quiet hours",
+        switch: "Quiet hours on",
         from: "Calls off from",
         until: "until",
         start: field(QuietHoursField::Start, view.start),
@@ -56,7 +56,7 @@ pub fn quiet_hours_window(view: &QuietHoursWindowView) -> QuietHoursWindowText {
         notice: view.refused.then_some("Start and end must differ"),
         keys: if view.on {
             vec![
-                (&["Tab"], "Next"),
+                (&["Tab"], "Next field"),
                 (&["↑", "↓"], "15 min"),
                 (&["Esc"], "Close"),
             ]
@@ -80,7 +80,7 @@ fn typing(digits: &str) -> String {
 fn sentence(sentence: QuietHoursSentence) -> String {
     match sentence {
         QuietHoursSentence::Off => {
-            "Off. Calls stay on unless you turn them off from the Indicator.".to_owned()
+            "Off. Calls stay on unless you turn them off from Desktop Calls in the bar.".to_owned()
         }
         QuietHoursSentence::Saved { start, end, day } => {
             let day = match day {
@@ -95,7 +95,7 @@ fn sentence(sentence: QuietHoursSentence) -> String {
             format!("Saved. Calls are off until {end}, and every day from {start} to {end}.")
         }
         QuietHoursSentence::Pending { start, end } => format!(
-            "Saved. Calls go off when this Call ends, until {end}, and every day from {start} to {end}."
+            "Saved. Calls go off when this call ends, until {end}, and every day from {start} to {end}."
         ),
     }
 }

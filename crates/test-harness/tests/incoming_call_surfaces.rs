@@ -208,7 +208,7 @@ fn the_banner_shows_the_formatted_number_within_a_second() {
     assert_eq!(banner.get("initial").map(String::as_str), Some("#"));
     assert_eq!(
         banner.get("meta").map(String::as_str),
-        Some("Not in Contacts")
+        Some("Not in contacts")
     );
     assert!(state.ringing);
     assert_eq!(call_window(&state), None);

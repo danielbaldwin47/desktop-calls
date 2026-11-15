@@ -303,7 +303,7 @@ pub(super) fn calls_off_during_a_call(sitting: &mut Sitting) -> Result<(), Stop>
         );
         return Ok(());
     }
-    sitting.observed("Calls turn off when this Call ends: the turn-off waits.".to_owned());
+    sitting.observed("Calls turn off when this call ends: the turn-off waits.".to_owned());
     let mark = sitting.mark();
     sitting.pause(CARRIES_ON)?;
     let cut = sitting

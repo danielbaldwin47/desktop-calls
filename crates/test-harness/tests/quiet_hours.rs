@@ -163,6 +163,9 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
         |state| state.calls_off == "off",
     );
     wait_off_until(&harness, end);
+    // The app logs the block once BlueZ answers it, which can be after the
+    // disconnect the block causes (#362).
+    harness.wait_for_app_log(r#""event_kind":"calls-turned-off""#, DEADLINE);
     let blocked = logged_at(&harness, "calls-turned-off");
     assert!(
         blocked.len() == 1 && blocked[0] >= start * 1_000_000,

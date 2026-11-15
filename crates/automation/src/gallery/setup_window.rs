@@ -44,6 +44,31 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
     State {
+        name: "setup-window-calls-off-bluetooth-off",
+        title: "The Setup Window while calls are off and Bluetooth is off: both cards, Turn calls on with its key, and a phone to choose once both are on (#369)",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+            harness.wait_for_app("calls are off", DEADLINE, |state| {
+                state.calls_off == "off" && state.connection_state == "disconnected"
+            });
+            harness.set_bluetooth_power("off");
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app(
+                "the Setup Window says calls are off and Bluetooth is off",
+                DEADLINE,
+                |state| {
+                    setup_window_shows(state, "calls-off", "Calls are off")
+                        && setup_window_shows(state, "focused", "true")
+                        && shows_problem(state, "bluetooth-off")
+                },
+            );
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
         name: "setup-problem-bluetooth-off",
         title: "The Setup Window with Bluetooth off: one card with Turn on and its key, the steps dimmed, and no Phone to list",
         still: |_| true,

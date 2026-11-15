@@ -898,6 +898,9 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::PairDone { .. }
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
+        | Input::HandsFreeUnpaired
+        | Input::PairAgain
+        | Input::PairingNotRemoved
         | Input::RetryHandsFree
         | Input::SetupWindowFocus(_)
         | Input::RetryContacts

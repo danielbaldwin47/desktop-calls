@@ -97,6 +97,13 @@ impl Pairing {
                     let _ = inputs.unbounded_send(input);
                 });
             }
+            Effect::RemovePairing { address } => {
+                MainContext::default().spawn_local(async move {
+                    if remove_pairing(&system, &address).await.is_err() {
+                        let _ = inputs.unbounded_send(Input::PairingNotRemoved);
+                    }
+                });
+            }
             Effect::TrustPhone { address } => {
                 MainContext::default().spawn_local(async move { trust(&system, &address).await });
             }
@@ -109,6 +116,9 @@ impl Pairing {
                         }
                         HandsFree::Unreachable => {
                             let _ = inputs.unbounded_send(Input::HandsFreeUnreachable);
+                        }
+                        HandsFree::Unpaired => {
+                            let _ = inputs.unbounded_send(Input::HandsFreeUnpaired);
                         }
                     }
                 });
@@ -287,6 +297,40 @@ async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> 
     }
 }
 
+/// `Adapter1.RemoveDevice` on the Phone with `address`, which no longer has
+/// the Desktop paired, so it can be paired afresh (ticket #377). BlueZ
+/// disconnects it first. Gone already counts as removed.
+async fn remove_pairing(system: &Connection, address: &str) -> Result<(), ()> {
+    match remove_device(system, address).await {
+        Ok(()) => {}
+        Err(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "org.bluez.Error.DoesNotExist" => {}
+        Err(error) => {
+            setup_failed("RemoveDevice", &error.to_string());
+            return Err(());
+        }
+    }
+    tracing::info!(
+        event_kind = %EventKind::PairingRemoved,
+        phone_address = %address,
+        "Removed the Desktop's stale pairing with the Phone, to pair it afresh"
+    );
+    Ok(())
+}
+
+async fn remove_device(system: &Connection, address: &str) -> zbus::Result<()> {
+    let Some(device) = bluez::find_device(system, address).await? else {
+        return Ok(());
+    };
+    let Some(adapter) = powered_adapter(system).await else {
+        return Err(zbus::Error::Failure(
+            "BlueZ has no powered adapter".to_owned(),
+        ));
+    };
+    let device = ObjectPath::try_from(device.as_str())?;
+    adapter_call(system, &adapter, "RemoveDevice", &(device,)).await
+}
+
 /// Sets `Trusted` on the Phone with `address`, so it connects without
 /// asking each time.
 async fn trust(system: &Connection, address: &str) {
@@ -308,6 +352,8 @@ enum HandsFree {
     Refused,
     /// Didn't answer: out of range, or its Bluetooth is off.
     Unreachable,
+    /// Answered without the pairing: it no longer has the Desktop paired.
+    Unpaired,
 }
 
 /// Whether a BlueZ error from `ConnectProfile` says the Phone never
@@ -359,6 +405,18 @@ async fn connect_hands_free(system: &Connection, address: &str) -> HandsFree {
                 "The Phone didn't answer for hands-free: out of range or its Bluetooth is off"
             );
             HandsFree::Unreachable
+        }
+        Err(zbus::Error::MethodError(name, message, _))
+            if bluez::pairing_lost(name.as_str(), message.as_deref().unwrap_or_default()) =>
+        {
+            tracing::info!(
+                event_kind = %EventKind::HandsFreeUnpaired,
+                error_kind = "pairing-lost",
+                phone_address = %address,
+                detail = %format!("{name}: {}", message.unwrap_or_default()),
+                "The Phone no longer has the Desktop paired, asked for hands-free"
+            );
+            HandsFree::Unpaired
         }
         Err(error) => {
             tracing::info!(

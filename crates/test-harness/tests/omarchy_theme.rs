@@ -212,15 +212,23 @@ fn the_call_window_takes_its_colours_from_the_omarchy_theme() {
 
     harness.answer(call);
 
+    // The Call Window collapses to the Call Pill 5 s after the Call
+    // connects, so the patch is read from the frame judged while the app
+    // still reported the Call Window: a second capture on a slow runner came
+    // after the collapse, and read the empty screen behind it (#288).
     let screenshot = harness.screenshot_when("call-window", DEADLINE, |screenshot| {
-        shows(screenshot, light.colour("red")) && !shows(screenshot, light.colour("green"))
+        shows(screenshot, light.colour("red"))
+            && !shows(screenshot, light.colour("green"))
+            && harness.app_state().surface("call-window").is_some()
     });
     let window = app_region(&screenshot).expect("the Call Window is on screen");
-    let patch = harness.screenshot_of("call-window-background", background_patch(window));
+    let elsewhere = screenshot.region_within(background_patch(window), |pixel| {
+        !close_to(pixel, light.colour("background"))
+    });
     assert!(
-        shows_only(&patch, light.colour("background")),
-        "the Call Window's background isn't the theme's; see {}",
-        patch.path.display()
+        elsewhere.is_none(),
+        "the Call Window's background isn't the theme's at {elsewhere:?}; see {}",
+        screenshot.path.display()
     );
 }
 

@@ -22,7 +22,9 @@
 //!   within a second, as the same Call: the hands-free profile dropping
 //!   briefly, or `WirePlumber` restarting, does that mid-Call. While
 //!   hands-free is away, such a Call ends only if hands-free isn't back
-//!   within [`GRACE`], or [`SERVICE_GRACE`] once the whole service has gone.
+//!   within [`GRACE`], or [`SERVICE_GRACE`] once the whole service has gone,
+//!   counted for every vanished Call from when hands-free went, if it went
+//!   later than the Call (#303).
 //!   Once hands-free is back, it is settled by the Calls the Phone lists:
 //!   the same Call if listed, ended if not listed within [`LISTING_GRACE`]
 //!   (ADR-0007). The AudioGateway comes back before its Calls, and nothing
@@ -785,8 +787,12 @@ impl PhoneLink {
         let followed = self.connected.as_deref() == Some(path);
         // Vanished Calls are known again by their number, so they vanish
         // before their objects are forgotten: the service may go without
-        // unannouncing them first, as when WirePlumber stops.
+        // unannouncing them first, as when WirePlumber stops. A Call that
+        // went just before is settled with the rest of the link: its grace,
+        // too, starts now, so how long the app took between them can't end
+        // it while the others are still awaited (#303).
         if followed {
+            self.restart_graces(GRACE, outcome);
             self.vanish_all(outcome);
         }
         let prefix = format!("{path}/");

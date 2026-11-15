@@ -122,6 +122,20 @@ impl Change {
         )
     }
 
+    /// This change split after the first Call's `CallRemoved`: that Call
+    /// going, then everything after it. The second part is empty if no Call
+    /// went.
+    pub fn split_after_first_call(self) -> (Self, Self) {
+        let at = self
+            .signals
+            .iter()
+            .position(|(_, signal)| matches!(signal, Signal::CallRemoved { .. }))
+            .map_or(self.signals.len(), |at| at + 1);
+        let mut first = self.signals;
+        let rest = first.split_off(at);
+        (Self { signals: first }, Self { signals: rest })
+    }
+
     fn bluez(&mut self, signal: Signal) {
         self.signals.push((Service::Bluez, signal));
     }
@@ -361,6 +375,22 @@ pub async fn emit(
         }
     }
     Ok(())
+}
+
+/// Sends `change` `after` a delay, on a thread of its own so the services
+/// keep answering meanwhile.
+pub fn emit_later(
+    system: Connection,
+    telephony: TelephonyConnection,
+    change: Change,
+    after: Duration,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(after);
+        if let Err(error) = zbus::block_on(emit(&system, &telephony, change)) {
+            eprintln!("simulated-phone: a delayed change failed: {error}");
+        }
+    });
 }
 
 /// Whether `call` is BlueZ's `Device1.Connect`, which this module answers.

@@ -329,15 +329,34 @@ impl Control {
     /// `ModemRemoved`; the device loses `Battery1`, and BlueZ marks the Phone
     /// disconnected. The Calls carry on on the Phone. The Desktop's
     /// `Connect` fails after BlueZ's page timeout until the Phone is back.
+    /// With the quirk `calls-go-apart`, what follows the first Call going is
+    /// sent [`telephony::CALLS_GO_APART`] later.
     async fn disconnect(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let change = {
+        let (change, apart) = {
             let mut world = lock(&self.world);
             world.range.reachable = false;
             world.obex.link_lost();
-            range::hands_free_down(&mut world)?
+            let apart = world
+                .behaviour
+                .quirks
+                .contains(&telephony::Quirk::CallsGoApart);
+            (range::hands_free_down(&mut world)?, apart)
+        };
+        let change = match change {
+            Some(change) if apart => {
+                let (first, rest) = change.split_after_first_call();
+                range::emit_later(
+                    self.system.clone(),
+                    Arc::clone(&self.telephony),
+                    rest,
+                    telephony::CALLS_GO_APART,
+                );
+                Some(first)
+            }
+            change => change,
         };
         self.range_changed(change, &emitter).await
     }

@@ -425,6 +425,43 @@ fn with_a_held_call_both_calls_stay_listed_and_neither_can_be_acted_on() {
     assert_eq!(on_phone, ["active", "held"]);
 }
 
+/// Two Calls lost in one link drop are settled alike, however far apart
+/// the app saw them go (#303). With `calls-go-apart`, the app sees Bob's
+/// held Call go 1.5 s before Alice's and the AudioGateway, as when its main
+/// loop was held between them on a slow runner. The Phone is back about
+/// 0.6 s after the AudioGateway went: past 2 s from when Bob's Call went,
+/// well within 2 s of the link going. Both come back as the same Calls.
+#[test]
+fn two_calls_lost_in_one_link_drop_come_back_alike_however_far_apart_they_went() {
+    let harness = connected();
+    let (_, bob) = on_a_call(&harness);
+    let (_, alice) = alice_waits(&harness);
+    harness
+        .hold_and_answer()
+        .expect("Hold & Answer is passed on");
+    harness.wait_for_app("Alice is live and Bob on hold", DEADLINE, |state| {
+        state_of(state, alice) == Some("active") && state_of(state, bob) == Some("held")
+    });
+    harness.simulated_phone().enable_quirk("calls-go-apart");
+
+    harness.simulated_phone().disconnect();
+    wait_lost(&harness);
+    harness.simulated_phone().return_to_range();
+
+    let state = harness.wait_for_app(
+        "both Calls are back as the same Calls",
+        RECONNECT_DEADLINE,
+        |state| {
+            state.connection_state == "connected"
+                && call_window(state, "notice").is_none()
+                && call_window(state, "held-call").is_some()
+        },
+    );
+    assert_eq!(state_of(&state, alice), Some("active"), "{state:#?}");
+    assert_eq!(state_of(&state, bob), Some("held"), "{state:#?}");
+    assert_eq!(state.calls.len(), 2, "{state:#?}");
+}
+
 /// Alice's Call waits during Bob's when hands-free is lost: her Banner goes,
 /// as it can't be answered or declined from here, and the Indicator doesn't
 /// say she is calling.

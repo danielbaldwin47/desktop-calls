@@ -427,7 +427,8 @@ fn with_a_held_call_both_calls_stay_listed_and_neither_can_be_acted_on() {
 
 /// Two Calls lost in one link drop are settled alike, however far apart
 /// the app saw them go (#303). With `calls-go-apart`, the app sees Bob's
-/// held Call go 1.5 s before Alice's and the AudioGateway, as when its main
+/// held Call, the first at the lowest path, go 1.5 s before Alice's and the
+/// AudioGateway, as when its main
 /// loop was held between them on a slow runner. The Phone is back about
 /// 0.6 s after the AudioGateway went: past 2 s from when Bob's Call went,
 /// well within 2 s of the link going. Both come back as the same Calls.

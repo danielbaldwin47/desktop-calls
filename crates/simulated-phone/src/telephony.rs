@@ -182,7 +182,8 @@ pub enum Quirk {
     /// [`CALLS_GO_APART`] before the other Calls and the AudioGateway, as
     /// the app did when its main loop was held between them on a slow
     /// runner (ticket #303). PipeWire sends them together; tests use it to
-    /// put a fixed gap where a stall fell.
+    /// put a fixed gap where a stall fell. The first Call is the one at the
+    /// lowest path, the earliest still on the Phone.
     CallsGoApart,
     /// BlueZ marks the Phone connected without sending the `Connected`
     /// `PropertiesChanged`: the Desktop's last word on the Phone stays
@@ -210,8 +211,10 @@ pub const SERVICE_LEVEL_TIME: Duration = Duration::from_millis(200);
 pub const CALLS_LISTED_LATE: Duration = Duration::from_secs(2);
 
 /// How long [`Quirk::CallsGoApart`] holds back what follows the first
-/// Call going: less than the Desktop's 2 s grace for a vanished Call, so
-/// the first Call is still awaited when the AudioGateway goes.
+/// Call going: under the Desktop's 2 s grace for a vanished Call, so the
+/// first Call is still awaited when the AudioGateway goes even if the app
+/// is held a further 0.5 s, and long enough that a Phone back 0.6 s after
+/// the AudioGateway went is back after that first Call's own 2 s.
 pub const CALLS_GO_APART: Duration = Duration::from_millis(1_500);
 
 /// How long [`Quirk::SlowPropertyWrites`] holds each reply.

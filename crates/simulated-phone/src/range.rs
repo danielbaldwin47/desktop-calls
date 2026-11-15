@@ -136,6 +136,11 @@ impl Change {
         (Self { signals: first }, Self { signals: rest })
     }
 
+    /// Whether the change sends nothing.
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+
     fn bluez(&mut self, signal: Signal) {
         self.signals.push((Service::Bluez, signal));
     }
@@ -375,22 +380,6 @@ pub async fn emit(
         }
     }
     Ok(())
-}
-
-/// Sends `change` `after` a delay, on a thread of its own so the services
-/// keep answering meanwhile.
-pub fn emit_later(
-    system: Connection,
-    telephony: TelephonyConnection,
-    change: Change,
-    after: Duration,
-) {
-    std::thread::spawn(move || {
-        std::thread::sleep(after);
-        if let Err(error) = zbus::block_on(emit(&system, &telephony, change)) {
-            eprintln!("simulated-phone: a delayed change failed: {error}");
-        }
-    });
 }
 
 /// Whether `call` is BlueZ's `Device1.Connect`, which this module answers.

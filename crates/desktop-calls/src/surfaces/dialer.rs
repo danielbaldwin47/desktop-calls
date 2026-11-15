@@ -7,9 +7,9 @@ use super::{
 };
 use crate::logging::EventKind;
 use crate::theme::space;
-use desktop_calls_core::matching::{DialerRow, DialerRowKind};
-use desktop_calls_core::messages::{self, DialerGlyph, Label};
-use desktop_calls_core::{Caller, DialerKey, DialerView, Input, PhoneStatus, Timestamp};
+use desktop_calls_core::matching::DialerRow;
+use desktop_calls_core::messages::{self, Label};
+use desktop_calls_core::{DialerKey, DialerView, Input, PhoneStatus};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -17,6 +17,10 @@ use gtk4_layer_shell::{KeyboardMode, Layer};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+mod rows;
+
+use rows::RowView;
 
 /// The Dialer.
 pub(super) struct Dialer {
@@ -55,6 +59,11 @@ pub(super) struct Dialer {
     /// The rows the list shows, and how many from the top it marks as
     /// Missed Calls the user hasn't seen.
     rows: RefCell<(Vec<DialerRow>, usize)>,
+    /// Every row the list has, those past the rows shown hidden: kept
+    /// between keystrokes and filled afresh (#350).
+    row_views: RefCell<Vec<RowView>>,
+    /// What the card was last fitted to the window with.
+    fitted: RefCell<Option<Fitted>>,
 }
 
 impl Dialer {
@@ -134,6 +143,8 @@ impl Dialer {
             openings: Rc::default(),
             query: RefCell::default(),
             rows: RefCell::default(),
+            row_views: RefCell::default(),
+            fitted: RefCell::default(),
         });
         dialer.connect(intents);
         dialer
@@ -223,9 +234,15 @@ impl Dialer {
         let shown = self.rows.borrow();
         let changed = shown.0 != view.rows || shown.1 != view.new_missed;
         drop(shown);
+        let (now, offset) = (now(), utc_offset_seconds());
+        let texts: Vec<_> = view
+            .rows
+            .iter()
+            .map(|row| messages::dialer_row(row, now, offset))
+            .collect();
         // Afresh on opening too, so the time column follows the clock.
         if changed || opening {
-            self.show_rows(&view.rows, view.new_missed);
+            self.show_rows(&view.rows, &texts, view.new_missed);
         }
         if let Some(row) = view
             .selected
@@ -254,8 +271,6 @@ impl Dialer {
         }
         let strip_shows = notice.is_some() || calls_off.is_some();
         self.notice.set_visible(strip_shows);
-        self.fit(strip_shows);
-
         let mut content = BTreeMap::from([
             ("query".to_owned(), view.query.clone()),
             ("rows".to_owned(), view.rows.len().to_string()),
@@ -275,23 +290,8 @@ impl Dialer {
         let strip_says_off = notice.is_none() && content.contains_key("calls-off");
         self.footer
             .show(&view.keys, &view.phone, strip_says_off, &mut content);
-        let (now, offset) = (now(), utc_offset_seconds());
-        for (index, row) in view.rows.iter().enumerate() {
-            let text = row_text(row, now, offset);
-            content.insert(format!("row-{index}"), text.line());
-            content.insert(format!("row-{index}-glyph"), text.glyph.as_str().to_owned());
-            if !row.matched.is_empty() {
-                let matched: Vec<&str> = row
-                    .matched
-                    .iter()
-                    .filter_map(|range| row.name.get(range.clone()))
-                    .collect();
-                content.insert(format!("row-{index}-matched"), matched.join(","));
-            }
-        }
-        for (index, section) in section_starts(&view.rows) {
-            content.insert(format!("section-{index}"), section.to_owned());
-        }
+        self.fit_if_changed(opening, strip_shows, &view.keys);
+        report_rows(&view.rows, &texts, &mut content);
         self.surface.show(content);
         self.surface.focus(true);
         self.take_clicks_on_card_only();
@@ -348,27 +348,50 @@ impl Dialer {
         });
     }
 
-    /// Fills the list with `rows`, from the top, the first `new_missed`
-    /// with a dot at their right: Missed Calls the user hasn't seen.
-    fn show_rows(&self, rows: &[DialerRow], new_missed: usize) {
-        self.list.remove_all();
+    /// Fills the list with `rows`, from the top, reading as `texts`, the
+    /// first `new_missed` with a dot at their right: Missed Calls the user
+    /// hasn't seen. Nothing is selected until the view says.
+    fn show_rows(&self, rows: &[DialerRow], texts: &[messages::DialerRowText], new_missed: usize) {
+        self.list.unselect_all();
         *self.sections.borrow_mut() = rows
             .iter()
             .map(|row| messages::dialer_section(row.kind))
             .collect();
         let underline = self.accent.color();
-        let (now, offset) = (now(), utc_offset_seconds());
-        for (index, row) in rows.iter().enumerate() {
-            let text = row_text(row, now, offset);
-            let shown = row_widget(row, &text, &underline, index < new_missed);
-            let list_row = gtk::ListBoxRow::new();
-            // The entry keeps the keyboard; the list only shows.
-            list_row.set_focusable(false);
-            list_row.set_child(Some(&shown));
-            self.list.append(&list_row);
+        let mut views = self.row_views.borrow_mut();
+        while views.len() < rows.len() {
+            let view = RowView::new();
+            self.list.append(&view.list_row);
+            views.push(view);
         }
+        for (index, view) in views.iter().enumerate() {
+            match rows.get(index).zip(texts.get(index)) {
+                Some((row, text)) => view.show(row, text, &underline, index < new_missed),
+                None => view.hide(),
+            }
+        }
+        drop(views);
+        self.list.invalidate_headers();
         self.scrolled.vadjustment().set_value(0.0);
         *self.rows.borrow_mut() = (rows.to_vec(), new_missed);
+    }
+
+    /// Fits the card to the window, as [`Self::fit`], on `opening` or when
+    /// the notice strip or the footer's keys have changed since it last
+    /// did: the card's height around its list changes only with them.
+    /// Measuring the card lays out every row, which cost 4.5 ms a keystroke
+    /// with 5,000 Contacts (#350). After the footer and the strip show what
+    /// they will, so they are measured as drawn.
+    fn fit_if_changed(&self, opening: bool, strip_shows: bool, keys: &[DialerKey]) {
+        let fitted = Fitted {
+            strip_shows,
+            notice: self.notice_text.label().to_string(),
+            keys: keys.to_vec(),
+        };
+        if opening || self.fitted.borrow().as_ref() != Some(&fitted) {
+            self.fit(strip_shows);
+            *self.fitted.borrow_mut() = Some(fitted);
+        }
     }
 
     /// Keeps the window as tall as a full Dialer, the list as tall as its
@@ -423,9 +446,37 @@ impl Dialer {
     }
 }
 
-/// How `row` reads, with when a Call History row's Call was.
-fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRowText {
-    messages::dialer_row(row, now, offset)
+/// Adds what each of `rows` shows, reading as `texts`, to `content`: its
+/// line, its glyph and its matched letters, and where each section starts.
+fn report_rows(
+    rows: &[DialerRow],
+    texts: &[messages::DialerRowText],
+    content: &mut BTreeMap<String, String>,
+) {
+    for (index, (row, text)) in rows.iter().zip(texts).enumerate() {
+        content.insert(format!("row-{index}"), text.line());
+        content.insert(format!("row-{index}-glyph"), text.glyph.as_str().to_owned());
+        if !row.matched.is_empty() {
+            let matched: Vec<&str> = row
+                .matched
+                .iter()
+                .filter_map(|range| row.name.get(range.clone()))
+                .collect();
+            content.insert(format!("row-{index}-matched"), matched.join(","));
+        }
+    }
+    for (index, section) in section_starts(rows) {
+        content.insert(format!("section-{index}"), section.to_owned());
+    }
+}
+
+/// What the card's height around its list follows: whether the notice
+/// strip shows, what it says, and the footer's keys.
+#[derive(PartialEq, Eq)]
+struct Fitted {
+    strip_shows: bool,
+    notice: String,
+    keys: Vec<DialerKey>,
 }
 
 /// The card that shows: the Dialer's background, border and corners.
@@ -458,148 +509,22 @@ fn section_headers(
         };
         let starts = section(row).filter(|label| before.and_then(section) != Some(*label));
         let Some(label) = starts else {
-            row.set_header(None::<&gtk::Widget>);
+            if row.header().is_some() {
+                row.set_header(None::<&gtk::Widget>);
+            }
             return;
         };
+        // The label this row had, if any, says the new section.
+        if let Some(header) = row.header().and_downcast::<gtk::Label>() {
+            header.set_text(label);
+            return;
+        }
         let header = gtk::Label::new(Some(label));
         header.add_css_class(class::EYEBROW);
         header.add_css_class("section");
         header.set_xalign(0.0);
         row.set_header(Some(&header));
     }
-}
-
-/// A row of the list: its glyph, its name over its detail line, when at
-/// the right, and the dot of a Missed Call the user hasn't seen if
-/// `marked`. The letters of the name that matched what was typed are
-/// underlined in `underline`.
-fn row_widget(
-    row: &DialerRow,
-    text: &messages::DialerRowText,
-    underline: &gtk::gdk::RGBA,
-    marked: bool,
-) -> gtk::Box {
-    let title = gtk::Label::new(Some(&text.title));
-    title.add_css_class("title");
-    // A row with no name shows the bare number.
-    if row.kind != DialerRowKind::CallNumber
-        && row.name.trim().is_empty()
-        && matches!(row.caller, Caller::Number(_))
-    {
-        title.add_css_class(class::NUMBER);
-    }
-    if text.title == row.name && !row.matched.is_empty() {
-        title.set_attributes(Some(&underlined(&row.matched, underline)));
-    }
-    title.set_xalign(0.0);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    lines.set_hexpand(true);
-    lines.set_valign(gtk::Align::Center);
-    lines.append(&title);
-    if text.missed || !text.detail.is_empty() {
-        lines.append(&detail_line(text));
-    }
-    let shown = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
-    shown.add_css_class("dialer-row");
-    shown.append(&glyph(&text.glyph));
-    shown.append(&lines);
-    if !text.time.is_empty() {
-        let time = gtk::Label::new(Some(&text.time));
-        time.add_css_class(class::META);
-        time.set_valign(gtk::Align::Center);
-        shown.append(&time);
-    }
-    if marked {
-        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        dot.add_css_class(class::NEW_DOT);
-        dot.set_valign(gtk::Align::Center);
-        shown.append(&dot);
-    }
-    shown
-}
-
-/// The detail line: "Missed" in the theme's red for a Missed Call, then
-/// the rest.
-fn detail_line(text: &messages::DialerRowText) -> gtk::Box {
-    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    let mut rest = text.detail.clone();
-    if text.missed {
-        let missed = gtk::Label::new(Some(messages::label(Label::Missed)));
-        missed.add_css_class(class::META);
-        missed.add_css_class(class::MISSED);
-        line.append(&missed);
-        if !rest.is_empty() {
-            rest = format!(" · {rest}");
-        }
-    }
-    if !rest.is_empty() {
-        let detail = gtk::Label::new(Some(&rest));
-        detail.add_css_class(class::META);
-        detail.set_xalign(0.0);
-        detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        line.append(&detail);
-    }
-    line
-}
-
-/// The glyph at a row's left, 28 across: the direction of a Call History
-/// row, red for a Missed Call, or an initial in a tile.
-fn glyph(glyph: &DialerGlyph) -> gtk::Widget {
-    let arrow = |icon, missed| {
-        let view = IconView::new(icon);
-        view.area.add_css_class("dialer-glyph");
-        if missed {
-            view.area.add_css_class(class::MISSED);
-        }
-        view.area.upcast::<gtk::Widget>()
-    };
-    match glyph {
-        DialerGlyph::Missed => arrow(Icon::Incoming, true),
-        DialerGlyph::Incoming => arrow(Icon::Incoming, false),
-        DialerGlyph::Outgoing => arrow(Icon::Outgoing, false),
-        DialerGlyph::Initial(initial) => {
-            let tile = gtk::Label::new(Some(initial));
-            tile.add_css_class(class::INITIAL_TILE);
-            tile.add_css_class("dialer-glyph");
-            tile.set_valign(gtk::Align::Center);
-            tile.upcast()
-        }
-    }
-}
-
-/// Pango attributes that underline the bytes `ranges` in `colour`.
-fn underlined(ranges: &[std::ops::Range<usize>], colour: &gtk::gdk::RGBA) -> gtk::pango::AttrList {
-    let attributes = gtk::pango::AttrList::new();
-    // Pango's colours are 16 bits a channel.
-    let channel = |value: f32| {
-        #[expect(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a channel between 0 and 1, clamped, scaled to 16 bits"
-        )]
-        let scaled = (value.clamp(0.0, 1.0) * 65_535.0).round() as u16;
-        scaled
-    };
-    for range in ranges {
-        let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else {
-            continue;
-        };
-        // Low: below the descenders, nearer the mockup's 3 px offset.
-        let mut line = gtk::pango::AttrInt::new_underline(gtk::pango::Underline::Low);
-        line.set_start_index(start);
-        line.set_end_index(end);
-        attributes.insert(line);
-        let mut tint = gtk::pango::AttrColor::new_underline_color(
-            channel(colour.red()),
-            channel(colour.green()),
-            channel(colour.blue()),
-        );
-        tint.set_start_index(start);
-        tint.set_end_index(end);
-        attributes.insert(tint);
-    }
-    attributes
 }
 
 /// Alt+Q, which opens the Quiet Hours Window, with no other command

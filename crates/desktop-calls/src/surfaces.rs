@@ -83,6 +83,7 @@ mod footer;
 mod icons;
 mod quiet_hours_window;
 mod setup_calls_off;
+mod setup_parts;
 mod setup_problems;
 mod setup_window;
 
@@ -208,6 +209,12 @@ impl Surfaces {
         let setup_window = SetupWindow::new(intents, report.clone());
         let setup_problems = SetupProblems::new(intents, report.clone());
         setup_window.put_on_top(&setup_problems.widget);
+        let problems = Rc::downgrade(&setup_problems);
+        setup_window.follow_focus(move |widget| {
+            problems
+                .upgrade()
+                .and_then(|problems| problems.problem_of(widget))
+        });
         let quiet_hours_window = QuietHoursWindow::new(intents, report.clone());
         let surfaces = Self {
             banner: Banner::new(intents, report.clone()),

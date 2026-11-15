@@ -257,11 +257,11 @@ fn a_phone_refusing_hands_free_shows_where_to_switch_phone_calls_on() {
     let state = wait_for_step(&harness, "phone-calls-off", CONNECT_DEADLINE);
     let instructions = field(&state, "instructions").unwrap_or_default();
     assert!(
-        instructions.contains("On your phone: switch Phone calls on."),
+        instructions.contains("On your phone: Switch Phone calls on."),
         "{instructions}"
     );
     assert!(
-        instructions.contains("tap the settings icon next to “desktop”"),
+        instructions.contains("On your phone: Tap the settings icon next to “desktop”"),
         "{instructions}"
     );
 

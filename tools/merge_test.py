@@ -146,13 +146,15 @@ class TheLane(unittest.TestCase):
             return lambda *_, **__: steps.append(name)
 
         with (
-            mock.patch.object(merge, "pull_request", return_value=pr),
+            # The second look is the fresh one: same head, marked to tell it apart.
+            mock.patch.object(merge, "pull_request", side_effect=[pr, {**pr, "fresh": True}]),
             mock.patch.object(merge, "require_contains_base", return_value=None),
             mock.patch.object(merge, "wait_for_checks", step("wait")),
             mock.patch.object(merge, "require_checks_passed", step("checked")),
             mock.patch.object(merge, "require_mergeable", side_effect=lambda pr: pr),
             mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", step("ticket")),
-            mock.patch.object(merge, "require_reviewed", step("reviews")),
+            mock.patch.object(merge, "require_reviewed",
+                              lambda pr: steps.append("reviews fresh" if pr.get("fresh") else "reviews")),
             mock.patch.object(merge, "take_landing_turn", step("take the lock")),
             mock.patch.object(merge, "gh", gh),
             contextlib.redirect_stdout(io.StringIO()),
@@ -163,11 +165,11 @@ class TheLane(unittest.TestCase):
     def test_a_bare_merge_waits_for_checks_without_the_lock_then_holds_it_to_the_squash(self):
         self.assertEqual(
             self.merge(lane_held=False),
-            ["reviews", "wait", "checked", "take the lock", "ticket", "reviews", "squash"],
+            ["reviews", "wait", "checked", "take the lock", "ticket", "reviews fresh", "squash"],
         )
 
     def test_land_holds_the_lock_itself_so_merge_does_not_take_it_again(self):
-        self.assertEqual(self.merge(lane_held=True), ["reviews", "wait", "checked", "ticket", "reviews", "squash"])
+        self.assertEqual(self.merge(lane_held=True), ["reviews", "wait", "checked", "ticket", "reviews fresh", "squash"])
 
     def test_the_lock_keeps_a_second_landing_out_until_the_first_lets_go(self):
         with tempfile.TemporaryDirectory() as directory:

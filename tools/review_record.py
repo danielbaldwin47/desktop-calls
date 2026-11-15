@@ -72,7 +72,7 @@ def record(number: int, kind: str, model: str, verdict: str, findings_file: str 
         )
     merge.gh("pr", "comment", str(number), "--body", body(kind, model, head, verdict, findings))
     print(f"Recorded on PR #{number}: {reviews.first_line(kind, model, head, verdict)}")
-    needed, missing = merge.review_status(pr, head)
+    needed, missing = merge.review_status(pr, head, posted=(reviews.Record(kind, model, head, verdict),))
     if kind not in needed:
         print(f"PR #{number} needs {' and '.join(needed)}; a {kind} review doesn't count toward it.")
     if missing:

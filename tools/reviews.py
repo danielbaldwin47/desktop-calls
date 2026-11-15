@@ -16,9 +16,10 @@ The kinds a PR needs depend on the paths its diff touches:
   .github/, .config/, the lint configs): one `tooling` review that passed.
 
 A review counts for a head if it names the head, or a commit in the head's
-history whose PR diff is the head's: commits since then only merged
-origin/main, with no conflict resolution. The diff is compared, not the
-commit messages. Of the reviews of one kind that count, the latest decides,
+history from which every later commit (but main's own) is a merge of
+origin/main whose tree is exactly what `git merge-tree` makes of its two
+parents: no conflict resolved, nothing slipped in. The merge is recomputed;
+commit messages are not read. Of the reviews of one kind that count, the latest decides,
 so a FAIL after a PASS on the same head refuses.
 
 This records that a review was claimed, not that it happened: the agent
@@ -85,20 +86,29 @@ def kinds_needed(paths: list[str]) -> tuple[str, ...]:
 
 
 def changed_paths(git: Git, base: str, head: str) -> list[str]:
-    """The paths the PR's diff touches: from where `head` left `base`."""
-    return git("diff", "--name-only", "--no-renames", f"{base}...{head}").split()
+    """The paths the PR's diff touches: from where `head` left `base`. NUL-
+    separated, since git quotes a path with other than ASCII in it."""
+    return [path for path in git("diff", "--name-only", "-z", "--no-renames", f"{base}...{head}").split("\0") if path]
 
 
-def pr_diff(git: Git, base: str, commit: str) -> list[str]:
-    """What `commit` changes since it last took in `base`, without line
-    numbers or blob ids, which a clean merge of `base` shifts. Two commits
-    with the same PR diff make the same change."""
-    since = git("merge-base", base, commit).strip()
-    text = git(
-        "diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", "--binary",
-        "--src-prefix=a/", "--dst-prefix=b/", since, commit,
-    )
-    return [line for line in text.splitlines() if not line.startswith(("@@", "index "))]
+def unreviewed_commits(git: Git, reviewed: str, head: str, base: str) -> str | None:
+    """None if every commit from `reviewed` to `head` that `base` lacks is a
+    merge of `base` whose tree is exactly what git's own merge of its two
+    parents makes: no conflict resolved, nothing slipped in. Else the first
+    commit that isn't, and why. Recomputing the merge compares the change,
+    not the commit messages."""
+    listing = git("rev-list", "--parents", head, f"^{reviewed}", f"^{base}").splitlines()
+    for line in listing:
+        commit, *parents = line.split()
+        if len(parents) != 2:
+            return f"{commit[:7]} is a new commit"
+        if not any(git("merge-base", parent, base, allowed=(0, 1)).strip() == parent for parent in parents):
+            return f"{commit[:7]} merges something other than {base}"
+        merged = git("merge-tree", "--write-tree", "--no-messages", *parents, allowed=(0, 1)).split()
+        tree = git("rev-parse", f"{commit}^{{tree}}").strip()
+        if not merged or merged[0] != tree:
+            return f"{commit[:7]} is a merge that resolved a conflict or changed more"
+    return None
 
 
 def why_not_covered(git: Git, reviewed: str, head: str, base: str) -> str | None:
@@ -109,12 +119,8 @@ def why_not_covered(git: Git, reviewed: str, head: str, base: str) -> str | None
         return f"{reviewed[:7]} is not in this clone (was the branch rebased?)"
     if git("merge-base", reviewed, head, allowed=(0, 1)).strip() != reviewed:
         return f"{reviewed[:7]} is not in the history of {head[:7]} (was the branch rebased?)"
-    if pr_diff(git, base, reviewed) == pr_diff(git, base, head):
-        return None
-    new = git("rev-list", "--no-merges", head, f"^{reviewed}", f"^{base}").split()
-    named = ", ".join(sha[:7] for sha in new[:3]) + (f" and {len(new) - 3} more" if len(new) > 3 else "")
-    since = f"commits {named}" if new else "a merge that resolved a conflict or changed more"
-    return f"{since} changed the PR's diff since {reviewed[:7]}"
+    why = unreviewed_commits(git, reviewed, head, base)
+    return f"{why}, since {reviewed[:7]}" if why else None
 
 
 def problems(git: Git, records: list[Record], head: str, base: str) -> tuple[tuple[str, ...], list[str]]:

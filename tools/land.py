@@ -15,8 +15,7 @@ lock (tools/merge.py's), held from the first look at `main` to the squash, so
 Before it takes the lock, and again on the head as it will be merged, it
 refuses a PR whose comments record no passed reviews for that head
 (tools/reviews.py, ticket #327; `just review-record` posts them). A merge of
-origin/main this makes keeps the reviews, since it leaves the PR's diff as
-it was.
+origin/main this makes keeps the reviews: it resolves no conflict.
 
 What it does, holding the lock:
   1. Brings the branch level with its copy on GitHub, fast-forward only. A

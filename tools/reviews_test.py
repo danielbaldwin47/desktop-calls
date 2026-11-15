@@ -140,7 +140,7 @@ class InARepository(unittest.TestCase):
         reviewed = self.commit("tools/x.py", "x = 1\n", "Tool")
         new = self.commit("tools/x.py", "x = 2\n", "Fix")
         (problem,) = self.problems([line("tooling", reviewed)])
-        self.assertIn(f"commits {new[:7]} changed the PR's diff since {reviewed[:7]}", problem)
+        self.assertIn(f"{new[:7]} is a new commit, since {reviewed[:7]}", problem)
 
     def test_a_clean_merge_of_main_keeps_the_review(self):
         reviewed = self.commit("shared.txt", "one\nTWO\nthree\nfour\nfive\nsix\nseven\n", "Work")
@@ -165,7 +165,33 @@ class InARepository(unittest.TestCase):
         (self.root / "tools" / "x.py").write_text("x = 'not reviewed'\n")
         self.git("commit", "--quiet", "--all", "-m", "Merge remote-tracking branch 'origin/main' into work")
         (problem,) = self.problems([line("tooling", reviewed)])
-        self.assertIn("changed the PR's diff", problem)
+        self.assertIn("is a merge that resolved a conflict or changed more", problem)
+
+    def test_a_merge_of_main_that_moves_a_reviewed_line_needs_a_new_review(self):
+        # The same lines added, elsewhere in the file: a diff without line
+        # numbers can't tell, a remade merge can (review of #332).
+        reviewed = self.commit("shared.txt", "one\nADDED\ntwo\nthree\nfour\nfive\nsix\nseven\n", "Work")
+        self.main_moves("tools/other.py", "y = 1\n")
+        self.git("merge", "--quiet", "--no-commit", "origin/main")
+        (self.root / "shared.txt").write_text("one\ntwo\nthree\nfour\nfive\nADDED\nsix\nseven\n")
+        self.git("commit", "--quiet", "--all", "-m", "Merge remote-tracking branch 'origin/main' into work")
+        (problem,) = self.problems([line("tooling", reviewed)])
+        self.assertIn("is a merge that resolved a conflict or changed more", problem)
+
+    def test_a_merge_of_another_branch_needs_a_new_review(self):
+        reviewed = self.commit("tools/x.py", "x = 1\n", "Tool")
+        self.git("switch", "--quiet", "-c", "other", "main")
+        self.commit("tools/y.py", "y = 1\n", "Other work")
+        self.git("switch", "--quiet", "work")
+        self.git("merge", "--quiet", "--no-edit", "other")
+        (problem,) = self.problems([line("tooling", reviewed)])
+        self.assertIn("merges something other than origin/main", problem)
+
+    def test_a_product_path_git_would_quote_is_still_product(self):
+        head = self.commit("crates/core/src/caf\u00e9.rs", "fn f() {}\n", "Code")
+        self.assertEqual(reviews.changed_paths(changes.run_git, "origin/main", head), ["crates/core/src/caf\u00e9.rs"])
+        self.assertEqual(self.problems([line("tooling", head)]),
+                         ["standards-spec: none recorded.", "spec: none recorded."])
 
     def test_a_review_of_a_commit_rebased_away_does_not_count(self):
         reviewed = self.commit("tools/x.py", "x = 1\n", "Tool")
@@ -214,6 +240,10 @@ class Refusing(unittest.TestCase):
 
 
 class Recording(unittest.TestCase):
+    def status(self, pr, head, posted=()):
+        self.posted_records = posted
+        return ("tooling",), []
+
     def record(self, *arguments, local: str | None = SHA, findings: str | None = None) -> tuple[list, str]:
         posted = []
 
@@ -226,7 +256,7 @@ class Recording(unittest.TestCase):
             mock.patch.object(merge, "pull_request", return_value=PR),
             mock.patch.object(merge, "gh", gh),
             mock.patch.object(review_record, "local_head_of", return_value=local),
-            mock.patch.object(merge, "review_status", return_value=(("tooling",), [])),
+            mock.patch.object(merge, "review_status", self.status),
             contextlib.redirect_stdout(out),
         ):
             review_record.record(42, *arguments, findings)
@@ -240,6 +270,8 @@ class Recording(unittest.TestCase):
         self.assertEqual(posted, [("pr", "comment", "42", "--body",
                                    f"Review: tooling by sonnet on {SHA}: PASS\n\n1. Nit: a name. Fixed in abc1234.\n")])
         self.assertIn("Next: just land 42", out)
+        # GitHub may not list the comment yet, so the status counts it itself.
+        self.assertEqual(self.posted_records, (reviews.Record("tooling", "sonnet", SHA, "PASS"),))
 
     def test_without_findings_it_says_none_were_recorded(self):
         posted, _ = self.record("tooling", "sonnet", "FAIL")

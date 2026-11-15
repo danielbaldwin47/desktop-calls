@@ -449,14 +449,15 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None, head: str |
         )
 
 
-def review_status(pr: dict, head: str) -> tuple[tuple[str, ...], list[str]]:
+def review_status(pr: dict, head: str, posted: tuple[reviews.Record, ...] = ()) -> tuple[tuple[str, ...], list[str]]:
     """The review kinds `head` needs, and what keeps the PR's comments from
-    showing each passed on it (tools/reviews.py, ticket #327)."""
+    showing each passed on it (tools/reviews.py, ticket #327). `posted`: a
+    record just posted, which GitHub may not list yet."""
     number, base = pr["number"], pr["baseRefName"]
     git("fetch", "--quiet", "origin", base, f"refs/pull/{number}/head")
     comments = json.loads(gh("pr", "view", str(number), "--json", "comments"))["comments"]
     records = [record for comment in comments if (record := reviews.parse(comment["body"]))]
-    return reviews.problems(git, records, head, f"origin/{base}")
+    return reviews.problems(git, records + list(posted), head, f"origin/{base}")
 
 
 def require_reviewed(pr: dict, head: str | None = None) -> None:

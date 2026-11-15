@@ -114,12 +114,13 @@ fn calls_off_from_the_indicator_keeps_the_phone_away_through_its_pages_the_waits
         item.icon_name.as_deref(),
         Some("desktop-calls-off-symbolic")
     );
-    let menu = harness.tray().menu();
-    assert!(
-        menu.iter()
-            .any(|entry| entry.label == "Turn calls on" && entry.enabled),
-        "{menu:?}"
-    );
+    // The Indicator shows the change in its tooltip before its menu.
+    harness
+        .tray()
+        .wait_for_menu("the menu offers Turn calls on", DEADLINE, |menu| {
+            menu.iter()
+                .any(|entry| entry.label == "Turn calls on" && entry.enabled)
+        });
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");
     assert!(record_text.contains(r#""state":"off""#), "{record_text}");
 

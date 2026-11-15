@@ -152,6 +152,7 @@ class TheLane(unittest.TestCase):
             mock.patch.object(merge, "require_checks_passed", step("checked")),
             mock.patch.object(merge, "require_mergeable", side_effect=lambda pr: pr),
             mock.patch.object(merge, "require_no_step_waits_on_a_closed_ticket", step("ticket")),
+            mock.patch.object(merge, "require_reviewed", step("reviews")),
             mock.patch.object(merge, "take_landing_turn", step("take the lock")),
             mock.patch.object(merge, "gh", gh),
             contextlib.redirect_stdout(io.StringIO()),
@@ -162,11 +163,11 @@ class TheLane(unittest.TestCase):
     def test_a_bare_merge_waits_for_checks_without_the_lock_then_holds_it_to_the_squash(self):
         self.assertEqual(
             self.merge(lane_held=False),
-            ["wait", "checked", "take the lock", "ticket", "squash"],
+            ["reviews", "wait", "checked", "take the lock", "ticket", "reviews", "squash"],
         )
 
     def test_land_holds_the_lock_itself_so_merge_does_not_take_it_again(self):
-        self.assertEqual(self.merge(lane_held=True), ["wait", "checked", "ticket", "squash"])
+        self.assertEqual(self.merge(lane_held=True), ["reviews", "wait", "checked", "ticket", "reviews", "squash"])
 
     def test_the_lock_keeps_a_second_landing_out_until_the_first_lets_go(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -231,9 +232,19 @@ class RequiringCIPassed(unittest.TestCase):
 
     def test_a_passed_ci_passed_is_let_through(self):
         self.require([
-            {"name": "just lint", "event": "pull_request", "bucket": "pass", "state": "SUCCESS", "link": ""},
-            {"name": "CI passed", "event": "pull_request", "bucket": "pass", "state": "SUCCESS", "link": ""},
+            {"name": "just lint", "event": "pull_request", "workflow": "CI", "bucket": "pass", "state": "SUCCESS", "link": ""},
+            {"name": "CI passed", "event": "pull_request", "workflow": "CI", "bucket": "pass", "state": "SUCCESS", "link": ""},
         ])
+
+    def test_a_status_or_another_workflows_job_named_ci_passed_is_refused(self):
+        for impostor in [
+            # A commit status, as `just ci-local` posted before #286: no workflow, no event.
+            {"name": "CI passed", "event": "", "workflow": "", "bucket": "pass", "state": "SUCCESS", "link": ""},
+            {"name": "CI passed", "event": "pull_request", "workflow": "Other", "bucket": "pass", "state": "SUCCESS", "link": ""},
+        ]:
+            with self.subTest(impostor), self.assertRaises(merge.Refused) as refused:
+                self.require([impostor])
+            self.assertIn('No passed "CI passed" check from CI\'s pull_request run', str(refused.exception))
 
 
 if __name__ == "__main__":

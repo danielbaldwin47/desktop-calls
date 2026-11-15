@@ -28,7 +28,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05) and the disk filling (2026-11-14).
 
-- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze, the local-CI merge rules, PR-only docs, the #154 triage, merging from behind main, owned PRs, the concept review before specs, probes before building, clearing build caches, and the 2026-11-15 after-v1 batches and held items (updated 2026-11-15).
+- [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze, the local-CI merge rules, PR-only docs, the #154 triage, merging from behind main, owned PRs, the concept review before specs, probes before building, clearing build caches, the 2026-11-15 after-v1 batches and held items, and the review records `just land` requires since #327 (updated 2026-11-15).
 
 - [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).
 

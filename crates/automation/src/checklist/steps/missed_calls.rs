@@ -158,14 +158,15 @@ pub(super) fn ring_out(sitting: &mut Sitting) -> Result<(), Stop> {
         return Ok(());
     };
     let shown = sitting.ask(
-        "Does a notification say you missed a call from your helper, by name or number, with the time?",
+        "Does a notification with a missed-call icon say you missed a call from your helper, by name or number, with the time under it?",
     )?;
     sitting.check(
         shown,
         if shown {
-            "The notification names the caller and gives the time.".to_owned()
+            "The notification shows a missed-call icon, names the caller and gives the time."
+                .to_owned()
         } else {
-            "The notification didn't name the caller with the time.".to_owned()
+            "The notification didn't show a missed-call icon, the caller and the time.".to_owned()
         },
     );
     let Some(selected) = notification_opens_the_dialer(sitting)? else {

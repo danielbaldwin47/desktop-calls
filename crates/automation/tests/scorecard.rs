@@ -218,6 +218,26 @@ fn a_failing_or_missing_scenario_fails_its_item_and_is_named() {
     );
 }
 
+#[test]
+fn every_scenario_the_scorecard_reads_is_a_test_in_its_scenario_file() {
+    let missing: Vec<String> = scenarios()
+        .into_iter()
+        .filter(|name| {
+            let Some((file, test)) = name.split_once("::") else {
+                return true;
+            };
+            let path = root().join(format!("crates/test-harness/tests/{file}.rs"));
+            !std::fs::read_to_string(path)
+                .is_ok_and(|text| text.contains(&format!("\nfn {test}()")))
+        })
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "no such scenario, so its item can never pass: {missing:#?}"
+    );
+}
+
 /// Every Checklist step's id, from the scorecard.
 fn checklist_steps() -> Vec<String> {
     scorecard(&["--checklist-steps"])

@@ -495,10 +495,9 @@ pub fn search(query: &str, contacts: &Contacts, call_history: &CallHistory) -> V
                     caller: Caller::Number(contact.numbers[number_index].number.clone()),
                     shown_number: number.shown.clone(),
                     at: None,
-                    matched: name_rank
-                        .map(|rank| highlight::matched(&typed, &contact.name, rank.tier))
-                        .unwrap_or_default(),
+                    matched: Vec::new(),
                 },
+                name_tier: name_rank.map(|rank| rank.tier),
             });
         }
     }
@@ -519,20 +518,28 @@ pub fn search(query: &str, contacts: &Contacts, call_history: &CallHistory) -> V
             continue;
         };
         exact |= typed.is(number);
-        let mut row = history_row(entry, Some(number), directory);
-        if let Some(name_rank) = name_rank {
-            row.matched = highlight::matched(&typed, &row.name, name_rank.tier);
-        }
         found.push(Found {
             rank,
             calls: history.calls(number),
             folded: name.folded.clone(),
-            row,
+            row: history_row(entry, Some(number), directory),
+            name_tier: name_rank.map(|rank| rank.tier),
         });
     }
     // Stable, so a Contact's numbers keep their order.
     found.sort_by(Found::order);
-    let mut rows: Vec<DialerRow> = found.into_iter().map(|found| found.row).collect();
+    // Only the rows shown are underlined: with 5,000 Contacts, one letter
+    // matches them all (#347).
+    let mut rows: Vec<DialerRow> = found
+        .into_iter()
+        .take(MAX_ROWS)
+        .map(|mut found| {
+            if let Some(tier) = found.name_tier {
+                found.row.matched = highlight::matched(&typed, &found.row.name, tier);
+            }
+            found.row
+        })
+        .collect();
     if let Some(call) = typed.call_row().filter(|_| !exact) {
         if typed.is_whole_number() {
             rows.insert(0, call);
@@ -583,6 +590,8 @@ struct Found {
     calls: Calls,
     folded: String,
     row: DialerRow,
+    /// How the name matched, if it did, for underlining its letters.
+    name_tier: Option<Tier>,
 }
 
 impl Found {

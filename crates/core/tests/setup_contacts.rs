@@ -8,8 +8,8 @@ use desktop_calls_core::{
     CallHistory, CallHistoryEntry, CallHistoryKind, Caller, ConfigFile, Contact, ContactNumber,
     Contacts, ContactsOutcome, ContactsState, Directory, Effect, HyprlandConfig, Input,
     KeybindingCheck, KeybindingStage, NumberLabel, Phone, PhoneCommand, ReadingContacts,
-    SetupNotice, SetupStep, State, SyncFailure, SyncProgress, Timer, Timestamp, Unavailable,
-    messages, step,
+    SetupFocus, SetupNotice, SetupStep, State, SyncFailure, SyncProgress, Timer, Timestamp,
+    Unavailable, messages, step,
 };
 
 const PHONE: &str = "AA:BB:CC:DD:EE:FF";
@@ -401,10 +401,16 @@ fn granted_the_window_shows_the_call_history_done_first_then_the_contacts_being_
     assert_eq!(state.call_history().entries().len(), 50, "for the Dialer");
     let view = state.surfaces().setup_window.expect("the window is open");
     let text = messages::setup_window(&view, Timestamp(12_000), None);
+    let sync = text.sync.expect("the sync shows");
+    let lines: Vec<String> = sync.rows.iter().map(messages::SyncRow::line).collect();
+    assert_eq!(lines, ["✓ Recent Calls", "Contacts · 312 · about 8 s left"]);
     assert_eq!(
-        text.progress,
-        ["✓ Recent Calls", "312 Contacts… about 8 seconds left"]
+        sync.note,
+        "Calls already work. Names appear as Contacts arrive."
     );
+    // Recent Calls are in, and Contacts part read: the bar is under way,
+    // and not full.
+    assert!((100..980).contains(&sync.bar), "{}", sync.bar);
 }
 
 #[test]
@@ -607,21 +613,22 @@ fn the_finish_page_names_the_config_file_with_a_tilde_and_shows_the_line_as_writ
     let home = Some("/home/user");
     let view = state.surfaces().setup_window.expect("the window is open");
     let text = messages::setup_window(&view, Timestamp(0), home);
+    let card = text.keybinding.expect("the keybinding's card");
     assert!(
-        text.instructions
-            .iter()
-            .any(|line| line.ends_with("~/.config/hypr/bindings.lua doesn't use those keys yet.")),
-        "{:?}",
-        text.instructions
+        card.text
+            .contains("in ~/.config/hypr/bindings.lua, which doesn't use those keys yet."),
+        "{card:?}"
     );
 
     let (state, _) = run(state, [Input::AddKeybinding]);
     let view = state.surfaces().setup_window.expect("the window is open");
     let text = messages::setup_window(&view, Timestamp(0), home);
     assert_eq!(
-        text.instructions[0],
+        text.instructions[0].line(),
         "This line goes at the end of ~/.config/hypr/bindings.lua:"
     );
+    // While the line is confirmed, the page is about the line alone.
+    assert_eq!((text.keybinding, text.tip), (None, None));
     // What the user confirms is what is written: no `~` in it.
     assert_eq!(text.line.as_deref(), Some(LINE));
     let (_, effects) = run(state, [Input::ConfirmKeybinding]);
@@ -649,14 +656,22 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
     let view = state.surfaces().setup_window.expect("the window is open");
     let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Add keybinding", "Done"]);
+    // The keybinding and the pin tip are two cards.
     assert!(
-        text.instructions
-            .iter()
-            .any(|line| line.contains("Super + Alt + C")),
+        text.keybinding
+            .as_ref()
+            .is_some_and(|card| card.text.contains("Super + Alt + C")),
         "{:?}",
-        text.instructions
+        text.keybinding
     );
-    assert!(text.tip.is_some_and(|tip| tip.contains("pin")));
+    assert!(
+        text.tip
+            .as_ref()
+            .is_some_and(|tip| tip.title == "Keep Desktop Calls in the bar"
+                && tip.text.contains("pin Desktop Calls")),
+        "{:?}",
+        text.tip
+    );
 
     let (state, effects) = run(state, [Input::AddKeybinding]);
     assert!(effects.is_empty(), "nothing written yet: {effects:?}");
@@ -700,9 +715,31 @@ fn the_finish_page_offers_the_keybinding_and_writes_nothing_until_confirmed() {
     let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Done"]);
     assert!(
-        text.instructions[0].starts_with("Place your first Call: press Super + Alt + C"),
+        text.keybinding.as_ref().is_some_and(|card| card
+            .text
+            .starts_with("Place your first Call: press Super + Alt + C")),
         "{:?}",
-        text.instructions
+        text.keybinding
+    );
+}
+
+#[test]
+fn cancel_focused_on_the_keybinding_line_is_named_until_cancelling_shows_new_buttons() {
+    let (state, _) = run(
+        synced(),
+        [
+            Input::KeybindingChecked(config(BINDINGS)),
+            Input::AddKeybinding,
+            Input::SetupWindowFocus(Some(SetupFocus::Button(1))),
+        ],
+    );
+    assert_eq!(text(&state).keys.first(), Some(&(&["Enter"][..], "Cancel")));
+    // Done is the second button now, but the window has put the keyboard
+    // on Add keybinding and not yet said so.
+    let (state, _) = run(state, [Input::CancelKeybinding]);
+    assert_eq!(
+        text(&state).keys.first(),
+        Some(&(&["Enter"][..], "Add keybinding"))
     );
 }
 
@@ -743,11 +780,11 @@ fn without_a_hyprland_config_to_add_to_the_finish_page_says_what_to_bind() {
     let text = messages::setup_window(&view, Timestamp(0), None);
     assert_eq!(text.buttons, ["Done"]);
     assert!(
-        text.instructions
-            .iter()
-            .any(|line| line.contains("/usr/bin/desktop-calls")),
+        text.keybinding
+            .as_ref()
+            .is_some_and(|card| card.text.contains("/usr/bin/desktop-calls")),
         "{:?}",
-        text.instructions
+        text.keybinding
     );
 }
 

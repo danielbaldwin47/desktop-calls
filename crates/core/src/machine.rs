@@ -57,9 +57,11 @@ use quiet_hours_window::QuietHoursWindows;
 pub use quiet_hours_window::{
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView,
 };
+pub(crate) use setup::CONTACT_READ_MS;
 use setup::{ChosenPhone, Setup};
 pub use setup::{
-    ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
+    ContactsOutcome, KeybindingStage, ReadingContacts, SetupFocus, SetupNotice, SetupStep,
+    SetupWindowView,
 };
 pub use setup_calls_off::SetupCallsOff;
 pub use view::{
@@ -748,8 +750,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
     } else {
         release_mute(&mut state, &mut effects);
     }
-    setup::follow_connection(&mut state, &mut effects);
-    setup::follow_contacts(&mut state, &mut effects);
+    setup::follow(&mut state, &mut effects);
     follow_call_window(&mut state, surfaces.call_window.as_ref(), &mut effects);
     dialling::place_once_connected(&mut state, &mut effects);
     calls_off::apply_pending(&mut state, &mut effects);
@@ -879,6 +880,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::HandsFreeRefused
         | Input::HandsFreeUnreachable
         | Input::RetryHandsFree
+        | Input::SetupWindowFocus(_)
         | Input::RetryContacts
         | Input::SkipContacts
         | Input::ContinueContacts

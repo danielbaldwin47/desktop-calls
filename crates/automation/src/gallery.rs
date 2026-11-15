@@ -354,7 +354,14 @@ const STATES: &[State] = &[
     State {
         name: "setup-window-contacts-syncing",
         title: "The Setup Window, with recent Calls read and Contacts still being read",
-        still: |state| setup_window_shows(state, "step", "contacts-syncing"),
+        // Only while Contacts are still being read, not in the moment
+        // after they are and before the finish page.
+        still: |state| {
+            state
+                .surface("setup-window")
+                .and_then(|window| window.get("progress"))
+                .is_some_and(|progress| progress.contains(" s left"))
+        },
         prepare: fresh_install,
         reach: |harness| {
             let phone = harness.simulated_phone();
@@ -367,7 +374,7 @@ const STATES: &[State] = &[
                 state
                     .surface("setup-window")
                     .and_then(|window| window.get("progress"))
-                    .is_some_and(|progress| progress.starts_with("✓ Recent Calls\n312 Contacts…"))
+                    .is_some_and(|progress| progress.starts_with("✓ Recent Calls\nContacts · 312"))
             });
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),

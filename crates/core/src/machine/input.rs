@@ -5,6 +5,7 @@ use super::calls_off::CallsOffRecord;
 use super::calls_turned::CallsTurnedNotice;
 use super::desktop::{DesktopCheck, DesktopFix, FixFailure};
 use super::quiet_hours_window::QuietHoursField;
+use super::setup::SetupFocus;
 use crate::call::{AudioLocation, CallId, CallState, Caller, Codec, Timestamp, Transport};
 use crate::clock::{Deadline, QuietHours, WallClock};
 use crate::connection::Phone;
@@ -212,6 +213,9 @@ pub enum Input {
     OpenSetupWindow,
     /// The user closed the Setup Window.
     CloseSetupWindow,
+    /// Keyboard focus moved in the Setup Window, to this control, or to
+    /// nothing Enter presses.
+    SetupWindowFocus(Option<SetupFocus>),
     /// What an earlier run kept of Calls Off, at startup and before any
     /// Phone is reported.
     CallsOffKept(CallsOffRecord),

@@ -78,14 +78,16 @@ const CSS: &str = "
 /* A Problem and a notice are cards on the warning tint, with the warning
    colour down the left edge. */
 .desktop-calls-setup .notice { border-left: 3px solid var(--dc-warning); }
-/* A Problem's button: small, and the Fix filled with the accent, whose
-   label reads on it at 4.5:1 in every theme (stock Adwaita's suggested
-   blue does not). */
+/* A Problem's button: small, and the Fix filled with the accent. Every
+   primary button, the Fix and the step's default alike, takes one label
+   and the accent in the shade that label reads on at 4.5:1 (stock
+   Adwaita's suggested blue doesn't under white) (#320). */
 .desktop-calls-setup button.small {
     min-height: 30px; min-width: 0; padding: 0 10px; font-size: 12.5px;
 }
-.desktop-calls-setup button.accent {
-    background: var(--dc-accent); color: var(--dc-accent-label);
+.desktop-calls-setup button.accent,
+.desktop-calls-setup button.suggested-action {
+    background: var(--dc-accent-fill); color: var(--dc-accent-label);
 }
 /* Calls are off: a card in the Problem card's shape, on a neutral tint
    with a neutral edge, since a choice isn't a fault. */

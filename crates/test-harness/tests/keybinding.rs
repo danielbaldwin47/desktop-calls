@@ -229,6 +229,31 @@ fn the_banner_names_the_keybinding_set_and_follows_the_config_as_it_changes() {
     );
 }
 
+/// With `bindings.lua` there but unreadable, the Banner's footer says it
+/// couldn't read the file and where to find what to do, rather than
+/// guessing that no keybinding is set (#366).
+#[test]
+fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .omarchy_bar()
+        .hyprland_bindings_unreadable(DESKTOP_CALLS_BINDING)
+        .start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    ring_until_banner(&harness);
+    harness.wait_for_app(
+        "the footer says bindings.lua couldn't be read",
+        DEADLINE,
+        |state| {
+            banner_footer(state)
+                == Some("Couldn't read bindings.lua. Phone setup… shows what to do.")
+        },
+    );
+}
+
 #[test]
 fn escape_gives_focus_back_and_the_call_keeps_ringing() {
     let (harness, client) = connected_with_a_focused_window();

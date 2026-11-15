@@ -174,8 +174,11 @@ const STATIC: &str = r#"
 }
 @keyframes breathe { from { opacity: 1; } 50% { opacity: 0.35; } to { opacity: 1; } }
 .ringing-dot.breathing { animation: breathe 1.2s ease-in-out infinite; }
+/* The surface's 1 px edge keeps the tile a tile where a theme's raised
+   colour is paler than its surface, as on Omarchy light (#326). */
 .initial-tile {
     min-width: 40px; min-height: 40px; background: var(--dc-raised);
+    border: 1px solid var(--dc-border);
     font-family: monospace; font-size: 16px; font-weight: 600; color: var(--dc-secondary);
 }
 .desktop-calls-surface button.two-line { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
@@ -217,7 +220,6 @@ window.desktop-calls-surface:not(.dialer).contact-lost { box-shadow: inset 0 0 0
     min-height: 58px; padding: 0 4px; font-size: 12px; font-weight: 600;
 }
 .desktop-calls-surface button.tile .type-keycap { border-color: transparent; padding: 0; }
-.desktop-calls-surface button.tile:checked { box-shadow: inset 0 0 0 2px var(--dc-accent); }
 .desktop-calls-surface progressbar.handoff-progress { margin: 0 10px 7px; min-width: 0; }
 .desktop-calls-surface progressbar.handoff-progress > trough {
     min-width: 0; min-height: 3px; border-radius: 2px; background: alpha(currentColor, 0.15);
@@ -226,7 +228,7 @@ window.desktop-calls-surface:not(.dialer).contact-lost { box-shadow: inset 0 0 0
     min-width: 0; min-height: 3px; border-radius: 2px; background: var(--dc-accent);
 }
 .desktop-calls-surface button.tile.accent {
-    background: var(--dc-accent); color: var(--dc-accent-label);
+    background: var(--dc-accent-fill); color: var(--dc-accent-label);
 }
 .desktop-calls-surface button.small {
     min-height: 30px; min-width: 0; padding: 0 10px; font-size: 12.5px;
@@ -331,6 +333,7 @@ pub(super) fn css(
         ("border", roles.border),
         ("accent", roles.accent),
         ("accent-label", roles.accent_label),
+        ("accent-fill", roles.accent_fill),
         ("answer", roles.answer),
         ("answer-ring", roles.answer_ring),
         ("end", roles.end),

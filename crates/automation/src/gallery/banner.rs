@@ -68,6 +68,18 @@ pub(super) const BANNER_STATES: &[State] = &[
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
+        name: "incoming-call-banner-keybinding-unreadable",
+        title: "The Incoming Call Banner with bindings.lua unreadable: the footer says so, and where to find what to do",
+        still: |state| footer(state).is_some_and(|footer| footer.starts_with("Couldn't read")),
+        prepare: |builder| builder.hyprland_bindings_unreadable(DESKTOP_CALLS_BINDING),
+        reach: |harness| {
+            sync(harness);
+            ring(harness);
+            wait_for_footer(harness);
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
         // The Banner identifies the caller for only 2 s: `reach` stops the

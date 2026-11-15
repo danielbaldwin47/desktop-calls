@@ -273,6 +273,9 @@ enum BoundKeys {
     NotRead,
     /// Nothing binds Desktop Calls.
     Unbound,
+    /// `bindings.lua` is there but couldn't be read, so whether anything
+    /// binds Desktop Calls isn't known (#366).
+    Unreadable,
     /// These keys, as the config writes them: `["SUPER", "ALT", "C"]`.
     Keys(Vec<String>),
 }
@@ -849,8 +852,15 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
         Input::Activate => activate(&mut state),
         Input::KeybindingRead(config) => {
-            state.keybinding =
-                crate::keybinding::bound_keys(&config).map_or(BoundKeys::Unbound, BoundKeys::Keys);
+            let unreadable = config
+                .bindings
+                .as_ref()
+                .is_some_and(|bindings| bindings.text.is_none());
+            state.keybinding = if unreadable {
+                BoundKeys::Unreadable
+            } else {
+                crate::keybinding::bound_keys(&config).map_or(BoundKeys::Unbound, BoundKeys::Keys)
+            };
         }
         Input::ReleaseFocus => state.focus = Focus::None,
         input @ (Input::CollapseCallWindow

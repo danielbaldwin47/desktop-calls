@@ -804,6 +804,10 @@ fn show_shortcut(
     let (shortcut, shown) = keycap(accelerator);
     let label = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
     label.set_halign(gtk::Align::Center);
+    // Centred at its own height, so the keycap is the Banner's size rather
+    // than the button's height, which read as a split button (#321).
+    label.set_valign(gtk::Align::Center);
+    shortcut.set_valign(gtk::Align::Center);
     if let Some(icon) = icon {
         label.append(&IconView::new(icon).area);
     }

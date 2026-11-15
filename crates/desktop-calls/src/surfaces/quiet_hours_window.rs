@@ -48,7 +48,7 @@ window.desktop-calls-quiet-hours > box { padding: 20px; }
 .desktop-calls-quiet-hours .quiet-time:focus {
     box-shadow: inset 0 0 0 2px var(--dc-accent); outline: none;
 }
-/* Off, the times read as set aside but still readable, about 4:1 (#314):
+/* Off, the times read as set aside but still readable, 4.5:1 or better (#314):
    the secondary colour in place of the stock half opacity. */
 .desktop-calls-quiet-hours .quiet-times.dim .quiet-time:disabled { filter: none; opacity: 1; }
 .desktop-calls-quiet-hours .quiet-times.dim .quiet-time:disabled label,

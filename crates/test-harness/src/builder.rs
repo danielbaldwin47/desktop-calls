@@ -89,6 +89,9 @@ pub struct Builder {
     wireplumber: Option<Vec<WirePlumberEntry>>,
     /// What Omarchy's `hypr/bindings.lua` holds, if the Desktop has one.
     hyprland_bindings: Option<String>,
+    /// The mode `hypr/bindings.lua` is given, if not the default: 0o000
+    /// for one no one may read.
+    hyprland_bindings_mode: Option<u32>,
     config_home: ConfigHome,
 }
 
@@ -469,6 +472,15 @@ impl Builder {
         self
     }
 
+    /// Puts `hypr/bindings.lua` holding `text` in the config folder, as
+    /// [`Self::hyprland_bindings`] does, but readable by no one, as after a
+    /// bad `chmod`.
+    pub fn hyprland_bindings_unreadable(mut self, text: &str) -> Self {
+        self.hyprland_bindings = Some(text.to_owned());
+        self.hyprland_bindings_mode = Some(0o000);
+        self
+    }
+
     /// The Desktop's config folder is `~/.config`, as on a real Desktop,
     /// not a folder beside the home: files in it are named with a `~`. The
     /// scenario's `config` folder is a link to it, so a scenario's own paths
@@ -497,9 +509,14 @@ impl Builder {
         write_wireplumber(&directory.join("config"), self.wireplumber.take());
         if let Some(text) = self.hyprland_bindings.take() {
             let hypr = directory.join("config/hypr");
+            let file = hypr.join("bindings.lua");
             fs::create_dir_all(&hypr)
-                .and_then(|()| fs::write(hypr.join("bindings.lua"), text))
+                .and_then(|()| fs::write(&file, text))
                 .expect("write the Hyprland bindings");
+            if let Some(mode) = self.hyprland_bindings_mode {
+                fs::set_permissions(&file, fs::Permissions::from_mode(mode))
+                    .expect("set the Hyprland bindings' mode");
+            }
         }
     }
 

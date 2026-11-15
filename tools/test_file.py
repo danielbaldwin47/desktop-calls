@@ -26,9 +26,12 @@ that would run, so a filter gone stale fails rather than runs nothing.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
+
+import scenario_shader_cache
 
 BINARY = ["-p", "test-harness", "--test", "scenarios"]
 TESTS = pathlib.Path(__file__).resolve().parent.parent / "crates/test-harness/tests"
@@ -85,10 +88,15 @@ def main() -> int:
 
     test_arguments = [*BINARY, "--", "--exact", *chosen, *rest]
     if ci_like:
+        # It fills the shared shader cache itself, under CI's limits.
         command = [sys.executable, str(pathlib.Path(__file__).with_name("test_ci_like.py")), *test_arguments]
-    else:
-        command = ["cargo", "test", "--locked", *test_arguments]
-    return subprocess.run(command).returncode
+        return subprocess.run(command).returncode
+    try:
+        environment = scenario_shader_cache.warm(dict(os.environ))
+    except scenario_shader_cache.WarmUpFailed as failure:
+        print(failure, file=sys.stderr)
+        return 1
+    return subprocess.run(["cargo", "test", "--locked", *test_arguments], env=environment).returncode
 
 
 if __name__ == "__main__":

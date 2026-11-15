@@ -404,12 +404,13 @@ def require_mergeable(pr: dict) -> dict:
     return pr
 
 
-def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
+def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None, head: str | None = None) -> None:
     """No Real-Phone Checklist step at the head may say it lands with a
     closed ticket, or with one this PR closes: the step needs its script
     first (ticket #120). CI's `just check` can't see which tickets the PR
-    closes, so this is where that is caught. `is_open` stands in for GitHub
-    in tests."""
+    closes, so this is where that is caught. `head` is the commit to read,
+    if not the PR's head on GitHub (`just land` passes its local merge of
+    main). `is_open` stands in for GitHub in tests."""
     number = pr["number"]
     if os.environ.get(checklist_tickets.OFFLINE) == "1":
         print(checklist_tickets.SKIPPED, flush=True)
@@ -417,7 +418,7 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
     closing = json.loads(gh("pr", "view", str(number), "--json", "closingIssuesReferences"))
     tickets = {issue["number"] for issue in closing["closingIssuesReferences"]}
     git("fetch", "--quiet", "origin", f"refs/pull/{number}/head")
-    text = git("show", f"{pr['headRefOid']}:{checklist_tickets.STEPS}")
+    text = git("show", f"{head or pr['headRefOid']}:{checklist_tickets.STEPS}")
     try:
         wrong = checklist_tickets.check(text, tickets, is_open)
     except checklist_tickets.Unreadable as error:
@@ -432,7 +433,7 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
         lines = "\n".join(f"  {line}" for line in wrong)
         raise Refused(
             f"Real-Phone Checklist steps wait on closed tickets (ticket #120):\n{lines}\n"
-            f"Next: write those steps' scripts on PR #{number}'s branch, then just merge {number}"
+            f"Next: write those steps' scripts on PR #{number}'s branch, then just land {number}"
         )
 
 

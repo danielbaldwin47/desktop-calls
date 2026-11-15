@@ -23,8 +23,7 @@ use support::{Runner, result_file, says, step};
 /// speakers play. The rest of group 2 is observed through the control
 /// interface.
 const HEARD_CLEARLY: &str = "Does your helper hear you clearly, with no echo of their own voice?";
-const MISSED_CALL_SHOWN: &str =
-    "Does a notification say you missed a call from your helper, by name or number, with the time?";
+const MISSED_CALL_SHOWN: &str = "Does a notification with a missed-call icon say you missed a call from your helper, by name or number, with the time under it?";
 const WITHHELD_SHOWN: &str = "Does a notification say you missed a call from a withheld number, and that it can't be called back?";
 const DESKTOP_SILENT: &str =
     "Apart from the Pixel itself, was the Desktop silent while the Call rang?";

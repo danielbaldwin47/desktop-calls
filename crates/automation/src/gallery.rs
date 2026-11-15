@@ -7,7 +7,9 @@
 //! [`banner::BANNER_STATES`] or [`setup_window::SETUP_PROBLEM_STATES`]. The Indicator's
 //! states, in [`indicator::INDICATOR_STATES`], are drawn as Omarchy's bar draws its
 //! icon, light and dark, and its menu's, in [`indicator::MENU_STATES`], as
-//! Omarchy's tray draws the menu: a stand-in.
+//! Omarchy's tray draws the menu: a stand-in. The Missed Call notification,
+//! in [`notification::NOTIFICATION_STATES`], is drawn as Omarchy's card draws it:
+//! a stand-in too.
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,6 +24,7 @@ mod call_pill;
 mod durations;
 mod indicator;
 mod look;
+mod notification;
 mod page;
 mod quiet_hours_window;
 mod refusals;
@@ -36,6 +39,7 @@ use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, MENU_STATES, draw_indicator, indicator_path,
 };
 use look::{LOOKS, Look};
+use notification::{draw_notifications, drawn_notifications};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
 use refusals::REFUSAL_STATES;
@@ -868,6 +872,10 @@ pub fn run(options: &Options) -> ExitCode {
                 }
             }
         }
+        if let Err(error) = draw_notifications(&output) {
+            eprintln!("Can't draw {error}");
+            return ExitCode::FAILURE;
+        }
     }
 
     // Every state rendered, now or by an earlier run.
@@ -892,7 +900,11 @@ pub fn run(options: &Options) -> ExitCode {
     let menus = drawn(MENU_STATES);
 
     let index = output.join("index.html");
-    if let Err(error) = fs::write(&index, index_html(&shots, &indicators, &menus)) {
+    let notifications = drawn_notifications(&output);
+    if let Err(error) = fs::write(
+        &index,
+        index_html(&shots, &indicators, &menus, &notifications),
+    ) {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }

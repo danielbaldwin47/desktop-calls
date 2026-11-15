@@ -52,6 +52,8 @@ import sys
 import tempfile
 import time
 
+import scenario_shader_cache
+
 # The calibrated limits: see the module's documentation. TEST_CI_LIKE_CPU_QUOTA
 # overrides the quota, for recalibrating (e.g. TEST_CI_LIKE_CPU_QUOTA=150%).
 CPU_QUOTA = os.environ.get("TEST_CI_LIKE_CPU_QUOTA") or "100%"
@@ -121,9 +123,11 @@ def build(arguments: list[str]) -> None:
             raise CannotRun(f"`{' '.join(command)}` failed")
 
 
-def run_confined(arguments: list[str], temporary: pathlib.Path, unit: str) -> int:
+def run_confined(command: list[str], temporary: pathlib.Path, unit: str,
+                 base: dict[str, str] | None = None) -> int:
+    """Runs `command` under CI's limits, in its own scope `unit`."""
     environment = dict(
-        os.environ,
+        os.environ if base is None else base,
         TMPDIR=str(temporary),
         RUST_TEST_THREADS=TEST_THREADS,
         DESKTOP_CALLS_CI_LIKE="1",
@@ -137,7 +141,7 @@ def run_confined(arguments: list[str], temporary: pathlib.Path, unit: str) -> in
         "--",
         "unshare", "--user", "--map-root-user", "--mount", "--",
         "sh", "-c", CONFINE, "confine",
-        "cargo", "test", "--workspace", "--locked", *arguments,
+        *command,
     ]
     print(
         f"just test-ci-like: CPU quota {CPU_QUOTA}, {TEST_THREADS} test threads, no GPU, "
@@ -205,12 +209,28 @@ def main() -> int:
         temporary = pathlib.Path(tempfile.mkdtemp(prefix="dc-ci-like-", dir="/tmp"))
         try:
             try:
-                status = run_confined(arguments, temporary, unit)
+                # Filled under the same limits, since Mesa keeps the programs
+                # of each renderer apart (#298).
+                warm_unit = f"{unit}-warm"
+                environment = scenario_shader_cache.warm(
+                    dict(os.environ),
+                    run=lambda command, env: subprocess.CompletedProcess(
+                        command, run_confined(command, temporary, warm_unit, env)
+                    ),
+                )
+                stop(warm_unit)
+                status = run_confined(
+                    ["cargo", "test", "--workspace", "--locked", *arguments], temporary, unit, environment
+                )
             except KeyboardInterrupt:
                 status = 130
+            except scenario_shader_cache.WarmUpFailed as failure:
+                print(f"just test-ci-like: {failure}", file=sys.stderr)
+                status = 1
             kept = keep_failed(temporary)
         finally:
             stop(unit)
+            stop(f"{unit}-warm")
             shutil.rmtree(temporary, ignore_errors=True)
             os.close(lock)
         verdict = "passed" if status == 0 else f"failed (exit status {status})"

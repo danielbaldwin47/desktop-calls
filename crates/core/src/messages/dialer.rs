@@ -177,7 +177,7 @@ pub fn dialer_calls_off(until: Option<TimeOfDay>) -> (String, &'static str) {
         Some(until) => format!("Calls are off until {until}."),
         None => "Calls are off.".to_owned(),
     };
-    (off, "Enter calls anyway; calls go off again after.")
+    (off, "Enter calls anyway, then calls turn off again.")
 }
 
 /// Where the Phone is, at the right of the Dialer's footer: its name while

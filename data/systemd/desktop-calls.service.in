@@ -3,7 +3,7 @@
 # session, and restarts it if it crashes; it then adopts any Call in progress.
 
 [Unit]
-Description=Desktop Calls: your Phone's Calls on this Desktop
+Description=Desktop Calls: your phone's calls on this computer
 Documentation=https://github.com/danielbaldwin47/desktop-calls
 PartOf=graphical-session.target
 After=graphical-session.target

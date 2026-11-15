@@ -236,7 +236,7 @@ pub fn failure(failure: Failure) -> Message {
             Some(NextAction::Command("desktop-calls service")),
         ),
         Failure::UnexpectedReply => (
-            "Desktop Calls answered in a way this command doesn't understand; is an older version still running?",
+            "Desktop Calls gave a reply this command doesn't understand. Is an older version still running?",
             None,
         ),
         Failure::ServiceFailedToStart => (
@@ -254,7 +254,7 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::CallMayStillBeLive => (
-            "The call may still be live on your phone; check your phone and hang up there if it is.",
+            "The call may not have ended. Check your phone and hang up there.",
             None,
         ),
         Failure::AudioNotMoved => (
@@ -280,7 +280,7 @@ pub fn failure(failure: Failure) -> Message {
         // The Dialer's footer says "Reconnecting…" meanwhile.
         Failure::PhoneReconnecting => ("Phone not connected: it's reconnecting.", None),
         Failure::PhonePairingLost => (
-            "Phone not connected: it has forgotten this computer, so pair them again.",
+            "Phone not connected: it has forgotten this computer. Pair it again.",
             Some(NextAction::Command("desktop-calls connect")),
         ),
         Failure::ConnectionLost => (
@@ -334,15 +334,15 @@ pub fn failure(failure: Failure) -> Message {
         Failure::NoWaitingCall => ("There's no waiting call to answer.", None),
         Failure::NoHeldCall => ("There's no call on hold to swap to.", None),
         Failure::HoldAndAnswerFailed => (
-            "Your phone didn't put your call on hold, so both calls are as they were; answer on your phone instead.",
+            "Your phone didn't put your call on hold, so nothing changed. Answer on your phone instead.",
             None,
         ),
         Failure::EndAndAnswerFailed => (
-            "Your phone didn't end your call, so both calls are as they were; end it on your phone instead.",
+            "Your phone didn't end your call, so nothing changed. End it on your phone instead.",
             None,
         ),
         Failure::SwapFailed => (
-            "Your phone didn't swap the calls, so both are as they were; swap them on your phone instead.",
+            "Your phone didn't swap the calls. Swap them on your phone instead.",
             None,
         ),
         Failure::NotConnectedYet => (
@@ -527,14 +527,14 @@ pub fn status(
             describe(phone)
         ),
         (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
-            "{} is in range, but not connected for calls: connecting it again.",
+            "{} is in range but not connected for calls yet. Reconnecting.",
             describe(phone)
         ),
         (ConnectionState::Disconnected, Some(phone)) => {
             format!("{} is out of range or has Bluetooth off.", describe(phone))
         }
         (ConnectionState::PairingLost, Some(phone)) => format!(
-            "{} has forgotten this computer; pair them again.",
+            "{} has forgotten this computer. Pair it again.",
             describe(phone)
         ),
     }
@@ -680,9 +680,7 @@ pub fn label(label: Label) -> &'static str {
         Label::Swap => "Swap",
         Label::Resume => "Resume",
         Label::OnHold => "On hold",
-        Label::WaitingCallFirst => {
-            "Answer or decline the waiting call first: until then, your phone would act on it instead of these calls."
-        }
+        Label::WaitingCallFirst => "Answer or decline the waiting call first.",
         Label::OnYourPhone => "On your phone",
         Label::OneOnHold => "1 on hold",
         Label::ToPhone => "To phone",

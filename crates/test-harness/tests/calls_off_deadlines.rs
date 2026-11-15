@@ -288,7 +288,7 @@ fn turning_calls_off_until_a_time_that_has_passed_is_refused() {
 
     assert_eq!(
         refused.message,
-        "That time has already passed, so calls stay on; choose a time ahead."
+        "That time has already passed, so calls stay on. Choose a later time."
     );
     assert_eq!(harness.app_state().calls_off, "on");
     assert!(!harness.simulated_phone().blocked());
@@ -337,7 +337,7 @@ fn the_cli_turns_calls_off_for_a_length_or_until_a_time_and_says_until_when() {
         ),
         (
             ["calls", "off", "--until", "9:30"],
-            "Give the time calls come back on as HH:MM on the 24-hour clock, such as --until 21:30.\n",
+            "Give the time as HH:MM on the 24-hour clock, such as --until 21:30.\n",
         ),
     ] {
         let output = harness.cli(&arguments);

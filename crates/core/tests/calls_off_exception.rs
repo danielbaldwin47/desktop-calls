@@ -199,7 +199,7 @@ fn while_calls_are_off_the_dialer_searches_and_says_enter_calls_anyway() {
         messages::dialer_calls_off(dialer.calls_off.and_then(|off| off.until)),
         (
             "Calls are off until 21:30.".to_owned(),
-            "Enter calls anyway; calls go off again after."
+            "Enter calls anyway, then calls turn off again."
         )
     );
     assert_eq!(messages::dialer_calls_off(None).0, "Calls are off.");

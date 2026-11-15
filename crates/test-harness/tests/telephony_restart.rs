@@ -39,8 +39,7 @@ const OUTLASTS_THE_WAIT: Duration = Duration::from_secs(12);
 const SERVICE_GIVEN_UP: Duration = Duration::from_secs(15);
 /// What the Call Window says when the Desktop can't tell whether the Hang up
 /// reached the Phone.
-const MAY_STILL_BE_LIVE: &str =
-    "The call may still be live on your phone; check your phone and hang up there if it is.";
+const MAY_STILL_BE_LIVE: &str = "The call may not have ended. Check your phone and hang up there.";
 /// The control interface's `Error` kind for it.
 const MAY_STILL_BE_LIVE_KIND: &str = "call-may-still-be-live";
 

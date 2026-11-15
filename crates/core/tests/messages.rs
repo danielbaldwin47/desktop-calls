@@ -56,7 +56,7 @@ fn status_with_contact_lost_says_so_in_the_call_windows_words() {
     );
     assert_eq!(
         messages::status(&ConnectionState::PairingLost, Some(&pixel()), false, true),
-        "My Pixel (AA:BB:CC:DD:EE:FF) has forgotten this computer; pair them again."
+        "My Pixel (AA:BB:CC:DD:EE:FF) has forgotten this computer. Pair it again."
     );
 }
 

@@ -10,23 +10,23 @@ use crate::messages::ProblemKind;
 pub(super) fn problem(problem: ProblemKind) -> Option<Message> {
     let (text, next_action) = match problem {
         ProblemKind::BluetoothOff => (
-            "This computer's Bluetooth is off, so your phone can't connect; choose Turn on to turn it on.",
+            "Your phone can't connect until this computer's Bluetooth is on.",
             None,
         ),
         ProblemKind::BluetoothBlocked => (
-            "This computer's Bluetooth is switched off by airplane mode or a wireless switch, so it can't be turned on from here; turn airplane mode off, or copy this command and run it in a terminal.",
+            "Airplane mode or a wireless switch is keeping this computer's Bluetooth off. Turn airplane mode off, or run this command in a terminal.",
             Some(NextAction::Command("rfkill unblock bluetooth")),
         ),
         ProblemKind::ContactsSupportMissing => (
-            "This computer is missing the Bluetooth file transfer service that brings contacts and call history over from your phone; copy this command and run it in a terminal to install it.",
+            "This computer is missing the Bluetooth service that brings over your phone's contacts and call history. To install it, run this command in a terminal.",
             Some(NextAction::Command("sudo pacman -S --needed bluez-obex")),
         ),
         ProblemKind::AudioNotSetUp => (
-            "This computer's audio isn't set up to connect to your phone for calls by itself and keep their audio on the phone until you move it here; choose Set up audio to save that setting and restart the audio.",
+            "This computer's audio isn't set up for phone calls yet. Set up audio fixes that and restarts the audio.",
             None,
         ),
         ProblemKind::BluezHandsFree => (
-            "An experimental calling feature of this computer's Bluetooth is on and takes your phone's calls before Desktop Calls can; to turn it off, set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line if it is there), then copy this command and run it in a terminal.",
+            "An experimental Bluetooth calling feature is on, and it takes your phone's calls before Desktop Calls can. To turn it off, set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line, if it's there), then run this command in a terminal.",
             Some(NextAction::Command("sudo systemctl restart bluetooth")),
         ),
         ProblemKind::ContactsDenied

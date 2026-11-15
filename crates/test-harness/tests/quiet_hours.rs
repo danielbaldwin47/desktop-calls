@@ -276,7 +276,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let said = cli_ok(&harness, &["quiet-hours", "22:00-06:30"]);
     assert_eq!(
         said,
-        "Quiet hours are 22:00 to 06:30: calls are off then every day, and on again after.\n"
+        "Quiet hours set: calls are off from 22:00 to 06:30 every day.\n"
     );
     harness.wait_for_app("Quiet hours are set", DEADLINE, |state| {
         state.quiet_hours == Some((minutes(22, 0), minutes(6, 30)))
@@ -320,7 +320,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     assert!(!refused.status.success());
     assert_eq!(
         String::from_utf8_lossy(&refused.stderr),
-        "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them.\n"
+        "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, such as 22:00-07:00, or off to turn them off. The start and end can't be the same.\n"
     );
 
     assert_eq!(

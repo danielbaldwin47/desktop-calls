@@ -343,15 +343,30 @@ fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
         .move_audio("desktop")
         .expect("MoveAudio(\"desktop\") is accepted");
 
-    // The audio can't arrive before the second `Activate` a second in, so
-    // the Call Window says it is coming the whole time.
-    harness.app_holds("the Call Window says Moving…", QUIET, |state| {
-        shown(state, "handoff").as_deref() == Some("Moving…")
-            && state.audio_location == "phone"
-    });
     let state = harness.wait_for_app("the audio reaches the Desktop", DEADLINE, |state| {
         state.audio_location == "desktop"
     });
+    // The audio can't arrive before the second `Activate` a second in, so
+    // the Call Window says it is coming the whole time, from the request
+    // until the audio is here. Judged on what the app published, in order,
+    // rather than over a second the harness times: that second starts only
+    // once the app answers the harness, and a busy app answered 580 ms
+    // late, past the second `Activate` (#146).
+    let call_windows = harness.surfaces_seen();
+    let until_here: Vec<_> = call_windows
+        .iter()
+        .filter_map(|shown| shown.get("call-window"))
+        .skip_while(|window| window.get("handoff").map(String::as_str) != Some("Moving…"))
+        .take_while(|window| window.get("state").map(String::as_str) != Some("On this computer"))
+        .collect();
+    assert!(
+        !until_here.is_empty()
+            && until_here.iter().all(|window| {
+                window.get("handoff").map(String::as_str) == Some("Moving…")
+                    && !window.contains_key("notice")
+            }),
+        "the Call Window stopped saying Moving… before the audio was here: {call_windows:#?}"
+    );
     let took = since_handoff_requested(&harness, "audio-moved");
     assert!(
         took < RETRIED_HANDOFF_DEADLINE,

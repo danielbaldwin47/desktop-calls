@@ -623,9 +623,18 @@ fn the_finish_page_names_the_config_file_with_a_tilde_and_shows_the_line_as_writ
     let (state, _) = run(state, [Input::AddKeybinding]);
     let view = state.surfaces().setup_window.expect("the window is open");
     let text = messages::setup_window(&view, Timestamp(0), home);
+    // One instruction, ahead of the line, so nothing sits between the line
+    // and its buttons (#326).
+    let lines: Vec<String> = text
+        .instructions
+        .iter()
+        .map(messages::Instruction::line)
+        .collect();
     assert_eq!(
-        text.instructions[0].line(),
-        "This line goes at the end of ~/.config/hypr/bindings.lua:"
+        lines,
+        [
+            "Choose Confirm to add this line to the end of ~/.config/hypr/bindings.lua, or Cancel to leave the file as it is:"
+        ]
     );
     // While the line is confirmed, the page is about the line alone.
     assert_eq!((text.keybinding, text.tip), (None, None));

@@ -19,6 +19,7 @@ const STATES: &[&str] = &[
     "call-window-muted",
     "call-window-keypad",
     "call-window-audio-on-phone",
+    "call-window-moving-audio",
     "call-window-ended",
     "call-window-connection-lost",
     "call-window-calling",

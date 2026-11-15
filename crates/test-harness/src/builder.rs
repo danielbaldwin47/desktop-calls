@@ -47,13 +47,19 @@ fn prune_stale_scenario_directories() {
 }
 
 /// Whether the Desktop animates.
+///
+/// Scenarios start with reduced motion, as they start with the cursor's
+/// blinking off: the Banner's ringing dot breathes for as long as it rings
+/// (#234), and a screen that never holds still would keep every action
+/// waiting for it to settle. A scenario about motion asks for
+/// [`Builder::full_motion`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Motion {
-    /// GTK animates, as it does by default.
-    #[default]
+    /// GTK animates, as a Desktop does by default.
     Full,
     /// The Desktop asks for reduced motion: GTK's `gtk-enable-animations`
     /// is off.
+    #[default]
     Reduced,
 }
 
@@ -422,9 +428,20 @@ impl Builder {
     }
 
     /// Turns animations off, as a Desktop set for reduced motion: GTK's
-    /// `gtk-enable-animations` is false.
+    /// `gtk-enable-animations` is false. Scenarios start so; this says a
+    /// scenario depends on it.
     pub fn reduced_motion(mut self) -> Self {
         self.motion = Motion::Reduced;
+        self
+    }
+
+    /// Turns animations on, as a Desktop does by default: GTK's
+    /// `gtk-enable-animations` is true. While the Banner rings, its dot
+    /// breathes and the screen never holds still, so a scenario with it
+    /// acts on the Banner through the control interface, not the pointer
+    /// or keyboard.
+    pub fn full_motion(mut self) -> Self {
+        self.motion = Motion::Full;
         self
     }
 
@@ -808,7 +825,7 @@ pub(super) fn environment(
 /// surface leaves the screen still (GTK fades the cursor in and out over
 /// many frames, which would keep [`Harness`]'s actions waiting for the
 /// screen to settle for up to 10 s after every key), and animations off
-/// too when the Desktop asks for [`Motion::Reduced`]. GTK reads them from
+/// too unless the scenario asked for [`Motion::Full`]. GTK reads them from
 /// `GSettings`, here kept in a key file in `config` (`GSETTINGS_BACKEND`
 /// is GLib's own variable, read by every GLib program), and from
 /// `gtk-4.0/settings.ini` where the `GSettings` schema is not installed.

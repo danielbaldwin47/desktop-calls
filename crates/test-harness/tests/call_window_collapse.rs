@@ -55,7 +55,11 @@ const CHANGE_WITHIN: Duration = Duration::from_secs(2);
 const CUT_WITHIN: Duration = Duration::from_millis(150);
 
 fn connected() -> Harness {
-    let harness = Harness::builder().headless_screen().omarchy_bar().start();
+    connected_on(Harness::builder().headless_screen().omarchy_bar())
+}
+
+fn connected_on(builder: test_harness::Builder) -> Harness {
+    let harness = builder.start();
     harness.simulated_phone().connect();
     harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
         state.connection_state == "connected"
@@ -523,7 +527,12 @@ fn mute_and_hang_up_on_the_call_pill_work_and_it_shows_muted() {
 /// reports the end of each change as soon as it starts.
 #[test]
 fn the_call_window_grows_out_of_the_call_pill_and_shrinks_back_in_200_ms() {
-    let harness = connected();
+    let harness = connected_on(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .full_motion(),
+    );
     live_on_desktop(&harness);
     wait_until_collapsed(&harness);
     let (pill_region, _) = pill_on_screen(&harness, "call-pill");

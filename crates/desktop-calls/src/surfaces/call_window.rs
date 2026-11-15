@@ -31,12 +31,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 mod change;
+mod handoff_progress;
 mod held;
 mod pill;
 mod render;
 
 use super::icons::{Icon, IconView};
 use change::{CHANGE_MS, Change, SMALLEST_CONTENT};
+use handoff_progress::HandoffProgress;
 use held::HeldRow;
 use pill::{CallPill, calls_off_tag};
 
@@ -71,6 +73,8 @@ pub(super) struct CallWindow {
     keypad_shown: Tile<gtk::ToggleButton>,
     /// Moves the audio to where the Call isn't heard.
     handoff: Tile<gtk::Button>,
+    /// The bar along the audio tile's foot while a Handoff is under way.
+    handoff_progress: HandoffProgress,
     /// Makes the only Call, on hold, live again.
     resume: gtk::Button,
     hang_up: gtk::Button,
@@ -182,7 +186,7 @@ impl CallWindow {
         let (top, caller, timer) = top_line();
         let (detail_line, meta, calls_off) = detail_line();
         let mut shortcuts = BTreeMap::new();
-        let (tiles, mute, keypad_shown, handoff) = tiles(&mut shortcuts);
+        let (tiles, mute, keypad_shown, handoff, handoff_progress) = tiles(&mut shortcuts);
 
         let resume = gtk::Button::new();
         resume.add_css_class("resume");
@@ -247,6 +251,7 @@ impl CallWindow {
             tiles,
             mute,
             keypad_shown,
+            handoff_progress,
             handoff,
             resume,
             hang_up,
@@ -648,7 +653,8 @@ fn hang_up_keycap(button: &gtk::Button) -> Option<gtk::Widget> {
 }
 
 /// The three tiles: Mute, Keypad and the audio move, in a row of equal
-/// widths. Adds each one's shortcut to `shortcuts`.
+/// widths, and the bar over the audio tile. Adds each one's shortcut to
+/// `shortcuts`.
 fn tiles(
     shortcuts: &mut Shortcuts,
 ) -> (
@@ -656,6 +662,7 @@ fn tiles(
     Tile<gtk::Button>,
     Tile<gtk::ToggleButton>,
     Tile<gtk::Button>,
+    HandoffProgress,
 ) {
     let (mute, shown, cap) = Tile::new(
         gtk::Button::new(),
@@ -684,8 +691,13 @@ fn tiles(
     tiles.set_homogeneous(true);
     tiles.append(&mute.button);
     tiles.append(&keypad_shown.button);
-    tiles.append(&handoff.button);
-    (tiles, mute, keypad_shown, handoff)
+    // The bar lies over the tile, not in it, so the tile's dimming while
+    // a Handoff disables it leaves the bar in full colour.
+    let over_handoff = gtk::Overlay::new();
+    over_handoff.set_child(Some(&handoff.button));
+    tiles.append(&over_handoff);
+    let handoff_progress = HandoffProgress::new(&over_handoff);
+    (tiles, mute, keypad_shown, handoff, handoff_progress)
 }
 
 /// The top line: who, and the timer at the right. Returns the line, who and

@@ -495,7 +495,12 @@ fn open_dialer_selects_the_call_asked_for() {
 #[test]
 #[ignore = "one scenario at a time: just test-file dialer_surface --ignored --test-threads=1 --ci-like"]
 fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
-    let harness = Harness::builder().headless_screen().omarchy_bar().start();
+    // Timed with animations on, as on the Desktop (#234).
+    let harness = Harness::builder()
+        .headless_screen()
+        .omarchy_bar()
+        .full_motion()
+        .start();
     let phone = harness.simulated_phone();
     phone.set_pbap_folder("pb", &vcards::contacts(5_000, 0));
     phone.set_pbap_folder("cch", &vcards::call_history(200));

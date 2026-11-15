@@ -11,7 +11,7 @@
 //! Window as shown once it starts to grow, and the Call Pill as shown once
 //! the window starts to shrink. The app logs each change's start and end.
 
-use super::super::WIDTH;
+use super::super::{WIDTH, animations_on};
 use super::CallWindow;
 use super::pill::PILL_WIDTH;
 use crate::logging::EventKind;
@@ -138,8 +138,7 @@ impl CallWindow {
 
     fn started(&self, change: Change) {
         self.change.set(Some(change));
-        let animated =
-            gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
+        let animated = animations_on();
         tracing::info!(
             event_kind = %EventKind::CallWindowChangeStarted,
             form = change.form(),

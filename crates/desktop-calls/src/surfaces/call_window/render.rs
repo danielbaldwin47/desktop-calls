@@ -25,6 +25,7 @@ impl CallWindow {
         }
         let Some(view) = view else {
             self.stop_ticker();
+            self.handoff_progress.show(false);
             self.surface.hide();
             self.pill.hide();
             self.reset_change();
@@ -320,6 +321,8 @@ impl CallWindow {
             })
             | None => (Label::MoveHere, Icon::Computer),
         };
+        self.handoff_progress
+            .show(audio.is_some_and(|audio| audio.moving.is_some()));
         let label = messages::label(label);
         self.handoff.label.set_text(label);
         self.handoff.icon.set(icon);

@@ -232,7 +232,7 @@ fn quiet_hours_beginning_turn_calls_off_until_they_end() {
             quiet_hours: true,
         }
     );
-    assert_eq!(status(&state), "Calls off until 07:00 (quiet hours)");
+    assert_eq!(status(&state), "Quiet hours until 07:00");
     assert!(view.menu.contains(&IndicatorEntry::TurnCallsOn));
 }
 
@@ -361,7 +361,7 @@ fn a_timed_break_ending_inside_quiet_hours_stays_off_until_they_end() {
         [Some(off_for_quiet_hours(end_after(START + 60)))]
     );
     assert!(state.calls_off());
-    assert_eq!(status(&state), "Calls off until 07:00 (quiet hours)");
+    assert_eq!(status(&state), "Quiet hours until 07:00");
 
     let (state, effects) = run(state, [clock(END)]);
     assert!(effects.contains(&block_phone(false)), "{effects:?}");
@@ -393,7 +393,7 @@ fn a_timed_break_that_ended_inside_quiet_hours_while_stopped_stays_off_at_start(
 }
 
 #[test]
-fn until_tomorrow_morning_ends_when_quiet_hours_end() {
+fn until_morning_ends_when_quiet_hours_end() {
     let state = connected_at(0);
     let view = state.indicator(&state.surfaces());
     let entry = view
@@ -459,7 +459,7 @@ fn quiet_hours_beginning_during_a_call_wait_for_it_to_end() {
 
     let (state, effects) = run(state, [ended(START + 5)]);
     assert!(effects.contains(&block_phone(true)), "{effects:?}");
-    assert_eq!(status(&state), "Calls off until 07:00 (quiet hours)");
+    assert_eq!(status(&state), "Quiet hours until 07:00");
 }
 
 #[test]

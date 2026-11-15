@@ -171,7 +171,7 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
         blocked.len() == 1 && blocked[0] >= start * 1_000_000,
         "the app blocked the Phone at {blocked:?}, before Quiet Hours began at {start}"
     );
-    let item = indicator_says(&harness, "Calls off until 06:00 (quiet hours)");
+    let item = indicator_says(&harness, "Quiet hours until 06:00");
     assert_eq!(item.status.as_deref(), Some("Active"), "no attention asked");
     let kept = record_text(&harness);
     assert!(kept.contains(r#""quiet_hours":true"#), "{kept}");
@@ -191,7 +191,7 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
         .expect("Quiet Hours set");
 
     wait_off_until(&harness, end);
-    indicator_says(&harness, "Calls off until 00:00 (quiet hours)");
+    indicator_says(&harness, "Quiet hours until 00:00");
     assert!(now() < end, "the setup took too long to test the end");
 
     let left = Duration::from_secs(end.saturating_sub(now()));
@@ -232,7 +232,7 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
         (now() + 8 * 3_600 - 60..=now() + 8 * 3_600 + 60).contains(&end),
         "{end} is not 07:00"
     );
-    indicator_says(&harness, "Calls off until 07:00 (quiet hours)");
+    indicator_says(&harness, "Quiet hours until 07:00");
 
     cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
@@ -263,7 +263,7 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
         turned_on,
         "the Phone was unblocked as the break ended inside Quiet Hours"
     );
-    indicator_says(&harness, "Calls off until 07:00 (quiet hours)");
+    indicator_says(&harness, "Quiet hours until 07:00");
     assert!(harness.simulated_phone().blocked());
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
 }
@@ -305,7 +305,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let state = wait_connected(&harness, RECONNECT_DEADLINE);
     assert_eq!(state.quiet_hours, Some((minutes(22, 0), minutes(6, 30))));
 
-    // Until tomorrow morning ends when Quiet Hours end.
+    // Until morning ends when Quiet Hours end.
     let said = cli_ok(&harness, &["calls", "off", "--until-morning"]);
     assert_eq!(
         said,

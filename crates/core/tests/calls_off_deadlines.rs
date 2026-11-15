@@ -1,4 +1,4 @@
-//! Calls Off for 1 hour or until tomorrow morning, at the Call state
+//! Calls Off for 1 hour or until morning, at the Call state
 //! machine's public interface (ticket #203): the menu shows each choice's
 //! end time, the deadline is kept for the next run, and calls come back on
 //! by themselves once the wall clock passes it, at once if it passed while
@@ -187,7 +187,7 @@ fn turn_calls_off_offers_an_hour_and_the_morning_with_their_end_times() {
         [
             "Until I turn them on",
             "For 1 hour (until 21:30)",
-            "Until tomorrow morning (07:00)"
+            "Until morning (07:00)"
         ]
     );
     assert_eq!(

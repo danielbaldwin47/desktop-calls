@@ -183,7 +183,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this call ends",
+        tooltip: "Calls off after this call",
         submenu: None,
         menu_shows: &[],
     },
@@ -210,7 +210,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
     },
     IndicatorState {
         name: "off-until-morning",
-        title: "The Indicator, calls off until tomorrow morning",
+        title: "The Indicator, calls off until morning",
         prepare: as_is,
         reach: |harness| {
             connect(harness);
@@ -230,7 +230,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
             connect(harness);
             let _output = harness.cli(&["quiet-hours", "00:00-23:59"]);
         },
-        tooltip: "Calls off until 23:59 (quiet hours)",
+        tooltip: "Quiet hours until 23:59",
         submenu: None,
         menu_shows: &[],
     },
@@ -295,7 +295,7 @@ pub(super) const MENU_STATES: &[IndicatorState] = &[
             live(harness);
             let _output = harness.cli(&["calls", "off"]);
         },
-        tooltip: "Calls turn off when this call ends",
+        tooltip: "Calls off after this call",
         submenu: None,
         menu_shows: &["Hang up", "Keep calls on"],
     },

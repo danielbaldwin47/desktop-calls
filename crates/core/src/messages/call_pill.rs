@@ -22,6 +22,13 @@ pub fn calls_off_after_tag() -> &'static str {
     "Calls off after"
 }
 
+/// What sits between two tags on one line, as between the parts of every
+/// other line of details: "1 on hold · Calls off after" (#319).
+#[must_use]
+pub fn tag_separator() -> &'static str {
+    "·"
+}
+
 /// The tooltip of the Call Pill's button labelled `name`, whose shortcut in
 /// the expanded Call Window is shown as `shortcut`: "Hang up · Ctrl+H".
 #[must_use]

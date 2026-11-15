@@ -43,6 +43,7 @@ const STATES: &[&str] = &[
     "dialer-call-history",
     "dialer-new-missed-calls",
     "dialer-results",
+    "dialer-no-matches",
     "dialer-not-connected",
     "dialer-calls-off",
     "dialer-withheld-missed-call",

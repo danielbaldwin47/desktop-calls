@@ -12,6 +12,7 @@ const STATES: &[&str] = &[
     "incoming-call-banner-keyboard",
     "incoming-call-banner-not-in-contacts",
     "incoming-call-banner-no-keybinding",
+    "incoming-call-banner-withheld",
     "call-waiting-banner-keyboard",
     "call-waiting-banner-without-hold",
     "call-window-live",
@@ -43,6 +44,11 @@ const STATES: &[&str] = &[
     "dialer-results",
     "dialer-not-connected",
     "dialer-calls-off",
+    "dialer-withheld-missed-call",
+    "dialer-call-in-progress",
+    "dialer-undialable",
+    "call-window-audio-not-moved",
+    "call-window-phone-kept-audio",
     "quiet-hours-window-off",
     "quiet-hours-window-on",
     "quiet-hours-window-refused",
@@ -52,6 +58,8 @@ const STATES: &[&str] = &[
     "setup-window-contacts-prompt",
     "setup-window-contacts-syncing",
     "setup-window-done",
+    "setup-window-contacts-prompt-timed-out",
+    "setup-window-done-contacts-denied",
     "setup-window-keybinding",
     "setup-window-calls-off",
     "setup-problem-bluetooth-off",
@@ -186,6 +194,40 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         }
     }
     indicator_menus_are_drawn(&output, &index);
+    missed_call_notifications_are_drawn(&output, &index);
+}
+
+/// The Missed Call notification in the gallery at `output`, whose page is
+/// `index`: a stand-in for Omarchy's card, single and grouped, light and
+/// dark, captioned as one. Omarchy's card is 380 logical pixels wide, and
+/// with a body and a bar of buttons, 2 + 10 + 40 + 10 + 35 + 2 high.
+fn missed_call_notifications_are_drawn(output: &Path, index: &str) {
+    for state in ["missed-call", "missed-calls-grouped"] {
+        for look in ["omarchy-light", "omarchy-dark"] {
+            let file = format!("notification-{state}-{look}.png");
+            assert!(index.contains(&file), "the index shows {file}: {index}");
+            let png = std::fs::read(output.join(&file))
+                .unwrap_or_else(|error| panic!("{file} is drawn: {error}"));
+            assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "{file} is a PNG");
+            assert_eq!(
+                png[16..20],
+                760_u32.to_be_bytes(),
+                "{file} is 380 wide at 2x"
+            );
+            assert_eq!(
+                png[20..24],
+                198_u32.to_be_bytes(),
+                "{file} is 99 high at 2x"
+            );
+        }
+    }
+    assert_eq!(
+        index
+            .matches("Stand-in: drawn from the notification the app sends")
+            .count(),
+        4,
+        "each notification's caption says it is a stand-in"
+    );
 }
 
 /// The Indicator's menu in the gallery at `output`, whose page is `index`:

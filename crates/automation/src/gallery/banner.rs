@@ -1,7 +1,7 @@
 //! The Incoming Call Banner's states in the gallery (#226): ringing, with
-//! the keyboard, identifying, not in Contacts and with no keybinding, and a
-//! Waiting Call with and without hold. A third Call waiting, beside the
-//! Call Window with two Calls, is in the main list.
+//! the keyboard, identifying, not in Contacts, withheld and with no
+//! keybinding, and a Waiting Call with and without hold. A third Call
+//! waiting, beside the Call Window with two Calls, is in the main list.
 
 use std::time::{Duration, Instant};
 
@@ -105,6 +105,29 @@ pub(super) const BANNER_STATES: &[State] = &[
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
+        name: "incoming-call-banner-withheld",
+        title: "The Incoming Call Banner for a withheld number, once no number came: Withheld number, and nothing to call back",
+        still: |state| {
+            caller(state).is_some_and(|caller| caller == "Withheld number")
+                && names_the_keybinding(state)
+        },
+        prepare: with_keybinding,
+        reach: |harness| {
+            connect(harness);
+            let _path = harness.simulated_phone().ring("");
+            // The Banner identifies the caller for 2 s first.
+            harness.wait_for_app(
+                "the Banner says Withheld number, with the keybinding",
+                DEADLINE,
+                |state| {
+                    caller(state).is_some_and(|caller| caller == "Withheld number")
+                        && names_the_keybinding(state)
+                },
+            );
+        },
+        shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
+    },
+    State {
         name: "call-waiting-banner",
         title: "A Waiting Call that can be held: Hold & Answer says who waits on hold, End & Answer whose Call ends; the Banner top right, the Call Window bottom right",
         still: expanded,
@@ -157,7 +180,7 @@ pub(super) const BANNER_STATES: &[State] = &[
     },
 ];
 
-fn with_keybinding(builder: Builder) -> Builder {
+pub(super) fn with_keybinding(builder: Builder) -> Builder {
     builder.hyprland_bindings(DESKTOP_CALLS_BINDING)
 }
 
@@ -167,7 +190,7 @@ fn footer(state: &AppState) -> Option<&String> {
         .and_then(|banner| banner.get("footer"))
 }
 
-fn names_the_keybinding(state: &AppState) -> bool {
+pub(super) fn names_the_keybinding(state: &AppState) -> bool {
     footer(state).is_some_and(|footer| footer.starts_with("Super Alt C then"))
 }
 
@@ -177,12 +200,15 @@ fn has_the_keyboard(state: &AppState) -> bool {
         .is_some_and(|banner| banner.contains_key("keycaps"))
 }
 
-/// Whether the Banner's caller line says the caller is being identified.
-fn identifying(state: &AppState) -> bool {
+fn caller(state: &AppState) -> Option<&String> {
     state
         .surface("banner")
         .and_then(|banner| banner.get("caller"))
-        .is_some_and(|caller| caller == "Identifying caller…")
+}
+
+/// Whether the Banner's caller line says the caller is being identified.
+fn identifying(state: &AppState) -> bool {
+    caller(state).is_some_and(|caller| caller == "Identifying caller…")
 }
 
 fn wait_for_footer(harness: &Harness) {

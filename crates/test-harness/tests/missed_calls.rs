@@ -191,9 +191,27 @@ fn scenario_8_a_caller_who_hangs_up_leaves_a_missed_call_notification_whose_clic
 
     rings_out(&harness, &path);
 
-    let notification = wait_for_notification(&harness, "Missed call from Alice (mobile)");
+    let notification = wait_for_notification(&harness, "Missed call from Alice");
     assert_eq!(notification.app_name, "Desktop Calls");
-    assert!(is_time(&notification.body), "{notification:?}");
+    assert!(
+        notification
+            .body
+            .strip_prefix("mobile · ")
+            .is_some_and(is_time),
+        "the number's label and the time under who: {notification:?}"
+    );
+    assert_eq!(
+        notification.hints.get("omarchy-glyph").map(String::as_str),
+        Some(r#""\u{f03fa}""#),
+        "Omarchy's glyph hint carries a missed-call glyph (md-phone_missed): {notification:?}"
+    );
+    // Omarchy draws an icon it can find, from the app icon or the
+    // desktop entry, in place of the glyph.
+    assert_eq!(notification.app_icon, "", "{notification:?}");
+    assert!(
+        !notification.hints.contains_key("desktop-entry"),
+        "{notification:?}"
+    );
     assert!(
         action(&notification, "default").is_some(),
         "{notification:?}"
@@ -234,7 +252,7 @@ fn call_back_on_the_notification_places_the_call() {
     let (path, _) = ring(&harness, ALICE);
     call_history(&harness, &[missed(Some(ALICE), "20261105T100000")]);
     rings_out(&harness, &path);
-    let notification = wait_for_notification(&harness, "Missed call from Alice (mobile)");
+    let notification = wait_for_notification(&harness, "Missed call from Alice");
 
     harness
         .notifications()
@@ -261,7 +279,7 @@ fn three_missed_calls_from_alice_leave_one_notification_counting_them() {
             SYNC_DEADLINE,
             |notification| {
                 if count == 1 {
-                    notification.summary == "Missed call from Alice (mobile)"
+                    notification.summary == "Missed call from Alice"
                 } else {
                     notification.summary == format!("{count} missed calls from Alice")
                 }
@@ -355,7 +373,7 @@ fn a_call_that_rings_out_is_notified_if_the_call_history_refresh_fails() {
 
     rings_out(&harness, &path);
 
-    wait_for_notification(&harness, "Missed call from Alice (mobile)");
+    wait_for_notification(&harness, "Missed call from Alice");
 }
 
 /// A Contact's name can't change how Omarchy treats the notification. Omarchy
@@ -377,10 +395,10 @@ fn a_missed_call_from_a_contact_named_like_a_verification_code_is_silenced_under
 
     let mut newest = Vec::new();
     for (number, reads, at) in [
-        (ALICE, "Missed call from Alice (mobile)", "20261105T100000"),
+        (ALICE, "Missed call from Alice", "20261105T100000"),
         (
             GATE,
-            "Missed call from Gate code 4821 (mobile)",
+            "Missed call from Gate code 4821",
             "20261105T100500",
         ),
         (

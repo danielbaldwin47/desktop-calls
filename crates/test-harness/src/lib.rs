@@ -150,8 +150,11 @@ pub const KEEP_SCENARIO_LOGS: &str = "KEEP_SCENARIO_LOGS";
 /// cache; a scenario's is always empty, so without this, every first frame on
 /// a machine with no GPU waits for Mesa's software renderer to compile the
 /// programs a window draws with (#282). `just ci-first-frame-timings` fills
-/// one with a warm-up run, then judges the first frames against it. Only
-/// Mesa reads it, as `MESA_SHADER_CACHE_DIR`; the app can't tell.
+/// one with a warm-up run, then judges the first frames against it. The
+/// scenario recipes fill one with `shader_cache.rs` and give it to every
+/// scenario (#298, `tools/scenario_shader_cache.py`); set but empty, each
+/// scenario's cache is cold. Only Mesa reads it, as `MESA_SHADER_CACHE_DIR`;
+/// the app can't tell.
 pub const SCENARIO_SHADER_CACHE: &str = "SCENARIO_SHADER_CACHE";
 
 /// The journal's socket. While it is reachable the app logs there, so the

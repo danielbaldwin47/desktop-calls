@@ -778,6 +778,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         // chose one: then only that one, and with it unpaired the Setup
         // Window opens once BlueZ has listed everything.
         Input::PhonePaired(phone) if state.phone.is_none() && state.may_follow(&phone) => {
+            setup::chosen_followed(&mut state, &phone, &mut effects);
             phone_paired(&mut state, phone, &mut effects);
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),

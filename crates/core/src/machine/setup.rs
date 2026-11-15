@@ -709,6 +709,32 @@ pub(super) fn kept(state: &mut State, address: String, name: Option<String>) {
     state.chosen_phone = Some(ChosenPhone { address, name });
 }
 
+/// The chosen Phone, followed again: kept again with its name, if that is
+/// new or wasn't kept, so the Setup Window can name it once it's gone.
+pub(super) fn chosen_followed(state: &mut State, phone: &Phone, effects: &mut Vec<Effect>) {
+    let chosen = state.chosen_phone.as_ref();
+    if chosen.is_some_and(|chosen| chosen.is(&phone.address)) {
+        keep(state, phone, effects);
+    }
+}
+
+/// Keeps `phone` as the Phone the user chose, when it or its name is new.
+/// A name that is only the address, as BlueZ gives for a Phone with none
+/// (with dashes), isn't one.
+fn keep(state: &mut State, phone: &Phone, effects: &mut Vec<Effect>) {
+    let chosen = ChosenPhone {
+        address: phone.address.clone(),
+        name: Some(phone.name.clone())
+            .filter(|name| !phone.address.eq_ignore_ascii_case(&name.replace('-', ":"))),
+    };
+    let kept = state.chosen_phone.as_ref();
+    if !kept.is_some_and(|kept| kept.is(&phone.address) && kept.name == chosen.name) {
+        state.chosen_phone = Some(chosen);
+        let phone = phone.clone();
+        effects.push(Effect::KeepChosenPhone { phone });
+    }
+}
+
 /// The Phone the Setup Window was pairing is paired: Desktop Calls follows
 /// it from now on, instead of any Phone it followed before, trusts it and
 /// connects it.
@@ -718,23 +744,8 @@ pub(super) fn paired(state: &mut State, phone: Phone, effects: &mut Vec<Effect>)
         .as_ref()
         .is_some_and(|followed| followed.address.eq_ignore_ascii_case(&phone.address));
     // The user chose it, so a restart follows it, not the Phone BlueZ lists
-    // first. Kept again when only its name is new, or wasn't kept. A name
-    // that is only the address, as BlueZ gives for a Phone with none, isn't
-    // one.
-    let chosen = ChosenPhone {
-        address: phone.address.clone(),
-        name: Some(phone.name.clone()).filter(|name| !phone.address.eq_ignore_ascii_case(name)),
-    };
-    if !state
-        .chosen_phone
-        .as_ref()
-        .is_some_and(|kept| kept.is(&phone.address) && kept.name == chosen.name)
-    {
-        state.chosen_phone = Some(chosen);
-        effects.push(Effect::KeepChosenPhone {
-            phone: phone.clone(),
-        });
-    }
+    // first.
+    keep(state, &phone, effects);
     if !already_followed {
         if state.phone.is_some() {
             switch_away(state, effects);

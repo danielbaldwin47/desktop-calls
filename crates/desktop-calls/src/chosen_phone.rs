@@ -121,7 +121,7 @@ fn from_json(document: &Value) -> Option<(String, Option<String>)> {
     let name = document
         .get("name")
         .and_then(Value::as_str)
-        .filter(|name| !name.trim().is_empty() && !is_address(name))
+        .filter(|name| !name.trim().is_empty() && !is_address(&name.replace('-', ":")))
         .map(str::to_owned);
     is_address(address).then(|| (address.to_owned(), name))
 }

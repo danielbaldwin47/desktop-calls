@@ -58,6 +58,10 @@ _Avoid_: phonebook, address book
 An incoming Call that stopped ringing without being answered on either device and without being declined.
 _Avoid_: unanswered call
 
+**Missed Call cue**:
+The lasting sign that Missed Calls are waiting: a badge on the Indicator, a count in its tooltip and a line in its menu, until the user opens the Dialer or calls back. The Dialer marks the Missed Calls it counted.
+_Avoid_: unread badge, missed-call count
+
 **Call History**:
 The Phone's record of recent incoming, outgoing and missed Calls.
 _Avoid_: call log, recents

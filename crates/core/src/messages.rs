@@ -400,10 +400,24 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
     }
 }
 
-/// What the Indicator says on hover: its status, then each Problem.
+/// "1 missed call", "2 missed calls": what the Missed Call cue counts.
+fn missed_calls(count: u32) -> String {
+    if count == 1 {
+        "1 missed call".to_owned()
+    } else {
+        format!("{count} missed calls")
+    }
+}
+
+/// What the Indicator says on hover: its status, the Missed Calls the cue
+/// counts, then each Problem.
 #[must_use]
 pub fn indicator_tooltip(view: &IndicatorView) -> String {
     let mut tooltip = indicator_status(&view.status);
+    if view.missed_calls > 0 {
+        tooltip.push_str(" · ");
+        tooltip.push_str(&missed_calls(view.missed_calls));
+    }
     for problem in &view.problems {
         tooltip.push_str(" · ");
         tooltip.push_str(problem_heading(*problem));
@@ -417,6 +431,7 @@ pub fn indicator_tooltip(view: &IndicatorView) -> String {
 pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
     match entry {
         IndicatorEntry::Status => indicator_status(&view.status),
+        IndicatorEntry::MissedCalls(count) => format!("{}…", missed_calls(*count)),
         IndicatorEntry::OpenDialer => "Open Dialer".to_owned(),
         IndicatorEntry::ConnectPhone => CONNECT_YOUR_PHONE.to_owned(),
         IndicatorEntry::Separator => String::new(),

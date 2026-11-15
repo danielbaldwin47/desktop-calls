@@ -33,7 +33,7 @@ const ITEM_PATH: &str = "/StatusNotifierItem";
 const MENU_PATH: &str = "/MenuBar";
 
 /// The icons, by look, as file name stems and their SVG.
-const ICONS: [(IndicatorLook, &str, &str); 6] = [
+const ICONS: [(IndicatorLook, &str, &str); 8] = [
     (
         IndicatorLook::Connected,
         "desktop-calls-connected-symbolic",
@@ -63,6 +63,16 @@ const ICONS: [(IndicatorLook, &str, &str); 6] = [
         IndicatorLook::Off,
         "desktop-calls-off-symbolic",
         include_str!("../../../data/icons/desktop-calls-off-symbolic.svg"),
+    ),
+    (
+        IndicatorLook::ConnectedMissedCalls,
+        "desktop-calls-connected-missed-symbolic",
+        include_str!("../../../data/icons/desktop-calls-connected-missed-symbolic.svg"),
+    ),
+    (
+        IndicatorLook::DisconnectedMissedCalls,
+        "desktop-calls-disconnected-missed-symbolic",
+        include_str!("../../../data/icons/desktop-calls-disconnected-missed-symbolic.svg"),
     ),
 ];
 
@@ -439,6 +449,7 @@ fn layout(view: &IndicatorView) -> Vec<MenuItem> {
         .map(|entry| {
             let id = match entry {
                 IndicatorEntry::Status => 1,
+                IndicatorEntry::MissedCalls(_) => 952,
                 IndicatorEntry::OpenDialer => 2,
                 IndicatorEntry::HangUp(_) => 3,
                 IndicatorEntry::Mute(_) => 4,

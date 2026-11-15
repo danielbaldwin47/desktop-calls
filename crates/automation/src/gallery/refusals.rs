@@ -4,10 +4,8 @@
 
 use test_harness::{AppState, Harness, Key};
 
-use super::{
-    DEADLINE, State, as_is, connect, dialer_shows, live_here, on_a_call, open_dialer, ring, shows,
-    shows_dialer, sync,
-};
+use super::dialer::{dialer_shows, open_dialer, shows_dialer};
+use super::{DEADLINE, State, as_is, connect, live_here, on_a_call, ring, shows, sync};
 
 pub(super) const REFUSAL_STATES: &[State] = &[
     State {

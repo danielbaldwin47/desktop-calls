@@ -1,6 +1,7 @@
 //! Placing a Call from the Desktop, and the Dialer.
 
 use super::input::{DialProgress, Effect, Input, PhoneCommand, PhoneRefusal, Timer};
+use super::missed_calls::{missed_first, seen_in_dialer};
 use super::{
     CALL_ENDED_MS, DIAL_TIMEOUT_MS, Dialer, Dialling, Focus, HungUpDial, NOTICE_MS, Notice,
     PHONE_FOR_DIAL_MS, State,
@@ -251,6 +252,7 @@ pub(super) fn dialer_input(state: &mut State, input: Input, effects: &mut Vec<Ef
 /// Opens the Dialer afresh with `query` typed. It takes the keyboard.
 pub(super) fn open_dialer(state: &mut State, query: String, select_call: Option<CallId>) {
     state.focus = Focus::None;
+    seen_in_dialer(state);
     state.dialer_openings = state.dialer_openings.wrapping_add(1);
     let caller = select_call.and_then(|call| {
         state
@@ -261,7 +263,7 @@ pub(super) fn open_dialer(state: &mut State, query: String, select_call: Option<
             .map(|(_, caller)| caller.clone())
     });
     let mut query = query;
-    let mut rows = matching::search(&query, &state.contacts, &state.call_history);
+    let mut rows = search(state, &query);
     let find = |rows: &[DialerRow]| {
         caller.as_ref().and_then(|caller| {
             rows.iter()
@@ -275,7 +277,7 @@ pub(super) fn open_dialer(state: &mut State, query: String, select_call: Option<
         // The Call isn't in the Call History the Desktop holds: look the
         // caller up by number instead, so Enter calls them and nobody else.
         query.clone_from(number);
-        rows = matching::search(&query, &state.contacts, &state.call_history);
+        rows = search(state, &query);
         found = find(&rows);
     }
     let selected = found.unwrap_or(0);
@@ -286,6 +288,16 @@ pub(super) fn open_dialer(state: &mut State, query: String, select_call: Option<
         selected,
         opened: state.dialer_openings,
     });
+}
+
+/// The Dialer's rows for `query`, with the Missed Calls it marks first.
+fn search(state: &State, query: &str) -> Vec<DialerRow> {
+    let rows = matching::search(query, &state.contacts, &state.call_history);
+    if query.trim().is_empty() {
+        missed_first(state, rows)
+    } else {
+        rows
+    }
 }
 
 /// What is typed can't be dialled and matches nothing: say so before Enter.
@@ -301,7 +313,7 @@ fn dialer_query(state: &mut State, query: String) {
     {
         return;
     }
-    let rows = matching::search(&query, &state.contacts, &state.call_history);
+    let rows = search(state, &query);
     if let Some(dialer) = state.dialer.as_mut() {
         dialer.notice = undialable(&query, &rows);
         dialer.query = query;
@@ -316,7 +328,7 @@ pub(super) fn refresh_dialer(state: &mut State) {
     let Some(query) = state.dialer.as_ref().map(|dialer| dialer.query.clone()) else {
         return;
     };
-    let rows = matching::search(&query, &state.contacts, &state.call_history);
+    let rows = search(state, &query);
     if let Some(dialer) = state.dialer.as_mut() {
         dialer.selected = dialer.selected.min(rows.len().saturating_sub(1));
         dialer.rows = rows;

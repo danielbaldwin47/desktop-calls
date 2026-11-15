@@ -12,6 +12,11 @@ head is what branch protection requires (#286). Landings take turns on one
 lock (tools/merge.py's), held from the first look at `main` to the squash, so
 `main` can't move between the run that tested a head and its merge.
 
+Before it takes the lock, and again on the head as it will be merged, it
+refuses a PR whose comments record no passed reviews for that head
+(tools/reviews.py, ticket #327; `just review-record` posts them). A merge of
+origin/main this makes keeps the reviews: it resolves no conflict.
+
 What it does, holding the lock:
   1. Brings the branch level with its copy on GitHub, fast-forward only. A
      branch that has diverged from it is refused: someone rebased, or pushed.
@@ -249,6 +254,14 @@ def plan(number: int, keep_target: bool) -> int:
         if look.must_update
         else "Would wait for GitHub's \"CI passed\" on the head"
     )
+    needed, missing = merge.review_status(pr, look.sha)
+    if missing:
+        print(f"Would refuse: no passed review recorded for {look.sha[:7]} of every kind it needs "
+              f"({' and '.join(needed)}):")
+        for line in missing:
+            print(f"  {line}")
+    else:
+        print(f"Reviews recorded for {look.sha[:7]}: {' and '.join(needed)}, passed.")
     print(f"{first}, then squash-merge.")
     print(
         "Would keep target/ (--keep-target)."
@@ -267,6 +280,7 @@ def holding_the_lane(number: int) -> int:
     ci_local.require_clean_head()  # HEAD may have moved while this waited for its turn
     look = survey(pr, level=True)
     sha, base = look.sha, look.base
+    merge.require_reviewed(pr, head=sha)  # commits here that GitHub lacks need reviews too
     if look.must_update:
         print(f"{sha[:7]} lacks commits on origin/{base} ({look.why}): merging origin/{base} into "
               f"{look.branch}.", flush=True)
@@ -276,7 +290,15 @@ def holding_the_lane(number: int) -> int:
         print(f"Letting through the commits on origin/{base} it lacks: {look.why}", flush=True)
     # On the head as it will be merged: a step whose script is on main only
     # must not refuse a branch behind main.
-    merge.require_no_step_waits_on_a_closed_ticket(pr, head=sha)
+    try:
+        merge.require_no_step_waits_on_a_closed_ticket(pr, head=sha)
+    except merge.Refused as refusal:
+        if not look.must_update:
+            raise
+        raise merge.Refused(
+            f"{refusal}\n(The merge of origin/{base} made above stays in {look.branch}, unpushed: "
+            "the next `just land` pushes it with your fix.)"
+        ) from None
     if not is_ancestor(sha, f"origin/{look.branch}"):
         print(f"Pushing {sha[:7]} to {look.branch}; GitHub's CI runs on it.", flush=True)
         push(look.branch, sha)
@@ -289,6 +311,7 @@ def land(number: int, keep_target: bool) -> int:
     merge.require_open(pr)
     require_here(pr)
     ci_local.require_clean_head()
+    merge.require_reviewed(pr)  # before waiting for the lock: refuse at once
     ci_local.stop_on_sigterm()
     lane = merge.take_landing_turn()
     try:

@@ -97,9 +97,7 @@ fn wait_for_hours(harness: &Harness, hours: Option<(u16, u16)>) -> AppState {
 }
 
 /// Chooses Quiet Hours… in the Indicator's menu, whatever times its hint
-/// shows.
-/// Opens the window from the Indicator's menu, once the menu offers it. A
-/// restarted app answers on the control interface before it registers its
+/// shows, once the menu offers it. A restarted app answers on the control interface before it registers its
 /// Indicator, so until then the tray still lists the item of the app that
 /// is gone (CI run 43681715594: `ServiceUnknown` reading its menu).
 fn open(harness: &Harness) {

@@ -253,12 +253,18 @@ async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> 
         .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Pair", &())
         .await
     {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            paired_by_bluez(address, "Pair returned");
+            Ok(())
+        }
         Err(zbus::Error::MethodError(name, message, _)) => {
             let detail = format!("{name}: {}", message.unwrap_or_default());
             let failure = match name.as_str() {
                 // Paired already, from the Phone's side meanwhile.
-                "org.bluez.Error.AlreadyExists" => return Ok(()),
+                "org.bluez.Error.AlreadyExists" => {
+                    paired_by_bluez(address, &detail);
+                    return Ok(());
+                }
                 "org.bluez.Error.AuthenticationRejected"
                 | "org.bluez.Error.AuthenticationCanceled" => PairingFailure::Rejected,
                 "org.bluez.Error.AuthenticationTimeout"
@@ -458,6 +464,16 @@ async fn set(
         .map(drop)
 }
 
+/// BlueZ says the Phone with `address` is paired, in answer to `Pair`.
+fn paired_by_bluez(address: &str, detail: &str) {
+    tracing::info!(
+        event_kind = %EventKind::Paired,
+        phone_address = %address,
+        detail,
+        "BlueZ paired the Phone"
+    );
+}
+
 fn setup_failed(step: &str, detail: &str) {
     tracing::warn!(
         event_kind = %EventKind::SetupFailed,
@@ -518,6 +534,12 @@ impl Agent {
         #[zbus(connection)] system: &Connection,
     ) -> Result<(), AgentError> {
         let phone = phone_at(system, device.as_str()).await;
+        tracing::info!(
+            event_kind = %EventKind::PairingCodeAsked,
+            phone_address = %phone.address,
+            "BlueZ asked whether the pairing code shows on both screens"
+        );
+        let address = phone.address.clone();
         let (sender, receiver) = oneshot::channel();
         // A request BlueZ asked earlier is turned down.
         if let Some(earlier) = self
@@ -532,7 +554,19 @@ impl Agent {
             phone,
             code: passkey,
         });
-        match receiver.await {
+        let answer = receiver.await;
+        let answered = match answer {
+            Ok(true) => "confirmed",
+            Ok(false) => "turned down",
+            Err(_) => "cancelled",
+        };
+        tracing::info!(
+            event_kind = %EventKind::PairingCodeAnswered,
+            phone_address = %address,
+            answered,
+            "Answered BlueZ's pairing code: {answered}"
+        );
+        match answer {
             Ok(true) => Ok(()),
             Ok(false) => Err(AgentError::Rejected("Turned down".to_owned())),
             Err(_) => Err(AgentError::Canceled("Cancelled".to_owned())),
@@ -559,6 +593,11 @@ impl Agent {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .is_some();
+        tracing::info!(
+            event_kind = %EventKind::PairingCancelled,
+            waiting = cancelled,
+            "BlueZ cancelled its pairing request: the Phone turned it down, or it timed out"
+        );
         if cancelled {
             let _ = self
                 .inputs

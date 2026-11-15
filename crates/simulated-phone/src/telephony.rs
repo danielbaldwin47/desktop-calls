@@ -427,6 +427,11 @@ pub enum Signal {
 }
 
 impl Signal {
+    /// Whether this is a `PropertiesChanged` that changes `name`.
+    pub fn changes(&self, name: &str) -> bool {
+        matches!(self, Self::PropertiesChanged { changed, .. } if changed.contains_key(name))
+    }
+
     pub async fn emit(&self, connection: &Connection) -> zbus::Result<()> {
         match self {
             Self::PropertiesChanged {

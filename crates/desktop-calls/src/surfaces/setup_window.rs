@@ -410,6 +410,15 @@ impl SetupWindow {
 
     pub(super) fn render(self: &Rc<Self>, view: Option<&SetupWindowView>) {
         let Some(view) = view else {
+            if let Some(step) = self.step.get() {
+                let since_opened_ms = self.since_opened_ms();
+                tracing::info!(
+                    event_kind = %EventKind::SetupClosed,
+                    step,
+                    since_opened_ms,
+                    "The Setup Window closed at step {step}, {since_opened_ms} ms after it opened"
+                );
+            }
             self.opened.set(None);
             self.step.set(None);
             self.shown.replace(None);

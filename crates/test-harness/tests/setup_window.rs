@@ -361,3 +361,67 @@ fn pair_again_after_the_phone_forgot_the_pairing() {
     wait_for_step(&harness, "done", CONNECT_DEADLINE);
     assert!(harness.app_state().problems.is_empty());
 }
+
+/// A fresh install on which BlueZ holds back each pairing's `Paired`
+/// signal, as BlueZ 5.87 did on the real Desktop (ticket #372).
+fn fresh_install_holding_paired() -> Harness {
+    Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .paired_signal_held()
+        .start()
+}
+
+#[test]
+fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
+    let harness = fresh_install_holding_paired();
+    wait_for_phone_listed(&harness, STARTUP);
+    wait_until_discoverable(&harness);
+
+    harness
+        .simulated_phone()
+        .pair_from_phone()
+        .expect("the Phone finds the Desktop");
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    let state = connected(&harness);
+    assert_eq!(
+        state.phone.as_ref().map(|phone| phone.name.as_str()),
+        Some(PHONE_NAME)
+    );
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+
+    // Opened again with the Phone connected, the window doesn't offer it
+    // to pair a second time: on the real Desktop that choice sat at
+    // "Pairing" for good.
+    harness.keyboard().press(Key::Return);
+    closed(&harness);
+    harness.wait_for_app_log(r#""event_kind":"setup-closed""#, DEADLINE);
+    harness.open_connect_window();
+    let state = wait_for_step(&harness, "choose", DEADLINE);
+    assert_ne!(field(&state, "phones"), Some(PHONE_NAME), "{state:?}");
+}
+
+#[test]
+fn a_phone_chosen_in_the_window_goes_on_when_bluez_signals_only_bonded() {
+    let harness = fresh_install_holding_paired();
+    wait_for_phone_listed(&harness, STARTUP);
+
+    harness.keyboard().press(Key::Return);
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+    // What the sitting's journal lacked, at info.
+    for kind in [
+        "pairing-code-asked",
+        "pairing-code-answered",
+        "paired",
+        "phone-paired",
+    ] {
+        harness.wait_for_app_log(&format!(r#""event_kind":"{kind}""#), DEADLINE);
+    }
+}

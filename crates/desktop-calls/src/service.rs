@@ -413,6 +413,7 @@ impl Shell {
                 effect @ (Effect::StartSetup
                 | Effect::StopSetup
                 | Effect::PairPhone { .. }
+                | Effect::RemovePairing { .. }
                 | Effect::AnswerPairingCode { .. }
                 | Effect::TrustPhone { .. }
                 | Effect::ConnectHandsFree { .. }) => self.pairing.carry_out(effect),

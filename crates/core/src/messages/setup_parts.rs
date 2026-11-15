@@ -35,7 +35,9 @@ fn stage(step: &SetupStep) -> usize {
         | SetupStep::Confirmed { .. }
         | SetupStep::Connecting { .. }
         | SetupStep::PhoneCallsOff { .. }
-        | SetupStep::PhoneUnreachable { .. } => 0,
+        | SetupStep::PhoneUnreachable { .. }
+        | SetupStep::PairingLost { .. }
+        | SetupStep::PairingAgain { .. } => 0,
         SetupStep::ContactsWarning { .. }
         | SetupStep::ContactsPrompt { .. }
         | SetupStep::ContactsPromptTimedOut { .. }

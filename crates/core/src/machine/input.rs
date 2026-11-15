@@ -293,6 +293,15 @@ pub enum Input {
     /// The Phone didn't answer when asked for hands-free: out of range, or
     /// its Bluetooth is off.
     HandsFreeUnreachable,
+    /// The Phone answered the Setup Window's ask for hands-free without the
+    /// pairing: it no longer has the Desktop paired (ticket #377).
+    HandsFreeUnpaired,
+    /// The user chose Pair again, for a Phone that no longer has the
+    /// Desktop paired.
+    PairAgain,
+    /// BlueZ didn't remove the Desktop's stale pairing with the Phone, as
+    /// [`Effect::RemovePairing`] asked.
+    PairingNotRemoved,
     /// The user asked to try again, after switching "Phone calls" on or
     /// bringing the Phone close.
     RetryHandsFree,
@@ -528,6 +537,12 @@ pub enum Effect {
     /// Pair with the nearby Phone with this address. Its code comes as
     /// [`Input::PairingCode`]; a failure as [`Input::PairingFailed`].
     PairPhone { address: String },
+    /// Remove the Desktop's pairing with the Phone with this address, which
+    /// no longer has the Desktop paired, so it can be paired afresh: asked
+    /// for only on the user's Pair again (ticket #377). BlueZ then lists it
+    /// as unpaired and, once found, nearby; a failure comes as
+    /// [`Input::PairingNotRemoved`].
+    RemovePairing { address: String },
     /// Answer the pairing code asked about last: `confirm` if the user
     /// confirmed it.
     AnswerPairingCode { confirm: bool },

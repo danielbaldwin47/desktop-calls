@@ -30,13 +30,18 @@
 //!   `ConnectOtherPhone` brings it into range, connected with hands-free
 //!   and its own AudioGateway, beside the Phone; `RingOnOtherPhone` makes a
 //!   Call ring on it.
-//! - `Adapter1.RemoveDevice` unpairs a device that isn't connected, as the
-//!   user does in Bluetooth settings: `InterfacesRemoved`. A connected one
-//!   fails `org.bluez.Error.Failed`, because the simulation doesn't model
-//!   BlueZ disconnecting it first: the test disconnects it, then removes it.
-//!   The Phone, removed while in range, is nearby and unpaired again:
-//!   discovery finds it, as a Phone on its "Pair new device" screen
-//!   (inferred).
+//! - `Adapter1.RemoveDevice` unpairs a device, as the user does in
+//!   Bluetooth settings: `InterfacesRemoved`. One connected without
+//!   hands-free, such as the Phone that forgot the pairing keeping the link
+//!   (ticket #373), is disconnected first, as BlueZ does: `Connected` goes
+//!   false (ticket #377). One with hands-free up fails
+//!   `org.bluez.Error.Failed`, where BlueZ would disconnect it and succeed:
+//!   the simulation doesn't model taking hands-free down for it, so the
+//!   test disconnects it, then removes it. The
+//!   control interface's `FailNextRemoveDevice` fails the next one with
+//!   `org.bluez.Error.Failed`. The Phone, removed while in range, is nearby
+//!   and unpaired again: discovery under way finds it, as a Phone on its
+//!   "Pair new device" screen (inferred).
 //!
 //! [`Connected`]: https://git.kernel.org/pub/scm/bluetooth/bluez.git/tree/doc/org.bluez.Device.rst
 
@@ -134,6 +139,10 @@ pub struct Pairing {
     pub other_gateway: Option<OwnedObjectPath>,
     /// `Paired` is set without a signal (`--paired-signal-held`).
     paired_signal_held: bool,
+    /// The next `RemoveDevice` fails (`FailNextRemoveDevice`).
+    pub fail_next_remove: bool,
+    /// Which `StartDiscovery` is current: only its loop finds devices.
+    discovery_run: u32,
 }
 
 impl Pairing {
@@ -295,7 +304,30 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
         .bluez
         .get(&device, bluez::DEVICE, "Connected")
         .and_then(|connected| bool::try_from(connected.clone()).ok());
-    match connected {
+    if connected.is_some() && std::mem::take(&mut world.pairing.fail_next_remove) {
+        return (
+            Reply::Error("org.bluez.Error.Failed", "Failed".to_owned()),
+            Vec::new(),
+        );
+    }
+    let phone = bluez::device_path(&world.phone_address).ok();
+    let hands_free_up = if phone.as_ref() == Some(&device) {
+        world.audio_gateway.is_some()
+    } else {
+        world.pairing.other_gateway.is_some() && world.pairing.is_other_phone(device.as_str())
+    };
+    // Disconnected first, as BlueZ does.
+    let mut signals = Vec::new();
+    if connected == Some(true) && !hands_free_up {
+        signals.extend(set(
+            world,
+            device.as_str(),
+            bluez::DEVICE,
+            "Connected",
+            false.into(),
+        ));
+    }
+    match connected.map(|connected| connected && hands_free_up) {
         None => (
             Reply::Error("org.bluez.Error.DoesNotExist", "Does Not Exist".to_owned()),
             Vec::new(),
@@ -303,7 +335,7 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
         Some(true) => (
             Reply::Error(
                 "org.bluez.Error.Failed",
-                "The simulation removes only a device that isn't connected".to_owned(),
+                "The simulation doesn't remove a device with hands-free up".to_owned(),
             ),
             Vec::new(),
         ),
@@ -319,7 +351,6 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
             .into_iter()
             .filter(|name| removed.contains_key(*name))
             .collect();
-            let phone = bluez::device_path(&world.phone_address).ok();
             if phone.as_ref() == Some(&device) && world.range.reachable {
                 world
                     .pairing
@@ -331,7 +362,8 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
                 object: device,
                 interfaces,
             };
-            (Reply::body(()), vec![signal])
+            signals.push(signal);
+            (Reply::body(()), signals)
         }
     }
 }
@@ -423,13 +455,19 @@ fn start_discovery(
     if !crate::desktop::powered(&lock(world)) {
         return zbus::block_on(crate::desktop::not_ready().send(system, &message.header()));
     }
-    let signal = set(
-        &mut lock(world),
-        ADAPTER_PATH,
-        ADAPTER,
-        "Discovering",
-        true.into(),
-    );
+    let (signal, run) = {
+        let mut world = lock(world);
+        // One discovery at a time: a later start ends this one's loop.
+        world.pairing.discovery_run += 1;
+        let signal = set(
+            &mut world,
+            ADAPTER_PATH,
+            ADAPTER,
+            "Discovering",
+            true.into(),
+        );
+        (signal, world.pairing.discovery_run)
+    };
     zbus::block_on(async {
         Reply::body(()).send(system, &message.header()).await?;
         if let Some(signal) = signal {
@@ -441,8 +479,13 @@ fn start_discovery(
         std::thread::sleep(FOUND_AFTER);
         let found = {
             let mut world = lock(world);
-            if world.pairing.undiscovered.is_empty() {
+            // Discovery goes on until stopped, and finds a device removed
+            // meanwhile, as BlueZ's does (ticket #377).
+            if !discovering(&world) || world.pairing.discovery_run != run {
                 return Ok(());
+            }
+            if world.pairing.undiscovered.is_empty() {
+                continue;
             }
             let (path, interfaces) = world.pairing.undiscovered.remove(0);
             let signal = Signal::InterfacesAdded {
@@ -455,6 +498,15 @@ fn start_discovery(
         };
         zbus::block_on(found.emit(system))?;
     }
+}
+
+/// Whether the adapter's `Discovering` is true.
+fn discovering(world: &World) -> bool {
+    OwnedObjectPath::try_from(ADAPTER_PATH)
+        .ok()
+        .and_then(|adapter| world.bluez.get(&adapter, ADAPTER, "Discovering").cloned())
+        .and_then(|discovering| bool::try_from(discovering).ok())
+        .unwrap_or(false)
 }
 
 fn copy_interfaces(interfaces: &Interfaces) -> Interfaces {

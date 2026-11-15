@@ -15,7 +15,11 @@
 //!    is trusted and connected. A Phone that connects without hands-free
 //!    (its media, say) is asked for hands-free alone.
 //! 6. Phone calls off: the Phone refused hands-free; the window says where
-//!    to switch "Phone calls" on.
+//!    to switch "Phone calls" on. Or pairing lost: the Phone answered
+//!    without the pairing, as one that forgot the Desktop does, so the
+//!    window offers Pair again. That, and only that, removes the Desktop's
+//!    stale pairing; the Phone, found again, is paired as if chosen
+//!    (ticket #377).
 //! 7. Contacts warning: connected for Calls. The Phone is about to ask
 //!    whether to share Contacts and Call History, so the window says so
 //!    first, and the sync waits until the person has had time to read it.
@@ -30,10 +34,13 @@
 //!    which it offers to add to the Hyprland config, writing nothing until
 //!    the user confirms the exact line.
 
+mod contacts;
 mod focus;
 mod keybinding;
 mod step;
 
+use contacts::{begin_contacts, finish, follow_contacts, start_sync};
+pub(super) use contacts::{contacts_read, hold_sync, sync_progress};
 pub use focus::SetupFocus;
 pub use step::SetupStep;
 
@@ -44,7 +51,7 @@ use super::setup_calls_off::{SetupCallsOff, keep_on_for_setup};
 use super::{State, forget_phone_keeping_desktop, phone::phone_paired};
 use crate::call::Timestamp;
 use crate::connection::{ConnectionState, Phone};
-use crate::contacts::{ContactsState, SyncProgress, Unavailable};
+use crate::contacts::{ContactsState, Unavailable};
 use crate::keybinding::KeybindingCheck;
 use crate::messages::ProblemKind;
 
@@ -145,6 +152,11 @@ enum Step {
     PhoneCallsOff(Phone),
     /// The Phone didn't answer: out of range, or its Bluetooth is off.
     PhoneUnreachable(Phone),
+    /// The Phone, asked for hands-free, no longer had the Desktop paired.
+    PairingLost(Phone),
+    /// Pair again: the Desktop's stale pairing is being removed, and the
+    /// Phone looked for, to pair it once found.
+    PairingAgain(Phone),
     ContactsWarning(Phone),
     Contacts(Phone),
     /// The Phone left before Contacts were read.
@@ -239,6 +251,9 @@ pub enum SetupNotice {
     PairingUnreachable,
     /// Pairing didn't finish, for a reason BlueZ didn't give.
     PairingFailed,
+    /// BlueZ didn't remove the Desktop's stale pairing with the Phone, for
+    /// Pair again (ticket #377).
+    PairingNotRemoved,
     /// The keybinding couldn't be written to the Hyprland config.
     KeybindingNotAdded,
     /// The Hyprland config changed after the line was shown, so nothing was
@@ -313,6 +328,12 @@ impl State {
                 phone: phone.clone(),
             },
             Step::PhoneUnreachable(phone) => SetupStep::PhoneUnreachable {
+                phone: phone.clone(),
+            },
+            Step::PairingLost(phone) => SetupStep::PairingLost {
+                phone: phone.clone(),
+            },
+            Step::PairingAgain(phone) => SetupStep::PairingAgain {
                 phone: phone.clone(),
             },
             Step::ContactsWarning(phone) => SetupStep::ContactsWarning {
@@ -440,9 +461,10 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
                 .iter_mut()
                 .find(|known| known.address.eq_ignore_ascii_case(&phone.address))
             {
-                Some(known) => *known = phone,
-                None => state.nearby_phones.push(phone),
+                Some(known) => *known = phone.clone(),
+                None => state.nearby_phones.push(phone.clone()),
             }
+            found_again(state, &phone, effects);
         }
         Input::PhoneNotNearby { address } => not_nearby(state, &address),
         // Pairing waits while calls are off; a Phone pairing from its own
@@ -457,18 +479,18 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
         Input::RejectPairing => answer_code(state, false, effects),
         Input::PairingFailed(failure) => pairing_failed(state, failure),
         Input::PairDone { address } => pair_done(state, &address, effects),
-        Input::HandsFreeRefused => {
+        Input::HandsFreeRefused => hands_free_answered(state, Step::PhoneCallsOff),
+        Input::HandsFreeUnreachable => hands_free_answered(state, Step::PhoneUnreachable),
+        // Asking again would only start another pairing on the Phone: the
+        // window offers Pair again instead.
+        Input::HandsFreeUnpaired => hands_free_answered(state, Step::PairingLost),
+        Input::PairAgain => pair_again(state, effects),
+        Input::PairingNotRemoved => {
             if let Some(setup) = state.setup.as_mut()
-                && let Step::AskedForHandsFree(phone) = &setup.step
+                && let Step::PairingAgain(phone) = &setup.step
             {
-                setup.step = Step::PhoneCallsOff(phone.clone());
-            }
-        }
-        Input::HandsFreeUnreachable => {
-            if let Some(setup) = state.setup.as_mut()
-                && let Step::AskedForHandsFree(phone) = &setup.step
-            {
-                setup.step = Step::PhoneUnreachable(phone.clone());
+                setup.step = Step::PairingLost(phone.clone());
+                setup.notice = Some(SetupNotice::PairingNotRemoved);
             }
         }
         Input::RetryHandsFree => retry(state, effects),
@@ -518,6 +540,52 @@ fn retry(state: &mut State, effects: &mut Vec<Effect>) {
             paired(state, phone, effects);
         }
         _ => {}
+    }
+}
+
+/// The Phone asked for hands-free didn't bring it up: the window goes on to
+/// the step `next` makes for it.
+fn hands_free_answered(state: &mut State, next: fn(Phone) -> Step) {
+    if let Some(setup) = state.setup.as_mut()
+        && let Step::AskedForHandsFree(phone) = &setup.step
+    {
+        setup.step = next(phone.clone());
+    }
+}
+
+/// Pair again, for a Phone that no longer has the Desktop paired: the
+/// Desktop's stale pairing is removed, the only time the Desktop removes
+/// one, and the Phone is paired once BlueZ finds it again.
+fn pair_again(state: &mut State, effects: &mut Vec<Effect>) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    let Step::PairingLost(phone) = &setup.step else {
+        return;
+    };
+    let phone = phone.clone();
+    setup.notice = None;
+    setup.step = Step::PairingAgain(phone.clone());
+    // Listed while it was paired, it is nearby only once found again.
+    not_nearby(state, &phone.address);
+    effects.push(Effect::RemovePairing {
+        address: phone.address,
+    });
+}
+
+/// A Phone found nearby: the one Pair again looks for is paired, as if the
+/// user had chosen it.
+fn found_again(state: &mut State, phone: &Phone, effects: &mut Vec<Effect>) {
+    let Some(setup) = state.setup.as_mut() else {
+        return;
+    };
+    if let Step::PairingAgain(lost) = &setup.step
+        && lost.address.eq_ignore_ascii_case(&phone.address)
+    {
+        setup.step = Step::Pairing(phone.clone());
+        effects.push(Effect::PairPhone {
+            address: phone.address.clone(),
+        });
     }
 }
 
@@ -613,7 +681,10 @@ fn pairing_code(state: &mut State, phone: Phone, code: u32, effects: &mut Vec<Ef
     };
     let welcome = match &setup.step {
         Step::Choose | Step::PhoneCallsOff(_) | Step::PhoneUnreachable(_) | Step::Done(_) => true,
-        Step::Pairing(chosen) => chosen.address.eq_ignore_ascii_case(&phone.address),
+        // Paired from the Phone's own screen before the Desktop found it.
+        Step::Pairing(chosen) | Step::PairingAgain(chosen) => {
+            chosen.address.eq_ignore_ascii_case(&phone.address)
+        }
         _ => false,
     };
     if !welcome {
@@ -831,141 +902,4 @@ fn follow_connection(state: &mut State, effects: &mut Vec<Effect>) {
         setup.step = Step::ContactsWarning(followed);
         wait(setup, WARNING_MS, effects);
     }
-}
-
-/// The sync the window follows is over once the Phone refused, the sync
-/// failed, or it finished, and the window goes on to the finish page. An
-/// unanswered prompt waits for Try again or Skip. If the Phone leaves
-/// before Contacts are read, the window says so instead; once they are,
-/// only older Calls are missing, and the window finishes.
-fn follow_contacts(state: &mut State, effects: &mut Vec<Effect>) {
-    let here = state.phone_is_here();
-    let sync = state.contacts_sync;
-    let Some(setup) = state.setup.as_mut() else {
-        return;
-    };
-    let phone = match &setup.step {
-        Step::ContactsWarning(phone) | Step::Contacts(phone) => phone.clone(),
-        // The link dropping can fail the sync just before the Phone is
-        // known to have left: that failure is the Phone leaving, so the
-        // window says so rather than that Contacts couldn't be read.
-        Step::Done(phone) if setup.just_failed && !here => {
-            setup.step = Step::ContactsAway(phone.clone());
-            return;
-        }
-        _ => return,
-    };
-    let at_contacts = matches!(setup.step, Step::Contacts(_));
-    if !here {
-        if at_contacts && setup.progress.contacts.is_read() {
-            finish(setup, phone, effects);
-        } else {
-            setup.step = Step::ContactsAway(phone);
-        }
-        return;
-    }
-    let over = at_contacts
-        && match sync {
-            ContactsState::Denied => true,
-            ContactsState::Unavailable(reason) => reason != Unavailable::PromptTimedOut,
-            ContactsState::Ready => !setup.progress.awaiting_finish,
-            ContactsState::Syncing | ContactsState::PermissionNeeded { .. } => false,
-        };
-    if over {
-        finish(setup, phone, effects);
-        if sync == ContactsState::Unavailable(Unavailable::Failed) {
-            wait(setup, LINK_DROP_MS, effects);
-            setup.just_failed = true;
-        }
-    }
-}
-
-/// How far the sync under way has got, for the Setup Window to show.
-pub(super) fn sync_progress(state: &mut State, progress: &SyncProgress) {
-    let Some(setup) = state.setup.as_mut() else {
-        return;
-    };
-    if !matches!(setup.step, Step::Contacts(_)) {
-        return;
-    }
-    let seen = &mut setup.progress;
-    match progress {
-        SyncProgress::Shared => seen.shared = true,
-        SyncProgress::CallHistory(_) => seen.call_history = true,
-        SyncProgress::ReadingContacts { count, at } => {
-            seen.contacts = ContactsProgress::Reading(ReadingContacts {
-                count: *count,
-                done_by: count.map(|count| Timestamp(at.0 + u64::from(count) * CONTACT_READ_MS)),
-            });
-        }
-        SyncProgress::Finished => seen.awaiting_finish = false,
-    }
-}
-
-/// The Contacts the window follows are read.
-pub(super) fn contacts_read(state: &mut State) {
-    if let Some(setup) = state.setup.as_mut()
-        && matches!(setup.step, Step::Contacts(_))
-    {
-        setup.progress.contacts = ContactsProgress::Read(setup.progress.contacts.reading());
-    }
-}
-
-/// The Phone the Setup Window is connecting is connected for Calls: its
-/// first sync waits until the window has warned that the Phone is about to
-/// ask whether to share Contacts. Back after leaving mid-Contacts, it waits
-/// for the user to carry on. Whether it waits.
-pub(super) fn hold_sync(state: &mut State) -> bool {
-    let followed = state.phone.clone();
-    let Some(setup) = state.setup.as_mut() else {
-        return false;
-    };
-    let held = followed.is_some_and(|followed| {
-        let waiting = match &setup.step {
-            Step::ContactsAway(phone) => Some(phone),
-            step => step.connecting(),
-        };
-        waiting.is_some_and(|phone| phone.address.eq_ignore_ascii_case(&followed.address))
-    });
-    setup.sync_held |= held;
-    held
-}
-
-/// Starts a sync, which the Setup Window then follows if it is at Contacts.
-fn start_sync(state: &mut State, effects: &mut Vec<Effect>) {
-    state.contacts_sync = ContactsState::Syncing;
-    effects.push(Effect::SyncContacts);
-    if let Some(setup) = state.setup.as_mut()
-        && matches!(setup.step, Step::Contacts(_))
-    {
-        setup.progress = Progress {
-            awaiting_finish: true,
-            ..Progress::default()
-        };
-    }
-}
-
-/// The warning has been up long enough: the sync starts, and the Phone
-/// asks. A sync already under way is followed instead.
-fn begin_contacts(state: &mut State, phone: Phone, effects: &mut Vec<Effect>) {
-    let Some(setup) = state.setup.as_mut() else {
-        return;
-    };
-    let held = std::mem::take(&mut setup.sync_held);
-    setup.step = Step::Contacts(phone);
-    setup.progress = Progress::default();
-    let under_way = matches!(
-        state.contacts_sync,
-        ContactsState::Syncing | ContactsState::PermissionNeeded { .. }
-    );
-    if !under_way && state.phone_is_here() && (held || state.may_sync_contacts()) {
-        start_sync(state, effects);
-    }
-}
-
-fn finish(setup: &mut Setup, phone: Phone, effects: &mut Vec<Effect>) {
-    setup.step = Step::Done(phone);
-    setup.keybinding = KeybindingStage::Checking;
-    setup.adding = false;
-    effects.push(Effect::CheckKeybinding);
 }

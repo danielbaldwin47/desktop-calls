@@ -316,6 +316,12 @@ pub async fn connect_phone(
     Err(failure.0)
 }
 
+/// Whether a BlueZ error from `Device1.Connect`, or `ConnectProfile`, says
+/// the Phone no longer has the Desktop paired.
+pub(crate) fn pairing_lost(name: &str, message: &str) -> bool {
+    connect_failure(name, message) == Some(ConnectFailure::PairingLost)
+}
+
 /// What a BlueZ error from `Device1.Connect`, or `ConnectProfile`, means,
 /// or `None` if the Phone is connected after all.
 fn connect_failure(name: &str, message: &str) -> Option<ConnectFailure> {

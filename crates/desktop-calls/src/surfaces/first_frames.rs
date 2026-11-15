@@ -44,7 +44,7 @@ type Kind = (&'static str, fn(&gtk::Snapshot, &gtk::Window));
 /// Each kind of thing the surfaces draw, one compiled program apiece. The
 /// colour is translucent and the clips off the pixel grid, because GTK
 /// draws an opaque rectangle or a clip on whole pixels without a program.
-const KINDS: [Kind; 10] = [
+const KINDS: [Kind; 11] = [
     // `gskgpucolor`: backgrounds.
     ("colour", |snapshot, _| {
         snapshot.append_color(&grey(), &square());
@@ -64,6 +64,14 @@ const KINDS: [Kind; 10] = [
     // `gskgpuborder`: the entry, and the HD mark.
     ("border", |snapshot, _| {
         snapshot.append_border(&rounded(), &[1.0; 4], &[grey(); 4]);
+    }),
+    // `gskgpuborder` under a clip: the Contacts' initial tiles, in the
+    // Dialer's scrolled list. No first frame shows a tile, so the first
+    // keystroke compiled it: 146 to 293 ms on a cold cache (#378).
+    ("clipped-border", |snapshot, _| {
+        snapshot.push_clip(&Rect::new(0.5, 0.5, SIZE / 2.0, SIZE / 2.0));
+        snapshot.append_border(&rounded(), &[1.0; 4], &[grey(); 4]);
+        snapshot.pop();
     }),
     // `gskgpucolorize`: text.
     ("text", |snapshot, window| {

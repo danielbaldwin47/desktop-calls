@@ -90,6 +90,18 @@ pub struct Builder {
     /// What Omarchy's `hypr/bindings.lua` holds, if the Desktop has one.
     hyprland_bindings: Option<HyprlandBindings>,
     config_home: ConfigHome,
+    shader_cache: ShaderCache,
+}
+
+/// Which Mesa shader cache the app gets.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum ShaderCache {
+    /// The one the run shares through [`crate::SCENARIO_SHADER_CACHE`], if
+    /// it names one; otherwise the scenario's own, empty.
+    #[default]
+    Run,
+    /// The scenario's own, empty, even where the run shares one.
+    Cold,
 }
 
 /// Where the scenario's config folder is.
@@ -509,6 +521,16 @@ impl Builder {
         self
     }
 
+    /// Gives the app an empty Mesa shader cache of its own, as on a Desktop
+    /// just after an install or a driver update, even where the run shares
+    /// a filled one through [`crate::SCENARIO_SHADER_CACHE`]: every shader
+    /// program the app draws with is compiled anew. Only Mesa reads the
+    /// cache; the app can't tell.
+    pub fn cold_shader_cache(mut self) -> Self {
+        self.shader_cache = ShaderCache::Cold;
+        self
+    }
+
     /// Keeps screenshots in `directory`. By default they go to
     /// `target/screenshots/scenarios/<test name>/`.
     pub fn screenshot_directory(mut self, directory: PathBuf) -> Self {
@@ -548,12 +570,7 @@ impl Builder {
     /// If any of them fails to start; the panic says which and where its log is.
     #[must_use]
     pub fn start(mut self) -> Harness {
-        prune_stale_scenario_directories();
-        let directory = tempfile::Builder::new()
-            .prefix(SCENARIO_DIRECTORY_PREFIX)
-            .tempdir()
-            .expect("create the scenario directory")
-            .keep();
+        let directory = new_scenario_directory();
         let bin_directory = bin_directory();
         let timeline = Timeline::start(&directory);
         let group = ProcessGroup::start(&directory);
@@ -569,7 +586,13 @@ impl Builder {
                     .unwrap_or_else(|error| panic!("monitor the private {bus} bus: {error}"));
                 address
             });
-        let mut environment = environment(&directory, &system_bus, &session_bus, self.config_home);
+        let mut environment = environment(
+            &directory,
+            &system_bus,
+            &session_bus,
+            self.config_home,
+            self.shader_cache,
+        );
         desktop_settings(&directory.join("config"), self.motion);
         if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
@@ -596,13 +619,9 @@ impl Builder {
         // from 1 up is plausible, and the app must not care which.
         let audio_gateway_index = 1 + random_u32() % 99;
 
-        let session =
-            zbus::block_on(zbus::connection::Builder::address(session_bus.as_str()).build())
-                .expect("connect the harness to the private session bus");
+        let session = connect(&session_bus, "session");
         share_environment(&session, &environment);
-        let system =
-            zbus::block_on(zbus::connection::Builder::address(system_bus.as_str()).build())
-                .expect("connect the harness to the private system bus");
+        let system = connect(&system_bus, "system");
         timeline.label(&unique_name(&session), "harness");
         timeline.label(&unique_name(&system), "harness");
 
@@ -682,6 +701,24 @@ pub(super) fn bin_directory() -> PathBuf {
         );
     }
     directory
+}
+
+/// A new scenario directory, once stale ones are pruned. It is kept: the
+/// [`Harness`] removes it when it drops, unless the scenario failed or keeps
+/// its logs.
+fn new_scenario_directory() -> PathBuf {
+    prune_stale_scenario_directories();
+    tempfile::Builder::new()
+        .prefix(SCENARIO_DIRECTORY_PREFIX)
+        .tempdir()
+        .expect("create the scenario directory")
+        .keep()
+}
+
+/// The harness's own connection to the private `bus` at `address`.
+fn connect(address: &str, bus: &str) -> Connection {
+    zbus::block_on(zbus::connection::Builder::address(address).build())
+        .unwrap_or_else(|error| panic!("connect the harness to the private {bus} bus: {error}"))
 }
 
 /// Gives the bus `session` is on `environment` for every service it starts,
@@ -818,6 +855,7 @@ pub(super) fn environment(
     system_bus: &str,
     session_bus: &str,
     config_home: ConfigHome,
+    shader_cache: ShaderCache,
 ) -> Vec<(&'static str, String)> {
     let path_of = |name: &str| {
         let path = directory.join(name);
@@ -837,7 +875,7 @@ pub(super) fn environment(
     };
     let shared_shader_cache = std::env::var(crate::SCENARIO_SHADER_CACHE)
         .ok()
-        .filter(|cache| !cache.is_empty())
+        .filter(|cache| shader_cache == ShaderCache::Run && !cache.is_empty())
         .map(|cache| ("MESA_SHADER_CACHE_DIR", cache));
     [
         ("DBUS_SYSTEM_BUS_ADDRESS", system_bus.to_owned()),

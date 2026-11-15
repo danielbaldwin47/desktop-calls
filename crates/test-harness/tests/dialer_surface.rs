@@ -492,15 +492,66 @@ fn open_dialer_selects_the_call_asked_for() {
 /// app (issue #47). CI runs it alone, after the whole run: with the whole run's
 /// scenarios at once on its runner, the first frame took 226 ms; one scenario
 /// at a time under `just test-ci-like`, 97 to 102 ms in 5 of 5 runs.
+///
+/// Every keystroke is typed before anything is judged, so a run that fails
+/// still draws every frame: `just ci-first-frame-timings` warms its shader
+/// cache with a run of this scenario, and a warm-up that stopped at a slow
+/// first frame left the first keystroke's programs out of it (#378).
 #[test]
 #[ignore = "one scenario at a time: just test-file dialer_surface --ignored --test-threads=1 --ci-like"]
 fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
     // Timed with animations on, as on the Desktop (#234).
-    let harness = Harness::builder()
-        .headless_screen()
-        .omarchy_bar()
-        .full_motion()
-        .start();
+    let harness = dialer_open_on_5000_contacts(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .full_motion(),
+    );
+    let first_frame_after = harness.app_took(
+        &AppEvent::kind("activate-requested"),
+        &AppEvent::kind("surface-shown").with("surface", "dialer"),
+        DEADLINE,
+    );
+    let keystrokes = type_contact_49(&harness);
+
+    assert!(
+        first_frame_after <= show_deadline(),
+        "the app took {first_frame_after:?} for the Dialer to draw its first frame once asked, \
+         against {:?} (from activate-requested to surface-shown surface=\"dialer\" in its log)",
+        show_deadline()
+    );
+    let slowest = assert_keystrokes_prompt(&keystrokes);
+    eprintln!("Dialer's first frame after {first_frame_after:?}; slowest keystroke {slowest:?}");
+}
+
+/// After an install or a driver update, Mesa's shader cache is empty. The
+/// first keystroke shows Contacts, whose initial tiles are edged with a
+/// border inside the list's clip, which no first frame draws: GTK compiled
+/// that program on the main loop, and the first keystroke took 146 ms here
+/// and 275 to 293 ms in CI, against 50 ms (#378). The app prepares it in
+/// its idle time with the surfaces' first frames.
+#[test]
+#[ignore = "one scenario at a time: just test-file dialer_surface --ignored --test-threads=1 --ci-like"]
+fn on_a_cold_shader_cache_the_dialer_still_follows_the_first_keystroke_promptly() {
+    let harness = dialer_open_on_5000_contacts(
+        Harness::builder()
+            .headless_screen()
+            .omarchy_bar()
+            .full_motion()
+            .cold_shader_cache(),
+    );
+
+    let keystrokes = type_contact_49(&harness);
+
+    let slowest = assert_keystrokes_prompt(&keystrokes);
+    eprintln!("On a cold shader cache, the slowest keystroke {slowest:?}");
+}
+
+/// Starts `builder`'s scenario with 5000 Contacts and 200 Call History
+/// entries synced, lets the app have its idle time since login, and opens
+/// the Dialer, ready for the first keystroke.
+fn dialer_open_on_5000_contacts(builder: test_harness::Builder) -> Harness {
+    let harness = builder.start();
     let phone = harness.simulated_phone();
     phone.set_pbap_folder("pb", &vcards::contacts(5_000, 0));
     phone.set_pbap_folder("cch", &vcards::call_history(200));
@@ -520,21 +571,21 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
     harness.wait_for_app("the Dialer shows", ROUND_TRIP, |state| {
         dialer(state).is_some()
     });
-    let first_frame_after = harness.assert_app_within(
-        "the Dialer to draw its first frame once asked",
-        &AppEvent::kind("activate-requested"),
-        &AppEvent::kind("surface-shown").with("surface", "dialer"),
-        show_deadline(),
-    );
     harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, focused);
     // GTK's first frame on a later refresh than the Dialer's first is
     // costly, which made the first keystroke the slowest: 22 ms against 4 ms
     // here, and 48.5 ms under CI's load (ticket #249). The Dialer draws that
     // frame unasked one refresh after it shows, before a person can react.
     let _ = harness.wait_for_app_log(r#""event_kind":"dialer-redrawn-after-shown""#, DEADLINE);
+    harness
+}
 
+/// Types "contact 49" a key at a time, and returns what the Dialer showed
+/// after each key, with how long the app took to draw it once the key
+/// reached it, by its log. Judges nothing.
+fn type_contact_49(harness: &Harness) -> Vec<(String, Duration)> {
     let mut query = String::new();
-    let mut slowest = Duration::ZERO;
+    let mut keystrokes = Vec::new();
     for character in "contact 49".chars() {
         query.push(character);
         harness.keyboard().type_text(&character.to_string());
@@ -544,21 +595,38 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
             |state| shown(state, "query") == Some(query.as_str()),
         );
         let length = query.chars().count();
-        let took = harness.assert_app_within(
-            &format!("the Dialer to show the rows for {query:?} once the key reached it"),
+        let took = harness.app_took(
             &AppEvent::kind("dialer-query-typed").with("query_chars", length),
             &AppEvent::kind("dialer-query-shown").with("query_chars", length),
-            KEYSTROKE_DEADLINE,
+            DEADLINE,
         );
-        slowest = slowest.max(took);
+        keystrokes.push((query.clone(), took));
     }
-    eprintln!("Dialer's first frame after {first_frame_after:?}; slowest keystroke {slowest:?}");
     let state = harness.app_state();
     assert!(
         shown(&state, "row-0").is_some_and(|row| row.starts_with("Contact 49")),
         "{:?}",
         dialer(&state)
     );
+    keystrokes
+}
+
+/// Checks the Dialer drew the rows for each keystroke within
+/// `KEYSTROKE_DEADLINE` of the key reaching it, and returns the slowest.
+fn assert_keystrokes_prompt(keystrokes: &[(String, Duration)]) -> Duration {
+    for (query, took) in keystrokes {
+        assert!(
+            *took <= KEYSTROKE_DEADLINE,
+            "the app took {took:?} for the Dialer to show the rows for {query:?} once the key \
+             reached it, against {KEYSTROKE_DEADLINE:?} (from dialer-query-typed to \
+             dialer-query-shown in its log); every keystroke: {keystrokes:?}"
+        );
+    }
+    keystrokes
+        .iter()
+        .map(|(_, took)| *took)
+        .max()
+        .unwrap_or_default()
 }
 
 /// One way of opening the Dialer.

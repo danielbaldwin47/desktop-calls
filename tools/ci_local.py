@@ -110,7 +110,7 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 #
 #   lint       CI job "lint"
 #   test       CI jobs "tests", "checklist" and "gallery": the tests but the
-#              harness's scenarios, and the scorecard, in one job rather than
+#              harness's scenarios, in one job rather than
 #              five (the gallery in one run rather than three shards)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
 #              five shards
@@ -118,7 +118,7 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 #              a time, so that no other scenario's app slows a first paint
 JOBS: dict[str, str] = {
     "lint": "just lint",
-    "test": "just ci-tests && just ci-checklist-group-6 && just ci-gallery && just scorecard",
+    "test": "just ci-tests && just ci-checklist-group-6 && just ci-gallery",
     "scenarios": "just ci-scenarios",
     "timings": "just ci-first-frame-timings",
 }

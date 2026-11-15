@@ -73,7 +73,6 @@ class SameAsCI(unittest.TestCase):
                 "just ci-tests",
                 "just ci-checklist-group-6",
                 "just ci-gallery",
-                "just scorecard",
                 "just ci-scenarios",
                 "just ci-first-frame-timings",
             },

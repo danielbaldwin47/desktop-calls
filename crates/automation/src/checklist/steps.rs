@@ -130,7 +130,7 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "1.3",
                 needs: &[PIXEL_IN_HAND],
-                title: "Turn Contacts access off on the Pixel, use Try again and let the prompt time out once, then allow it",
+                title: "Pair afresh with Contacts access unticked on the Pixel, let its prompt time out once, use Try again, then allow it",
                 script: Some(prompt_times_out_then_allowed),
                 lands_with: &[],
             },

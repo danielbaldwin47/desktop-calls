@@ -48,6 +48,15 @@ Sources: the [scorecard audit](../research/2026-11-14-scorecard-audit.md), `gh r
 - Item 5 (only the user's Checklist remains): **by the chief of staff's statement, yes.** Not re-checked whether the Checklist has any recorded result; it had none on 2026-11-14. The Checklist gained scripts for group 4 (#305) and a locale-aware step 7.1 (#297), so the sitting has more to run than on 2026-11-14 ([testing](testing.md)).
 - Open for the user: #329, #301, concept reviews for #283, #140 and #292, the design questions from #323 and #324, the Checklist and the `needs-info` issues. The list with labels is in the [session-log](session-log.md).
 
+## Where v1 stands, 2026-11-15 late evening (checked against `main` at `fc72ab3`; supersedes the entry above where they differ)
+
+Sources: `gh run list --branch main`, `gh issue list --state open`, and the PR bodies of #357 and #359 to #370, read 2026-11-15 after 13:35Z. Nothing ran on the Pixel. The PRs are listed in the [session-log](session-log.md).
+
+- Item 2 (`main` green on GitHub): **met, with one red, traced without a rerun.** Run 43713287809 on `f8c8a77` (#359's merge) failed in a Quiet Hours scenario that read the app's log about 1 ms before the line it wanted was written (#362, fixed by #363). Every other run from `d71a7f4` to `fc72ab3` succeeded on its first attempt.
+- Item 4 (the UI pass): **finished, with fewer loose ends.** Of the screenshot review's findings, #313 to #326, 11 of 14 are closed: most fixed by #353, #361, #365, #367, #368 and earlier PRs, and #323 and #324 closed with their questions handed to the user. #319, #325 and #326 are `ready-for-human`, each on one design question. #370 makes the Setup Window's first page truthful when calls are off, with or without Bluetooth.
+- Items 1, 3 and 5: unchanged from the entry above. Item 7 of the scorecard still waits on #292's decision, and item 8 waits on a new screenshot review of the changed surfaces.
+- Open for the user: the design questions in #234, #292, #301, #319, #323, #324, #325, #326 and #329, the backlog in #366 (`needs-triage`), the Checklist (#28 to #31), the `needs-info` issues and the concept reviews for #283 and #140. Each question is in one line in the [session-log](session-log.md).
+
 ## Fog of war, 2026-11-13
 
 Unknown, and not to be planned as if known:

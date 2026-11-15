@@ -12,9 +12,18 @@
 //! heading, with Turn calls on: while choosing a Phone it has the keyboard,
 //! the step's words are dimmed and no Phone is listed.
 //!
-//! It reports `setup-window` with `step`, `heading`, `instructions`,
-//! `buttons` and `progress` (one per line), `phones` (names, one per line),
-//! `summary`, `code`, `countdown`, `line`, `tip`, `notice`, `keys`,
+//! Four named steps run across the top (`setup_parts`), the current one
+//! marked and the done ones ticked; the instructions are grouped under "On
+//! your phone" and "Here"; the countdown says what it counts; the sync is a
+//! checklist with a bar; and the finish page offers the keybinding and the
+//! pin tip as two equal cards.
+//!
+//! It reports `setup-window` with `step`, `stage` (the named step),
+//! `stages`, `heading`, `instructions`, `buttons` and `progress` (one per
+//! line), `phones` (names, one per line), `summary`, `code`, `countdown`,
+//! `countdown-label`, `sync-bar` (in thousandths), `sync-note`, `line`,
+//! `keybinding` and `tip` (each card's title, then its text), `notice`,
+//! `keys`,
 //! `dimmed` (while a Problem or calls being off blocks the step),
 //! `calls-off` (its heading), `calls-off-text`, `calls-off-button`,
 //! `desktop` and `focused`, and
@@ -30,7 +39,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use desktop_calls_core::messages::{self, SetupWindowText};
+use desktop_calls_core::messages::{self, SETUP_STAGES, SetupWindowText, StageMark, stage_line};
 use desktop_calls_core::{
     Input, KeybindingCheck, KeybindingStage, Phone, SetupStep, SetupWindowView, Timestamp,
 };
@@ -39,6 +48,9 @@ use gtk::glib;
 use gtk::prelude::*;
 
 use super::setup_calls_off::CallsOffCard;
+use super::setup_parts::{
+    self, Card, Instructions, Stages, SyncView, keep_runs_whole, wrapping_label,
+};
 use super::setup_problems::notice_card;
 use super::{
     SharedReport, after_next_frame, class, footer, reported, set_class, surface_mapped,
@@ -58,7 +70,6 @@ const CSS: &str = "
 }
 .desktop-calls-setup .setup-phone { padding: 10px 12px; font-weight: bold; }
 .desktop-calls-setup .setup-line { font-family: monospace; padding: 8px; }
-.desktop-calls-setup .setup-tip { color: var(--dc-secondary); }
 /* A Problem and a notice are cards on the warning tint, with the warning
    colour down the left edge. */
 .desktop-calls-setup .notice { border-left: 3px solid var(--dc-warning); }
@@ -91,13 +102,18 @@ const TICK: Duration = Duration::from_millis(200);
 /// The Setup Window.
 pub(super) struct SetupWindow {
     window: gtk::Window,
+    /// The four named steps across the top.
+    stages: Stages,
     heading: gtk::Label,
     summary: gtk::Label,
-    instructions: gtk::Box,
+    instructions: Instructions,
     code: gtk::Label,
-    progress: gtk::Label,
+    /// What the countdown counts, under it.
+    countdown_label: gtk::Label,
+    sync: SyncView,
     line: gtk::Label,
-    tip: gtk::Label,
+    keybinding: Card,
+    tip: Card,
     notice: gtk::Box,
     notice_text: gtk::Label,
     /// Says calls are off, with Turn calls on.
@@ -144,37 +160,22 @@ impl SetupWindow {
         window.set_resizable(false);
         window.add_css_class("desktop-calls-setup");
 
+        let stages = Stages::new();
         let heading = gtk::Label::new(None);
         heading.add_css_class(class::HEADING);
         heading.set_xalign(0.0);
         heading.set_wrap(true);
-        let summary = gtk::Label::new(None);
-        summary.set_xalign(0.0);
-        summary.set_wrap(true);
-        summary.set_max_width_chars(50);
-        let instructions = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let summary = wrapping_label();
+        let instructions = Instructions::new();
         let code = gtk::Label::new(None);
         code.add_css_class("setup-code");
         code.set_selectable(false);
-        let progress = gtk::Label::new(None);
-        progress.set_xalign(0.0);
-        let line = gtk::Label::new(None);
-        line.add_css_class("setup-line");
-        line.add_css_class("card");
-        line.set_xalign(0.0);
-        line.set_wrap(true);
-        // Breaks only at a space or after a `/`: see `keep_runs_whole`.
-        line.set_wrap_mode(gtk::pango::WrapMode::Word);
-        line.set_max_width_chars(50);
-        // Selectable with the pointer, to copy; Tab still moves only
-        // between the buttons.
-        line.set_selectable(true);
-        line.set_focusable(false);
-        let tip = gtk::Label::new(None);
-        tip.add_css_class("setup-tip");
-        tip.set_xalign(0.0);
-        tip.set_wrap(true);
-        tip.set_max_width_chars(50);
+        let countdown_label = gtk::Label::new(None);
+        countdown_label.add_css_class("setup-countdown-label");
+        let sync = SyncView::new();
+        let line = setup_parts::line_label();
+        let keybinding = Card::new();
+        let tip = Card::new();
         let (notice, notice_text) = notice_card();
         let calls_off = CallsOffCard::new(intents);
         // Plain dimmed words, not a field that looks like an input.
@@ -185,24 +186,31 @@ impl SetupWindow {
         let list = gtk::ListBox::new();
         list.add_css_class("boxed-list");
         list.set_selection_mode(gtk::SelectionMode::Single);
+        // What is listed here goes in the "Here" group.
+        instructions.add_here(&empty);
+        instructions.add_here(&list);
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, space::S);
         buttons.set_halign(gtk::Align::End);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         footer.add_css_class(class::FOOTER_LINE);
 
+        // The code, or the countdown, and what it counts: one block.
+        let digits = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        digits.append(&code);
+        digits.append(&countdown_label);
         let layout = gtk::Box::new(gtk::Orientation::Vertical, space::L);
         for widget in [
-            heading.upcast_ref::<gtk::Widget>(),
+            stages.widget.upcast_ref::<gtk::Widget>(),
+            heading.upcast_ref(),
             calls_off.widget.upcast_ref(),
+            digits.upcast_ref(),
             summary.upcast_ref(),
-            instructions.upcast_ref(),
-            code.upcast_ref(),
-            progress.upcast_ref(),
-            line.upcast_ref(),
             notice.upcast_ref(),
-            empty.upcast_ref(),
-            list.upcast_ref(),
-            tip.upcast_ref(),
+            instructions.widget.upcast_ref(),
+            sync.widget.upcast_ref(),
+            line.upcast_ref(),
+            keybinding.widget.upcast_ref(),
+            tip.widget.upcast_ref(),
             buttons.upcast_ref(),
             footer.upcast_ref(),
         ] {
@@ -212,12 +220,15 @@ impl SetupWindow {
 
         let setup = Rc::new(Self {
             window,
+            stages,
             heading,
             summary,
             instructions,
             code,
-            progress,
+            countdown_label,
+            sync,
             line,
+            keybinding,
             tip,
             notice,
             notice_text,
@@ -413,6 +424,7 @@ impl SetupWindow {
         let new_step = self.step.replace(Some(step)) != Some(step);
         let new_buttons = *self.shown_buttons.borrow() != text.buttons;
         self.window.set_title(Some(text.title));
+        self.stages.show(text.stages);
         self.heading.set_text(&text.heading);
         self.summary
             .set_text(text.summary.as_deref().unwrap_or_default());
@@ -423,23 +435,30 @@ impl SetupWindow {
         let dimmed = view.problem_has_focus.is_some() || waits_for_calls;
         for widget in [
             self.summary.upcast_ref::<gtk::Widget>(),
-            self.instructions.upcast_ref(),
-            self.empty.upcast_ref(),
-            self.list.upcast_ref(),
+            self.instructions.widget.upcast_ref(),
         ] {
             set_class(widget, "setup-dimmed", dimmed);
         }
-        self.show_instructions(&text.instructions);
-        // The pairing code, or the countdown: both big digits.
-        let digits = text.code.as_deref().or(text.countdown.as_deref());
+        // The pairing code, or the countdown in seconds with what it
+        // counts: both big digits.
+        let countdown = text
+            .countdown
+            .as_ref()
+            .map(|seconds| format!("{seconds} s"));
+        let digits = text.code.as_deref().or(countdown.as_deref());
         self.code.set_text(digits.unwrap_or_default());
-        self.code.set_visible(digits.is_some());
-        self.progress.set_text(&text.progress.join("\n"));
-        self.progress.set_visible(!text.progress.is_empty());
+        self.countdown_label
+            .set_text(text.countdown_label.unwrap_or_default());
+        self.countdown_label
+            .set_visible(text.countdown_label.is_some());
+        if let Some(block) = self.code.parent() {
+            block.set_visible(digits.is_some());
+        }
+        self.sync.show(text.sync.as_ref());
         keep_runs_whole(&self.line, text.line.as_deref().unwrap_or_default());
         self.line.set_visible(text.line.is_some());
-        self.tip.set_text(text.tip.unwrap_or_default());
-        self.tip.set_visible(text.tip.is_some());
+        self.keybinding.show(text.keybinding.as_ref());
+        self.tip.show(text.tip.as_ref());
         self.notice_text
             .set_text(text.notice.as_deref().unwrap_or_default());
         self.notice.set_visible(text.notice.is_some());
@@ -453,6 +472,11 @@ impl SetupWindow {
             _ => &[],
         };
         let relisted = self.show_phones(phones, text, new_step);
+        // What is listed here shows while choosing, with or without a Phone.
+        self.instructions.show(
+            &messages::grouped(&text.instructions),
+            text.empty_list.is_some(),
+        );
         if new_step || new_buttons {
             self.show_buttons(&view.step, text);
             self.shown_buttons.replace(text.buttons.clone());
@@ -484,28 +508,6 @@ impl SetupWindow {
         if !phones.is_empty() && !self.listed.replace(true) {
             self.phone_listed();
         }
-    }
-
-    fn show_instructions(&self, instructions: &[String]) {
-        while let Some(child) = self.instructions.first_child() {
-            self.instructions.remove(&child);
-        }
-        // Numbered when there is more than one thing to do.
-        let numbered = instructions.len() > 1;
-        for (number, instruction) in (1..).zip(instructions) {
-            let line = if numbered {
-                format!("{number}. {instruction}")
-            } else {
-                instruction.clone()
-            };
-            let label = gtk::Label::new(None);
-            label.set_xalign(0.0);
-            label.set_wrap(true);
-            label.set_max_width_chars(50);
-            keep_runs_whole(&label, &line);
-            self.instructions.append(&label);
-        }
-        self.instructions.set_visible(!instructions.is_empty());
     }
 
     /// Lists `phones`, keeping the one selected; whether the list changed.
@@ -628,21 +630,6 @@ impl SetupWindow {
     }
 }
 
-/// Sets `label`'s text so it can break only at a space or after a `/`,
-/// never inside a word or a path's name: Pango may not break inside each
-/// run, so the text itself stays exactly as given, to copy.
-fn keep_runs_whole(label: &gtk::Label, text: &str) {
-    label.set_text(text);
-    let attributes = gtk::pango::AttrList::new();
-    for run in messages::unbreakable_runs(text) {
-        let mut no_break = gtk::pango::AttrInt::new_allow_breaks(false);
-        no_break.set_start_index(u32::try_from(run.start).unwrap_or(u32::MAX));
-        no_break.set_end_index(u32::try_from(run.end).unwrap_or(u32::MAX));
-        attributes.insert(no_break);
-    }
-    label.set_attributes(Some(&attributes));
-}
-
 /// Tab on the last button moves round to the first: GTK would move focus
 /// out of the window. Shift+Tab is GTK's own, so from the first button it
 /// reaches the Problems above.
@@ -662,7 +649,7 @@ fn round_from_the_last_button(window: &gtk::Window, buttons: &gtk::Box) -> glib:
 fn add_css() {
     if let Some(display) = gtk::gdk::Display::default() {
         let provider = gtk::CssProvider::new();
-        provider.load_from_string(CSS);
+        provider.load_from_string(&format!("{CSS}{}", setup_parts::CSS));
         gtk::style_context_add_provider_for_display(
             &display,
             &provider,
@@ -716,11 +703,27 @@ fn now() -> Timestamp {
 
 /// What the window reports for `view`.
 fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, String> {
+    let instructions: Vec<String> = text
+        .instructions
+        .iter()
+        .map(messages::Instruction::line)
+        .collect();
+    let stages: Vec<String> = SETUP_STAGES
+        .iter()
+        .zip(text.stages)
+        .map(|(name, mark)| stage_line(name, mark))
+        .collect();
+    let now = SETUP_STAGES
+        .iter()
+        .zip(text.stages)
+        .find_map(|(name, mark)| (mark == StageMark::Now).then_some(*name));
     let mut content = BTreeMap::from([
         ("step".to_owned(), view.step.as_str().to_owned()),
+        ("stage".to_owned(), now.unwrap_or_default().to_owned()),
+        ("stages".to_owned(), stages.join("\n")),
         ("heading".to_owned(), text.heading.clone()),
         ("keys".to_owned(), footer::text(&text.keys)),
-        ("instructions".to_owned(), text.instructions.join("\n")),
+        ("instructions".to_owned(), instructions.join("\n")),
         ("buttons".to_owned(), text.buttons.join("\n")),
     ]);
     if let SetupStep::Choose { phones } = &view.step {
@@ -740,14 +743,23 @@ fn report(view: &SetupWindowView, text: &SetupWindowText) -> BTreeMap<String, St
     if let SetupStep::ContactsPrompt { deadline, .. } = &view.step {
         content.insert("deadline".to_owned(), deadline.0.to_string());
     }
-    if !text.progress.is_empty() {
-        content.insert("progress".to_owned(), text.progress.join("\n"));
+    if let Some(label) = text.countdown_label {
+        content.insert("countdown-label".to_owned(), label.to_owned());
+    }
+    if let Some(sync) = &text.sync {
+        let rows: Vec<String> = sync.rows.iter().map(messages::SyncRow::line).collect();
+        content.insert("progress".to_owned(), rows.join("\n"));
+        content.insert("sync-bar".to_owned(), sync.bar.to_string());
+        content.insert("sync-note".to_owned(), sync.note.to_owned());
     }
     if let Some(line) = &text.line {
         content.insert("line".to_owned(), line.clone());
     }
-    if let Some(tip) = text.tip {
-        content.insert("tip".to_owned(), tip.to_owned());
+    if let Some(card) = &text.keybinding {
+        content.insert("keybinding".to_owned(), card.reported());
+    }
+    if let Some(tip) = &text.tip {
+        content.insert("tip".to_owned(), tip.reported());
     }
     if let Some(notice) = &text.notice {
         content.insert("notice".to_owned(), notice.to_owned());

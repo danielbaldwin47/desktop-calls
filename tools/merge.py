@@ -372,8 +372,9 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
         raise Refused(
             f'No passed "{SUMMARY_CHECK}" check on PR #{number}\'s head '
             f"({pr['headRefOid'][:7]}), so nothing judged every job. Checks found: {names}.\n"
-            f"Next: gh run list --branch {pr['headRefName']} --event pull_request   "
-            f"(then `just merge {number}`)"
+            "GitHub starts no pull_request run on a PR that conflicts with main.\n"
+            f"Next: gh pr view {number} --json mergeable   (if it conflicts, merge origin/main "
+            f"into the branch and push; then `just land {number}`)"
         )
 
 

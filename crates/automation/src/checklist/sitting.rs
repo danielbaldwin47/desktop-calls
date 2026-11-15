@@ -287,7 +287,8 @@ impl Sitting {
     /// itself is never kept or printed.
     pub fn test_number(&self) -> TestNumber {
         let number = if self.demo.is_some() {
-            DEMO_TEST_NUMBER_AS_FILED.to_owned()
+            std::env::var(DEMO_TEST_NUMBER_VARIABLE)
+                .unwrap_or_else(|_| DEMO_TEST_NUMBER_AS_FILED.to_owned())
         } else {
             let Some(config) = std::env::var_os("XDG_CONFIG_HOME")
                 .map(PathBuf::from)
@@ -534,6 +535,12 @@ impl Sitting {
 /// code, which the runner takes from the locale.
 const DEMO_TEST_NUMBER_AS_FILED: &str = "07700 900999";
 
+/// The environment variable that files another Test Number for the demo,
+/// as the user's file would have it, so a test can play a user whose Test
+/// Number has its country code. Only the demo reads it, never the run
+/// against the real Phone.
+const DEMO_TEST_NUMBER_VARIABLE: &str = "DESKTOP_CALLS_DEMO_TEST_NUMBER";
+
 /// What `just pbap-probe` runs. The real-Phone tools need the system
 /// Python, the only one with dbus-python (#54); `just` itself may be a
 /// version manager's shim, which fails in the demo's temporary home.
@@ -588,21 +595,18 @@ pub enum TestNumber {
     NoCountry,
     Ready {
         number: Fingerprint,
-        /// The country code taken from the locale, if the number had none.
+        /// The country code the number was read with, if it had none.
         assumed: Option<u16>,
     },
 }
 
 /// The region of the Desktop's locale for telephone numbers, such as `US`
-/// for `en_US.UTF-8`: from `LC_TELEPHONE`, then `LC_ALL`, then `LANG`.
-fn locale_region() -> Option<String> {
-    ["LC_TELEPHONE", "LC_ALL", "LANG"]
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.is_empty())
-        .and_then(|locale| {
-            let (_, rest) = locale.split_once('_')?;
-            let region: String = rest.chars().take_while(char::is_ascii_alphabetic).collect();
-            (region.len() == 2).then_some(region)
-        })
+/// for `en_US.UTF-8`, by the rule the app's Contacts read it by.
+pub(super) fn locale_region() -> Option<String> {
+    let read = |name| std::env::var(name).ok();
+    desktop_calls_core::locale_region(
+        read("LC_ALL").as_deref(),
+        read("LC_TELEPHONE").as_deref(),
+        read("LANG").as_deref(),
+    )
 }

@@ -76,13 +76,14 @@ pub fn run(options: &Options) -> ExitCode {
     };
 
     let (sender, events) = mpsc::channel();
-    let timeline = match watch::start(&world.bus, sender.clone()) {
+    let timeline = match watch::start(&world.bus, sender.clone(), sitting::locale_region()) {
         Ok(timeline) => timeline,
         Err(watch::WatchError::NotRunning) => {
+            // Never `cargo run`: that would start a second app beside the
+            // installed service. `just run` stops the service for its run and
+            // starts it again afterwards (ADR-0006).
             eprintln!(
-                // Until `just install` lands (#20), the service runs from a
-                // terminal.
-                "Desktop Calls isn't running, so the checklist can't observe it. Start it in another terminal with `cargo run --release -p desktop-calls -- service`, then run this again."
+                "Desktop Calls isn't running, so the checklist can't observe it. Start the installed service with `systemctl --user start desktop-calls`, or, to try this checkout's app instead, run `just run` in another terminal (it stops the installed service for the run and starts it again afterwards). Then run this again."
             );
             return ExitCode::FAILURE;
         }

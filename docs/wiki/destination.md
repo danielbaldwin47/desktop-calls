@@ -28,13 +28,22 @@ Sources: the [scorecard audit](../research/2026-11-14-scorecard-audit.md), `gh r
 - Item 4 (the UI pass): **built.** Spec #221's ten tickets, #222 to #231, merged. The user's judgement of it waits for their sitting; the after-the-sitting tickets #232 to #237 and #262 are open.
 - Item 5 (only the user's Checklist remains): **not yet**, because items 1 and 2 are open. The Checklist has no recorded result: its state folder did not exist on 2026-11-14.
 
+## Where v1 stands, 2026-11-15 (checked against `main` at `7be818a`; supersedes the 2026-11-14 list above where they differ)
+
+**v1's agent-side work is complete as of `7be818a`.** That is the chief of staff's statement of 2026-11-15, relayed to the author, and the author checked what GitHub can show of it. What remains for v1 is the user's Real-Phone Checklist (#28 to #31, all open, `ready-for-human`) and the `needs-info` issues it settles: #112, #109 and #51 (open, `needs-info`). Sources: `gh issue list --state open`, `gh run list --branch main`, `gh pr list`, read 2026-11-15. Nothing ran on the Pixel.
+
+- Item 2 (`main` green on GitHub): **met.** The runs on `a65d408` (43680620102) and `7be818a` (43681111286) ended in success. Causes of the red of 2026-11-14 and their fixes (#285, #287) are in the [session-log](session-log.md) and [testing](testing.md).
+- Item 1 (scorecard on the Simulated Phone): **not shown by the tool; the gaps named on 2026-11-14 are partly closed.** The Quiet Hours Window now has a key path: the command `desktop-calls quiet-hours` and Alt+Q in the Dialer (#279, PR #281, `a0597b0`). #25 (the keyboard-only suite), #26 and #27 are open and in flight as after-v1 work. #292, filed after `7be818a` and `needs-triage`, lists Indicator entries that still have no key path (scorecard item 7). Whether #25, #27 and #292 gate v1 is not recorded as the user's call: the 2026-11-14 entry left it to them, and the statement above treats them as not gating. Read it as the chief of staff's judgement until the user says so.
+- Items 3 and 4: unchanged from 2026-11-14 (met on the Simulated Phone; the UI pass built, the user's judgement of it waiting for their sitting).
+- Item 5 (only the user's Checklist remains): **by the chief of staff's statement, yes**; not re-checked whether the Checklist has any recorded result (`~/.local/state/desktop-calls/real-phone-checklist/` was absent on 2026-11-14).
+
 ## Fog of war, 2026-11-13
 
 Unknown, and not to be planned as if known:
 
 - **What the UI pass will contain.** The user asked for a UI pass after the fixes and before their checklist sitting ([user-preferences](user-preferences.md)). A Fable design review was in progress on 2026-11-13, at the user's request, to propose it. Until the user has chosen from it, the pass has no scope.
 - **Whether a "calls only, keep media audio" mode follows v1.** Probe B of the Calls Off probe ([note](../research/2026-11-13-calls-off-mechanism-probe.md)) suggests it is feasible as a best effort: the Phone's hands-free profile can be dropped while A2DP stays up, but it must be dropped again after every reconnect (observed on the Desktop with the Pixel; the reconnect half from BlueZ and PipeWire source, not tested). The user agreed on 2026-11-13 that blocking is the only mode in v1 and that this mode is an after-v1 concept ([product-shape](product-shape.md)).
-- **The Companion App.** The user wanted it "soon" after v1 on 2026-11-04 ([product-shape](product-shape.md)). No later decision on it is recorded in this wiki.
+- **The Companion App.** The user wanted it "soon" after v1 on 2026-11-04 ([product-shape](product-shape.md)). No later decision on it is recorded in this wiki. On 2026-11-15 the user let the chief of staff choose after-v1 work ([user-preferences](user-preferences.md)); the Companion App is not among the issues sent, which are listed in the [session-log](session-log.md).
 
 ## Out of scope, 2026-11-13
 

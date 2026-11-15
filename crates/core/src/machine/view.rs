@@ -221,6 +221,18 @@ pub enum CallPillTag {
 }
 
 impl CallWindowView {
+    /// Whether Escape collapses the window to the Call Pill: once its Call
+    /// has connected, so the Call Pill has a Call to show. Before that,
+    /// Escape only gives the keyboard back.
+    #[must_use]
+    pub fn collapses_on_escape(&self) -> bool {
+        self.connection_lost
+            || matches!(
+                self.phase,
+                CallWindowPhase::Live { .. } | CallWindowPhase::OnHold { .. }
+            )
+    }
+
     /// The tag the Call Pill shows. Muted comes first, since talking while
     /// unheard is the costliest mistake; then a Held Call, which nothing
     /// else on the Call Pill shows; then the audio on the Phone, which its

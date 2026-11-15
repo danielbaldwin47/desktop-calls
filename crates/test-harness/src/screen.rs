@@ -616,12 +616,13 @@ mod tests {
     #[test]
     fn a_command_that_never_finishes_fails_at_its_deadline() {
         let started = Instant::now();
-        let error = output_within(
-            Command::new("sleep").arg("10"),
-            Duration::from_millis(300),
-        )
-        .expect_err("sleep 10 can't finish in 300 ms");
-        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        let error = output_within(Command::new("sleep").arg("10"), Duration::from_millis(300))
+            .expect_err("sleep 10 can't finish in 300 ms");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
         assert!(error.to_string().contains("within 300ms"), "{error}");
     }
 

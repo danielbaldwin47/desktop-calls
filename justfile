@@ -25,6 +25,34 @@ test *args:
     cargo build --workspace --bins --locked
     cargo test --workspace --locked {{args}}
 
+# CI splits `just test --exclude test-harness` across three jobs, which took
+# 12 minutes as one (#286): `ci-tests`, `ci-checklist-group-6` and
+# `ci-gallery`. The tests the last two run, by name; `ci-tests` skips them.
+gallery_test := "the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy"
+# The Real-Phone Checklist's demo runs of group 6, which wait out real
+# minutes (calls off for 60 s, Quiet Hours from the next minute for one).
+checklist_group_6_tests := "group_6_times step_6_2_"
+
+# Run every test outside the harness's scenarios but the gallery and the checklist's group 6 runs.
+ci-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    skips=()
+    for name in {{gallery_test}} {{checklist_group_6_tests}}; do skips+=(--skip "$name"); done
+    cargo build --workspace --bins --locked
+    cargo test --workspace --exclude test-harness --locked -- "${skips[@]}"
+
+# Run the Real-Phone Checklist's demo runs of group 6, about 3.5 minutes of real waits.
+ci-checklist-group-6:
+    cargo build --workspace --bins --locked
+    cargo test -p automation --test real_phone_checklist --locked -- {{checklist_group_6_tests}}
+
+# CI passes `1/3` to render part 1 of 3 of the gallery's states; empty, every state.
+# Render the gallery through its test, or one part of it.
+ci-gallery shard="":
+    cargo build --workspace --bins --locked
+    GALLERY_SHARD={{shard}} cargo test -p automation --test gallery --locked
+
 # CI passes `--partition count:k/N` to run shard k of N; `just ci-local` runs
 # them whole.
 # Build the binaries the harness's scenarios run, then run them with cargo-nextest.

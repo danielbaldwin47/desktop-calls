@@ -26,6 +26,7 @@ mod look;
 mod page;
 mod quiet_hours_window;
 mod setup_window;
+mod shard;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
@@ -36,6 +37,7 @@ use look::{LOOKS, Look};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
 use setup_window::SETUP_PROBLEM_STATES;
+pub use shard::Shard;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -800,24 +802,47 @@ pub struct Options {
     pub repeat: u32,
     /// How many states to render at a time. Default: one per CPU.
     pub workers: Option<u32>,
+    /// Only this part of the states, for one of several CI runners.
+    pub shard: Option<Shard>,
+    /// Print the states' names, in order, and render nothing.
+    pub list_states: bool,
+}
+
+/// The states to render: `only`, or the states of `shard`, or every state.
+/// None, having said why, if `only` names no state.
+fn chosen_states(options: &Options) -> Option<Vec<&'static State>> {
+    let Some(only) = &options.only else {
+        let in_shard = |position: usize| options.shard.is_none_or(|shard| shard.holds(position));
+        return Some(
+            all_states()
+                .enumerate()
+                .filter(|(position, _)| in_shard(*position))
+                .map(|(_, state)| state)
+                .collect(),
+        );
+    };
+    let state = all_states().find(|state| state.name == only);
+    if state.is_none() {
+        let names: Vec<&str> = all_states().map(|state| state.name).collect();
+        eprintln!(
+            "The gallery has no state {only:?}. Its states: {}.",
+            names.join(", ")
+        );
+    }
+    state.map(|state| vec![state])
 }
 
 /// `automation screenshot`: renders the gallery, or with `only` one state
 /// of it, `repeat` times, into `output` or `target/screenshots/gallery`.
 pub fn run(options: &Options) -> ExitCode {
-    let states: Vec<&State> = match &options.only {
-        None => all_states().collect(),
-        Some(only) => {
-            let Some(state) = all_states().find(|state| state.name == only) else {
-                let names: Vec<&str> = all_states().map(|state| state.name).collect();
-                eprintln!(
-                    "The gallery has no state {only:?}. Its states: {}.",
-                    names.join(", ")
-                );
-                return ExitCode::FAILURE;
-            };
-            vec![state]
+    if options.list_states {
+        for state in all_states() {
+            println!("{}", state.name);
         }
+        return ExitCode::SUCCESS;
+    }
+    let Some(states) = chosen_states(options) else {
+        return ExitCode::FAILURE;
     };
     let output = if let Some(output) = options.output.clone() {
         output

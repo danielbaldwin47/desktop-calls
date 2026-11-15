@@ -73,8 +73,40 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         .expect("the binary is in target/<profile>/")
         .join("screenshots/gallery");
 
+    // CI renders the gallery in parts, one per runner (#286): GALLERY_SHARD
+    // is K/N, and this part holds every N-th of the gallery's states from
+    // the K-th, in the order `--list-states` prints.
+    let shard = std::env::var("GALLERY_SHARD")
+        .ok()
+        .filter(|shard| !shard.is_empty());
+    let listed = Command::new(binary)
+        .args(["screenshot", "--list-states"])
+        .output()
+        .expect("run automation screenshot --list-states");
+    let listed = String::from_utf8(listed.stdout).expect("the states' names are text");
+    let order: Vec<&str> = listed.lines().collect();
+    for state in STATES {
+        assert!(
+            order.contains(state),
+            "the gallery lists {state}: {order:?}"
+        );
+    }
+    let in_this_part = |state: &str| {
+        let Some(shard) = &shard else { return true };
+        let (number, count) = shard.split_once('/').expect("GALLERY_SHARD is K/N");
+        let (number, count): (usize, usize) = (
+            number.parse().expect("K is a number"),
+            count.parse().expect("N is a number"),
+        );
+        let position = order.iter().position(|listed| *listed == state);
+        position.is_some_and(|position| position % count == number - 1)
+    };
+
     let mut command = Command::new(binary);
     command.arg("screenshot");
+    if let Some(shard) = &shard {
+        command.args(["--shard", shard]);
+    }
     // The gallery is one test, so the test runner's limit on how many run at
     // once doesn't reach it. `just ci-local` sets that limit to what the
     // Desktop has to spare, and each state here is a compositor and an app.
@@ -97,9 +129,13 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     );
     let index =
         std::fs::read_to_string(output.join("index.html")).expect("the gallery has an index");
-    let files = STATES.iter().flat_map(|state| {
-        ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))
-    });
+    let files = STATES
+        .iter()
+        .filter(|state| in_this_part(state))
+        .flat_map(|state| {
+            ["light", "dark", "omarchy-light", "omarchy-dark"]
+                .map(|look| format!("{state}-{look}.png"))
+        });
     for file in files {
         let file = file.as_str();
         assert!(index.contains(file), "the index shows {file}: {index}");

@@ -407,7 +407,9 @@ impl Watch {
         if !self.fired.load(Ordering::SeqCst) {
             return result;
         }
-        let detail = result.err().map_or_else(String::new, |error| format!(" ({error})"));
+        let detail = result
+            .err()
+            .map_or_else(String::new, |error| format!(" ({error})"));
         Err(format!(
             "the compositor did not answer within {:?}{detail}",
             self.deadline

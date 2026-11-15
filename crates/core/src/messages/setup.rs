@@ -341,7 +341,7 @@ fn pairing_lost(text: &mut SetupWindowText, phone: &Phone) -> Page {
     (
         format!("Pair {} again", phone.name),
         vec![Instruction::here(
-            "Choose Pair again to remove the old pairing and start over.",
+            "Choose Pair again: this computer removes its old pairing, then pairs with your phone.",
         )],
         vec!["Pair again", "Close"],
     )
@@ -593,7 +593,7 @@ fn finish(
             command,
         } => (
             format!(
-                "{} already does something else in {}; to open the dialer from a key, bind another one to run {command}",
+                "{} is already used in {}. To open the dialer from a key, bind another one to run {command}",
                 shown_keys(keys),
                 shown_path(file, home)
             ),

@@ -220,7 +220,7 @@ fn step_1_2_fails_when_the_finish_page_offers_no_keybinding() {
     assert_eq!(pairing["result"], "fail", "{pairing:#}");
     assert!(
         says(pairing, "offered no keybinding to add")
-            && says(pairing, "Super+Alt+C already does something else"),
+            && says(pairing, "Super+Alt+C is already used"),
         "{pairing:#}"
     );
     assert!(

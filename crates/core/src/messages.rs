@@ -254,7 +254,7 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::CallMayStillBeLive => (
-            "The call may not have ended. Check your phone and hang up there.",
+            "The call may not have ended. Check your phone, and hang up there if it's still going.",
             None,
         ),
         Failure::AudioNotMoved => (
@@ -351,11 +351,11 @@ pub fn failure(failure: Failure) -> Message {
         ),
         Failure::WaitingCallFirst => (label(Label::WaitingCallFirst), None),
         Failure::AlreadyHolding => (
-            "You already have a call on hold, so this one can't go on hold too; choose End & answer or Decline.",
+            "You already have a call on hold. Choose End & answer or Decline.",
             None,
         ),
         Failure::NothingToHoldOrEnd => (
-            "Your other call is on hold already, so there's nothing to hold or end; choose Answer, which keeps it on hold, or Decline.",
+            "Your other call is already on hold. Choose Answer to keep it there, or Decline.",
             None,
         ),
         Failure::CallsOffUntilPassed => (calls_off::UNTIL_PASSED, None),

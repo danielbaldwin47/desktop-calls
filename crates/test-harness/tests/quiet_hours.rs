@@ -293,7 +293,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     assert_eq!(
         cli_ok(&harness, &["status"]),
         format!(
-            "Connected to My Pixel ({address}).\nQuiet hours: calls are off every day from 22:00 to 06:30.\n"
+            "Connected to My Pixel ({address}).\nQuiet hours: calls are off from 22:00 to 06:30 every day.\n"
         )
     );
     let json: serde_json::Value =
@@ -309,7 +309,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let said = cli_ok(&harness, &["calls", "off", "--until-morning"]);
     assert_eq!(
         said,
-        "Calls are off until 06:30: your phone stays disconnected, and connects again then.\n"
+        "Calls are off until 06:30. Your phone reconnects then.\n"
     );
     // 06:30 is 18 and a half hours after noon.
     wait_off_until(&harness, noon + 18 * 3_600 + 1_800);
@@ -320,7 +320,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     assert!(!refused.status.success());
     assert_eq!(
         String::from_utf8_lossy(&refused.stderr),
-        "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, such as 22:00-07:00, or off to turn them off. The start and end can't be the same.\n"
+        "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, such as 22:00-07:00, or off. The start and end can't be the same.\n"
     );
 
     assert_eq!(

@@ -63,7 +63,7 @@ pub enum KeybindingCheck {
     },
     /// `file` already binds `keys` to Desktop Calls.
     Added { keys: String, file: String },
-    /// `keys` already does something else in `file`; the user can bind
+    /// `keys` is already used in `file`; the user can bind
     /// another key to `command`.
     Taken {
         keys: String,

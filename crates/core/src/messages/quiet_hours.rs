@@ -106,7 +106,7 @@ fn sentence(sentence: QuietHoursSentence) -> String {
             format!("Saved. Calls are off from {start} to {end} every day{day}.")
         }
         QuietHoursSentence::OffNow { start, end } => {
-            format!("Saved. Calls are off now, and from {start} to {end} every day.")
+            format!("Saved. Calls are off now until {end}, and from {start} to {end} every day.")
         }
         QuietHoursSentence::Pending { start, end } => {
             format!("Saved. Calls turn off after this call, and from {start} to {end} every day.")

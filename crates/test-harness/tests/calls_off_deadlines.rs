@@ -311,13 +311,11 @@ fn the_cli_turns_calls_off_for_a_length_or_until_a_time_and_says_until_when() {
     let shown = clock_time(until, offset);
     assert_eq!(
         said,
-        format!(
-            "Calls are off until {shown}: your phone stays disconnected, and connects again then.\n"
-        )
+        format!("Calls are off until {shown}. Your phone reconnects then.\n")
     );
     assert_eq!(
         cli_ok(&harness, &["status"]),
-        format!("Calls are off until {shown}: your phone stays disconnected until then.\n")
+        format!("Calls are off until {shown}. Your phone stays disconnected.\n")
     );
     cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
@@ -333,7 +331,7 @@ fn the_cli_turns_calls_off_for_a_length_or_until_a_time_and_says_until_when() {
     for (arguments, refusal) in [
         (
             ["calls", "off", "--for", "25h"],
-            "Calls can be turned off for 1 minute to 24 hours, such as --for 90m or --for 2h; for longer, run desktop-calls calls off and turn them on yourself.\n",
+            "Calls can be turned off for 1 minute to 24 hours, such as --for 90m or --for 2h. For longer, run desktop-calls calls off and turn them on yourself.\n",
         ),
         (
             ["calls", "off", "--until", "9:30"],
@@ -431,7 +429,7 @@ fn the_menu_offers_an_hour_and_until_morning_with_their_end_times_across_a_clock
     indicator_says(&harness, "Calls off until 07:00");
     assert_eq!(
         cli_ok(&harness, &["status"]),
-        "Calls are off until 07:00: your phone stays disconnected until then.\n"
+        "Calls are off until 07:00. Your phone stays disconnected.\n"
     );
 
     cli_ok(&harness, &["calls", "on"]);

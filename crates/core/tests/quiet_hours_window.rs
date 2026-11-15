@@ -380,7 +380,7 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     let view = window(&open(state));
     assert_eq!(
         messages::quiet_hours_window(&view).sentence,
-        "Saved. Calls are off now, and from 20:00 to 21:00 every day."
+        "Saved. Calls are off now until 21:00, and from 20:00 to 21:00 every day."
     );
     assert_eq!(view.off_spans, [(20 * 60, 21 * 60)]);
 

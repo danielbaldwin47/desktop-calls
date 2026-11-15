@@ -289,10 +289,12 @@ fn verdict(directory: &Path, verdict: &str, defects: &[&str], ids: &[(&str, &str
         format!("# Screenshot review\n\nReviewed commit: abc1234\nVerdict: {verdict}\n\n");
     for path in [
         "crates/desktop-calls/src",
-        "crates/core/src/messages",
-        "crates/core/src/messages.rs",
+        "crates/core/src",
+        "data/icons",
         "crates/automation/src/gallery",
         "crates/automation/src/gallery.rs",
+        "crates/test-harness/src",
+        "crates/test-harness/fixtures/omarchy-themes",
     ] {
         let id = ids.iter().find(|(named, _)| *named == path).map_or_else(
             || {
@@ -305,7 +307,7 @@ fn verdict(directory: &Path, verdict: &str, defects: &[&str], ids: &[(&str, &str
             },
             |(_, id)| (*id).to_owned(),
         );
-        text.push_str(&format!("Reviewed tree: {path} {id}\n"));
+        text.push_str(&format!("Reviewed path: {path} {id}\n"));
     }
     for defect in defects {
         text.push_str(&format!("Defect: {defect}\n"));

@@ -4,20 +4,24 @@
 //!
 //! The file records each watched path's git object id at the review, not
 //! only the commit: a squash merge gives the commit a new id, but leaves
-//! the trees as they were.
+//! each path's content, and so its id, as it was.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// What the gallery shows comes from these: the surfaces, their words, and
-/// the gallery's states. A change to any of them needs a new review.
-pub const WATCHED: [&str; 5] = [
+/// What the gallery shows comes from these: the surfaces, the core's views
+/// and words, the Indicator's drawings, the gallery's states, the harness
+/// that renders them, and the Omarchy looks. A change to any of them, or
+/// one missing from the verdict or from `HEAD`, needs a new review.
+pub const WATCHED: [&str; 7] = [
     "crates/desktop-calls/src",
-    "crates/core/src/messages",
-    "crates/core/src/messages.rs",
+    "crates/core/src",
+    "data/icons",
     "crates/automation/src/gallery",
     "crates/automation/src/gallery.rs",
+    "crates/test-harness/src",
+    "crates/test-harness/fixtures/omarchy-themes",
 ];
 
 /// Where the verdict is, from the repository's root.
@@ -58,7 +62,7 @@ pub fn standing(root: &Path, verdict: &Path) -> Standing {
     };
     let reviewed: Vec<(&str, &str)> = text
         .lines()
-        .filter_map(|line| line.strip_prefix("Reviewed tree: ")?.split_once(' '))
+        .filter_map(|line| line.strip_prefix("Reviewed path: ")?.split_once(' '))
         .collect();
     let changed: Vec<String> = WATCHED
         .iter()

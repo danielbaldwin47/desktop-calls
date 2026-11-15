@@ -125,7 +125,7 @@ pub(super) fn open_dialer(harness: &Harness, query: &str) {
     });
 }
 
-fn dialer_shows(state: &AppState, key: &str, value: &str) -> bool {
+pub(super) fn dialer_shows(state: &AppState, key: &str, value: &str) -> bool {
     state
         .surface("dialer")
         .and_then(|dialer| dialer.get(key))
@@ -133,6 +133,6 @@ fn dialer_shows(state: &AppState, key: &str, value: &str) -> bool {
 }
 
 /// Whether the Dialer, wider than the other surfaces, is on screen.
-fn shows_dialer(screenshot: &Screenshot) -> bool {
+pub(super) fn shows_dialer(screenshot: &Screenshot) -> bool {
     app_region(screenshot).is_some_and(|region| region.right - region.left > 500.0)
 }

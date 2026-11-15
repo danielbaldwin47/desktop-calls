@@ -22,18 +22,21 @@ use test_harness::vcards::{self, CallKind};
 mod banner;
 mod call_pill;
 mod dialer;
+mod durations;
 mod indicator;
 mod look;
 mod notification;
 mod page;
 mod quiet_hours_window;
+mod refusals;
 mod render;
 mod setup_window;
 mod shard;
 
-use banner::BANNER_STATES;
+use banner::{BANNER_STATES, names_the_keybinding, with_keybinding};
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
 use dialer::DIALER_STATES;
+use durations::DURATION_STATES;
 use indicator::{
     INDICATOR_STATES, INDICATOR_THEMES, IndicatorState, MENU_STATES, draw_indicator, indicator_path,
 };
@@ -41,8 +44,9 @@ use look::{LOOKS, Look};
 use notification::{draw_notifications, drawn_notifications};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
+use refusals::REFUSAL_STATES;
 use render::render_all;
-use setup_window::SETUP_PROBLEM_STATES;
+use setup_window::{SETUP_CONTACTS_STATES, SETUP_PROBLEM_STATES};
 pub use shard::Shard;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
@@ -214,31 +218,6 @@ const STATES: &[State] = &[
         },
     },
     State {
-        name: "call-window-ended",
-        title: "The Call Window, just after the Call ended: who and how long it lasted, and no controls",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            let call = ring(harness);
-            harness.answer(call);
-            harness.wait_for_app("the Call is live", DEADLINE, |state| {
-                state
-                    .surface("call-window")
-                    .is_some_and(|window| window.contains_key("handoff"))
-            });
-            harness.hang_up(call);
-            harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
-                state
-                    .surface("call-window")
-                    .and_then(|window| window.get("state"))
-                    .is_some_and(|line| line.starts_with("Call ended · "))
-            });
-        },
-        // No Hang up once the Call has ended.
-        shown: without_controls,
-    },
-    State {
         name: "call-window-held",
         title: "The Call Window with two Calls: the answered one live, the first on hold in the row above it",
         still: |_| true,
@@ -248,9 +227,9 @@ const STATES: &[State] = &[
     },
     State {
         name: "call-window-held-third-call-waiting",
-        title: "Three Calls: one live and one on hold, neither with Hang up, and a Waiting Call's Banner with End & Answer and Decline only",
+        title: "Three Calls: one live and one on hold, Swap gone and Hang up dimmed until the Waiting Call is answered or declined, and a Waiting Call's Banner with End & Answer, Decline and the keybinding",
         still: |_| true,
-        prepare: as_is,
+        prepare: with_keybinding,
         reach: |harness| {
             held(harness);
             let _path = harness.simulated_phone().ring(THIRD_NUMBER);
@@ -264,45 +243,12 @@ const STATES: &[State] = &[
                         && state
                             .surface("banner")
                             .is_some_and(|banner| banner.contains_key("options"))
+                        && names_the_keybinding(state)
                 },
             );
         },
         // The Banner's ringing dot is the only green on the screen.
         shown: |screenshot, look| shows(screenshot, look.red()) && shows(screenshot, look.green()),
-    },
-    State {
-        name: "call-window-connection-lost",
-        title: "The Call Window, after the audio went to the phone and hands-free didn't come back: the timer struck through, a notice to hang up on the phone, and no controls",
-        still: |_| true,
-        prepare: as_is,
-        reach: |harness| {
-            connect(harness);
-            let call = ring(harness);
-            harness.answer(call);
-            harness.wait_for_app("the audio is on the Desktop", DEADLINE, |state| {
-                state.audio_location == "desktop"
-            });
-            harness
-                .simulated_phone()
-                .enable_quirk("connect-profile-fails");
-            harness
-                .move_audio("phone")
-                .unwrap_or_else(|error| panic!("move the audio to the phone: {error:?}"));
-            harness.wait_for_app(
-                "the Call Window says the connection is lost",
-                DEADLINE,
-                |state| {
-                    state
-                        .surface("call-window")
-                        .is_some_and(|window| window.contains_key("notice-heading"))
-                },
-            );
-        },
-        shown: |screenshot, look| {
-            without_controls(screenshot, look)
-                && !shows(screenshot, look.green())
-                && shows(screenshot, look.warning())
-        },
     },
     State {
         name: "call-window-calling",
@@ -899,9 +845,12 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .iter()
         .chain(DIALER_STATES)
         .chain(BANNER_STATES)
+        .chain(DURATION_STATES)
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
         .chain(SETUP_PROBLEM_STATES)
+        .chain(SETUP_CONTACTS_STATES)
+        .chain(REFUSAL_STATES)
 }
 
 /// A state's file name under `look`, without `.png`.

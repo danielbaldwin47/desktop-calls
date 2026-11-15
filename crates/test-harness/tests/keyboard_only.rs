@@ -684,7 +684,7 @@ fn held_for(harness: &Harness, number: &str, live: u32, answered: usize) -> (Str
     (path, call)
 }
 
-/// Alice, a Contact, and two older Calls in the Call History.
+/// Alice and five more Contacts.
 fn contacts() -> String {
     let mut all = vcards::contact("Alice", &[("CELL", "+44 7700 900456")]);
     all.push_str(&vcards::contacts(5, 1_000));

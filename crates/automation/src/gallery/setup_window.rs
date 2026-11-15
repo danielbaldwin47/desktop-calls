@@ -5,10 +5,13 @@
 //! with a Phone listed). With them, calls being off: a neutral card in the
 //! same shape, with Turn calls on and its key.
 
+use std::time::Duration;
+
 use test_harness::{AppState, Builder, Harness};
 
 use super::{
-    DEADLINE, PHONE_NAME, State, app_region, as_is, fresh_install, setup_window_shows, sync,
+    DEADLINE, PHONE_NAME, State, app_region, as_is, fresh_install, pair_through_setup_window,
+    setup_window_shows, sync,
 };
 
 /// Audio settings that leave out hands-free, so Calls' audio isn't set up.
@@ -78,6 +81,53 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         still: |_| true,
         prepare: |builder| fresh_install(builder).bluez_hands_free_on(),
         reach: |harness| wait_for_problem(harness, "bluez-hands-free", true),
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+];
+
+/// Longer than the Phone's 30 s contacts prompt.
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// The Setup Window when the Phone didn't share Contacts (#26).
+pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
+    State {
+        name: "setup-window-contacts-prompt-timed-out",
+        title: "The Setup Window after nobody answered the Phone's contacts prompt: Try again, with its key, and Skip",
+        still: |_| true,
+        prepare: fresh_install,
+        reach: |harness| {
+            harness.simulated_phone().set_contacts_prompt("ask");
+            pair_through_setup_window(harness);
+            harness.wait_for_app(
+                "the Setup Window says the Phone stopped asking",
+                PROMPT_TIMEOUT,
+                |state| setup_window_shows(state, "step", "contacts-prompt-timed-out"),
+            );
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-done-contacts-denied",
+        title: "The Setup Window's finish page after the Phone refused Contacts: Calls still work, and where to allow it later",
+        still: |_| true,
+        prepare: fresh_install,
+        reach: |harness| {
+            harness.simulated_phone().set_contacts_prompt("deny");
+            pair_through_setup_window(harness);
+            harness.wait_for_app(
+                "the finish page says Contacts aren't shared",
+                PROMPT_TIMEOUT,
+                |state| {
+                    setup_window_shows(state, "step", "done")
+                        && state
+                            .surface("setup-window")
+                            .and_then(|window| window.get("summary"))
+                            .is_some_and(|summary| {
+                                summary.starts_with("Your phone isn't sharing contacts.")
+                            })
+                },
+            );
+        },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];

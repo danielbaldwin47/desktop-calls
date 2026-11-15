@@ -442,21 +442,28 @@ fn hanging_up_shows_call_ended_then_closes_the_call_window() {
     let harness = connected_on_screen();
     let (path, call) = ring_until_banner(&harness);
     harness.answer(call);
-    harness.wait_for_app("the Call Window shows a timer", DEADLINE, |state| {
+    // The Call lasts 2 s, so "Call ended" shows how long, not 0:00 (#262).
+    harness.wait_for_app("the Call Window's timer reads 0:02", DEADLINE, |state| {
         call_window(state)
             .and_then(|window| window.get("timer"))
-            .is_some_and(|status| is_timer(status))
+            .is_some_and(|status| status == "0:02")
     });
     let hang_up = find_on_screen(&harness, "call-window", RED);
 
     click(&harness, hang_up);
 
-    harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
+    let state = harness.wait_for_app("the Call Window says Call ended", DEADLINE, |state| {
         state.calls.is_empty()
             && call_window(state)
                 .and_then(|window| window.get("state"))
                 .is_some_and(|line| line.starts_with("Call ended"))
     });
+    // The click and its Hangup may take the Call into its next second.
+    let line = call_window(&state).and_then(|window| window.get("state"));
+    assert!(
+        line.is_some_and(|line| ["Call ended · 0:02", "Call ended · 0:03"].contains(&line.as_str())),
+        "{line:?}"
+    );
     harness.wait_for_app("the Call Window closes", DEADLINE, |state| {
         call_window(state).is_none()
     });

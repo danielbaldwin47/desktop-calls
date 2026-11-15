@@ -461,7 +461,7 @@ impl Banner {
                         })
                         .append(&label);
                 }
-                FooterPart::Words(",") => {
+                FooterPart::Comma => {
                     let comma = gtk::Label::new(Some(","));
                     match group.take() {
                         Some(keys) => keys.append(&comma),

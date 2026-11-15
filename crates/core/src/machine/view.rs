@@ -3,7 +3,7 @@
 use super::desktop::SetupProblemsView;
 use super::quiet_hours_window::QuietHoursWindowView;
 use super::setup::SetupWindowView;
-use super::{Focus, State};
+use super::{BoundKeys, Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
 use crate::clock::TimeOfDay;
 use crate::indicator::PhoneStatus;
@@ -533,7 +533,11 @@ impl State {
                     footer: if focused {
                         Some(BannerFooter::GiveKeyboardBack)
                     } else {
-                        self.keybinding.clone()
+                        match &self.keybinding {
+                            BoundKeys::NotRead => None,
+                            BoundKeys::Unbound => Some(BannerFooter::NoKeybinding),
+                            BoundKeys::Keys(keys) => Some(BannerFooter::Keybinding(keys.clone())),
+                        }
                     },
                 }
             });

@@ -881,6 +881,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             restore_audio(&mut state, &mut effects);
         }
         Input::PhoneCommandFailed(command) => command_failed(&mut state, &command, &mut effects),
+        Input::HandsFreePairingLost => presence::hands_free_pairing_lost(&mut state, &mut effects),
         Input::DoNotDisturbChanged(on) => state.do_not_disturb = on,
         input @ (Input::PairedPhonesListed
         | Input::OpenSetupWindow

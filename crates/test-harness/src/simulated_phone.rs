@@ -29,6 +29,8 @@ trait SimulatedPhone1 {
 
     fn forget_pairing(&self) -> zbus::Result<()>;
 
+    fn forget_pairing_keeping_link(&self) -> zbus::Result<()>;
+
     fn calls_on_phone(&self) -> zbus::Result<Vec<(String, String)>>;
 
     fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
@@ -265,6 +267,18 @@ impl SimulatedPhone<'_> {
     pub fn forget_pairing(&self) {
         zbus::block_on(async { self.proxy().await?.forget_pairing().await })
             .expect("have the Simulated Phone forget the pairing");
+    }
+
+    /// The Phone forgets the pairing and drops hands-free, while BlueZ keeps
+    /// it connected, as the real Pixel did (ticket #373): each
+    /// `ConnectProfile` then fails `"br-connection-key-missing"`.
+    ///
+    /// # Panics
+    ///
+    /// If the Simulated Phone refuses.
+    pub fn forget_pairing_keeping_link(&self) {
+        zbus::block_on(async { self.proxy().await?.forget_pairing_keeping_link().await })
+            .expect("have the Simulated Phone forget the pairing, keeping the link");
     }
 
     /// Pairs from the Phone's side, as its owner does by tapping the Desktop

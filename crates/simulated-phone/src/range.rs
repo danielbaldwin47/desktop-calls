@@ -104,6 +104,13 @@ enum Service {
 }
 
 impl Change {
+    /// This change without BlueZ's `Connected` going false: the link stays.
+    fn keep_connected(&mut self) {
+        self.signals.retain(|(service, signal)| {
+            !(matches!(service, Service::Bluez) && signal.changes("Connected"))
+        });
+    }
+
     /// This change split before its first Telephony signal: BlueZ marking
     /// the Phone connected, then hands-free coming up.
     fn split_at_hands_free(self) -> (Self, Self) {
@@ -255,6 +262,24 @@ pub fn hands_free_down(world: &mut World) -> zbus::Result<Option<Change>> {
         OwnedVariant::from(false),
     );
     change.bluez(connected_changed(&device, false));
+    Ok(Some(change))
+}
+
+/// Drops hands-free alone, keeping BlueZ's connection, as the real Pixel
+/// did on forgetting the Desktop (ticket #373). `None` if it is down
+/// already.
+pub fn hands_free_gone(world: &mut World) -> zbus::Result<Option<Change>> {
+    let device = bluez::device_path(&world.phone_address)?;
+    let Some(mut change) = hands_free_down(world)? else {
+        return Ok(None);
+    };
+    world.bluez.set(
+        &device,
+        bluez::DEVICE,
+        "Connected",
+        OwnedVariant::from(true),
+    );
+    change.keep_connected();
     Ok(Some(change))
 }
 

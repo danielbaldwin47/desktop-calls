@@ -165,17 +165,6 @@ jobs:
       - *cache
       - name: just ci-tests
         run: just ci-tests
-      # A report, not a gate: only the run on main makes it.
-      - name: just scorecard
-        if: github.event_name != 'pull_request'
-        run: just scorecard | tee scorecard.txt
-      - name: Keep the scorecard
-        if: always() && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: scorecard
-          path: scorecard.txt
-          if-no-files-found: ignore
       # Every scenario directory left: those of failed scenarios, and of
       # passing ones too when KEEP_SCENARIO_LOGS is set. `just ci-wait`
       # downloads them.
@@ -311,6 +300,15 @@ jobs:
           name: shard-count-${{ matrix.shard }}
           path: target/shard-counts
 
+      # Each scenario's result (.config/nextest.toml), for the scorecard job.
+      - name: Keep this shard's results
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-results-${{ matrix.shard }}
+          path: target/nextest/default/junit.xml
+          if-no-files-found: ignore
+
       # First-frame timings, judged one scenario at a time as on the Desktop,
       # which runs one app (issue #47). In the whole run above, every
       # scenario's app at once slows each first paint past its target. Only
@@ -329,6 +327,39 @@ jobs:
           if-no-files-found: ignore
 
       - *scenario-logs
+
+  # The polish scorecard (#27), from the scenario shards' results: a report,
+  # not a gate, so only the run on main makes it and "CI passed" doesn't
+  # wait for it. It runs after the shards, whether or not they passed, so a
+  # failing scenario shows as its item's FAIL.
+  scorecard:
+    name: just scorecard, from the scenarios' results
+    needs: [changes, image, scenarios]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: *container
+    steps:
+      - *checkout
+      - *cache
+      - name: Fetch the shards' results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scenario-results-*
+          path: scenario-results
+      - name: Score
+        env:
+          GALLERY: "artifacts gallery-1 to gallery-3 of ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          cargo build --quiet -p automation --locked
+          target/debug/automation scorecard --scenarios scenario-results --gallery "$GALLERY" | tee scorecard.txt
+      - name: Keep the scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard
+          path: scorecard.txt
+          if-no-files-found: ignore
 
   # The one check that says CI passed, and the context branch protection
   # requires, pinned to GitHub Actions. It fails unless `changes` succeeded

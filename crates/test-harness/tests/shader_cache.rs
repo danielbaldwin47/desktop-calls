@@ -40,7 +40,12 @@ fn the_app_shows_every_surface_once_into_the_shared_shader_cache() {
     let cache = std::env::var(test_harness::SCENARIO_SHADER_CACHE)
         .ok()
         .filter(|cache| !cache.is_empty())
-        .unwrap_or_else(|| panic!("{} names no cache to fill", test_harness::SCENARIO_SHADER_CACHE));
+        .unwrap_or_else(|| {
+            panic!(
+                "{} names no cache to fill",
+                test_harness::SCENARIO_SHADER_CACHE
+            )
+        });
     let harness = Harness::builder().headless_screen().omarchy_bar().start();
     harness.simulated_phone().connect();
     harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
@@ -52,7 +57,10 @@ fn the_app_shows_every_surface_once_into_the_shared_shader_cache() {
     first_frame(&harness, "dialer");
     // It takes the keyboard apart from drawing; a key before that is lost.
     harness.wait_for_app("the Dialer has the keyboard", DEADLINE, |state| {
-        state.surface("dialer").and_then(|dialer| dialer.get("focused")).map(String::as_str)
+        state
+            .surface("dialer")
+            .and_then(|dialer| dialer.get("focused"))
+            .map(String::as_str)
             == Some("true")
     });
     harness.keyboard().press(Key::Escape);
@@ -74,7 +82,10 @@ fn the_app_shows_every_surface_once_into_the_shared_shader_cache() {
 
 /// Waits for the app to draw `surface`'s first frame, by its log.
 fn first_frame(harness: &Harness, surface: &str) {
-    let _ = harness.wait_for_app_log(&format!("Drew the {surface} surface's first frame"), COLD_DEADLINE);
+    let _ = harness.wait_for_app_log(
+        &format!("Drew the {surface} surface's first frame"),
+        COLD_DEADLINE,
+    );
 }
 
 /// Waits until the cache holds something and its size stays the same for

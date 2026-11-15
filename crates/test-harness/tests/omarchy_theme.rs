@@ -342,7 +342,8 @@ fn focused(state: &AppState, surface: &str) -> bool {
 }
 
 #[test]
-fn the_banner_has_a_plain_border_until_it_has_the_keyboard_and_the_dialer_with_the_keyboard_an_accent_one() {
+fn the_banner_has_a_plain_border_until_it_has_the_keyboard_and_the_dialer_with_the_keyboard_an_accent_one()
+ {
     let dark = OmarchyTheme::Dark;
     let (harness, banner) = ringing(
         Harness::builder().theme(dark.mode()).omarchy_theme(dark),
@@ -352,7 +353,10 @@ fn the_banner_has_a_plain_border_until_it_has_the_keyboard_and_the_dialer_with_t
     let background = dark.colour("background");
     let border = mix(background, dark.colour("foreground"), 30);
     let accent = dark.colour("accent");
-    assert!(!focused(&harness.app_state(), "banner"), "the Banner took the keyboard");
+    assert!(
+        !focused(&harness.app_state(), "banner"),
+        "the Banner took the keyboard"
+    );
     let screenshot = harness.screenshot("banner-border");
     let edge = left_edge(&screenshot, banner);
     assert!(
@@ -421,7 +425,10 @@ fn the_call_window_with_the_keyboard_has_an_accent_border_and_the_call_pill_a_pl
             && app_region(screenshot)
                 .is_some_and(|window| has_border(screenshot, window, accent, background))
     });
-    assert!(app_region(&screenshot).is_some(), "the Call Window is on screen");
+    assert!(
+        app_region(&screenshot).is_some(),
+        "the Call Window is on screen"
+    );
 
     harness.keyboard().press(Key::Escape);
 

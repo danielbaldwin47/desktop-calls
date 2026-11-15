@@ -525,7 +525,9 @@ fn an_answer_dropped_because_the_caller_gave_up_leaves_no_handoff_under_way() {
     let (first_path, _) = answered(&harness);
     // Mute, the unmute when the Call ends and RejectSCO=true after it each
     // hold the serialized Phone commands for a second.
-    harness.simulated_phone().enable_quirk("slow-property-writes");
+    harness
+        .simulated_phone()
+        .enable_quirk("slow-property-writes");
     harness
         .set_muted(true)
         .unwrap_or_else(|error| panic!("Mute was refused: {error:?}"));
@@ -544,9 +546,11 @@ fn an_answer_dropped_because_the_caller_gave_up_leaves_no_handoff_under_way() {
         state.surface("banner").is_none()
     });
     let _ = harness.simulated_phone().dial_on_phone(OTHER_NUMBER);
-    let state = harness.wait_for_app("the Call placed on the Phone is listed", DEADLINE, |state| {
-        state.calls.len() == 2
-    });
+    let state = harness.wait_for_app(
+        "the Call placed on the Phone is listed",
+        DEADLINE,
+        |state| state.calls.len() == 2,
+    );
     let placed = state
         .calls
         .iter()
@@ -565,7 +569,9 @@ fn an_answer_dropped_because_the_caller_gave_up_leaves_no_handoff_under_way() {
         |state| {
             let window = state.surface("call-window");
             state.audio_location == "phone"
-                && window.and_then(|window| window.get("state")).map(String::as_str)
+                && window
+                    .and_then(|window| window.get("state"))
+                    .map(String::as_str)
                     == Some("Calling…")
                 && window.is_some_and(|window| !window.contains_key("notice"))
         },

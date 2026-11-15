@@ -253,7 +253,11 @@ fn test_call_starts_a_service_that_was_stopped_before_it() {
 
     let status = wait_for_exit(&harness, &mut test_call, "test_call.py");
     assert!(status.success(), "test_call.py: {status}");
-    assert_eq!(harness.service_state(), "active", "the service runs after the run");
+    assert_eq!(
+        harness.service_state(),
+        "active",
+        "the service runs after the run"
+    );
     assert_eq!(harness.service_history(), ["activating", "active"]);
 }
 
@@ -402,7 +406,11 @@ fn just_run_starts_a_service_that_was_stopped_before_it() {
     send(&harness, &run, "-INT");
 
     wait_for_exit(&harness, &mut run, "run.py");
-    assert_eq!(harness.service_state(), "active", "the service runs after the run");
+    assert_eq!(
+        harness.service_state(),
+        "active",
+        "the service runs after the run"
+    );
     assert_eq!(harness.app_process_id(), harness.service_process_id());
 }
 
@@ -520,7 +528,11 @@ fn a_run_whose_service_start_fails_doesnt_stop_the_next_run_starting_it() {
     dev_run_on_bus(&harness, harness.service_process_id());
     send(&harness, &first, "-INT");
     let status = wait_for_exit(&harness, &mut first, "the first run.py");
-    assert_eq!(status.code(), Some(3), "the first run couldn't start the service");
+    assert_eq!(
+        status.code(),
+        Some(3),
+        "the first run couldn't start the service"
+    );
 
     fs::write(&unit, &installed).expect("mend the unit file");
     let mut second = start_run(&harness);
@@ -528,6 +540,10 @@ fn a_run_whose_service_start_fails_doesnt_stop_the_next_run_starting_it() {
     send(&harness, &second, "-INT");
     let status = wait_for_exit(&harness, &mut second, "the second run.py");
     assert_eq!(status.code(), Some(130), "the second run.py: {status}");
-    assert_eq!(harness.service_state(), "active", "the second run started it");
+    assert_eq!(
+        harness.service_state(),
+        "active",
+        "the second run started it"
+    );
     assert_eq!(harness.app_process_id(), harness.service_process_id());
 }

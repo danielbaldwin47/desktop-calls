@@ -109,7 +109,10 @@ fn dial_refused(harness: &Harness, kind: &str) -> String {
         );
         std::thread::sleep(Duration::from_millis(20));
     };
-    assert_eq!((error.kind.as_str(), error.message.as_str()), (kind, printed.as_str()));
+    assert_eq!(
+        (error.kind.as_str(), error.message.as_str()),
+        (kind, printed.as_str())
+    );
     // The refusal is decided before anything is asked of the Phone, and
     // the CLI has returned, so what the Phone recorded by now is final.
     let dials = harness
@@ -128,9 +131,7 @@ fn assert_status_says_lost(harness: &Harness) {
     let address = harness.phone().address.clone();
     assert_eq!(
         status(harness),
-        format!(
-            "Connection to {PHONE_NAME} ({address}) lost: the Call continues on your phone."
-        )
+        format!("Connection to {PHONE_NAME} ({address}) lost: the Call continues on your phone.")
     );
 }
 
@@ -185,7 +186,9 @@ fn after_the_lost_call_window_closes_with_the_phone_in_range_a_call_says_it_is_r
 #[test]
 fn with_hands_free_dropped_and_no_call_the_dialer_says_the_phone_is_reconnecting() {
     let harness = connected();
-    harness.simulated_phone().enable_quirk("connect-profile-fails");
+    harness
+        .simulated_phone()
+        .enable_quirk("connect-profile-fails");
     let device = format!(
         "/org/bluez/hci0/dev_{}",
         harness.phone().address.replace(':', "_")

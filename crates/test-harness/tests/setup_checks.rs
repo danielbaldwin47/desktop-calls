@@ -143,7 +143,14 @@ fn rejects_audio(recorded: &[RecordedMethodCall]) -> usize {
 /// No text the user can read carries a D-Bus name or error.
 fn no_raw_dbus_text(texts: &[&str]) {
     for text in texts {
-        for raw in ["org.", "Error", "Telephony1", "Adapter1", "obex", "RejectSCO"] {
+        for raw in [
+            "org.",
+            "Error",
+            "Telephony1",
+            "Adapter1",
+            "obex",
+            "RejectSCO",
+        ] {
             assert!(!text.contains(raw), "{raw:?} shows in {text:?}");
         }
     }
@@ -171,9 +178,7 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
     let state = harness.wait_for_app(
         "the footer says Enter turns Bluetooth on",
         DEADLINE,
-        |state| {
-            window_field(state, "keys") == Some("Enter Turn on · Tab Next button · Esc Close")
-        },
+        |state| window_field(state, "keys") == Some("Enter Turn on · Tab Next button · Esc Close"),
     );
     assert_eq!(window_field(&state, "dimmed"), Some("true"));
 
@@ -275,7 +280,9 @@ fn wait_for_phone_listed(harness: &Harness) -> AppState {
                 && window
                     .get("phones")
                     .is_some_and(|phones| !phones.is_empty())
-                && window.get("focused").is_some_and(|focused| focused == "true")
+                && window
+                    .get("focused")
+                    .is_some_and(|focused| focused == "true")
         })
     })
 }
@@ -319,7 +326,10 @@ fn with_audio_not_set_up_enter_on_the_code_confirms_it_and_leaves_audio_alone() 
     let give_up = std::time::Instant::now() + DEADLINE;
     loop {
         let requests = harness.simulated_phone().pairing_requests();
-        if requests.last().is_some_and(|(_, outcome)| outcome == "confirmed") {
+        if requests
+            .last()
+            .is_some_and(|(_, outcome)| outcome == "confirmed")
+        {
             break;
         }
         assert!(
@@ -350,10 +360,7 @@ fn contacts_support_missing_takes_no_focus_so_enter_still_pairs() {
         field(state, "problems") == Some("contacts-support-missing")
     });
     let state = wait_for_phone_listed(&harness);
-    assert_eq!(
-        window_field(&state, "keys"),
-        Some("Enter Pair · Esc Close")
-    );
+    assert_eq!(window_field(&state, "keys"), Some("Enter Pair · Esc Close"));
     assert_eq!(
         window_field(&state, "dimmed"),
         None,
@@ -470,7 +477,11 @@ fn setting_up_audio_keeps_the_permissions_of_a_drop_in_it_rewrites() {
     let harness = Harness::builder()
         .headless_screen()
         .phone_unpaired()
-        .wireplumber_config_with_mode("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
+        .wireplumber_config_with_mode(
+            "51-music.conf",
+            ROLES_WITHOUT_HANDS_FREE,
+            NOT_FROM_ANY_UMASK,
+        )
         .start();
 
     set_up_audio_and_wait_until_done(&harness);
@@ -508,7 +519,10 @@ monitor.bluez.properties = {
         EARLIER,
         "the drop-in was rewritten"
     );
-    assert_eq!(harness.wireplumber_drop_in_mode(DROP_IN), NOT_FROM_ANY_UMASK);
+    assert_eq!(
+        harness.wireplumber_drop_in_mode(DROP_IN),
+        NOT_FROM_ANY_UMASK
+    );
 }
 
 #[test]
@@ -516,7 +530,11 @@ fn setting_up_audio_rewrites_the_file_a_linked_drop_in_points_to_and_keeps_its_p
     let harness = Harness::builder()
         .headless_screen()
         .phone_unpaired()
-        .wireplumber_config_linked("51-music.conf", ROLES_WITHOUT_HANDS_FREE, NOT_FROM_ANY_UMASK)
+        .wireplumber_config_linked(
+            "51-music.conf",
+            ROLES_WITHOUT_HANDS_FREE,
+            NOT_FROM_ANY_UMASK,
+        )
         .start();
 
     set_up_audio_and_wait_until_done(&harness);
@@ -564,7 +582,10 @@ fn keeping_audio_off_the_phone_turned_off_alone_is_a_problem_even_in_an_odd_drop
         "{ours}"
     );
     assert!(!ours.contains("bluez5.roles"), "roles were fine: {ours}");
-    assert!(!ours.contains("auto-connect"), "auto-connect was fine: {ours}");
+    assert!(
+        !ours.contains("auto-connect"),
+        "auto-connect was fine: {ours}"
+    );
     assert_eq!(
         after.get("51-odd.conf").map(String::as_str),
         Some(
@@ -671,14 +692,21 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
             .is_some_and(|notice| notice.contains("couldn't be saved") && notice.contains(&folder))
     });
     assert_eq!(kinds(&state), ["audio-not-set-up"]);
-    assert_eq!(field(&state, "buttons"), Some("Set up audio"), "it can be tried again");
+    assert_eq!(
+        field(&state, "buttons"),
+        Some("Set up audio"),
+        "it can be tried again"
+    );
     harness.simulated_phone().recorded_holds(
         "WirePlumber isn't restarted for settings that weren't saved",
         BEFORE_CONSENT,
         |recorded| !restarts_wireplumber(recorded),
     );
     assert_eq!(
-        harness.wireplumber_drop_ins().get("51-music.conf").map(String::as_str),
+        harness
+            .wireplumber_drop_ins()
+            .get("51-music.conf")
+            .map(String::as_str),
         Some(ROLES_WITHOUT_HANDS_FREE),
         "the other file is left as it was"
     );
@@ -706,11 +734,17 @@ fn setting_up_audio_with_a_restart_job_ending(result: &str, wait: Duration) {
         DEADLINE,
         restarts_wireplumber,
     );
-    let state = harness.wait_for_app("the Setup Window says the audio didn't restart", wait, |state| {
-        field(state, "notice").is_some_and(|notice| notice.contains("didn't restart"))
-    });
+    let state = harness.wait_for_app(
+        "the Setup Window says the audio didn't restart",
+        wait,
+        |state| field(state, "notice").is_some_and(|notice| notice.contains("didn't restart")),
+    );
     assert_eq!(kinds(&state), ["audio-not-set-up"]);
-    assert_eq!(field(&state, "buttons"), Some("Set up audio"), "it can be tried again");
+    assert_eq!(
+        field(&state, "buttons"),
+        Some("Set up audio"),
+        "it can be tried again"
+    );
     assert!(
         harness.wireplumber_drop_ins().contains_key(DROP_IN),
         "the audio setting is saved"
@@ -772,12 +806,14 @@ fn every_problem_asks_for_attention_and_the_menu_explains_it_in_plain_words() {
         "Contacts support not installed",
     ];
     let tooltip = format!("My Pixel not connected · {}", headings.join(" · "));
-    harness.tray().wait_for("the Indicator asks for attention", DEADLINE, |items| {
-        items.iter().any(|item| {
-            item.status.as_deref() == Some("NeedsAttention")
-                && item.tooltip.as_deref() == Some(tooltip.as_str())
-        })
-    });
+    harness
+        .tray()
+        .wait_for("the Indicator asks for attention", DEADLINE, |items| {
+            items.iter().any(|item| {
+                item.status.as_deref() == Some("NeedsAttention")
+                    && item.tooltip.as_deref() == Some(tooltip.as_str())
+            })
+        });
     let state = harness.app_state();
     assert_eq!(
         kinds(&state),
@@ -795,7 +831,10 @@ fn every_problem_asks_for_attention_and_the_menu_explains_it_in_plain_words() {
         let entry = MenuEntry::find(&menu, &format!("{heading}: put it right…"))
             .unwrap_or_else(|| panic!("{heading:?} is in the menu: {menu:#?}"));
         let explanation = MenuEntry::labels(&entry.children).join(" ");
-        assert_eq!(explanation, problem.message, "the menu explains {heading:?}");
+        assert_eq!(
+            explanation, problem.message,
+            "the menu explains {heading:?}"
+        );
         texts.push(explanation);
         texts.push(problem.message.clone());
     }
@@ -832,11 +871,15 @@ fn a_problem_stays_while_the_phone_comes_and_goes_and_setting_up_audio_keeps_aud
     harness.wait_for_app("out of range, the Problem still there", DEADLINE, |state| {
         state.connection_state == "disconnected" && kinds(state) == ["audio-not-set-up"]
     });
-    harness.tray().wait_for("the Indicator still asks for attention", DEADLINE, |items| {
-        items
-            .iter()
-            .any(|item| item.status.as_deref() == Some("NeedsAttention"))
-    });
+    harness.tray().wait_for(
+        "the Indicator still asks for attention",
+        DEADLINE,
+        |items| {
+            items
+                .iter()
+                .any(|item| item.status.as_deref() == Some("NeedsAttention"))
+        },
+    );
     harness.simulated_phone().return_to_range();
     harness.wait_for_app("back, the Problem still there", DEADLINE, |state| {
         state.connection_state == "connected" && kinds(state) == ["audio-not-set-up"]

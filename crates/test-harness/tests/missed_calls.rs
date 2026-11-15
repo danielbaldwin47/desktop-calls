@@ -396,11 +396,7 @@ fn a_missed_call_from_a_contact_named_like_a_verification_code_is_silenced_under
     let mut newest = Vec::new();
     for (number, reads, at) in [
         (ALICE, "Missed call from Alice", "20261105T100000"),
-        (
-            GATE,
-            "Missed call from Gate code 4821",
-            "20261105T100500",
-        ),
+        (GATE, "Missed call from Gate code 4821", "20261105T100500"),
         (
             GATE,
             "2 missed calls from Gate code 4821",

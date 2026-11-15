@@ -182,11 +182,11 @@ fn a_call_that_rings_out_with_contacts_denied_calls_drops_it_before_missed_call_
 fn a_dial_the_phone_going_out_of_range_cancels_says_disconnected_before_the_error() {
     let harness = connected(Harness::builder());
     let dial = harness.start_dial(NUMBER);
-    harness.simulated_phone().wait_for_recorded(
-        "the Phone is asked to dial",
-        DEADLINE,
-        |calls| calls.iter().any(|call| call.member == "Dial"),
-    );
+    harness
+        .simulated_phone()
+        .wait_for_recorded("the Phone is asked to dial", DEADLINE, |calls| {
+            calls.iter().any(|call| call.member == "Dial")
+        });
 
     harness.simulated_phone().disconnect();
 

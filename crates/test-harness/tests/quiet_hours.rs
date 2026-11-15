@@ -103,9 +103,7 @@ fn record(harness: &Harness) -> PathBuf {
 }
 
 fn quiet_hours_file(harness: &Harness) -> PathBuf {
-    harness
-        .directory()
-        .join("config/desktop-calls/quiet-hours")
+    harness.directory().join("config/desktop-calls/quiet-hours")
 }
 
 fn record_text(harness: &Harness) -> String {
@@ -150,16 +148,20 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
         state.quiet_hours == Some((minutes(23, 59), minutes(6, 0)))
     });
     assert!(now() < start, "the setup took too long to test the start");
-    harness.app_holds("calls stay on until Quiet Hours begin", Duration::from_secs(1), |state| {
-        state.calls_off == "on"
-    });
+    harness.app_holds(
+        "calls stay on until Quiet Hours begin",
+        Duration::from_secs(1),
+        |state| state.calls_off == "on",
+    );
 
     // 06:00 the next morning: 6 hours and a minute after 23:59.
     let end = start + 6 * 3_600 + 60;
     let left = Duration::from_secs(start.saturating_sub(now()));
-    harness.wait_for_app("calls go off as Quiet Hours begin", left + DEADLINE, |state| {
-        state.calls_off == "off"
-    });
+    harness.wait_for_app(
+        "calls go off as Quiet Hours begin",
+        left + DEADLINE,
+        |state| state.calls_off == "off",
+    );
     wait_off_until(&harness, end);
     let blocked = logged_at(&harness, "calls-turned-off");
     assert!(
@@ -201,7 +203,10 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
         &AppEvent::kind("connection-state-changed").with("connection_state", "connected"),
         RECONNECT_DEADLINE,
     );
-    assert!(took <= RECONNECT_DEADLINE, "connected {took:?} after Quiet Hours ended");
+    assert!(
+        took <= RECONNECT_DEADLINE,
+        "connected {took:?} after Quiet Hours ended"
+    );
     assert!(!record(&harness).exists(), "the record is cleared");
     assert!(!harness.simulated_phone().blocked());
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
@@ -233,9 +238,11 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
 
     harness.restart_app();
     wait_connected(&harness, RECONNECT_DEADLINE);
-    harness.app_holds("calls stay on after the restart", Duration::from_secs(2), |state| {
-        state.calls_off == "on"
-    });
+    harness.app_holds(
+        "calls stay on after the restart",
+        Duration::from_secs(2),
+        |state| state.calls_off == "on",
+    );
 
     // A break by hand replaces Quiet Hours; ending inside them, it stays
     // off until they end.
@@ -334,7 +341,12 @@ fn set_quiet_hours_refuses_a_time_past_23_59() {
         .set_quiet_hours(minutes(24, 0), minutes(7, 0))
         .expect_err("24:00 is refused");
 
-    assert!(refused.message.starts_with("Give Quiet Hours as HH:MM-HH:MM"), "{refused:?}");
+    assert!(
+        refused
+            .message
+            .starts_with("Give Quiet Hours as HH:MM-HH:MM"),
+        "{refused:?}"
+    );
     assert_eq!(harness.app_state().quiet_hours, None);
 }
 
@@ -359,9 +371,11 @@ fn quiet_hours_beginning_sends_no_confirmation() {
     assert!(now() < start, "the setup took too long to test the start");
 
     let left = Duration::from_secs(start.saturating_sub(now()));
-    harness.wait_for_app("calls go off as Quiet Hours begin", left + DEADLINE, |state| {
-        state.calls_off == "off"
-    });
+    harness.wait_for_app(
+        "calls go off as Quiet Hours begin",
+        left + DEADLINE,
+        |state| state.calls_off == "off",
+    );
     wait_off_until(&harness, start + 6 * 3_600 + 60);
 
     // A notification comes in the step that causes it, in order: one more

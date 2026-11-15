@@ -7,7 +7,10 @@
 //! does. The user's real systemd is never touched.
 
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use test_harness::{AppEvent, AppState, Harness};
@@ -69,6 +72,20 @@ fn picked_up_since(harness: &Harness, from: usize) -> bool {
         .any(|line| line.contains(r#""event_kind":"earlier-run-loaded""#))
 }
 
+/// Writes `bytes` into the pipe at `pipe` for the app reading it. A write
+/// to a pipe waits for a reader, so it runs aside: an app that died before
+/// reading fails the scenario at the deadline instead of hanging it.
+fn hand_over(pipe: PathBuf, bytes: Vec<u8>) {
+    let (written, wrote) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = written.send(fs::write(pipe, bytes));
+    });
+    match wrote.recv_timeout(DEADLINE) {
+        Ok(result) => result.expect("hand the record to the dev run's read"),
+        Err(_) => panic!("the dev run didn't read the record within {DEADLINE:?}"),
+    }
+}
+
 #[test]
 fn a_dev_run_stopped_mid_call_leaves_nothing_for_the_installed_service() {
     let mut harness = Harness::builder().phone_connected().installed().start();
@@ -107,8 +124,12 @@ fn a_dev_run_stopped_mid_call_leaves_nothing_for_the_installed_service() {
         !picked_up_since(&harness, before_dev_run),
         "the dev run was held at reading the record, yet had picked up the Call"
     );
-    fs::write(&record, kept).expect("hand the record to the dev run's read");
-    harness.wait_for_app_log(r#""event_kind":"earlier-run-loaded""#, DEADLINE);
+    hand_over(record, kept);
+    harness.wait_for_app_log_after(
+        before_dev_run,
+        r#""event_kind":"earlier-run-loaded""#,
+        DEADLINE,
+    );
     assert!(
         picked_up_since(&harness, before_dev_run),
         "the next dev run picked up the Call the last one left"

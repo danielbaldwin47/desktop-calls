@@ -449,7 +449,9 @@ impl Unit {
 /// `Activator.ActivationRequest` with the unit's name to
 /// `org.freedesktop.systemd1`, and leaves the starting to the manager.
 async fn start_when_asked(mut messages: MessageStream, unit: &Arc<Unit>) {
-    while let Some(Ok(message)) = messages.next().await {
+    while let Some(message) = messages.next().await {
+        // A message that can't be read isn't a request; the next one may be.
+        let Ok(message) = message else { continue };
         let header = message.header();
         let asks = message.message_type() == Type::Signal
             && header.interface().is_some_and(|interface| {

@@ -57,7 +57,7 @@ use quiet_hours_window::QuietHoursWindows;
 pub use quiet_hours_window::{
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView,
 };
-use setup::Setup;
+use setup::{ChosenPhone, Setup};
 pub use setup::{
     ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
 };
@@ -343,10 +343,10 @@ pub struct State {
     setup_offered: bool,
     /// How many times the Setup Window has opened.
     setup_openings: u32,
-    /// The address of the Phone the user chose last in the Setup Window.
+    /// The Phone the user chose last in the Setup Window.
     /// Once there is one, no other Phone is followed, and it outlives the
     /// Phone being unpaired, so a restart never picks another silently.
-    chosen_phone: Option<String>,
+    chosen_phone: Option<ChosenPhone>,
     /// Every Phone BlueZ has reported paired, followed or not, so the Setup
     /// Window can offer the others when none is followed.
     paired_phones: Vec<Phone>,
@@ -558,7 +558,7 @@ impl State {
         match self.connection {
             ConnectionState::NotSetUp => Some(Failure::PhoneNotSetUp),
             ConnectionState::Connecting => Some(Failure::PhoneConnecting),
-            ConnectionState::Disconnected => Some(Failure::PhoneOutOfRange),
+            ConnectionState::Disconnected => Some(self.disconnected_refusal()),
             ConnectionState::PairingLost => Some(Failure::PhonePairingLost),
             ConnectionState::Connected if !self.calls.is_empty() || self.dialling.is_some() => {
                 Some(Failure::CallInProgress)
@@ -706,7 +706,7 @@ impl State {
     fn may_follow(&self, phone: &Phone) -> bool {
         self.chosen_phone
             .as_ref()
-            .is_none_or(|chosen| chosen.eq_ignore_ascii_case(&phone.address))
+            .is_none_or(|chosen| chosen.is(&phone.address))
     }
 
     fn is_our_phone(&self, address: &str) -> bool {
@@ -773,11 +773,12 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::PhonePaired(phone) if state.setup_pairs(&phone.address) => {
             setup::paired(&mut state, phone, &mut effects);
         }
-        Input::ChosenPhoneKept { address } => state.chosen_phone = Some(address),
+        Input::ChosenPhoneKept { address, name } => setup::kept(&mut state, address, name),
         // Whichever Phone BlueZ lists first is followed, unless the user
         // chose one: then only that one, and with it unpaired the Setup
         // Window opens once BlueZ has listed everything.
         Input::PhonePaired(phone) if state.phone.is_none() && state.may_follow(&phone) => {
+            setup::chosen_followed(&mut state, &phone, &mut effects);
             phone_paired(&mut state, phone, &mut effects);
         }
         Input::PhoneUnpaired { address } if state.is_our_phone(&address) => return unpair(&state),

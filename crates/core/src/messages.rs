@@ -78,6 +78,9 @@ pub enum Failure {
     PhoneConnecting,
     /// A Call can't be placed: the Phone is out of range or has Bluetooth off.
     PhoneOutOfRange,
+    /// A Call can't be placed: the Phone is in range without hands-free,
+    /// which the Desktop is connecting again.
+    PhoneReconnecting,
     /// A Call can't be placed: the Phone no longer has the Desktop paired.
     PhonePairingLost,
     /// The Bluetooth connection to the Phone dropped mid-Call, which carries
@@ -164,6 +167,7 @@ impl Failure {
             Self::PhoneNotSetUp => "phone-not-set-up",
             Self::PhoneConnecting => "phone-connecting",
             Self::PhoneOutOfRange => "phone-out-of-range",
+            Self::PhoneReconnecting => "phone-reconnecting",
             Self::PhonePairingLost => "phone-pairing-lost",
             Self::ConnectionLost => "connection-lost",
             Self::CallInProgress => "call-in-progress",
@@ -264,6 +268,8 @@ pub fn failure(failure: Failure) -> Message {
             "Phone not connected: it's out of range or has Bluetooth off.",
             None,
         ),
+        // The Dialer's footer says "Reconnecting…" meanwhile.
+        Failure::PhoneReconnecting => ("Phone not connected: it's reconnecting.", None),
         Failure::PhonePairingLost => (
             "Phone not connected: it has forgotten this computer, so pair them again.",
             Some(NextAction::Command("desktop-calls connect")),
@@ -476,12 +482,15 @@ pub fn mute_toggled(muted: bool) -> &'static str {
 
 /// One sentence saying whether the Phone is connected.
 /// `hands_free_lost`: the Phone is in range without hands-free, which the
-/// Desktop is connecting again (ticket #216).
+/// Desktop is connecting again (ticket #216). `contact_lost`: the Desktop
+/// has lost contact with the live Call, which carries on on the Phone; the
+/// status says so in the Call Window's words (ticket #152).
 #[must_use]
 pub fn status(
     connection_state: &ConnectionState,
     phone: Option<&Phone>,
     hands_free_lost: bool,
+    contact_lost: bool,
 ) -> String {
     match (connection_state, phone) {
         (ConnectionState::NotSetUp, _) | (_, None) => "No Phone is set up yet.".to_owned(),
@@ -489,6 +498,10 @@ pub fn status(
             format!("Connecting to {}.", describe(phone))
         }
         (ConnectionState::Connected, Some(phone)) => format!("Connected to {}.", describe(phone)),
+        (ConnectionState::Disconnected, Some(phone)) if contact_lost => format!(
+            "Connection to {} lost: the Call continues on your phone.",
+            describe(phone)
+        ),
         (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
             "{} is in range, but not connected for Calls: connecting it again.",
             describe(phone)

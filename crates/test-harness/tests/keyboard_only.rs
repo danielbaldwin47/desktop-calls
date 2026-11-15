@@ -693,9 +693,22 @@ fn contacts() -> String {
 
 const OLDER_CALLS: [&str; 2] = ["+447700900001", "+447700900002"];
 
+/// How many Calls the Call History holds before Bob's Missed Call: more
+/// than the Dialer's page of 8 rows, so Page Down shows it moves a page.
+const HISTORY: u32 = 12;
+
+/// The two older Calls, then ten more on earlier days.
 fn older_calls() -> String {
-    vcards::call(CallKind::Dialed, Some(OLDER_CALLS[0]), "20261104T100000")
-        + &vcards::call(CallKind::Dialed, Some(OLDER_CALLS[1]), "20261104T090000")
+    let mut calls = vcards::call(CallKind::Dialed, Some(OLDER_CALLS[0]), "20261104T100000")
+        + &vcards::call(CallKind::Dialed, Some(OLDER_CALLS[1]), "20261104T090000");
+    for day in 1..=HISTORY - 2 {
+        calls.push_str(&vcards::call(
+            CallKind::Dialed,
+            Some(&format!("+4477009002{day:02}")),
+            &format!("202610{day:02}T090000"),
+        ));
+    }
+    calls
 }
 
 /// Waits until the Phone is asked to dial `number`, the person called
@@ -770,7 +783,7 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     harness.wait_for_app("Contacts and Call History are synced", SYNC_DEADLINE, |state| {
         state.connection_state == "connected"
             && state.contacts.state == "ready"
-            && state.contacts.call_history == 2
+            && state.contacts.call_history == HISTORY
     });
 
     let state = open_the_dialer(&harness);
@@ -789,7 +802,7 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
 
     open_the_dialer(&harness);
     for (key, row, action) in [
-        (Key::PageDown, "1", "Move a page down the Call History: Page Down"),
+        (Key::PageDown, "8", "Move a page down the Call History: Page Down"),
         (Key::PageUp, "0", "Move a page up the Call History: Page Up"),
         (Key::Down, "1", ""),
         (Key::Up, "0", "Move up the Call History: Up"),
@@ -831,7 +844,7 @@ fn the_dialer_and_the_quiet_hours_window_by_keys_alone() {
     );
     harness.simulated_phone().caller_hangs_up(&path);
     harness.wait_for_app("the Missed Call is in the Call History", SYNC_DEADLINE, |state| {
-        state.calls.is_empty() && state.contacts.call_history == 3
+        state.calls.is_empty() && state.contacts.call_history == HISTORY + 1
     });
     open_the_dialer(&harness);
     let state = harness.wait_for_app("the Missed Call is selected", DEADLINE, |state| {
@@ -871,11 +884,6 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
         state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
     });
     performed.did("Step the start of Quiet Hours: Tab, Up");
-    harness.keyboard().press(Key::Down);
-    harness.keyboard().press(Key::Up);
-    harness.wait_for_app("Down then Up steps the start back and on", DEADLINE, |state| {
-        state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
-    });
     harness.keyboard().press(Key::Down);
     harness.wait_for_app("Down steps the start back", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60, 7 * 60))

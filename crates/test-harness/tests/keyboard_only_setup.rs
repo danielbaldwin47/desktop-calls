@@ -229,7 +229,7 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "done", DEADLINE);
     let prompts = harness.simulated_phone().contacts_prompts();
-    assert_eq!(prompts.len(), 2, "the Phone is not asked again: {prompts:?}");
+    assert_eq!(prompts.len(), 2, "the Phone is not asked a third time: {prompts:?}");
     performed.did("Skip Contacts once the prompt timed out: Tab, Enter on Skip");
     performed.all_done();
 }

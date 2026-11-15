@@ -176,6 +176,20 @@ impl Sitting {
         }
     }
 
+    /// Moves where the next wait starts to the app's latest state, for a
+    /// step that must not see what an earlier one left in the timeline: a
+    /// wrong Call it hung up, say, which a wait for "a Call placed" would
+    /// find again.
+    pub fn forget_the_past(&mut self) {
+        let latest = self
+            .timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+            .saturating_sub(1);
+        self.cursor = self.cursor.max(latest);
+    }
+
     /// Where the next wait starts looking, for [`Sitting::seen_since`] to
     /// look back over everything published from here on.
     pub fn mark(&self) -> usize {

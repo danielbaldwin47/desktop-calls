@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use test_harness::vcards::{self, CallKind};
 
@@ -247,12 +247,20 @@ const STATES: &[State] = &[
             harness
                 .simulated_phone()
                 .set_activate_delay(Duration::from_millis(2_500));
+            let asked = Instant::now();
             harness
                 .move_audio("desktop")
                 .unwrap_or_else(|error| panic!("move the audio here: {error:?}"));
             harness.wait_for_app("the audio tile says it moves", DEADLINE, |state| {
                 handoff_shows(state, "Moving…")
             });
+            // The audio arrives 2.5 s on, which a slow runner's capture can
+            // miss, so the app is stopped for it, as for the other short
+            // states (#248).
+            harness.freeze_app_before(
+                asked + Duration::from_millis(2_000),
+                "the audio tile moving the audio",
+            );
         },
         shown: |screenshot, look| shows(screenshot, look.red()) && shows(screenshot, look.accent()),
     },

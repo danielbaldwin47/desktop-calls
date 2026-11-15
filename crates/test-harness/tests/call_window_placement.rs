@@ -145,13 +145,42 @@ fn assert_hang_up_stays(
     );
 }
 
+/// Where the Mute tile is in `screenshot` while the microphone is muted:
+/// the warning colour in the row of tiles just above Hang up, at
+/// `hang_up`. Muting also edges the window in it, so the edge is left out.
+fn mute_tile(screenshot: &Screenshot, hang_up: Region) -> Option<Region> {
+    let tiles = Region {
+        left: hang_up.left,
+        top: hang_up.top - 100.0,
+        right: hang_up.right,
+        bottom: hang_up.top,
+    };
+    screenshot.region_within(tiles, |pixel| close_to(pixel, WARNING))
+}
+
+/// Checks `screenshot` shows the Mute tile exactly at `tile`, within a
+/// layout pixel, as for Hang up.
+fn assert_tile_stays(screenshot: &Screenshot, hang_up: Region, tile: Region) {
+    let moved =
+        mute_tile(screenshot, hang_up).unwrap_or_else(|| panic!("the Mute tile left the screen"));
+    let within = |a: f64, b: f64| (a - b).abs() <= 1.0;
+    assert!(
+        within(moved.left, tile.left)
+            && within(moved.top, tile.top)
+            && within(moved.right, tile.right)
+            && within(moved.bottom, tile.bottom),
+        "the Mute tile moved, from {tile:?} to {moved:?}: see {}",
+        screenshot.path.display()
+    );
+}
+
 /// The Call Window's height in `screenshot`'s bottom half.
 fn window_height(screenshot: &Screenshot) -> f64 {
     app_region_within(screenshot, bottom_half()).map_or(0.0, |window| window.bottom - window.top)
 }
 
 #[test]
-fn the_call_pill_and_the_expanded_call_window_share_the_bottom_right_corner_at_hyprlands_gap() {
+fn the_call_pill_and_the_call_window_share_the_corner_at_hyprlands_gap_and_follow_its_reload() {
     // Half of Hyprland's 40, as Omarchy's own panels sit.
     let harness = connected(Harness::builder().hyprland_gaps_out(40));
     bob_live_here(&harness);
@@ -160,23 +189,42 @@ fn the_call_pill_and_the_expanded_call_window_share_the_bottom_right_corner_at_h
     });
     assert!(state.surface("call-pill").is_none());
     let (width, height) = LAYOUT_SIZE;
-    let in_corner = |region: Region| {
-        (width - 20.0 - region.right).abs() <= 2.0 && (height - 20.0 - region.bottom).abs() <= 2.0
+    let in_corner = |region: Region, gap: f64| {
+        (width - gap - region.right).abs() <= 2.0 && (height - gap - region.bottom).abs() <= 2.0
     };
-    let expanded = harness.screenshot_when("call-window", SCREEN_DEADLINE, |screenshot| {
-        app_region_within(screenshot, bottom_half())
-            .is_some_and(|window| in_corner(window) && window.bottom - window.top > 150.0)
-    });
-    let window = app_region_within(&expanded, bottom_half()).expect("the Call Window shows");
-    // Taller than the Call Pill: the Call Window hadn't yet collapsed.
-    assert!(
-        window.right - window.left > 300.0
-            && window.bottom - window.top > 150.0
-            && window.top > BAR_HEIGHT,
-        "{window:?} in {}",
-        expanded.path.display()
+    let expanded_at = |name: &str, gap: f64| {
+        let expanded = harness.screenshot_when(name, SCREEN_DEADLINE, |screenshot| {
+            app_region_within(screenshot, bottom_half())
+                .is_some_and(|window| in_corner(window, gap) && window.bottom - window.top > 150.0)
+        });
+        let window = app_region_within(&expanded, bottom_half()).expect("the Call Window shows");
+        // Taller than the Call Pill: the Call Window hadn't collapsed.
+        assert!(
+            window.right - window.left > 300.0
+                && window.bottom - window.top > 150.0
+                && window.top > BAR_HEIGHT,
+            "{window:?} in {}",
+            expanded.path.display()
+        );
+        window
+    };
+    let window = expanded_at("call-window", 20.0);
+    // The pointer on the window keeps it expanded while the gap changes.
+    harness.pointer().move_to(
+        f64::midpoint(window.left, window.right),
+        f64::midpoint(window.top, window.bottom),
     );
 
+    // Hyprland reloads with a new gap while the Call Window shows: it moves
+    // to the new corner.
+    harness.set_hyprland_gaps_out(50);
+    harness.wait_for_app("the Call Window moves to 25 px in", DEADLINE, |state| {
+        placed_bottom_right(call_window(state), "25")
+    });
+    let window = expanded_at("call-window-gap-25", 25.0);
+
+    // The pointer leaves; the Call Window collapses 5 s later.
+    harness.pointer().move_to(width / 2.0, BAR_HEIGHT + 10.0);
     let state = harness.wait_for_app(
         "the Call Window collapses to the Call Pill",
         COLLAPSE_DEADLINE,
@@ -184,13 +232,13 @@ fn the_call_pill_and_the_expanded_call_window_share_the_bottom_right_corner_at_h
     );
 
     assert!(
-        placed_bottom_right(state.surface("call-pill"), "20"),
+        placed_bottom_right(state.surface("call-pill"), "25"),
         "{:?}",
         state.surface("call-pill")
     );
     let collapsed = harness.screenshot_when("call-pill", SCREEN_DEADLINE, |screenshot| {
         app_region_within(screenshot, bottom_half())
-            .is_some_and(|pill| in_corner(pill) && pill.bottom - pill.top < 80.0)
+            .is_some_and(|pill| in_corner(pill, 25.0) && pill.bottom - pill.top < 80.0)
     });
     let pill = app_region_within(&collapsed, bottom_half()).expect("the Call Pill shows");
     assert!(
@@ -216,11 +264,15 @@ fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_go
             .is_some()
     });
     // Muting recolours the window and moves nothing: it keeps its height.
-    let muted = window_height(&harness.screenshot("call-window-muted-settled"));
+    let settled = harness.screenshot("call-window-muted-settled");
+    let muted = window_height(&settled);
     assert!(
         (muted - height).abs() <= 1.0,
         "the Call Window went from {height} to {muted} high"
     );
+    // The Mute tile, in the warning colour now: it stays put too.
+    let tile = mute_tile(&settled, hang_up)
+        .unwrap_or_else(|| panic!("no Mute tile in {}", settled.path.display()));
 
     // A click in the padding gives the window the keyboard; K opens the
     // keypad.
@@ -235,7 +287,9 @@ fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_go
     assert_hang_up_stays(&harness, "call-window-keypad", hang_up, |screenshot| {
         window_height(screenshot) > height + 100.0
     });
-    let height = window_height(&harness.screenshot("call-window-keypad-settled"));
+    let settled = harness.screenshot("call-window-keypad-settled");
+    assert_tile_stays(&settled, hang_up, tile);
+    let height = window_height(&settled);
 
     let _path = harness.simulated_phone().ring(ALICE);
     harness.wait_for_app("Alice's Call waits", DEADLINE, |state| {
@@ -254,6 +308,13 @@ fn muting_moves_nothing_and_hang_up_stays_put_when_the_keypad_opens_or_a_call_go
     assert_hang_up_stays(&harness, "call-window-held", hang_up, |screenshot| {
         (window_height(screenshot) - height).abs() > 20.0
     });
+    // The microphone stays muted for Alice's Call, so the Mute tile still
+    // shows where it was.
+    assert_tile_stays(
+        &harness.screenshot("call-window-held-settled"),
+        hang_up,
+        tile,
+    );
 }
 
 #[test]

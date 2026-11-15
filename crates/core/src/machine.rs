@@ -265,6 +265,18 @@ struct ConnectionLost {
     loss: u32,
 }
 
+/// The keys of the binding that runs Desktop Calls.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum BoundKeys {
+    /// The Hyprland config isn't read yet.
+    #[default]
+    NotRead,
+    /// Nothing binds Desktop Calls.
+    Unbound,
+    /// These keys, as the config writes them: `["SUPER", "ALT", "C"]`.
+    Keys(Vec<String>),
+}
+
 /// Everything the Call state machine knows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[expect(
@@ -366,10 +378,9 @@ pub struct State {
     /// The wall clock as the shell last reported it, while the Desktop was
     /// awake.
     clock: Option<WallClock>,
-    /// What the Banner's footer says of the keybinding that runs Desktop
-    /// Calls: its keys, or that none is set; `None` until the Hyprland
-    /// config is read.
-    keybinding: Option<BannerFooter>,
+    /// The keybinding that runs Desktop Calls, as the Hyprland config was
+    /// last read. The Banner's footer names it.
+    keybinding: BoundKeys,
     /// The Quiet Hours the user set, if any.
     quiet_hours: Option<QuietHours>,
     /// While calls are on through Quiet Hours the user turned them on in:
@@ -838,10 +849,8 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::TimerFired(timer) => timer_fired(&mut state, timer, &mut effects),
         Input::Activate => activate(&mut state),
         Input::KeybindingRead(config) => {
-            state.keybinding = Some(
-                crate::keybinding::bound_keys(&config)
-                    .map_or(BannerFooter::NoKeybinding, BannerFooter::Keybinding),
-            );
+            state.keybinding =
+                crate::keybinding::bound_keys(&config).map_or(BoundKeys::Unbound, BoundKeys::Keys);
         }
         Input::ReleaseFocus => state.focus = Focus::None,
         input @ (Input::CollapseCallWindow

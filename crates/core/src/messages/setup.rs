@@ -91,20 +91,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         keys: Vec::new(),
     };
     let (heading, instructions, buttons): Page = match &view.step {
-        SetupStep::Choose { .. } => {
-            // Nothing to look for while pairing waits for calls.
-            let waits = view.calls_off.is_some_and(|off| off.blocks_step);
-            // A Problem blocks choosing only while Bluetooth is off or
-            // blocked: nothing is looked for, and how this computer shows
-            // on phones isn't known yet (#315).
-            let bluetooth_off = view.problem_has_focus.is_some();
-            text.empty_list = (!waits && !bluetooth_off).then_some("Looking for phones nearby…");
-            if bluetooth_off {
-                choose_once_bluetooth_is_on()
-            } else {
-                choose(&desktop)
-            }
-        }
+        SetupStep::Choose { .. } => choosing(view, &desktop, &mut text.empty_list),
         SetupStep::Pairing { phone } => (
             format!("Pairing with {}…", phone.name),
             vec![Instruction::phone("Keep the Pair new device screen open.")],
@@ -194,6 +181,22 @@ fn choose(desktop: &str) -> Page {
         ],
         vec!["Cancel"],
     )
+}
+
+/// The first page, and in `empty_list` what shows while no Phone is listed.
+fn choosing(view: &SetupWindowView, desktop: &str, empty_list: &mut Option<&'static str>) -> Page {
+    // Nothing to look for while pairing waits for calls.
+    let waits = view.calls_off.is_some_and(|off| off.blocks_step);
+    // A Problem blocks choosing only while Bluetooth is off or blocked:
+    // nothing is looked for, and how this computer shows on phones isn't
+    // known yet (#315).
+    let bluetooth_off = view.problem_has_focus.is_some();
+    *empty_list = (!waits && !bluetooth_off).then_some("Looking for phones nearby…");
+    if bluetooth_off {
+        choose_once_bluetooth_is_on()
+    } else {
+        choose(desktop)
+    }
 }
 
 /// The first page while Bluetooth is off or blocked: the phone's steps as

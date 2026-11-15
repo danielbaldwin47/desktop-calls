@@ -239,9 +239,8 @@ impl SetupProblems {
             text.set_max_width_chars(50);
             body.append(&heading);
             body.append(&text);
-            // Under the sentence, one row: the command, if the user must run
-            // it, and the button at the right. Beside the sentence, a long
-            // one would be squeezed into a narrow column.
+            // Under the sentence, the command if the user must run it, then
+            // the button at the right.
             let actions = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
             actions.set_margin_top(space::XS);
             let button = if let Some(label) = messages::fix_label(*kind) {

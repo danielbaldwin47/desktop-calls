@@ -327,7 +327,7 @@ fn choosing_a_paired_phone_that_is_out_of_range_says_to_bring_it_close_and_conne
         "{summary}"
     );
     assert!(
-        !summary.contains("isn't sharing Calls"),
+        !summary.contains("isn't sharing calls"),
         "wrong advice for a Phone that is away: {summary}"
     );
 

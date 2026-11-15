@@ -15,7 +15,7 @@ const DAY: u64 = 86_400;
 pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
     State {
         name: "quiet-hours-window-off",
-        title: "The Quiet hours Window, switched off: the times kept and dimmed, the switch focused",
+        title: "The Quiet Hours Window, switched off: the times kept and dimmed, the switch focused",
         still: |_| true,
         prepare: at_noon,
         reach: |harness| {
@@ -27,7 +27,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
     },
     State {
         name: "quiet-hours-window-on",
-        title: "The Quiet hours Window, on from 22:00 to 07:00: the saved sentence and the bar in two pieces, the start focused",
+        title: "The Quiet Hours Window, on from 22:00 to 07:00: the saved sentence and the bar in two pieces, the start focused",
         still: |_| true,
         prepare: at_noon,
         reach: |harness| {
@@ -46,7 +46,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
     },
     State {
         name: "quiet-hours-window-refused",
-        title: "The Quiet hours Window, refusing a start typed equal to the end",
+        title: "The Quiet Hours Window, refusing a start typed equal to the end",
         still: |_| true,
         prepare: at_noon,
         reach: |harness| {
@@ -77,7 +77,7 @@ fn shows(state: &AppState, key: &str, value: &str) -> bool {
 /// Waits until the window shows each of `fields`, with keyboard focus.
 fn wait_for(harness: &Harness, fields: &[(&str, &str)]) {
     harness.wait_for_app(
-        &format!("the Quiet hours Window shows {fields:?}"),
+        &format!("the Quiet Hours Window shows {fields:?}"),
         DEADLINE,
         |state| {
             shows(state, "focused", "true")

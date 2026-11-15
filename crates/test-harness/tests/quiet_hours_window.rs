@@ -77,7 +77,7 @@ fn field<'state>(state: &'state AppState, name: &str) -> Option<&'state str> {
 /// Waits until the window shows each of `fields`, with keyboard focus.
 fn wait_for_window(harness: &Harness, fields: &[(&str, &str)]) -> AppState {
     harness.wait_for_app(
-        &format!("the Quiet hours Window shows {fields:?}, focused"),
+        &format!("the Quiet Hours Window shows {fields:?}, focused"),
         DEADLINE,
         |state| {
             field(state, "focused") == Some("true")
@@ -145,7 +145,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     assert_eq!(field(&state, "notice"), None);
 
     harness.keyboard().press(Key::Escape);
-    harness.wait_for_app("the Quiet hours Window is closed", DEADLINE, |state| {
+    harness.wait_for_app("the Quiet Hours Window is closed", DEADLINE, |state| {
         window(state).is_none()
     });
     assert_eq!(
@@ -166,7 +166,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     );
     assert_eq!(
         field(&state, "sentence"),
-        Some("Off. Calls stay on unless you turn them off from the indicator.")
+        Some("Off. Calls stay on unless you turn them off from Desktop Calls in the bar.")
     );
     assert_eq!(field(&state, "keys"), Some("Space Switch on\nEsc Close"));
 }
@@ -313,7 +313,7 @@ fn the_command_line_opens_it_and_enter_works_the_switch() {
 
     // Escape closes it; the setting commands still work without it.
     harness.keyboard().press(Key::Escape);
-    harness.wait_for_app("the Quiet hours Window is closed", DEADLINE, |state| {
+    harness.wait_for_app("the Quiet Hours Window is closed", DEADLINE, |state| {
         window(state).is_none()
     });
     cli_ok(&harness, &["quiet-hours", "off"]);
@@ -348,7 +348,7 @@ fn alt_q_in_the_dialer_opens_it_with_the_keyboard() {
     assert!(state.surface("dialer").is_none(), "the Dialer closed");
 
     harness.keyboard().press(Key::Escape);
-    harness.wait_for_app("the Quiet hours Window is closed", DEADLINE, |state| {
+    harness.wait_for_app("the Quiet Hours Window is closed", DEADLINE, |state| {
         window(state).is_none()
     });
 }

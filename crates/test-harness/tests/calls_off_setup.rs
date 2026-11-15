@@ -185,7 +185,7 @@ fn a_phone_paired_during_quiet_hours_is_not_blocked_the_moment_it_pairs() {
         .start();
     harness
         .set_quiet_hours(22 * 60, 7 * 60)
-        .expect("Quiet hours set");
+        .expect("Quiet Hours set");
     harness.wait_for_app(
         "the Setup Window lists the Phone",
         Duration::from_secs(10),

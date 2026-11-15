@@ -46,7 +46,7 @@ pub fn load() -> Option<QuietHours> {
     tracing::info!(
         event_kind = %EventKind::QuietHoursLoaded,
         quiet_hours = %hours,
-        "Picking up the Quiet hours the user set"
+        "Picking up the Quiet Hours the user set"
     );
     Some(hours)
 }
@@ -64,12 +64,12 @@ pub fn save(hours: Option<QuietHours>) {
                 tracing::info!(
                     event_kind = %EventKind::QuietHoursSet,
                     quiet_hours = %hours,
-                    "Quiet hours set"
+                    "Quiet Hours set"
                 );
             } else {
                 tracing::info!(
                     event_kind = %EventKind::QuietHoursCleared,
-                    "Quiet hours turned off"
+                    "Quiet Hours turned off"
                 );
             }
         }
@@ -115,6 +115,6 @@ fn failed(error_kind: &str, detail: &str) {
         event_kind = %EventKind::QuietHoursFailed,
         error_kind,
         detail,
-        "Couldn't keep or read the Quiet hours"
+        "Couldn't keep or read the Quiet Hours"
     );
 }

@@ -217,7 +217,7 @@ impl Demo {
         let start = u16::try_from(start % 1_440).unwrap_or(0);
         let end = (start + 1) % 1_440;
         if let Err(error) = self.harness.set_quiet_hours(start, end) {
-            panic!("Quiet hours weren't set: {error:?}");
+            panic!("Quiet Hours weren't set: {error:?}");
         }
     }
 
@@ -428,7 +428,7 @@ impl Demo {
             "quiet-hours-soon" => self.quiet_hours_soon(),
             "quiet-hours-off" => {
                 if let Err(error) = self.harness.clear_quiet_hours() {
-                    panic!("Quiet hours didn't turn off: {error:?}");
+                    panic!("Quiet Hours didn't turn off: {error:?}");
                 }
             }
             // The Phone, blocked and out of the Desktop's hands, pages it as

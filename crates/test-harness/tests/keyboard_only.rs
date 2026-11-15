@@ -117,14 +117,14 @@ const ACTIONS: &[(&str, KeyPath)] = &[
         Case(DIALER),
     ),
     ("Call back a Missed Call: Enter", Case(DIALER)),
-    ("Open the Quiet hours Window: Alt+Q", Case(DIALER)),
+    ("Open the Quiet Hours Window: Alt+Q", Case(DIALER)),
     ("Switch Quiet hours on: Space", Case(DIALER)),
-    ("Step the start of Quiet hours: Tab, Up", Case(DIALER)),
-    ("Step the start of Quiet hours back: Down", Case(DIALER)),
-    ("Type the end of Quiet hours: Tab, digits", Case(DIALER)),
+    ("Step the start of Quiet Hours: Tab, Up", Case(DIALER)),
+    ("Step the start of Quiet Hours back: Down", Case(DIALER)),
+    ("Type the end of Quiet Hours: Tab, digits", Case(DIALER)),
     ("Erase a digit typed in a time: Backspace", Case(DIALER)),
-    ("Switch Quiet hours off: Shift+Tab, Space", Case(DIALER)),
-    ("Close the Quiet hours Window: Escape", Case(DIALER)),
+    ("Switch Quiet Hours off: Shift+Tab, Space", Case(DIALER)),
+    ("Close the Quiet Hours Window: Escape", Case(DIALER)),
     // Calls Off.
     (
         "Call a typed number while calls are off: Enter calls anyway",
@@ -194,7 +194,7 @@ const UNSHOWN: &[(&str, u32)] = &[
     ("Move a page down the Call History: Page Down", 301),
     ("Move a page up the Call History: Page Up", 301),
     ("Erase a digit typed in a time: Backspace", 301),
-    ("Switch Quiet hours off: Shift+Tab, Space", 301),
+    ("Switch Quiet Hours off: Shift+Tab, Space", 301),
 ];
 
 const BANNER: &str = "the_banner_by_keys_alone";

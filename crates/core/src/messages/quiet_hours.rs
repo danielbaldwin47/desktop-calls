@@ -80,7 +80,7 @@ fn typing(digits: &str) -> String {
 fn sentence(sentence: QuietHoursSentence) -> String {
     match sentence {
         QuietHoursSentence::Off => {
-            "Off. Calls stay on unless you turn them off from the indicator.".to_owned()
+            "Off. Calls stay on unless you turn them off from Desktop Calls in the bar.".to_owned()
         }
         QuietHoursSentence::Saved { start, end, day } => {
             let day = match day {

@@ -393,7 +393,7 @@ fn quiet_hours_beginning_and_ending_say_nothing() {
     ]);
 
     let (state, begins) = run(state, [clock_with(START, Some(quiet_hours()))]);
-    assert!(state.calls_off(), "Quiet hours turned calls off");
+    assert!(state.calls_off(), "Quiet Hours turned calls off");
     let (state, _) = run(state, [blocked(true)]);
     let (state, _) = run(state, dropped());
     let (state, ends) = run(state, [clock_with(END, Some(quiet_hours()))]);

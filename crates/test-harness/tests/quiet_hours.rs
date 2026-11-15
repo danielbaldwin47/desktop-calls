@@ -142,14 +142,14 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
 
     harness
         .set_quiet_hours(minutes(23, 59), minutes(6, 0))
-        .expect("Quiet hours set");
+        .expect("Quiet Hours set");
 
     harness.wait_for_app("Quiet hours are set", DEADLINE, |state| {
         state.quiet_hours == Some((minutes(23, 59), minutes(6, 0)))
     });
     assert!(now() < start, "the setup took too long to test the start");
     harness.app_holds(
-        "calls stay on until Quiet hours begin",
+        "calls stay on until Quiet Hours begin",
         Duration::from_secs(1),
         |state| state.calls_off == "on",
     );
@@ -158,7 +158,7 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
     let end = start + 6 * 3_600 + 60;
     let left = Duration::from_secs(start.saturating_sub(now()));
     harness.wait_for_app(
-        "calls go off as Quiet hours begin",
+        "calls go off as Quiet Hours begin",
         left + DEADLINE,
         |state| state.calls_off == "off",
     );
@@ -166,7 +166,7 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
     let blocked = logged_at(&harness, "calls-turned-off");
     assert!(
         blocked.len() == 1 && blocked[0] >= start * 1_000_000,
-        "the app blocked the Phone at {blocked:?}, before Quiet hours began at {start}"
+        "the app blocked the Phone at {blocked:?}, before Quiet Hours began at {start}"
     );
     let item = indicator_says(&harness, "Calls off until 06:00 (quiet hours)");
     assert_eq!(item.status.as_deref(), Some("Active"), "no attention asked");
@@ -185,7 +185,7 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
     // Set while under way: calls go off at once, until midnight.
     harness
         .set_quiet_hours(minutes(23, 0), minutes(0, 0))
-        .expect("Quiet hours set");
+        .expect("Quiet Hours set");
 
     wait_off_until(&harness, end);
     indicator_says(&harness, "Calls off until 00:00 (quiet hours)");
@@ -196,7 +196,7 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
     let ended = logged_at(&harness, "calls-off-deadline-passed");
     assert!(
         ended.len() == 1 && ended[0] >= end * 1_000_000,
-        "the app turned calls on at {ended:?}, before Quiet hours ended at {end}"
+        "the app turned calls on at {ended:?}, before Quiet Hours ended at {end}"
     );
     let took = harness.app_took(
         &AppEvent::kind("calls-off-deadline-passed"),
@@ -205,7 +205,7 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
     );
     assert!(
         took <= RECONNECT_DEADLINE,
-        "connected {took:?} after Quiet hours ended"
+        "connected {took:?} after Quiet Hours ended"
     );
     assert!(!record(&harness).exists(), "the record is cleared");
     assert!(!harness.simulated_phone().blocked());
@@ -219,8 +219,8 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
     let mut harness = harness_in(&time_zone_reading(23, 0, now()));
     harness
         .set_quiet_hours(minutes(22, 0), minutes(7, 0))
-        .expect("Quiet hours set");
-    let state = harness.wait_for_app("calls go off for Quiet hours", DEADLINE, |state| {
+        .expect("Quiet Hours set");
+    let state = harness.wait_for_app("calls go off for Quiet Hours", DEADLINE, |state| {
         state.calls_off == "off"
     });
     // 07:00 is 8 hours on.
@@ -251,14 +251,14 @@ fn turned_on_during_quiet_hours_calls_stay_on_across_a_restart_and_a_timed_break
     harness.turn_calls_off(until).expect("calls turn off");
     wait_off_until(&harness, until);
     harness.wait_for_app(
-        "calls stay off until Quiet hours end",
+        "calls stay off until Quiet Hours end",
         Duration::from_secs(3) + DEADLINE,
         |state| state.calls_off == "off" && state.calls_off_until == end,
     );
     assert_eq!(
         logged_at(&harness, "calls-turned-on").len(),
         turned_on,
-        "the Phone was unblocked as the break ended inside Quiet hours"
+        "the Phone was unblocked as the break ended inside Quiet Hours"
     );
     indicator_says(&harness, "Calls off until 07:00 (quiet hours)");
     assert!(harness.simulated_phone().blocked());
@@ -279,7 +279,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
         state.quiet_hours == Some((minutes(22, 0), minutes(6, 30)))
     });
     assert_eq!(
-        fs::read_to_string(quiet_hours_file(&harness)).expect("the Quiet hours file"),
+        fs::read_to_string(quiet_hours_file(&harness)).expect("the Quiet Hours file"),
         "22:00-06:30\n"
     );
     let address = harness
@@ -296,7 +296,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let json: serde_json::Value =
         serde_json::from_str(&cli_ok(&harness, &["status", "--json"])).expect("status --json");
     assert_eq!(json["quiet_hours"], "22:00-06:30");
-    assert_eq!(harness.app_state().calls_off, "on", "outside Quiet hours");
+    assert_eq!(harness.app_state().calls_off, "on", "outside Quiet Hours");
 
     harness.restart_app();
     let state = wait_connected(&harness, RECONNECT_DEADLINE);
@@ -367,12 +367,12 @@ fn quiet_hours_beginning_sends_no_confirmation() {
     let harness = harness_in(&time_zone_reading(23, 59, start));
     harness
         .set_quiet_hours(minutes(23, 59), minutes(6, 0))
-        .expect("Quiet hours set");
+        .expect("Quiet Hours set");
     assert!(now() < start, "the setup took too long to test the start");
 
     let left = Duration::from_secs(start.saturating_sub(now()));
     harness.wait_for_app(
-        "calls go off as Quiet hours begin",
+        "calls go off as Quiet Hours begin",
         left + DEADLINE,
         |state| state.calls_off == "off",
     );
@@ -395,7 +395,7 @@ fn quiet_hours_ending_sends_no_confirmation() {
     let harness = harness_in(&time_zone_reading(0, 0, end));
     harness
         .set_quiet_hours(minutes(23, 0), minutes(0, 0))
-        .expect("Quiet hours set");
+        .expect("Quiet Hours set");
     wait_off_until(&harness, end);
     assert!(now() < end, "the setup took too long to test the end");
 

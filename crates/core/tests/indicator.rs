@@ -230,7 +230,7 @@ fn with_quiet_hours(state: State) -> State {
     run(
         state,
         [Input::QuietHoursKept(
-            QuietHours::parse("22:00-07:00").unwrap_or_else(|| panic!("valid Quiet hours")),
+            QuietHours::parse("22:00-07:00").unwrap_or_else(|| panic!("valid Quiet Hours")),
         )],
     )
 }

@@ -83,7 +83,7 @@ fn window(state: &State) -> QuietHoursWindowView {
     state
         .surfaces()
         .quiet_hours_window
-        .expect("the Quiet hours Window is open")
+        .expect("the Quiet Hours Window is open")
 }
 
 /// Opens the window from the Indicator's menu.
@@ -153,7 +153,7 @@ fn opened_with_no_quiet_hours_it_is_switched_off_and_offers_22_00_to_07_00() {
     let text = messages::quiet_hours_window(&view);
     assert_eq!(
         text.sentence,
-        "Off. Calls stay on unless you turn them off from the indicator."
+        "Off. Calls stay on unless you turn them off from Desktop Calls in the bar."
     );
     assert_eq!(
         text.keys,

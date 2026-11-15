@@ -75,7 +75,7 @@ fn quiet_hours(harness: &Harness) {
     // wait on the menu itself.
     harness
         .tray()
-        .wait_for_menu("the menu shows the Quiet hours", DEADLINE, |menu| {
+        .wait_for_menu("the menu shows the Quiet Hours", DEADLINE, |menu| {
             MenuEntry::find(menu, QUIET_HOURS_ENTRY).is_some()
         });
 }
@@ -222,7 +222,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
     },
     IndicatorState {
         name: "off-quiet-hours",
-        title: "The Indicator, calls off for Quiet hours",
+        title: "The Indicator, calls off for Quiet Hours",
         prepare: as_is,
         // Under way at any time but the day's last minute, in whichever
         // time zone the gallery runs.
@@ -240,7 +240,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
 pub(super) const MENU_STATES: &[IndicatorState] = &[
     IndicatorState {
         name: "menu-calls-on",
-        title: "The Indicator's menu, calls on, with Quiet hours set",
+        title: "The Indicator's menu, calls on, with Quiet Hours set",
         prepare: at_noon,
         reach: |harness| {
             connect(harness);

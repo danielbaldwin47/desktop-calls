@@ -175,12 +175,13 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
         Some("Calls off after")
     );
     says_again(&harness);
-    let menu = harness.tray().menu();
-    assert!(
-        menu.iter()
-            .any(|entry| entry.label == "Keep calls on" && entry.enabled),
-        "{menu:?}"
-    );
+    // The Indicator shows the change in its tooltip before its menu.
+    harness
+        .tray()
+        .wait_for_menu("the menu offers Keep calls on", DEADLINE, |menu| {
+            menu.iter()
+                .any(|entry| entry.label == "Keep calls on" && entry.enabled)
+        });
     let record_text = fs::read_to_string(record(&harness)).expect("read the record");
     assert!(
         record_text.contains(r#""state":"pending""#) && record_text.contains(r#""exception":true"#),
@@ -277,7 +278,7 @@ fn keep_calls_on_during_the_call_leaves_calls_on_after_it() {
     let harness = on_screen();
     let call = placed_anyway(&harness);
 
-    harness.tray().click("Keep calls on");
+    harness.tray().click_when_shown("Keep calls on", DEADLINE);
 
     harness.wait_for_app("nothing waits", DEADLINE, |state| !state.calls_off_pending);
     harness.simulated_phone().caller_hangs_up(&call);

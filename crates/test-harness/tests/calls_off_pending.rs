@@ -121,12 +121,13 @@ fn calls_off_from_the_indicator_during_a_call_waits_for_it_to_end() {
         Some("desktop-calls-in-call-symbolic"),
         "{items:?}"
     );
-    let menu = harness.tray().menu();
-    assert!(
-        menu.iter()
-            .any(|entry| entry.label == "Keep calls on" && entry.enabled),
-        "{menu:?}"
-    );
+    // The Indicator shows the change in its tooltip before its menu.
+    let menu = harness
+        .tray()
+        .wait_for_menu("the menu offers Keep calls on", DEADLINE, |menu| {
+            menu.iter()
+                .any(|entry| entry.label == "Keep calls on" && entry.enabled)
+        });
     assert!(
         !menu.iter().any(|entry| entry.label == "Turn calls off"),
         "{menu:?}"
@@ -183,7 +184,7 @@ fn keep_calls_on_from_the_indicator_cancels_the_waiting_turn_off() {
     harness.tray().click("Until I turn them on");
     wait_waiting(&harness);
 
-    harness.tray().click("Keep calls on");
+    harness.tray().click_when_shown("Keep calls on", DEADLINE);
 
     harness.wait_for_app("nothing waits", DEADLINE, |state| !state.calls_off_pending);
     harness.wait_for_app_log("calls-kept-on", DEADLINE);
@@ -296,7 +297,7 @@ fn the_call_window_is_tagged_calls_off_after_while_a_turn_off_waits_and_the_tag_
         state.calls_off_pending && tagged(state) == Some(TAG)
     });
 
-    harness.tray().click("Keep calls on");
+    harness.tray().click_when_shown("Keep calls on", DEADLINE);
 
     harness.wait_for_app("the tag goes, the Call still shown", DEADLINE, |state| {
         !state.calls_off_pending && shown(state) && tagged(state).is_none()
@@ -443,7 +444,7 @@ fn keeping_calls_on_while_a_turn_off_waits_confirms_that_the_phone_stays_connect
     cli_ok(&harness, &["calls", "off"]);
     wait_waiting(&harness);
 
-    harness.tray().click("Keep calls on");
+    harness.tray().click_when_shown("Keep calls on", DEADLINE);
 
     let notification = harness.notifications().wait_for(
         "the confirmation that calls are on",

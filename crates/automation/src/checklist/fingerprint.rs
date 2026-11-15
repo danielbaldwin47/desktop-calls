@@ -295,10 +295,10 @@ mod tests {
     #[test]
     fn a_zero_that_belongs_to_the_number_is_kept() {
         // Italian landlines keep their leading 0 in every form.
-        let rome = Fingerprint::of("+39 06 6982 3456");
-        assert!(rome.is(&Fingerprint::of("0039 06 6982 3456")));
-        assert!(!rome.is(&Fingerprint::of("+39 6 6982 3456")));
-        assert!(!rome.is(&Fingerprint::of("+39 06 6982 3457")));
+        let milan = Fingerprint::of("+39 02 1234 5678");
+        assert!(milan.is(&Fingerprint::of("0039 02 1234 5678")));
+        assert!(!milan.is(&Fingerprint::of("+39 2 1234 5678")));
+        assert!(!milan.is(&Fingerprint::of("+39 02 1234 5679")));
     }
 
     #[test]

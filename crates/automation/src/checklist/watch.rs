@@ -51,6 +51,9 @@ pub struct AppState {
     pub calls_off_until: u64,
     /// A turn-off waits for the last Call to end, while calls are "on".
     pub calls_off_pending: bool,
+    /// How many times the app has started since watching began, as `just
+    /// install` restarts it. The state is read afresh at each start.
+    pub app_starts: u32,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -189,22 +192,49 @@ pub fn start(
         })?;
     let timeline: Timeline = Arc::new(Mutex::new(vec![(Instant::now(), first)]));
     let kept = timeline.clone();
-    thread::spawn(move || zbus::block_on(follow(stream, &kept, &events, locale_region.as_deref())));
+    let bus = bus.clone();
+    thread::spawn(move || {
+        zbus::block_on(follow(
+            stream,
+            &bus,
+            &kept,
+            &events,
+            locale_region.as_deref(),
+        ));
+    });
     Ok(timeline)
 }
 
 /// Subscribes to the control interface's signals (its `PropertiesChanged`
-/// and `MissedCall`), then reads it whole, so no change slips between the
-/// two.
+/// and `MissedCall`) and to the app starting, then reads it whole, so no
+/// change slips between the two.
 async fn subscribe(
     bus: &Connection,
     locale_region: Option<&str>,
-) -> zbus::Result<(MessageStream, AppState)> {
+) -> zbus::Result<(Signals, AppState)> {
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
         .path(PATH)
         .build()?;
-    let stream = MessageStream::for_match_rule(rule, bus, None).await?;
+    let signals = MessageStream::for_match_rule(rule, bus, None).await?;
+    // The app taking its bus name again: a restart, such as `just install`.
+    let starts = MatchRule::builder()
+        .msg_type(Type::Signal)
+        .sender("org.freedesktop.DBus")
+        .interface("org.freedesktop.DBus")
+        .member("NameOwnerChanged")
+        .add_arg(BUS_NAME)
+        .build()?;
+    let starts = MessageStream::for_match_rule(starts, bus, None).await?;
+    let state = read_whole(bus, locale_region).await?;
+    Ok((futures_util::stream::select(signals, starts), state))
+}
+
+/// The control interface's signals and the app's starts, as they arrive.
+type Signals = futures_util::stream::Select<MessageStream, MessageStream>;
+
+/// Every property of the control interface, read now.
+async fn read_whole(bus: &Connection, locale_region: Option<&str>) -> zbus::Result<AppState> {
     let properties = PropertiesProxy::builder(bus)
         .destination(BUS_NAME)
         .path(PATH)
@@ -217,11 +247,12 @@ async fn subscribe(
     for (name, value) in &all {
         state.apply(name, value.try_clone()?, locale_region)?;
     }
-    Ok((stream, state))
+    Ok(state)
 }
 
 async fn follow(
-    mut stream: MessageStream,
+    mut stream: Signals,
+    bus: &Connection,
     timeline: &Timeline,
     events: &Sender<Event>,
     locale_region: Option<&str>,
@@ -230,6 +261,12 @@ async fn follow(
         let arrived = Instant::now();
         let Some(change) = Change::from(&message, locale_region) else {
             continue;
+        };
+        // A new app publishes no change for what it starts with, so its
+        // state is read whole. If that fails, its changes fill it in.
+        let started = match change {
+            Change::Started => Some(read_whole(bus, locale_region).await.unwrap_or_default()),
+            _ => None,
         };
         let mut timeline = timeline.lock().unwrap_or_else(PoisonError::into_inner);
         let mut state = timeline
@@ -245,6 +282,12 @@ async fn follow(
                 }
             }
             Change::MissedCall(missed) => state.missed_calls.push(missed),
+            Change::Started => {
+                let mut fresh = started.unwrap_or_default();
+                fresh.missed_calls = std::mem::take(&mut state.missed_calls);
+                fresh.app_starts = state.app_starts + 1;
+                state = fresh;
+            }
         }
         timeline.push((arrived, state));
         drop(timeline);
@@ -258,6 +301,8 @@ async fn follow(
 enum Change {
     Properties(HashMap<String, OwnedVariant>),
     MissedCall(AppMissedCall),
+    /// The app took its bus name: it has started.
+    Started,
 }
 
 impl Change {
@@ -284,6 +329,13 @@ impl Change {
                     withheld: number.is_empty(),
                     number: Fingerprint::of_call(&number, locale_region),
                 }))
+            }
+            Some("NameOwnerChanged") => {
+                let (name, _, owner) = message
+                    .body()
+                    .deserialize::<(String, String, String)>()
+                    .ok()?;
+                (name == BUS_NAME && !owner.is_empty()).then_some(Self::Started)
             }
             _ => None,
         }

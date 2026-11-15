@@ -15,6 +15,7 @@ mod sitting;
 mod steps;
 mod watch;
 
+use std::collections::VecDeque;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -119,6 +120,7 @@ pub fn run(options: &Options) -> ExitCode {
 
     let command = resume_command(options);
     let mut file = choose_file(&directory, mode, &state.phone_name, &groups, options.fresh);
+    file.begin_run(&command);
     println!(
         "Real-Phone Checklist, {}, with {}.",
         match options.group {
@@ -137,11 +139,8 @@ pub fn run(options: &Options) -> ExitCode {
             Ok(()) => {}
             Err(Stop::Quit) => {
                 println!();
-                println!(
-                    "Stopped. Your results so far are in {}.",
-                    file.path.display()
-                );
-                println!("To carry on where you stopped, run `{command}`.");
+                println!("Stopped.");
+                summarise(&file, &groups, options, true);
                 return ExitCode::SUCCESS;
             }
             Err(error) => {
@@ -150,7 +149,7 @@ pub fn run(options: &Options) -> ExitCode {
             }
         }
     }
-    summarise(&file, &groups, &command);
+    summarise(&file, &groups, options, false);
     ExitCode::SUCCESS
 }
 
@@ -303,17 +302,16 @@ fn choose_file(
         });
     match latest {
         Some(file) => {
-            let passed: Vec<&str> = runnable
+            let passed: Vec<String> = runnable
                 .iter()
-                .filter(|step| {
-                    file.step(step.id)
-                        .is_some_and(|record| record.outcome == Outcome::Pass)
-                })
-                .map(|step| step.id)
+                .filter_map(|step| file.step(step.id))
+                .filter(|record| record.outcome == Outcome::Pass)
+                .map(|record| format!("{} ({})", record.id, which_run(record.run)))
                 .collect();
             println!(
-                "Resuming the run started {}. Passed already: {}. (--fresh starts over.)",
+                "Resuming the results started {}, as run {} of them. Passed already: {}. (--fresh starts over.)",
                 file.started,
+                file.run() + 1,
                 if passed.is_empty() {
                     "none".to_owned()
                 } else {
@@ -398,15 +396,42 @@ fn run_group(
         }
         Err(stop) => return Err(stop),
     }
-    for step in to_run {
-        let record_of_step = run_step(sitting, step)?;
-        record(file, order, record_of_step);
+    let mut queue: VecDeque<&Step> = to_run.into();
+    while let Some(step) = queue.pop_front() {
+        let (record_of_step, back_to) = run_step(sitting, step)?;
+        if let Some(record_of_step) = record_of_step {
+            record(file, order, record_of_step);
+        }
+        // Going back runs the earlier step and every runnable one after it
+        // up to this one again, then carries on as before.
+        let Some(back_to) = back_to else { continue };
+        let position = |id: &str| group.steps.iter().position(|other| other.id == id);
+        if let (Some(from), Some(to)) = (position(back_to), position(step.id)) {
+            for again in group.steps[from..=to].iter().rev() {
+                if again.script.is_some() {
+                    queue.push_front(again);
+                }
+            }
+        }
     }
     Ok(())
 }
 
-/// Runs one step's script and returns its record.
-fn run_step(sitting: &mut Sitting, step: &Step) -> Result<StepRecord, Stop> {
+/// "run 2", or "an earlier run" for a record from before runs were kept.
+fn which_run(run: u32) -> String {
+    if run == 0 {
+        "an earlier run".to_owned()
+    } else {
+        format!("run {run}")
+    }
+}
+
+/// Runs one step's script and returns its record, if it has one, and the
+/// step to go back to, if the user chose to.
+fn run_step(
+    sitting: &mut Sitting,
+    step: &Step,
+) -> Result<(Option<StepRecord>, Option<&'static str>), Stop> {
     println!();
     println!("Step {}: {}", step.id, step.title);
     flush();
@@ -416,9 +441,21 @@ fn run_step(sitting: &mut Sitting, step: &Step) -> Result<StepRecord, Stop> {
         None => Err(Stop::Skipped),
     };
     let mut findings = sitting.take_findings();
+    let mut back_to = None;
     let outcome = match finished {
         Ok(()) if findings.failed => Outcome::Fail,
         Ok(()) => Outcome::Pass,
+        // A step that failed before it offered to go back keeps its
+        // failure; one that only found it couldn't start records nothing.
+        Err(Stop::BackTo(id)) if findings.failed => {
+            back_to = Some(id);
+            Outcome::Fail
+        }
+        Err(Stop::BackTo(id)) => {
+            println!("  Going back to step {id}.");
+            flush();
+            return Ok((None, Some(id)));
+        }
         Err(Stop::Skipped) => {
             findings.evidence.push("You skipped this step.".to_owned());
             Outcome::Skipped
@@ -452,17 +489,22 @@ fn run_step(sitting: &mut Sitting, step: &Step) -> Result<StepRecord, Stop> {
             Outcome::Skipped => "skipped",
         }
     );
+    if let Some(id) = back_to {
+        println!("  Going back to step {id}.");
+    }
     flush();
-    Ok(StepRecord {
+    let record_of_step = StepRecord {
         id: step.id.to_owned(),
         title: step.title.to_owned(),
         outcome,
+        run: 0,
         evidence: findings.evidence,
         measurements: findings.measurements,
         started_us,
         ended_us,
         journal,
-    })
+    };
+    Ok((Some(record_of_step), back_to))
 }
 
 /// A record of `step` as skipped, with why.
@@ -472,6 +514,7 @@ fn skipped(step: &Step, evidence: String) -> StepRecord {
         id: step.id.to_owned(),
         title: step.title.to_owned(),
         outcome: Outcome::Skipped,
+        run: 0,
         evidence: vec![evidence],
         measurements: serde_json::Map::new(),
         started_us: now,
@@ -486,51 +529,100 @@ fn record(file: &mut ResultFile, order: &[&str], step: StepRecord) {
     }
 }
 
-fn summarise(file: &ResultFile, groups: &[&Group], command: &str) {
+/// Ends a run, finished or `stopped`, with a plain summary (#380): each
+/// runnable step of `groups`, how it stands and why, then the one command
+/// to run next.
+fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: bool) {
+    let run = file.run();
+    let mut not_passed: Vec<&str> = Vec::new();
     println!();
-    let mut retry = false;
+    println!("Summary:");
     for group in groups {
-        let count = |outcome: Outcome| {
-            group
-                .steps
-                .iter()
-                .filter(|step| step.script.is_some())
-                .filter(|step| {
-                    file.step(step.id)
-                        .is_some_and(|record| record.outcome == outcome)
-                })
-                .count()
-        };
-        let runnable = group
-            .steps
-            .iter()
-            .filter(|step| step.script.is_some())
-            .count();
-        let waiting = group.steps.len() - runnable;
-        let (passed, failed, skipped) = (
-            count(Outcome::Pass),
-            count(Outcome::Fail),
-            count(Outcome::Skipped),
-        );
-        retry |= failed + skipped > 0;
-        println!(
-            "Group {}: {passed} of {runnable} runnable steps pass{}{}; {waiting} not yet runnable.",
-            group.number,
-            if failed > 0 {
-                format!(", {failed} failed")
-            } else {
+        let mut waiting: Vec<&str> = Vec::new();
+        for step in group.steps {
+            if step.script.is_none() {
+                waiting.push(step.id);
+                continue;
+            }
+            let Some(record) = file.step(step.id) else {
+                not_passed.push(step.id);
+                println!("  {} not run.", step.id);
+                continue;
+            };
+            let when = if record.run == run {
                 String::new()
-            },
-            if skipped > 0 {
-                format!(", {skipped} skipped")
             } else {
-                String::new()
-            },
-        );
+                format!(" in {}", which_run(record.run))
+            };
+            match record.outcome {
+                Outcome::Pass => println!("  {} passed{when}.", step.id),
+                Outcome::Fail => {
+                    not_passed.push(step.id);
+                    println!("  {} failed{when}: {}", step.id, why_failed(record));
+                }
+                Outcome::Skipped => {
+                    not_passed.push(step.id);
+                    println!(
+                        "  {} skipped{when}: {}",
+                        step.id,
+                        record.evidence.last().map_or("", String::as_str)
+                    );
+                }
+            }
+        }
+        if !waiting.is_empty() {
+            println!(
+                "  Not yet runnable in group {}: {}.",
+                group.number,
+                waiting.join(", ")
+            );
+        }
     }
     println!("Results: {}", file.path.display());
-    if retry {
-        println!("To retry the steps that didn't pass, run `{command}`.");
+    let command = resume_command(options);
+    let next_group = options
+        .group
+        .and_then(|number| GROUPS.iter().find(|group| group.number == number + 1));
+    let next = match (not_passed.first(), next_group) {
+        (Some(first), _) if stopped => format!("run `{command}` to carry on from {first}"),
+        (Some(_), _) => format!("run `{command}` to retry {}", words_list(&not_passed)),
+        (None, Some(group)) => format!(
+            "run `{}` for group {}",
+            resume_command(&Options {
+                group: Some(group.number),
+                demo: options.demo,
+                headless: false,
+                results: None,
+                fresh: false,
+            }),
+            group.number
+        ),
+        (None, None) => "nothing: every runnable step has passed".to_owned(),
+    };
+    println!("Next: {next}.");
+    flush();
+}
+
+/// Why `record` failed: its failed checks, or else its last evidence.
+fn why_failed(record: &StepRecord) -> String {
+    let failures: Vec<&str> = record
+        .evidence
+        .iter()
+        .filter_map(|line| line.strip_prefix("Failed: "))
+        .collect();
+    if failures.is_empty() {
+        record.evidence.last().cloned().unwrap_or_default()
+    } else {
+        failures.join(" ")
+    }
+}
+
+/// `1.1`, `1.1 and 1.3`, `1.1, 1.2 and 1.3`.
+fn words_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -570,11 +662,7 @@ fn waits_on(step: &Step) -> String {
 
 fn tickets(numbers: &[u32]) -> String {
     let named: Vec<String> = numbers.iter().map(|number| format!("#{number}")).collect();
-    match named.as_slice() {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
+    words_list(&named.iter().map(String::as_str).collect::<Vec<_>>())
 }
 
 impl std::fmt::Display for Stop {
@@ -583,6 +671,7 @@ impl std::fmt::Display for Stop {
             Self::Skipped => formatter.write_str("skipped"),
             Self::Quit => formatter.write_str("stopped"),
             Self::TimedOut(what) => formatter.write_str(what),
+            Self::BackTo(id) => write!(formatter, "going back to step {id}"),
         }
     }
 }

@@ -46,6 +46,9 @@ pub enum Stop {
     Quit,
     /// What the step waited for did not happen in time.
     TimedOut(String),
+    /// The step can't go on until an earlier step of its group, this one,
+    /// is done again, and the user chose to do it now (#380).
+    BackTo(&'static str),
 }
 
 /// A state the app published, and when.
@@ -413,6 +416,17 @@ impl Sitting {
                 Some(Event::Closed) => return Err(Stop::Quit),
                 Some(Event::Changed) | None => {}
             }
+        }
+    }
+
+    /// Offers to go back to step `id` now, saying why first, and returns
+    /// how the step stops: going back on Enter, else skipped or stopped.
+    pub fn offer_to_go_back(&mut self, id: &'static str, why: &str, prompt: &str) -> Stop {
+        self.say(why, &[]);
+        self.findings.evidence.push(why.to_owned());
+        match self.ready(prompt) {
+            Ok(()) => Stop::BackTo(id),
+            Err(stop) => stop,
         }
     }
 

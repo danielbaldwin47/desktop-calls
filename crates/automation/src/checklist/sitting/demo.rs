@@ -50,8 +50,11 @@ use crate::checklist::watch::AppState;
 /// - a first run: `forget-pairing` (the Phone forgets the Desktop and the
 ///   Desktop removes the Phone, which stays nearby), `restart-app` (as
 ///   `just install` restarts it), `open-setup-window` (`desktop-calls
-///   connect`), `contacts-access-off` (the Phone asks again before it
-///   shares Contacts), `allow-contacts` (Allow on the Phone's prompt),
+///   connect`), `pair-through-setup-window` (`desktop-calls connect`, then
+///   the Phone chosen and its code confirmed, waited for), `contacts-access-off`
+///   (the Phone asks before it shares Contacts), `contacts-refused` (it
+///   refuses them without asking), `contacts-access-on` (it shares them
+///   without asking again), `allow-contacts` (Allow on the Phone's prompt),
 ///   `bind-super-alt-c-elsewhere` (the user's Hyprland config already uses
 ///   those keys for another program), `cancel-then-confirm` (on the
 ///   keybinding's line: Cancel, then Add keybinding and Confirm after all);
@@ -138,6 +141,10 @@ const FOCUS_DEADLINE: Duration = Duration::from_secs(5);
 /// How long the Call Window may take to collapse to the Call Pill in the
 /// demo: 5 s after the Call connects, and a margin.
 const COLLAPSE_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long the demo's Phone may take to be listed, to show its code, and
+/// to connect, when the user pairs it without the runner.
+const PAIRING_DEADLINE: Duration = Duration::from_secs(20);
 
 /// Whether the Setup Window has keyboard focus and shows exactly `buttons`.
 fn setup_window_shows(state: &test_harness::AppState, buttons: &str) -> bool {
@@ -284,6 +291,35 @@ impl Demo {
         }
     }
 
+    /// The user opens the Setup Window, chooses the Phone and confirms its
+    /// code, and the Phone connects: paired, without the runner asking.
+    fn pair_through_setup_window(&self) {
+        drop(self.harness.cli(&["connect"]));
+        let keyboard = self.harness.keyboard();
+        self.harness
+            .wait_for_app("the Phone listed", PAIRING_DEADLINE, |state| {
+                state.surface("setup-window").is_some_and(|window| {
+                    window.get("step").map(String::as_str) == Some("choose")
+                        && window
+                            .get("phones")
+                            .is_some_and(|phones| !phones.is_empty())
+                        && window.get("focused").map(String::as_str) == Some("true")
+                })
+            });
+        keyboard.press(Key::Return);
+        self.harness
+            .wait_for_app("the pairing code", PAIRING_DEADLINE, |state| {
+                state
+                    .surface("setup-window")
+                    .is_some_and(|window| window.get("step").map(String::as_str) == Some("confirm"))
+            });
+        keyboard.press(Key::Return);
+        self.harness
+            .wait_for_app("the Phone connected", PAIRING_DEADLINE, |state| {
+                state.connection_state == "connected"
+            });
+    }
+
     /// The user's Hyprland config already binds Super+Alt+C to another
     /// program, so the finish page can't offer that keybinding.
     fn bind_super_alt_c_elsewhere(&self) {
@@ -394,7 +430,10 @@ impl Demo {
             "forget-pairing" => self.forget_pairing(),
             "restart-app" => self.harness.restart_app(),
             "open-setup-window" => drop(self.harness.cli(&["connect"])),
+            "pair-through-setup-window" => self.pair_through_setup_window(),
             "contacts-access-off" => self.harness.simulated_phone().set_contacts_prompt("ask"),
+            "contacts-refused" => self.harness.simulated_phone().set_contacts_prompt("deny"),
+            "contacts-access-on" => self.harness.simulated_phone().set_contacts_prompt("grant"),
             // Android remembers the answer for the Desktop.
             "bind-super-alt-c-elsewhere" => self.bind_super_alt_c_elsewhere(),
             "cancel-then-confirm" => self.cancel_then_confirm(),
@@ -580,7 +619,8 @@ impl Demo {
                      decline, hang-up, hold-and-answer, end-and-answer, swap, answer-waiting, \
                      decline-waiting, call-third, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
-                     open-setup-window, contacts-access-off, allow-contacts, \
+                     open-setup-window, pair-through-setup-window, contacts-access-off, \
+                     contacts-refused, contacts-access-on, allow-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm, indicator-click, indicator-mute, \
                      indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-test-number-national, \
                      type-test-number-trunk-zero, type-wrong-number, type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \

@@ -6,7 +6,9 @@
 //! keyboard focus, so Enter takes the step; while choosing, the first Phone
 //! listed has focus, the arrow keys move between Phones and Enter chooses.
 //! Escape or closing the window cancels. A footer line shows the keys that
-//! work now. While a Problem blocks the step, its card sits under the
+//! work now; the window tells the core which control has the keyboard as
+//! focus moves, so after Tab or Shift+Tab the footer names the button Enter
+//! presses. While a Problem blocks the step, its card sits under the
 //! heading (`setup_problems`) and the step's words are dimmed. While calls
 //! are off, the Calls Off card (`setup_calls_off`) sits first under the
 //! heading, with Turn calls on: while choosing a Phone it has the keyboard,
@@ -39,9 +41,12 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use desktop_calls_core::messages::{self, SETUP_STAGES, SetupWindowText, StageMark, stage_line};
+use desktop_calls_core::messages::{
+    self, ProblemKind, SETUP_STAGES, SetupWindowText, StageMark, stage_line,
+};
 use desktop_calls_core::{
-    Input, KeybindingCheck, KeybindingStage, Phone, SetupStep, SetupWindowView, Timestamp,
+    Input, KeybindingCheck, KeybindingStage, Phone, SetupFocus, SetupStep, SetupWindowView,
+    Timestamp,
 };
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
@@ -341,6 +346,44 @@ impl SetupWindow {
     /// appears; otherwise the Phone takes it, as without it.
     pub(super) fn top_keeps_focus(&self, keeps: bool) {
         self.top_keeps_focus.set(keeps);
+    }
+
+    /// Tells the core which control has the keyboard whenever focus moves,
+    /// for the footer to name what Enter presses. `problem_of` names the
+    /// Problem whose card's button a widget is.
+    pub(super) fn follow_focus(
+        self: &Rc<Self>,
+        problem_of: impl Fn(&gtk::Widget) -> Option<ProblemKind> + 'static,
+    ) {
+        let weak = Rc::downgrade(self);
+        self.window.connect_focus_widget_notify(move |_| {
+            if let Some(setup) = weak.upgrade() {
+                setup.send(Input::SetupWindowFocus(setup.focused_control(&problem_of)));
+            }
+        });
+    }
+
+    /// The control that has the keyboard, as the core names it.
+    fn focused_control(
+        &self,
+        problem_of: &impl Fn(&gtk::Widget) -> Option<ProblemKind>,
+    ) -> Option<SetupFocus> {
+        let focus = GtkWindowExt::focus(&self.window)?;
+        let within = |widget: &gtk::Widget| focus == *widget || focus.is_ancestor(widget);
+        if within(self.list.upcast_ref()) {
+            return Some(SetupFocus::Phone);
+        }
+        if within(self.calls_off.button.upcast_ref()) {
+            return Some(SetupFocus::TurnCallsOn);
+        }
+        if let Some(kind) = problem_of(&focus) {
+            return Some(SetupFocus::Problem(kind));
+        }
+        let buttons: Vec<gtk::Widget> =
+            std::iter::successors(self.buttons.first_child(), WidgetExt::next_sibling).collect();
+        // The default button, first in the core's order, is last in the box.
+        let place = buttons.iter().position(within)?;
+        Some(SetupFocus::Button(buttons.len() - 1 - place))
     }
 
     /// Gives keyboard focus back to the step, if nothing in the window has

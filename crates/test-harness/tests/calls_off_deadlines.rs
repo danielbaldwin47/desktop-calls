@@ -401,7 +401,14 @@ fn the_menu_offers_an_hour_and_tomorrow_morning_with_their_end_times_across_a_cl
     let harness = harness_in(&zone);
     indicator_says(&harness, "My Pixel connected");
 
-    let menu = harness.tray().menu();
+    // The Indicator shows the change in its tooltip before its menu.
+    let menu = harness.tray().wait_for_menu(
+        "the menu offers three ways to turn calls off",
+        DEADLINE,
+        |menu| {
+            MenuEntry::find(menu, "Turn calls off").is_some_and(|entry| entry.children.len() >= 3)
+        },
+    );
     let choices = &MenuEntry::find(&menu, "Turn calls off")
         .expect("Turn calls off")
         .children;
@@ -429,7 +436,14 @@ fn the_menu_offers_an_hour_and_tomorrow_morning_with_their_end_times_across_a_cl
 
     cli_ok(&harness, &["calls", "on"]);
     wait_connected(&harness, RECONNECT_DEADLINE);
-    let menu = harness.tray().menu();
+    // The app says it is connected before the Indicator's menu shows it.
+    let menu = harness.tray().wait_for_menu(
+        "the menu offers to turn calls off for an hour",
+        DEADLINE,
+        |menu| {
+            MenuEntry::find(menu, "Turn calls off").is_some_and(|entry| entry.children.len() >= 2)
+        },
+    );
     let for_an_hour = MenuEntry::labels(
         &MenuEntry::find(&menu, "Turn calls off")
             .expect("Turn calls off")

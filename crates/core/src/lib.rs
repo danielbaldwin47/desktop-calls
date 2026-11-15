@@ -39,8 +39,8 @@ pub use machine::{
     DialerKey, DialerView, Effect, FixFailure, HeldCall, Input, KeybindingStage, Mute,
     NUMBER_LATE_MS, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem, QuietHoursDay,
     QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts, RingingCaller,
-    SetupCallsOff, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State, StateLine,
-    Surfaces, Timer, WaitingOptions, keypad_tones, step,
+    SetupCallsOff, SetupFocus, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State,
+    StateLine, Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;

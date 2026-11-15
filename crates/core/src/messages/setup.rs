@@ -5,7 +5,8 @@ use crate::call::Timestamp;
 use crate::connection::Phone;
 use crate::keybinding::KeybindingCheck;
 use crate::machine::{
-    ContactsOutcome, KeybindingStage, ReadingContacts, SetupNotice, SetupStep, SetupWindowView,
+    ContactsOutcome, KeybindingStage, ReadingContacts, SetupFocus, SetupNotice, SetupStep,
+    SetupWindowView,
 };
 use crate::messages::setup_parts::{
     Instruction, SetupCard, StageMark, SyncText, pin_card, seconds_until, stage_marks, sync,
@@ -153,11 +154,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
             &mut text, phone, *connected, *contacts, keybinding, &desktop, home,
         ),
     };
-    let turns_on = text
-        .calls_off
-        .as_ref()
-        .filter(|_| view.calls_off.is_some_and(|off| off.blocks_step));
-    text.keys = keys(&view.step, &buttons, view.problem_has_focus, turns_on);
+    text.keys = keys(view, &buttons, text.calls_off.as_ref());
     text.heading = heading;
     text.instructions = instructions;
     text.buttons = buttons;
@@ -182,46 +179,76 @@ fn choose(desktop: &str) -> Page {
     )
 }
 
-/// The keys that work now, for the foot of the window: the Problem's button
-/// when it has the keyboard, otherwise the step's. While calls are off and
-/// the step waits for them, Turn calls on has the keyboard.
+const ENTER: &[&str] = &["Enter"];
+const CLOSE: (&[&str], &str) = (&["Esc"], "Close");
+const NEXT: (&[&str], &str) = (&["Tab"], "Next button");
+
+/// The keys that work now, for the foot of the window, Enter naming the
+/// button that has the keyboard: the one the window last reported, after
+/// Tab or Shift+Tab, while it is still there. Otherwise the button that
+/// takes the keyboard by itself: Turn calls on while calls are off and the
+/// step waits for them, a Problem's button while it blocks the step, and
+/// otherwise the step's default.
 fn keys(
-    step: &SetupStep,
+    view: &SetupWindowView,
     buttons: &[&'static str],
-    problem: Option<ProblemKind>,
-    turns_on: Option<&SetupCallsOffText>,
+    calls_off: Option<&SetupCallsOffText>,
 ) -> Keys {
-    const ENTER: &[&str] = &["Enter"];
-    const CLOSE: (&[&str], &str) = (&["Esc"], "Close");
-    const NEXT: (&[&str], &str) = (&["Tab"], "Next button");
-    if let Some(off) = turns_on {
-        return vec![(ENTER, off.button), NEXT, CLOSE];
+    let reported = match (view.focus, &view.step) {
+        (Some(SetupFocus::TurnCallsOn), _) => calls_off.map(turn_calls_on_keys),
+        (Some(SetupFocus::Problem(problem)), _) => Some(problem_keys(problem)),
+        (Some(SetupFocus::Button(index)), _) => buttons
+            .get(index)
+            .map(|button| button_keys(buttons, button)),
+        (Some(SetupFocus::Phone), SetupStep::Choose { phones }) => Some(choose_keys(phones)),
+        (Some(SetupFocus::Phone) | None, _) => None,
+    };
+    if let Some(keys) = reported {
+        return keys;
     }
-    if let Some(problem) = problem {
-        let does = fix_label(problem).unwrap_or_else(copy_command_label);
-        return vec![(ENTER, does), NEXT, CLOSE];
+    if let Some(off) = calls_off.filter(|_| view.calls_off.is_some_and(|off| off.blocks_step)) {
+        return turn_calls_on_keys(off);
     }
-    match (step, buttons) {
-        (SetupStep::Choose { phones }, _) => {
-            let mut keys = Keys::new();
-            if phones.len() > 1 {
-                keys.push((&["↑", "↓"], "Choose"));
-            }
-            if !phones.is_empty() {
-                keys.push((ENTER, "Pair"));
-            }
-            keys.push(CLOSE);
-            keys
-        }
+    if let Some(problem) = view.problem_has_focus {
+        return problem_keys(problem);
+    }
+    match (&view.step, buttons.first()) {
+        (SetupStep::Choose { phones }, _) => choose_keys(phones),
+        (_, Some(default)) => button_keys(buttons, default),
+        (_, None) => vec![CLOSE],
+    }
+}
+
+/// While choosing, a Phone listed has the keyboard.
+fn choose_keys(phones: &[Phone]) -> Keys {
+    let mut keys = Keys::new();
+    if phones.len() > 1 {
+        keys.push((&["↑", "↓"], "Choose"));
+    }
+    if !phones.is_empty() {
+        keys.push((ENTER, "Pair"));
+    }
+    keys.push(CLOSE);
+    keys
+}
+
+/// `button`, one of the step's `buttons`, has the keyboard.
+fn button_keys(buttons: &[&'static str], button: &'static str) -> Keys {
+    match buttons {
         // Enter and Escape do one thing: one entry says it.
-        (_, ["Close"]) => vec![(&["Enter", "Esc"], "Close")],
-        (_, [only]) => vec![(ENTER, only), CLOSE],
-        (_, buttons) => vec![
-            (ENTER, buttons.first().copied().unwrap_or_default()),
-            NEXT,
-            CLOSE,
-        ],
+        ["Close"] => vec![(&["Enter", "Esc"], "Close")],
+        [_] => vec![(ENTER, button), CLOSE],
+        _ => vec![(ENTER, button), NEXT, CLOSE],
     }
+}
+
+fn problem_keys(problem: ProblemKind) -> Keys {
+    let does = fix_label(problem).unwrap_or_else(copy_command_label);
+    vec![(ENTER, does), NEXT, CLOSE]
+}
+
+fn turn_calls_on_keys(off: &SetupCallsOffText) -> Keys {
+    vec![(ENTER, off.button), NEXT, CLOSE]
 }
 
 /// `file` as the Setup Window names it: relative to `home` as `~` when it

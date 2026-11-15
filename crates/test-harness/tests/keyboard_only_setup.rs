@@ -35,16 +35,17 @@ fn wait_for_enter_on(harness: &Harness, button: &str, deadline: Duration) -> App
     )
 }
 
-/// Waits until the Problem card's only button, `button`, has the keyboard.
-/// The footer still names the step's button then (#296), so this reads the
-/// card's focus, which its focus ring shows.
+/// Waits until the Problem card's only button, `button`, has the keyboard,
+/// and the footer says Enter presses it (#296).
 fn wait_for_problem_button(harness: &Harness, button: &str) -> AppState {
+    let enter = format!("Enter {button} ·");
     harness.wait_for_app(
-        &format!("the Problem card's {button} has the keyboard"),
+        &format!("the Problem card's {button} has the keyboard, and the footer says so"),
         DEADLINE,
         |state| {
             focused(state, "setup-problems")
                 && shown(state, "setup-problems", "buttons") == Some(button)
+                && setup_window(state, "keys").is_some_and(|keys| keys.starts_with(&enter))
         },
     )
 }
@@ -147,9 +148,8 @@ fn first_run_in_the_setup_window_by_keys_alone() {
     harness.keyboard().press(Key::Return);
     performed.did("Add the keybinding: Enter");
     wait_for_enter_on(&harness, "Confirm", DEADLINE);
-    // The footer still names Confirm for Enter after Tab (#296); the
-    // outcome shows Cancel was pressed.
     harness.keyboard().press(Key::Tab);
+    wait_for_enter_on(&harness, "Cancel", DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_enter_on(&harness, "Add keybinding", DEADLINE);
     let bindings = std::fs::read_to_string(harness.directory().join("config/hypr/bindings.lua"))
@@ -192,9 +192,13 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
     wait_for_enter_on(&harness, "Pair", STARTUP);
     harness.keyboard().press(Key::Return);
     wait_for_enter_on(&harness, "Confirm", CONNECT_DEADLINE);
-    // The footer still names Confirm for Enter after Tab (#296); the
-    // outcome shows Reject was pressed.
+    // The footer follows the keyboard both ways.
     harness.keyboard().press(Key::Tab);
+    wait_for_enter_on(&harness, "Cancel", DEADLINE);
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_enter_on(&harness, "Confirm", DEADLINE);
+    harness.keyboard().press(Key::Tab);
+    wait_for_enter_on(&harness, "Cancel", DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "choose", CONNECT_DEADLINE);
 
@@ -245,8 +249,7 @@ fn a_refused_phone_then_skipped_contacts_by_keys_alone() {
         "{keys:?}"
     );
     harness.keyboard().press(Key::Tab);
-    // The footer still names Try again for Enter once Tab has moved to
-    // Skip (#296), so the outcome shows which button Enter pressed.
+    wait_for_enter_on(&harness, "Skip", DEADLINE);
     harness.keyboard().press(Key::Return);
     wait_for_step(&harness, "done", DEADLINE);
     let prompts = phone.contacts_prompts();

@@ -11,7 +11,9 @@
 //!
 //! The kinds below are the programs that drawing every surface in every
 //! state compiles (the screenshot gallery, traced with `GSK_DEBUG=shaders`,
-//! 2026-11-05). The work starts only once the app is quiet: the Phone
+//! 2026-11-05), and the clipped border that the Dialer's first keystroke
+//! drew first once its tiles took an edge (traced 2026-11-15, #378). A
+//! surface that draws a new kind of thing needs its kind added here. The work starts only once the app is quiet: the Phone
 //! Connected, no Call, nothing shown, so startup never waits for it. Each
 //! kind is one piece of work in its own idle turn of the main loop, at a
 //! lower priority than anything else on it. The moment the app is busy again

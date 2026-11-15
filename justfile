@@ -74,7 +74,7 @@ ci-scenarios *args:
 # past its target. `just test-file` fails if a file has no ignored scenario
 # left, rather than run nothing.
 #
-# Judged against a Mesa shader cache that a warm-up run has just filled, as
+# Judged against a Mesa shader cache that warm-up runs have just filled, as
 # on a Desktop that has run the app before, where Mesa keeps its compiled
 # programs between runs (#282). Without it, each scenario's cache is new and
 # empty, and on a machine with no GPU each first frame mostly waits for
@@ -95,10 +95,16 @@ ci-first-frame-timings:
             | grep -E "first frame|first Banner|the app took" || true
     done
     echo "Warming the shared Mesa shader cache in $cache (not judged)"
-    for file in "${files[@]}"; do
-        SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 \
-            >/dev/null 2>&1 || true
+    # Twice: Mesa keeps some of what a run compiles only from the run after,
+    # so after one warm-up the Dialer's first keystroke still took 33 to 37
+    # ms here, and 12 ms from the third run on (#378).
+    for pass in 1 2; do
+        for file in "${files[@]}"; do
+            SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 \
+                >/dev/null 2>&1 || true
+        done
     done
+    # The cold-cache scenario among them keeps a cache of its own even here.
     echo "First frames with the warmed cache (judged):"
     for file in "${files[@]}"; do
         SCENARIO_SHADER_CACHE="$cache" just test-file "$file" --ignored --test-threads=1 --nocapture

@@ -46,6 +46,23 @@ const FIRST_FRAMES_DEADLINE: Duration = Duration::from_secs(15);
 /// How long the Dialer's rows may take to follow a keystroke, from the key
 /// reaching the app to the frame that shows them, by the app's log.
 const KEYSTROKE_DEADLINE: Duration = Duration::from_millis(50);
+/// The same on a cold shader cache in CI, whose runner paints in software:
+/// there, with every GTK program prepared, Mesa's software renderer still
+/// compiles its own code for each kind of thing the first time it is drawn
+/// on screen, which no drawing offscreen does for it. The first keystroke
+/// took 52 to 58 ms there (33 to 36 ms here, under `just test-ci-like`
+/// too). 100 ms still catches a GTK program compiling on the main loop
+/// again, which took 146 ms here and 275 to 293 ms there (#378).
+const CI_COLD_KEYSTROKE_DEADLINE: Duration = Duration::from_millis(100);
+
+/// The cold-cache keystroke deadline for where the tests run.
+fn cold_keystroke_deadline() -> Duration {
+    if std::env::var_os("CI").is_some() && std::env::var_os(CI_LIKE).is_none() {
+        CI_COLD_KEYSTROKE_DEADLINE
+    } else {
+        KEYSTROKE_DEADLINE
+    }
+}
 /// How long the tests' own round trip may take: the request to the app, and
 /// the change back on the control interface. Looser than the targets above
 /// because a loaded CI runner stretches it even when the app is fast
@@ -520,7 +537,7 @@ fn with_5000_contacts_the_dialer_shows_and_follows_each_keystroke_promptly() {
          against {:?} (from activate-requested to surface-shown surface=\"dialer\" in its log)",
         show_deadline()
     );
-    let slowest = assert_keystrokes_prompt(&keystrokes);
+    let slowest = assert_keystrokes_prompt(&keystrokes, KEYSTROKE_DEADLINE);
     eprintln!("Dialer's first frame after {first_frame_after:?}; slowest keystroke {slowest:?}");
 }
 
@@ -543,7 +560,7 @@ fn on_a_cold_shader_cache_the_dialer_still_follows_the_first_keystroke_promptly(
 
     let keystrokes = type_contact_49(&harness);
 
-    let slowest = assert_keystrokes_prompt(&keystrokes);
+    let slowest = assert_keystrokes_prompt(&keystrokes, cold_keystroke_deadline());
     eprintln!("On a cold shader cache, the slowest keystroke {slowest:?}");
 }
 
@@ -611,14 +628,14 @@ fn type_contact_49(harness: &Harness) -> Vec<(String, Duration)> {
     keystrokes
 }
 
-/// Checks the Dialer drew the rows for each keystroke within
-/// `KEYSTROKE_DEADLINE` of the key reaching it, and returns the slowest.
-fn assert_keystrokes_prompt(keystrokes: &[(String, Duration)]) -> Duration {
+/// Checks the Dialer drew the rows for each keystroke within `deadline` of
+/// the key reaching it, and returns the slowest.
+fn assert_keystrokes_prompt(keystrokes: &[(String, Duration)], deadline: Duration) -> Duration {
     for (query, took) in keystrokes {
         assert!(
-            *took <= KEYSTROKE_DEADLINE,
+            *took <= deadline,
             "the app took {took:?} for the Dialer to show the rows for {query:?} once the key \
-             reached it, against {KEYSTROKE_DEADLINE:?} (from dialer-query-typed to \
+             reached it, against {deadline:?} (from dialer-query-typed to \
              dialer-query-shown in its log); every keystroke: {keystrokes:?}"
         );
     }

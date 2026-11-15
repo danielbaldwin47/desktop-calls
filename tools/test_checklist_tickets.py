@@ -9,6 +9,7 @@ import contextlib
 import io
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -105,10 +106,15 @@ class Command(unittest.TestCase):
 
             return ask
 
-        with mock.patch.object(checklist_tickets, "github_is_open", unreachable), mock.patch.object(
-            checklist_tickets, "repository", lambda: "owner/repo"
-        ):
-            code, _, err = self.run_main([], {checklist_tickets.OFFLINE: "0"})
+        # GitHub is asked only about a step still waiting on a ticket, and
+        # the real steps.rs may have none: give it one.
+        with tempfile.TemporaryDirectory() as directory:
+            waiting = Path(directory) / "steps.rs"
+            waiting.write_text(steps_rs(step("4.1", "None", "148")), encoding="utf-8")
+            with mock.patch.object(checklist_tickets, "STEPS", str(waiting)), mock.patch.object(
+                checklist_tickets, "github_is_open", unreachable
+            ), mock.patch.object(checklist_tickets, "repository", lambda: "owner/repo"):
+                code, _, err = self.run_main([], {checklist_tickets.OFFLINE: "0"})
         self.assertEqual(code, 1)
         self.assertIn("no network", err)
         self.assertIn(f"{checklist_tickets.OFFLINE}=1", err)

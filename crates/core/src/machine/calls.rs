@@ -14,10 +14,48 @@ use super::missed_calls::missed;
 use super::presence::{connection_lost_over, found_lost_call, lost_track, reconnect_due};
 use super::setup::setup_timer;
 use super::view::WaitingOptions;
-use super::{CALL_ENDED_MS, EndedCall, RECENT_CALLS, State};
+use super::{CALL_ENDED_MS, EndedCall, NUMBER_LATE_MS, RECENT_CALLS, State};
 use crate::call::{Call, CallId, CallState, Caller, Direction, Request, Timestamp};
 use crate::messages::Failure;
 use crate::missed::Unconfirmed;
+
+/// The Phone reported a Call: `input` is `Input::CallAdded`.
+pub(super) fn phone_added_call(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
+    let Input::CallAdded {
+        call,
+        state: call_state,
+        caller,
+        at,
+    } = input
+    else {
+        return;
+    };
+    let call = Call {
+        id: call,
+        direction: Direction::from_first_state(call_state),
+        state: call_state,
+        caller,
+        active_since: call_state.is_connected().then_some(at),
+        added_at: at,
+        request: Request::None,
+        history_before: state.call_history.clone(),
+    };
+    await_number(state, &call, effects);
+    call_added(state, call, effects);
+}
+
+/// An incoming Call that rings with no number may get one a moment later:
+/// until [`NUMBER_LATE_MS`] has passed, the Banner doesn't say the number
+/// is withheld.
+fn await_number(state: &mut State, call: &Call, effects: &mut Vec<Effect>) {
+    if call.caller == Caller::Withheld && call.direction == Direction::Incoming {
+        state.awaiting_number.push(call.id);
+        effects.push(Effect::StartTimer {
+            timer: Timer::NumberLate(call.id),
+            after_ms: NUMBER_LATE_MS,
+        });
+    }
+}
 
 /// The Phone reported `call`, unless it already had.
 pub(super) fn call_added(state: &mut State, mut call: Call, effects: &mut Vec<Effect>) {
@@ -331,7 +369,7 @@ fn call_ended(state: &mut State, ended: &Call, effects: &mut Vec<Effect>) {
             call: ended.id,
             caller: ended.caller.clone(),
             at: ended.added_at,
-            before: state.call_history.clone(),
+            before: ended.history_before.clone(),
             refresh: state.missed.refreshes_asked,
         });
     } else {

@@ -343,6 +343,36 @@ fn a_call_declined_on_the_phone_is_not_in_its_missed_calls_and_is_not_notified()
     never_notified(&harness);
 }
 
+/// The Phone lists a Call as missed as it ends, and the Call History it
+/// sends can reach the app before the news that the Call is over: the
+/// Missed Call is this Call all the same (#356).
+#[test]
+fn a_missed_call_the_phone_lists_before_the_call_is_over_is_still_notified() {
+    let harness = Harness::builder().headless_screen().start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &contacts());
+    call_history(&harness, &[]);
+    // The first sync waits on the person holding the Phone, so the Call
+    // History is read while the Call rings, after the Phone lists it.
+    phone.set_contacts_prompt("ask");
+    phone.connect();
+    harness.wait_for_app("the Phone asks to share Contacts", SYNC_DEADLINE, |state| {
+        state.contacts.state == "permission-needed"
+    });
+    let (path, _) = ring(&harness, ALICE);
+    call_history(&harness, &[missed(Some(ALICE), "20261105T100000")]);
+    phone.answer_contacts_prompt("grant");
+    harness.wait_for_app(
+        "the Call History lists the Missed Call while the Call still rings",
+        SYNC_DEADLINE,
+        |state| state.contacts.call_history == 2 && state.calls.len() == 1,
+    );
+
+    rings_out(&harness, &path);
+
+    wait_for_notification(&harness, "Missed call from Alice");
+}
+
 #[test]
 fn with_contacts_denied_a_call_that_rings_out_is_still_notified() {
     let harness = Harness::start();

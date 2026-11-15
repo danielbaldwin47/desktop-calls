@@ -127,12 +127,22 @@ const KEYPAD: [[&str; 3]; 4] = [
 /// [`Theme`] and its classes ([`class`]).
 const CSS: &str = "
 .desktop-calls-surface { padding: 16px; }
-.desktop-calls-surface.dialer { padding: 2px; }
+/* The Dialer's window shows nothing itself: its card does. */
+window.desktop-calls-surface.dialer { padding: 0; background: none; }
+.dialer-card {
+    padding: 2px; background-color: var(--window-bg-color);
+    box-shadow: inset 0 0 0 1px var(--dc-border);
+}
+window.dialer.has-keyboard .dialer-card { box-shadow: inset 0 0 0 2px var(--dc-accent); }
+.dialer-card .accent-probe { color: var(--dc-accent); }
 .desktop-calls-surface.dialer list { background: none; }
-.desktop-calls-surface .dialer-row { padding: 6px 14px; }
-.desktop-calls-surface.dialer .new-dot { margin-right: 14px; }
-.desktop-calls-surface.dialer .footer-line { padding-left: 14px; padding-right: 14px; padding-bottom: 12px; }
+.desktop-calls-surface .dialer-row { padding: 8px 14px; }
 .desktop-calls-surface .dialer-row .title { font-weight: bold; }
+.dialer-row .dialer-glyph { min-width: 28px; min-height: 28px; color: var(--dc-secondary); }
+.dialer-row .dialer-glyph.missed { color: var(--dc-missed); }
+.dialer-row .initial-tile { font-size: 12px; }
+.desktop-calls-surface.dialer .type-eyebrow.section { padding: 10px 14px 4px; }
+.desktop-calls-surface.dialer .footer-line { padding-left: 14px; padding-right: 14px; padding-bottom: 12px; }
 .desktop-calls-surface.call-pill { padding: 6px 6px 6px 12px; }
 .desktop-calls-surface.call-pill.quiet { padding-right: 12px; }
 .desktop-calls-surface .hd {

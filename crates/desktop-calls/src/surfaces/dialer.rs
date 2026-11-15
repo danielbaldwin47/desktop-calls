@@ -8,10 +8,8 @@ use super::{
 use crate::logging::EventKind;
 use crate::theme::space;
 use desktop_calls_core::matching::{DialerRow, DialerRowKind};
-use desktop_calls_core::messages::{self, Label};
-use desktop_calls_core::{
-    CallHistoryKind, Caller, DialerKey, DialerView, Input, PhoneStatus, Timestamp,
-};
+use desktop_calls_core::messages::{self, DialerGlyph, Label};
+use desktop_calls_core::{Caller, DialerKey, DialerView, Input, PhoneStatus, Timestamp};
 use futures_channel::mpsc::UnboundedSender;
 use gtk::glib;
 use gtk::prelude::*;
@@ -28,6 +26,15 @@ pub(super) struct Dialer {
     search: gtk::DrawingArea,
     list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,
+    /// The window's child, as tall as a full Dialer, and the card at its
+    /// top that shows, as tall as its rows.
+    root: gtk::Box,
+    card: gtk::Box,
+    /// Hidden; coloured with the accent.
+    accent: gtk::Label,
+    /// The label over each row's section, by row: see
+    /// [`messages::dialer_section`].
+    sections: Rc<RefCell<Vec<Option<&'static str>>>>,
     /// The notice strip under the search row, its icon, and its words: why
     /// Enter can't Call, or that calls are off and Enter calls anyway.
     notice: gtk::Box,
@@ -79,24 +86,45 @@ impl Dialer {
         let no_matches = gtk::Label::new(Some(messages::label(Label::NoMatches)));
         no_matches.add_css_class("dim-label");
         list.set_placeholder(Some(&no_matches));
+        let sections = Rc::new(RefCell::new(Vec::new()));
+        list.set_header_func(section_headers(sections.clone()));
         let scrolled = gtk::ScrolledWindow::new();
         scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-        scrolled.set_size_request(-1, DIALER_LIST_HEIGHT);
+        // As tall as its rows, up to the list's height.
+        scrolled.set_propagate_natural_height(true);
+        scrolled.set_max_content_height(DIALER_LIST_HEIGHT);
         scrolled.set_focusable(false);
         scrolled.set_child(Some(&list));
         let footer = Footer::new();
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.append(&search_row);
-        content.append(&notice);
-        content.append(&scrolled);
-        content.append(&footer.line);
-        surface.window.set_child(Some(&content));
+        // The accent colour, which Pango's underline under matched letters
+        // can't take from CSS.
+        let accent = gtk::Label::new(None);
+        accent.add_css_class("accent-probe");
+        accent.set_visible(false);
+        let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        card.add_css_class(CARD);
+        card.set_valign(gtk::Align::Start);
+        card.append(&search_row);
+        card.append(&notice);
+        card.append(&scrolled);
+        card.append(&footer.line);
+        card.append(&accent);
+        // The window keeps the height of a full Dialer, so the compositor
+        // centres it where it always has and its top edge stays put; the
+        // card in it, which is all that shows, follows its rows.
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.append(&card);
+        surface.window.set_child(Some(&root));
         let dialer = Rc::new(Self {
             surface,
             entry,
             search: search.area,
             list,
             scrolled,
+            root,
+            card,
+            accent,
+            sections,
             notice,
             notice_icon,
             notice_text,
@@ -225,6 +253,7 @@ impl Dialer {
         }
         self.notice
             .set_visible(notice.is_some() || calls_off.is_some());
+        self.fit();
 
         let mut content = BTreeMap::from([
             ("query".to_owned(), view.query.clone()),
@@ -249,9 +278,22 @@ impl Dialer {
         for (index, row) in view.rows.iter().enumerate() {
             let text = row_text(row, now, offset);
             content.insert(format!("row-{index}"), text.line());
+            content.insert(format!("row-{index}-glyph"), text.glyph.as_str().to_owned());
+            if !row.matched.is_empty() {
+                let matched: Vec<&str> = row
+                    .matched
+                    .iter()
+                    .filter_map(|range| row.name.get(range.clone()))
+                    .collect();
+                content.insert(format!("row-{index}-matched"), matched.join(","));
+            }
+        }
+        for (index, section) in section_starts(&view.rows) {
+            content.insert(format!("section-{index}"), section.to_owned());
         }
         self.surface.show(content);
         self.surface.focus(true);
+        self.take_clicks_on_card_only();
         if opening {
             // The cursor at the end, nothing selected: typing adds to the
             // query rather than replacing it.
@@ -309,62 +351,67 @@ impl Dialer {
     /// with a dot at their right: Missed Calls the user hasn't seen.
     fn show_rows(&self, rows: &[DialerRow], new_missed: usize) {
         self.list.remove_all();
+        *self.sections.borrow_mut() = rows
+            .iter()
+            .map(|row| messages::dialer_section(row.kind))
+            .collect();
+        let underline = self.accent.color();
         let (now, offset) = (now(), utc_offset_seconds());
         for (index, row) in rows.iter().enumerate() {
             let text = row_text(row, now, offset);
-            let title = gtk::Label::new(Some(&text.title));
-            title.add_css_class("title");
-            // A Call History row with no name shows the bare number.
-            if row.kind != DialerRowKind::CallNumber
-                && row.name.trim().is_empty()
-                && matches!(row.caller, Caller::Number(_))
-            {
-                title.add_css_class(class::NUMBER);
-            }
-            title.set_xalign(0.0);
-            title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
-            lines.add_css_class("dialer-row");
-            lines.append(&title);
-            if !text.detail.is_empty() {
-                let detail = gtk::Label::new(Some(&text.detail));
-                detail.set_xalign(0.0);
-                detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                // Missed Calls stand out in the theme's red.
-                detail.add_css_class(class::META);
-                if row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed) {
-                    detail.add_css_class(class::MISSED);
-                }
-                lines.append(&detail);
-            }
+            let shown = row_widget(row, &text, &underline, index < new_missed);
             let list_row = gtk::ListBoxRow::new();
             // The entry keeps the keyboard; the list only shows.
             list_row.set_focusable(false);
-            if index < new_missed {
-                lines.set_hexpand(true);
-                let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                dot.add_css_class(class::NEW_DOT);
-                dot.set_valign(gtk::Align::Center);
-                let marked = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                marked.append(&lines);
-                marked.append(&dot);
-                list_row.set_child(Some(&marked));
-            } else {
-                list_row.set_child(Some(&lines));
-            }
+            list_row.set_child(Some(&shown));
             self.list.append(&list_row);
         }
         self.scrolled.vadjustment().set_value(0.0);
         *self.rows.borrow_mut() = (rows.to_vec(), new_missed);
     }
 
-    /// Scrolls the list just enough to show `row`.
+    /// Keeps the window as tall as a full Dialer, the list as tall as its
+    /// rows up to the list's height, less the notice strip's while it
+    /// shows, so the card never outgrows the window.
+    fn fit(&self) {
+        let natural =
+            |widget: &gtk::Widget| widget.measure(gtk::Orientation::Vertical, DIALER_WIDTH).1;
+        let notice = if self.notice.is_visible() {
+            natural(self.notice.upcast_ref())
+        } else {
+            0
+        };
+        self.scrolled
+            .set_max_content_height(DIALER_LIST_HEIGHT - notice);
+        let around_list =
+            natural(self.card.upcast_ref()) - natural(self.scrolled.upcast_ref()) - notice;
+        self.root
+            .set_size_request(-1, around_list + DIALER_LIST_HEIGHT);
+    }
+
+    /// Lets clicks below the card, where nothing shows, through to what is
+    /// under the Dialer, once the card has its height.
+    fn take_clicks_on_card_only(&self) {
+        let (window, card) = (self.surface.window.clone(), self.card.clone());
+        after_next_frame(&self.surface.window, move || {
+            if let Some(surface) = window.surface() {
+                let card = gtk::cairo::RectangleInt::new(0, 0, window.width(), card.height());
+                surface.set_input_region(Some(&gtk::cairo::Region::create_rectangle(&card)));
+            }
+        });
+    }
+
+    /// Scrolls the list just enough to show `row`, and the label over its
+    /// section if it starts one.
     fn scroll_to(&self, row: &gtk::ListBoxRow) {
         let Some(bounds) = row.compute_bounds(&self.list) else {
             return;
         };
+        let header = row
+            .header()
+            .and_then(|header| header.compute_bounds(&self.list));
         let adjustment = self.scrolled.vadjustment();
-        let top = f64::from(bounds.y());
+        let top = f64::from(header.map_or(bounds.y(), |header| header.y()));
         let bottom = f64::from(bounds.y() + bounds.height());
         if top < adjustment.value() {
             adjustment.set_value(top);
@@ -376,8 +423,180 @@ impl Dialer {
 
 /// How `row` reads, with when a Call History row's Call was.
 fn row_text(row: &DialerRow, now: Timestamp, offset: i64) -> messages::DialerRowText {
-    let when = row.at.map(|at| messages::when(at, now, offset));
-    messages::dialer_row(row, when.as_deref())
+    messages::dialer_row(row, now, offset)
+}
+
+/// The card that shows: the Dialer's background, border and corners.
+const CARD: &str = "dialer-card";
+
+/// Where each section starts among `rows`, and its label.
+fn section_starts(rows: &[DialerRow]) -> Vec<(usize, &'static str)> {
+    let mut starts = Vec::new();
+    let mut last = None;
+    for (index, row) in rows.iter().enumerate() {
+        let section = messages::dialer_section(row.kind);
+        if let Some(label) = section.filter(|_| section != last) {
+            starts.push((index, label));
+        }
+        last = section;
+    }
+    starts
+}
+
+/// Puts the label over each section where it starts, from `sections`, the
+/// label for each row.
+fn section_headers(
+    sections: Rc<RefCell<Vec<Option<&'static str>>>>,
+) -> impl Fn(&gtk::ListBoxRow, Option<&gtk::ListBoxRow>) + 'static {
+    move |row, before| {
+        let section = |row: &gtk::ListBoxRow| {
+            usize::try_from(row.index())
+                .ok()
+                .and_then(|index| sections.borrow().get(index).copied().flatten())
+        };
+        let starts = section(row).filter(|label| before.and_then(section) != Some(*label));
+        let Some(label) = starts else {
+            row.set_header(None::<&gtk::Widget>);
+            return;
+        };
+        let header = gtk::Label::new(Some(label));
+        header.add_css_class(class::EYEBROW);
+        header.add_css_class("section");
+        header.set_xalign(0.0);
+        row.set_header(Some(&header));
+    }
+}
+
+/// A row of the list: its glyph, its name over its detail line, when at
+/// the right, and the dot of a Missed Call the user hasn't seen if
+/// `marked`. The letters of the name that matched what was typed are
+/// underlined in `underline`.
+fn row_widget(
+    row: &DialerRow,
+    text: &messages::DialerRowText,
+    underline: &gtk::gdk::RGBA,
+    marked: bool,
+) -> gtk::Box {
+    let title = gtk::Label::new(Some(&text.title));
+    title.add_css_class("title");
+    // A row with no name shows the bare number.
+    if row.kind != DialerRowKind::CallNumber
+        && row.name.trim().is_empty()
+        && matches!(row.caller, Caller::Number(_))
+    {
+        title.add_css_class(class::NUMBER);
+    }
+    if text.title == row.name && !row.matched.is_empty() {
+        title.set_attributes(Some(&underlined(&row.matched, underline)));
+    }
+    title.set_xalign(0.0);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let lines = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    lines.set_hexpand(true);
+    lines.set_valign(gtk::Align::Center);
+    lines.append(&title);
+    if text.missed || !text.detail.is_empty() {
+        lines.append(&detail_line(text));
+    }
+    let shown = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
+    shown.add_css_class("dialer-row");
+    shown.append(&glyph(&text.glyph));
+    shown.append(&lines);
+    if !text.time.is_empty() {
+        let time = gtk::Label::new(Some(&text.time));
+        time.add_css_class(class::META);
+        time.set_valign(gtk::Align::Center);
+        shown.append(&time);
+    }
+    if marked {
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.add_css_class(class::NEW_DOT);
+        dot.set_valign(gtk::Align::Center);
+        shown.append(&dot);
+    }
+    shown
+}
+
+/// The detail line: "Missed" in the theme's red for a Missed Call, then
+/// the rest.
+fn detail_line(text: &messages::DialerRowText) -> gtk::Box {
+    let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let mut rest = text.detail.clone();
+    if text.missed {
+        let missed = gtk::Label::new(Some(messages::label(Label::Missed)));
+        missed.add_css_class(class::META);
+        missed.add_css_class(class::MISSED);
+        line.append(&missed);
+        if !rest.is_empty() {
+            rest = format!(" · {rest}");
+        }
+    }
+    if !rest.is_empty() {
+        let detail = gtk::Label::new(Some(&rest));
+        detail.add_css_class(class::META);
+        detail.set_xalign(0.0);
+        detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        line.append(&detail);
+    }
+    line
+}
+
+/// The glyph at a row's left, 28 across: the direction of a Call History
+/// row, red for a Missed Call, or an initial in a tile.
+fn glyph(glyph: &DialerGlyph) -> gtk::Widget {
+    let arrow = |icon, missed| {
+        let view = IconView::new(icon);
+        view.area.add_css_class("dialer-glyph");
+        if missed {
+            view.area.add_css_class(class::MISSED);
+        }
+        view.area.upcast::<gtk::Widget>()
+    };
+    match glyph {
+        DialerGlyph::Missed => arrow(Icon::Incoming, true),
+        DialerGlyph::Incoming => arrow(Icon::Incoming, false),
+        DialerGlyph::Outgoing => arrow(Icon::Outgoing, false),
+        DialerGlyph::Initial(initial) => {
+            let tile = gtk::Label::new(Some(initial));
+            tile.add_css_class(class::INITIAL_TILE);
+            tile.add_css_class("dialer-glyph");
+            tile.set_valign(gtk::Align::Center);
+            tile.upcast()
+        }
+    }
+}
+
+/// Pango attributes that underline the bytes `ranges` in `colour`.
+fn underlined(ranges: &[std::ops::Range<usize>], colour: &gtk::gdk::RGBA) -> gtk::pango::AttrList {
+    let attributes = gtk::pango::AttrList::new();
+    // Pango's colours are 16 bits a channel.
+    let channel = |value: f32| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a channel between 0 and 1, clamped, scaled to 16 bits"
+        )]
+        let scaled = (value.clamp(0.0, 1.0) * 65_535.0).round() as u16;
+        scaled
+    };
+    for range in ranges {
+        let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else {
+            continue;
+        };
+        let mut line = gtk::pango::AttrInt::new_underline(gtk::pango::Underline::Single);
+        line.set_start_index(start);
+        line.set_end_index(end);
+        attributes.insert(line);
+        let mut tint = gtk::pango::AttrColor::new_underline_color(
+            channel(colour.red()),
+            channel(colour.green()),
+            channel(colour.blue()),
+        );
+        tint.set_start_index(start);
+        tint.set_end_index(end);
+        attributes.insert(tint);
+    }
+    attributes
 }
 
 /// Alt+Q, which opens the Quiet Hours Window, with no other command

@@ -207,20 +207,42 @@ fn the_dialer_command_shows_the_dialer_centred_with_focus_listing_the_call_histo
     assert!(!row(1).contains("Missed") && !row(2).contains("Missed"));
     assert_eq!(shown(&state, "anchor"), Some("centre"));
     assert_eq!(shown(&state, "margin"), None);
+}
 
-    let screenshot = harness.screenshot_when("dialer", SCREEN_DEADLINE, |screenshot| {
+/// The Dialer is centred below the bar with its list full, and keeps its
+/// top edge there as its rows change, its height following them: the
+/// search field stays where the eye left it (#232).
+#[test]
+fn the_dialer_keeps_its_top_edge_while_its_height_follows_the_rows() {
+    let harness = synced_on_screen();
+    open(&harness);
+    // The 20 numbered Contacts fill the list.
+    type_query(&harness, "contact");
+    let full = harness.screenshot_when("dialer-full", SCREEN_DEADLINE, |screenshot| {
         app_region(screenshot).is_some_and(|region| region.right - region.left > 300.0)
     });
-    let region = app_region(&screenshot).expect("the Dialer is on screen");
-    let (x, y) = region.centre();
+    let full = app_region(&full).expect("the Dialer is on screen");
+    let (x, y) = full.centre();
     let (width, height) = LAYOUT_SIZE;
-    assert!(
-        (x - width / 2.0).abs() <= 2.0,
-        "not centred across: {region:?}"
-    );
+    assert!((x - width / 2.0).abs() <= 2.0, "not centred across: {full:?}");
     // Centred in the space below the bar.
     let middle = f64::midpoint(height, BAR_HEIGHT);
-    assert!((y - middle).abs() <= 2.0, "not centred down: {region:?}");
+    assert!((y - middle).abs() <= 2.0, "not centred down: {full:?}");
+
+    // Back to the three rows of the Call History.
+    harness.keyboard().press_with_control('a');
+    harness.keyboard().press(Key::Backspace);
+    harness.wait_for_app("the Dialer lists the Call History", DEADLINE, |state| {
+        shown(state, "query") == Some("")
+    });
+    let short = harness.screenshot_when("dialer-short", SCREEN_DEADLINE, |screenshot| {
+        app_region(screenshot).is_some_and(|region| region.bottom < full.bottom - 100.0)
+    });
+    let short = app_region(&short).expect("the Dialer is on screen");
+    assert!(
+        (short.top - full.top).abs() <= 1.0,
+        "the top edge moved: {full:?} then {short:?}"
+    );
 }
 
 /// The footer shows the keys that work now and, at the right, the Phone as

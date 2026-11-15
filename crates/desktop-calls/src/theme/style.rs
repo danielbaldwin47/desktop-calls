@@ -184,8 +184,8 @@ const STATIC: &str = r#"
 .dim-label { opacity: 1; color: var(--dc-secondary); }
 .missed { color: var(--dc-missed); }
 
-window.desktop-calls-surface { box-shadow: inset 0 0 0 1px var(--dc-border); }
-window.desktop-calls-surface.has-keyboard { box-shadow: inset 0 0 0 2px var(--dc-accent); }
+window.desktop-calls-surface:not(.dialer) { box-shadow: inset 0 0 0 1px var(--dc-border); }
+window.desktop-calls-surface:not(.dialer).has-keyboard { box-shadow: inset 0 0 0 2px var(--dc-accent); }
 window.desktop-calls-surface.muted,
 window.desktop-calls-surface.contact-lost { box-shadow: inset 0 0 0 2px var(--dc-warning); }
 
@@ -344,7 +344,7 @@ pub(super) fn css(
         let tile = rounding.min(INITIAL_TILE_RADIUS);
         let _ = writeln!(
             css,
-            ".desktop-calls-surface {{ border-radius: {rounding}px; }}\n\
+            ".desktop-calls-surface, .dialer-card {{ border-radius: {rounding}px; }}\n\
              .desktop-calls-surface button,\n\
              .desktop-calls-surface entry,\n\
              .desktop-calls-surface .notice {{ border-radius: {control}px; }}\n\

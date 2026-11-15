@@ -211,5 +211,30 @@ class WaitingForChecks(unittest.TestCase):
         self.assertEqual(self.wait([[], []], [0, 0, 1, 1, late, late]), 2)
 
 
+class RequiringCIPassed(unittest.TestCase):
+    """Only GitHub's "CI passed" on the head judges every job, so a head
+    without it passed is refused however green its other checks are (#290)."""
+
+    def require(self, found: list[dict]) -> None:
+        with mock.patch.object(merge, "checks", lambda pr: found):
+            merge.require_checks_passed(PR, 0)
+
+    def test_a_dispatched_runs_summary_alone_is_refused(self):
+        found = [
+            {"name": "just lint", "event": "workflow_dispatch", "bucket": "pass", "state": "SUCCESS", "link": ""},
+            {"name": "CI passed (dispatched run)", "event": "workflow_dispatch", "bucket": "pass", "state": "SUCCESS", "link": ""},
+        ]
+        with self.assertRaises(merge.Refused) as refused:
+            self.require(found)
+        self.assertIn('No passed "CI passed"', str(refused.exception))
+        self.assertIn("Next:", str(refused.exception))
+
+    def test_a_passed_ci_passed_is_let_through(self):
+        self.require([
+            {"name": "just lint", "event": "pull_request", "bucket": "pass", "state": "SUCCESS", "link": ""},
+            {"name": "CI passed", "event": "pull_request", "bucket": "pass", "state": "SUCCESS", "link": ""},
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

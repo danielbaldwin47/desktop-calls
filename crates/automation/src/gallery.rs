@@ -10,11 +10,9 @@
 //! Omarchy's tray draws the menu: a stand-in.
 
 use std::fs;
-use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread;
 use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
@@ -25,6 +23,7 @@ mod indicator;
 mod look;
 mod page;
 mod quiet_hours_window;
+mod render;
 mod setup_window;
 mod shard;
 
@@ -36,6 +35,7 @@ use indicator::{
 use look::{LOOKS, Look};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
+use render::render_all;
 use setup_window::SETUP_PROBLEM_STATES;
 pub use shard::Shard;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
@@ -806,6 +806,9 @@ pub struct Options {
     pub shard: Option<Shard>,
     /// Print the states' names, in order, and render nothing.
     pub list_states: bool,
+    /// How long to wait between reaching each state and capturing it, as a
+    /// slow runner might (#248).
+    pub late: Option<Duration>,
 }
 
 /// The states to render: `only`, or the states of `shard`, or every state.
@@ -869,7 +872,7 @@ pub fn run(options: &Options) -> ExitCode {
         .flat_map(|state| LOOKS.map(|look| (*state, look)))
         .collect();
     for repetition in 1..=options.repeat {
-        render_all(&shots, &output, options.workers);
+        render_all(&shots, &output, options.workers, options.late);
         if options.repeat > 1 {
             println!("Rendered {repetition} of {} times.", options.repeat);
         }
@@ -940,48 +943,6 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
         .chain(SETUP_PROBLEM_STATES)
-}
-
-/// Renders each of `shots` into `output`, several at a time: `workers`, or
-/// one scenario per CPU. Each has its own compositor, buses and app, so they
-/// don't meet. One at a time, the 56 shots took 139 s of a CI run (#118).
-/// With a CPU's worth of them each on a machine others are building on, a
-/// screen was late past its deadline (#167).
-fn render_all(shots: &[(&State, Look)], output: &Path, workers: Option<u32>) {
-    let next = AtomicUsize::new(0);
-    let workers = workers.map_or_else(
-        || thread::available_parallelism().map_or(1, NonZeroUsize::get),
-        |workers| workers as usize,
-    );
-    thread::scope(|scope| {
-        for _ in 0..workers.min(shots.len()) {
-            scope.spawn(|| {
-                while let Some(&(state, look)) = shots.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    render(state, look, output);
-                }
-            });
-        }
-    });
-}
-
-/// Renders `state` under `look` into `output`.
-fn render(state: &State, look: Look, output: &Path) {
-    let harness = (state.prepare)(look.builder())
-        .headless_screen()
-        .omarchy_bar()
-        .screenshot_directory(output.to_owned())
-        .start();
-    (state.reach)(&harness);
-    // A frame is judged after it is taken. A surface queues its
-    // new content for `Surfaces` as it renders it, and a task on
-    // the same GLib main context publishes it. That task runs at
-    // default priority, before GTK's redraw, which GLib runs at a
-    // lower one. Only that scheduling order, not any proof in the
-    // code, makes a frame judged while the app still reports the
-    // state show that state.
-    let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
-        (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
-    });
 }
 
 /// A state's file name under `look`, without `.png`.

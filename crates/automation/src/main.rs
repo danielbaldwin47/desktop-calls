@@ -75,6 +75,11 @@ enum Command {
         /// Print the gallery's states, in order, and render nothing.
         #[arg(long)]
         list_states: bool,
+        /// Wait this many milliseconds between reaching each state and
+        /// capturing it, as a slow runner might: the states that last a
+        /// moment must still be captured (#248).
+        #[arg(long, value_name = "MS")]
+        late: Option<u64>,
     },
     /// Run the app against the Simulated Phone in a nested compositor window.
     Demo {
@@ -106,6 +111,7 @@ fn main() -> ExitCode {
             workers,
             shard,
             list_states,
+            late,
         } => gallery::run(&gallery::Options {
             output,
             only,
@@ -113,6 +119,7 @@ fn main() -> ExitCode {
             workers,
             shard,
             list_states,
+            late: late.map(std::time::Duration::from_millis),
         }),
         Command::Demo { scenario } => demo::run(&scenario),
     }

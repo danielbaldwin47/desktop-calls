@@ -219,7 +219,7 @@ impl State {
         self.clock
     }
 
-    /// When "Until tomorrow morning" ends: when Quiet Hours next end, once
+    /// When "Until morning" ends: when Quiet Hours next end, once
     /// the clock has read them, or else the next morning (spec #198).
     #[must_use]
     pub fn until_morning(&self) -> Option<Deadline> {

@@ -1,4 +1,4 @@
-//! Calls Off for 1 hour or until tomorrow morning, at the Call state
+//! Calls Off for 1 hour or until morning, at the Call state
 //! machine's public interface (ticket #203): the menu shows each choice's
 //! end time, the deadline is kept for the next run, and calls come back on
 //! by themselves once the wall clock passes it, at once if it passed while

@@ -1,4 +1,4 @@
-//! Scenarios: Calls Off for 1 hour or until tomorrow morning (ticket
+//! Scenarios: Calls Off for 1 hour or until morning (ticket
 //! #203). A deadline is an instant, kept in `calls-off.json`: when it
 //! passes, calls come back on by themselves and the Phone connects within
 //! the scorecard's 10 s. One that passes while the app is stopped takes
@@ -396,7 +396,7 @@ fn evening_before_clocks_go_forward() -> (String, i64, u64) {
 }
 
 #[test]
-fn the_menu_offers_an_hour_and_tomorrow_morning_with_their_end_times_across_a_clock_change() {
+fn the_menu_offers_an_hour_and_until_morning_with_their_end_times_across_a_clock_change() {
     let (zone, offset, midnight) = evening_before_clocks_go_forward();
     let harness = harness_in(&zone);
     indicator_says(&harness, "My Pixel connected");

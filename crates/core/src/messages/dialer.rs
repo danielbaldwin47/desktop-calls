@@ -192,6 +192,11 @@ pub fn dialer_phone(status: &PhoneStatus, strip_says_off: bool) -> String {
         PhoneStatus::Connected(phone) => phone.name.clone(),
         PhoneStatus::NoPhone => "Not set up".to_owned(),
         PhoneStatus::CallsOff { .. } if strip_says_off => super::calls_off::calls_off(None, false),
+        // With no Off icon beside it, the footer says "off" (#313's review).
+        PhoneStatus::CallsOff {
+            until: Some(until),
+            quiet_hours: true,
+        } => format!("Calls off until {until} (quiet hours)"),
         PhoneStatus::CallsOff { until, quiet_hours } => {
             super::calls_off::calls_off(*until, *quiet_hours)
         }

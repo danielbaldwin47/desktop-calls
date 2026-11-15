@@ -393,7 +393,7 @@ fn a_timed_break_that_ended_inside_quiet_hours_while_stopped_stays_off_at_start(
 }
 
 #[test]
-fn until_tomorrow_morning_ends_when_quiet_hours_end() {
+fn until_morning_ends_when_quiet_hours_end() {
     let state = connected_at(0);
     let view = state.indicator(&state.surfaces());
     let entry = view

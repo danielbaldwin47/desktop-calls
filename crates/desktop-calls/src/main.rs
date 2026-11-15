@@ -119,7 +119,7 @@ enum CallsTurn {
         /// Until this time, then on again: HH:MM on the 24-hour clock.
         #[arg(long, value_name = "HH:MM", group = "deadline")]
         until: Option<String>,
-        /// Until tomorrow morning at 07:00, then on again.
+        /// Until morning at 07:00, then on again.
         #[arg(long, group = "deadline")]
         until_morning: bool,
     },

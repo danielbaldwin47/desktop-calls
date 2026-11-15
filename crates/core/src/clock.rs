@@ -144,6 +144,6 @@ impl QuietHoursClock {
 /// How long "For 1 hour" turns calls off for, in milliseconds.
 pub const FOR_AN_HOUR_MS: u64 = 3_600_000;
 
-/// When "Until tomorrow morning" ends: the next 07:00 local time (spec
+/// When "Until morning" ends: the next 07:00 local time (spec
 /// #198).
 pub const MORNING: TimeOfDay = TimeOfDay { hour: 7, minute: 0 };

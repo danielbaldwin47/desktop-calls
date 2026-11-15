@@ -107,6 +107,8 @@ impl CallPill {
         // Joined as every other line of tags is, so two read as two.
         let tag_separator = gtk::Label::new(Some(messages::tag_separator()));
         tag_separator.add_css_class(class::TAG);
+        // In the secondary colour, so it reads as neither tag's.
+        tag_separator.add_css_class(class::CALLS_OFF);
         tag_separator.set_visible(false);
         let tag_line = gtk::Box::new(gtk::Orientation::Horizontal, space::XS);
         tag_line.append(&tag);
@@ -270,6 +272,7 @@ impl CallPill {
             content.insert("mute-tooltip".to_owned(), mute_tooltip);
         }
         report_tags(tag, view.calls_off_after, &mut content);
+        self.report_tag_line(&mut content);
         if let Some(mute) = mute {
             report_mute(mute, mute_text, &mut content);
         }
@@ -291,6 +294,25 @@ impl CallPill {
         } else {
             self.surface.report_ahead(content);
         }
+    }
+
+    /// Adds the line under the caller as it reads on screen: the text of
+    /// each label shown on it, separator and all (#319).
+    fn report_tag_line(&self, content: &mut BTreeMap<String, String>) {
+        if !self.tag_line.is_visible() {
+            return;
+        }
+        let mut shown = Vec::new();
+        let mut child = self.tag_line.first_child();
+        while let Some(widget) = child {
+            if widget.is_visible()
+                && let Some(label) = widget.downcast_ref::<gtk::Label>()
+            {
+                shown.push(label.text().to_string());
+            }
+            child = widget.next_sibling();
+        }
+        content.insert("tag-line".to_owned(), shown.join(" "));
     }
 
     /// Shows the tags on the line under the caller: the state tag, then
@@ -394,18 +416,6 @@ fn report_tags(
             "calls-off-after".to_owned(),
             messages::calls_off_after_tag().to_owned(),
         );
-    }
-    // The line as it reads, separator and all.
-    let line: Vec<&str> = [
-        tag.map(messages::call_pill_tag),
-        calls_off_after.then(messages::calls_off_after_tag),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if !line.is_empty() {
-        let separator = format!(" {} ", messages::tag_separator());
-        content.insert("tag-line".to_owned(), line.join(&separator));
     }
 }
 

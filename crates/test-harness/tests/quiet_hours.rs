@@ -302,7 +302,7 @@ fn the_cli_sets_and_clears_quiet_hours_and_they_persist_across_a_restart() {
     let state = wait_connected(&harness, RECONNECT_DEADLINE);
     assert_eq!(state.quiet_hours, Some((minutes(22, 0), minutes(6, 30))));
 
-    // Until tomorrow morning ends when Quiet Hours end.
+    // Until morning ends when Quiet Hours end.
     let said = cli_ok(&harness, &["calls", "off", "--until-morning"]);
     assert_eq!(
         said,

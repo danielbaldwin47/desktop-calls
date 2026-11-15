@@ -481,7 +481,7 @@ fn the_footer_names_the_phone_while_connected_and_otherwise_says_where_it_is() {
     // While a notice hides the strip, the footer says until when.
     assert_eq!(
         dialer_phone(&until_morning, false),
-        "Quiet hours until 07:00"
+        "Calls off until 07:00 (quiet hours)"
     );
     assert_eq!(
         dialer_key(desktop_calls_core::DialerKey::Call),

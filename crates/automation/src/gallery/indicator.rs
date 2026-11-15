@@ -210,7 +210,7 @@ pub(super) const INDICATOR_STATES: &[IndicatorState] = &[
     },
     IndicatorState {
         name: "off-until-morning",
-        title: "The Indicator, calls off until tomorrow morning",
+        title: "The Indicator, calls off until morning",
         prepare: as_is,
         reach: |harness| {
             connect(harness);

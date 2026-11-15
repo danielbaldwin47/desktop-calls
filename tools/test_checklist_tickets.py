@@ -174,6 +174,8 @@ class MergeGate(unittest.TestCase):
                 "require_checks_passed": lambda pr, minutes: None,
                 "require_mergeable": lambda pr: pr,
                 "require_no_step_waits_on_a_closed_ticket": gate,
+                # The real lock is shared with every landing on this machine.
+                "take_landing_turn": lambda: None,
                 "gh": gh,
             }.items():
                 stack.enter_context(mock.patch.object(merge, name, stand_in))

@@ -68,6 +68,22 @@ enum Command {
         /// more reliable.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         workers: Option<u32>,
+        /// Render only part K of N of the states (every N-th, from the
+        /// K-th), as CI's gallery jobs do, one part each.
+        #[arg(long, value_name = "K/N", conflicts_with = "only")]
+        shard: Option<gallery::Shard>,
+        /// Print the gallery's states, in order, and render nothing.
+        #[arg(long)]
+        list_states: bool,
+        /// Wait this many milliseconds between reaching each state and
+        /// capturing it, as a slow runner might: the states that last a
+        /// moment must still be captured (#248).
+        #[arg(long, value_name = "MS")]
+        late: Option<u64>,
+        /// Render only this look: light, dark, omarchy-light or
+        /// omarchy-dark. A PR's CI renders one; the run on main every one.
+        #[arg(long, value_name = "LOOK")]
+        look: Option<String>,
     },
     /// Run the app against the Simulated Phone in a nested compositor window.
     Demo {
@@ -97,11 +113,19 @@ fn main() -> ExitCode {
             only,
             repeat,
             workers,
+            shard,
+            list_states,
+            late,
+            look,
         } => gallery::run(&gallery::Options {
             output,
             only,
             repeat,
             workers,
+            shard,
+            list_states,
+            late: late.map(std::time::Duration::from_millis),
+            look,
         }),
         Command::Demo { scenario } => demo::run(&scenario),
     }

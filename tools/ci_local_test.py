@@ -24,6 +24,7 @@ import ci_local
 REPOSITORY = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = (REPOSITORY / ".github/workflows/ci.yml").read_text()
 BUILD_ROOTFS = (REPOSITORY / "tools/local-ci/build-rootfs.sh").read_text()
+CONTAINERFILE = (REPOSITORY / ".github/ci-image/Containerfile").read_text()
 JUSTFILE = (REPOSITORY / "justfile").read_text()
 
 
@@ -52,14 +53,14 @@ class Repository(unittest.TestCase):
 
 
 class SameAsCI(unittest.TestCase):
-    def test_full_ci_runs_only_on_pushes_to_main(self):
+    def test_ci_runs_on_pull_requests_and_pushes_to_main(self):
         trigger = WORKFLOW.split("\njobs:")[0]
-        self.assertNotRegex(trigger, r"(?m)^  pull_request:")
+        self.assertRegex(trigger, r"(?m)^  pull_request:\n    branches: \[main\]")
         self.assertRegex(trigger, r"(?m)^  push:\n    branches: \[main\]")
 
     def test_every_job_is_a_command_ci_runs(self):
         # CI runs each `just` recipe a local job runs, so a recipe can't change
-        # for one and not the other. ci.yml passes ci-scenarios its shard.
+        # for one and not the other. ci.yml passes some recipes their shard.
         commands = {
             recipe.strip()
             for command in ci_local.JOBS.values()
@@ -69,43 +70,52 @@ class SameAsCI(unittest.TestCase):
             commands,
             {
                 "just lint",
-                "just test --exclude test-harness",
+                "just ci-tests",
+                "just ci-checklist-group-6",
+                "just ci-gallery",
                 "just scorecard",
                 "just ci-scenarios",
                 "just ci-first-frame-timings",
             },
         )
+        workflow = WORKFLOW.replace("run: >-\n          ", "run: ")
         for command in commands:
-            self.assertIn(f"run: {command}", WORKFLOW.replace("run: >-\n          ", "run: "))
-        for recipe in ("ci-scenarios", "ci-first-frame-timings"):
+            self.assertRegex(workflow, rf"run: {re.escape(command)}\b")
+        for recipe in ("ci-tests", "ci-checklist-group-6", "ci-gallery", "ci-scenarios",
+                       "ci-first-frame-timings"):
             self.assertRegex(JUSTFILE, rf"(?m)^{recipe}\b.*:$")
 
     def test_every_just_command_in_a_ci_job_is_a_local_job(self):
-        # The other direction: a `just` step added to the lint, check or
-        # scenarios job of ci.yml must be added to JOBS, or it runs on GitHub
-        # only, and "CI passed" can be posted without it.
+        # The other direction: a `just` step added to a job of ci.yml must be
+        # added to JOBS, or `just ci-local` passes without it.
         local = {
             recipe.strip()
             for command in ci_local.JOBS.values()
             for recipe in command.split("&&")
         }
-        found = set()
-        for job in ("lint", "check", "scenarios"):
-            block = re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [\w-]+:\n|\Z)", WORKFLOW)
-            self.assertIsNotNone(block, job)
-            for line in re.findall(r"(?m)^\s+run: (just [^\n]*)$", block.group(1)):
-                found.add(line.split(" | ")[0].split(" --partition")[0].strip())
+        jobs = WORKFLOW.split("\njobs:\n", 1)[1]
+        found = {
+            line.split(" | ")[0].split(" --partition")[0].split(" ${{")[0].strip()
+            for line in re.findall(r"(?m)^\s+run: (just [^\n]*)$", jobs)
+        }
         self.assertEqual(found, local)
 
-    def test_the_image_has_the_packages_ci_installs(self):
-        # The workflow's one package list, anchored as `&install` and used by
-        # every test job.
-        installed = re.search(r"&install\n\s+name: [^\n]*\n\s+run: >-\n((?:\s+[^\n]+\n)+?)\n", WORKFLOW)
-        self.assertIsNotNone(installed)
-        ci = packages(installed.group(1).replace("pacman -Syu --noconfirm --needed", ""))
+    def test_the_checklist_jobs_run_every_group_6_test_ci_tests_skips(self):
+        # ci-tests skips checklist_group_6_tests, and CI's checklist jobs
+        # run one name each, so a name in one list must be in the other.
+        listed = re.search(r'(?m)^checklist_group_6_tests := "([^"]*)"$', JUSTFILE)
+        matrix = re.search(r"(?m)^        names: \[([^\]]*)\]$", WORKFLOW)
+        self.assertIsNotNone(listed)
+        self.assertIsNotNone(matrix)
+        self.assertEqual(set(matrix.group(1).replace(",", " ").split()), set(listed.group(1).split()))
+
+    def test_the_image_has_the_packages_ci_has(self):
+        # CI's image (.github/ci-image/Containerfile) and ci-local's.
+        ci = re.search(r"pacman -Syu --noconfirm --needed \\\n((?:\s+[^\n&]+\\\n)+)", CONTAINERFILE)
+        self.assertIsNotNone(ci)
         local = re.search(r"pacman -Syu --noconfirm --needed \\\n((?:    [^\n]+\\?\n)+)", BUILD_ROOTFS)
         self.assertIsNotNone(local)
-        self.assertEqual(packages(local.group(1).replace("\\", "")), ci)
+        self.assertEqual(packages(local.group(1).replace("\\", "")), packages(ci.group(1).replace("\\", "")))
 
 
 class Folders(unittest.TestCase):
@@ -160,14 +170,7 @@ class Stopping(unittest.TestCase):
                 os.kill(child, 0)
 
 
-class Offline(unittest.TestCase):
-    def test_a_run_with_the_ticket_check_skipped_cannot_pass(self):
-        with mock.patch.dict(os.environ, {ci_local.OFFLINE: "1"}), \
-                mock.patch.object(ci_local, "post_status") as post:
-            with self.assertRaises(ci_local.Refused):
-                ci_local.settle("a" * 40, [], 100, mock.Mock())
-            post.assert_not_called()
-
+class TheImage(unittest.TestCase):
     def test_the_image_never_gets_the_host_environment(self):
         enter = (REPOSITORY / "tools/local-ci/enter.sh").read_text()
         self.assertNotIn("DESKTOP_CALLS_OFFLINE=", enter)
@@ -314,118 +317,6 @@ class Image(unittest.TestCase):
             pull.assert_not_called()
 
 
-class Pushing(unittest.TestCase):
-    SHA = "c" * 40
-
-    def push(self, branch):
-        calls = []
-
-        def run(command, **kwargs):
-            calls.append(command)
-            return subprocess.CompletedProcess(command, 0, "", "")
-
-        with mock.patch.object(ci_local, "git", return_value=branch), \
-                mock.patch.object(ci_local.subprocess, "run", side_effect=run):
-            ci_local.push_branch(self.SHA, mock.Mock())
-        return calls
-
-    def test_never_pushes_main(self):
-        with mock.patch.object(ci_local, "git", return_value="main"), \
-                mock.patch.object(ci_local.subprocess, "run") as run:
-            with self.assertRaisesRegex(ci_local.Refused, "main"):
-                ci_local.push_branch(self.SHA, mock.Mock())
-            run.assert_not_called()
-
-    def test_never_pushes_a_detached_head(self):
-        with mock.patch.object(ci_local, "git", return_value=""), \
-                mock.patch.object(ci_local.subprocess, "run") as run:
-            with self.assertRaisesRegex(ci_local.Refused, "detached"):
-                ci_local.push_branch(self.SHA, mock.Mock())
-            run.assert_not_called()
-
-    def test_pushes_the_tested_commit_never_the_branch_ref(self):
-        calls = self.push("ticket/7-x")
-        pushes = [command for command in calls if command[:2] == ["git", "push"]]
-        self.assertEqual(pushes, [["git", "push", "origin", f"{self.SHA}:refs/heads/ticket/7-x"]])
-        self.assertNotIn("--force", " ".join(pushes[0]))
-
-    def test_a_failed_push_posts_nothing(self):
-        def fail(command, **kwargs):
-            return subprocess.CompletedProcess(command, 1, "", "rejected")
-
-        with mock.patch.object(ci_local, "git", return_value="ticket/7-x"), \
-                mock.patch.object(ci_local.subprocess, "run", side_effect=fail):
-            with self.assertRaisesRegex(ci_local.Refused, "pushing ticket/7-x failed"):
-                ci_local.push_branch(self.SHA, mock.Mock())
-
-
-class Posting(unittest.TestCase):
-    SHA = "a" * 40
-
-    def log(self):
-        log = mock.Mock()
-        log.display_path.return_value = "~/.cache/desktop-calls-ci/logs/x.log"
-        return log
-
-    def test_the_description_names_the_log_without_a_home_directory(self):
-        text = ci_local.status_description("success", 104.4, [], self.log())
-        self.assertIn("~/.cache/desktop-calls-ci/logs/x.log", text)
-        self.assertNotIn("/home/", text)
-        self.assertLessEqual(len(text), 140)
-
-    def test_a_failure_names_the_jobs(self):
-        text = ci_local.status_description("failure", 60, ["lint", "test"], self.log())
-        self.assertIn("lint, test", text)
-
-    def test_nothing_is_posted_if_head_moved(self):
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=("b" * 40, "")), \
-                mock.patch.object(ci_local, "post_status") as post:
-            with self.assertRaises(ci_local.Refused):
-                ci_local.settle(self.SHA, [], 100, self.log())
-            post.assert_not_called()
-
-    def test_nothing_is_posted_if_the_tree_became_dirty(self):
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=(self.SHA, " M x")), \
-                mock.patch.object(ci_local, "post_status") as post:
-            with self.assertRaises(ci_local.Refused):
-                ci_local.settle(self.SHA, [], 100, self.log())
-            post.assert_not_called()
-
-    def test_green_posts_success_on_the_tested_commit(self):
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=(self.SHA, "")), \
-                mock.patch.object(ci_local, "github_has", return_value=True), \
-                mock.patch.object(ci_local, "post_status") as post:
-            self.assertEqual(ci_local.settle(self.SHA, [], 100, self.log()), ci_local.EXIT_PASSED)
-            self.assertEqual(post.call_args.args[:2], (self.SHA, "success"))
-
-    def test_green_pushes_first_if_github_lacks_the_commit(self):
-        order = []
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=(self.SHA, "")), \
-                mock.patch.object(ci_local, "github_has", return_value=False), \
-                mock.patch.object(ci_local, "push_branch", side_effect=lambda *a: order.append("push")), \
-                mock.patch.object(ci_local, "post_status", side_effect=lambda *a: order.append("post")):
-            ci_local.settle(self.SHA, [], 100, self.log())
-        self.assertEqual(order, ["push", "post"])
-
-    def test_red_posts_failure_and_never_pushes(self):
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=(self.SHA, "")), \
-                mock.patch.object(ci_local, "github_has", return_value=True), \
-                mock.patch.object(ci_local, "push_branch") as push, \
-                mock.patch.object(ci_local, "post_status") as post:
-            self.assertEqual(ci_local.settle(self.SHA, ["lint"], 100, self.log()), ci_local.EXIT_FAILED)
-            self.assertEqual(post.call_args.args[:2], (self.SHA, "failure"))
-            push.assert_not_called()
-
-    def test_red_on_a_commit_github_lacks_posts_nothing(self):
-        with mock.patch.object(ci_local, "head_and_cleanliness", return_value=(self.SHA, "")), \
-                mock.patch.object(ci_local, "github_has", return_value=False), \
-                mock.patch.object(ci_local, "push_branch") as push, \
-                mock.patch.object(ci_local, "post_status") as post:
-            self.assertEqual(ci_local.settle(self.SHA, ["test"], 100, self.log()), ci_local.EXIT_FAILED)
-            post.assert_not_called()
-            push.assert_not_called()
-
-
 class Stopped(unittest.TestCase):
     """A failed lint ends the run: head 8b3c277 failed lint in 4 s and the
     other jobs still ran for 205 s."""
@@ -545,16 +436,21 @@ class DocsOnly(unittest.TestCase):
 
 
 class Choosing(unittest.TestCase):
-    """What main() runs and what it posts."""
+    """What main() runs, and that it posts and pushes nothing (#286)."""
 
     SHA = "a" * 40
 
-    def main(self, *arguments: str, docs_only: bool) -> tuple[mock.Mock, mock.Mock]:
-        run_jobs = mock.Mock(return_value=([], pathlib.Path("/tmp/x")))
-        settle = mock.Mock(return_value=ci_local.EXIT_PASSED)
+    def main(self, *arguments: str, docs_only: bool, failed: list[str] | None = None) -> tuple[mock.Mock, int]:
+        run_jobs = mock.Mock(return_value=(failed or [], pathlib.Path("/tmp/x")))
+
+        def no_network(command, *_, **__):
+            if command[:2] in (["gh", "api"], ["git", "push"]):
+                raise AssertionError(f"ci-local ran {command}")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch("sys.argv", ["ci_local.py", *arguments]), \
-                mock.patch.object(ci_local, "require_online"), \
+                mock.patch.object(ci_local.subprocess, "run", no_network), \
                 mock.patch.object(ci_local, "require_clean_head", return_value=self.SHA), \
                 mock.patch.object(ci_local, "worktree", return_value="/work/here"), \
                 mock.patch.object(ci_local, "Claim"), \
@@ -565,36 +461,29 @@ class Choosing(unittest.TestCase):
                 mock.patch.object(ci_local, "build_image"), \
                 mock.patch.object(ci_local, "remove_tree"), \
                 mock.patch.object(ci_local, "is_docs_only", return_value=docs_only), \
-                mock.patch.object(ci_local, "run_jobs", run_jobs), \
-                mock.patch.object(ci_local, "settle", settle):
-            ci_local.main()
-        return run_jobs, settle
+                mock.patch.object(ci_local, "run_jobs", run_jobs):
+            code = ci_local.main()
+        return run_jobs, code
 
-    def test_a_docs_only_change_runs_lint_alone_and_posts_the_status(self):
-        run_jobs, settle = self.main(docs_only=True)
-        self.assertEqual(run_jobs.call_args.args[2], ["lint"])
-        self.assertEqual(settle.call_args.args[4], True)
+    def test_a_docs_only_change_runs_lint_alone(self):
+        run_jobs, code = self.main(docs_only=True)
+        self.assertEqual((run_jobs.call_args.args[2], code), (["lint"], ci_local.EXIT_PASSED))
 
-    def test_a_change_with_code_runs_every_job(self):
-        run_jobs, settle = self.main(docs_only=False)
-        self.assertEqual(run_jobs.call_args.args[2], list(ci_local.JOBS))
-        self.assertEqual(settle.call_args.args[4], False)
+    def test_a_change_with_code_runs_every_job_and_posts_nothing(self):
+        run_jobs, code = self.main(docs_only=False)
+        self.assertEqual((run_jobs.call_args.args[2], code), (list(ci_local.JOBS), ci_local.EXIT_PASSED))
+
+    def test_a_failed_job_fails_the_run_and_posts_nothing(self):
+        _, code = self.main(docs_only=False, failed=["test"])
+        self.assertEqual(code, ci_local.EXIT_FAILED)
 
     def test_full_runs_every_job_for_docs(self):
         run_jobs, _ = self.main("--full", docs_only=True)
         self.assertEqual(run_jobs.call_args.args[2], list(ci_local.JOBS))
 
     def test_named_jobs_run_as_named_for_docs(self):
-        run_jobs, settle = self.main("lint", "test", docs_only=True)
+        run_jobs, _ = self.main("lint", "test", docs_only=True)
         self.assertEqual(run_jobs.call_args.args[2], ["lint", "test"])
-        settle.assert_not_called()
-
-    def test_the_status_says_the_run_was_docs_only(self):
-        log = mock.Mock()
-        log.display_path.return_value = "~/.cache/desktop-calls-ci/logs/x.log"
-        text = ci_local.status_description("success", 40, [], log, docs_only=True)
-        self.assertIn("docs only, lint alone", text)
-        self.assertLessEqual(len(text), 140)
 
 
 class Queued(unittest.TestCase):
@@ -620,9 +509,8 @@ class Queued(unittest.TestCase):
             child.wait()
 
     def run_in(self, directory: str, script: str = "ci_local.py") -> tuple[ci_local.Claim, subprocess.Popen]:
-        """A stand-in for a ci-local run (or, with `land.py`, a landing), which
-        `is_ci_local` takes for one by its command line, with its claim on
-        `directory`."""
+        """A stand-in for a ci-local run, which `is_ci_local` takes for one by
+        its command line, with its claim on `directory`."""
         child = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)", script],
         )
@@ -646,15 +534,6 @@ class Queued(unittest.TestCase):
         self.assertIn(f"process {child.pid}", message)
         self.assertIn("waiting since 20:41:00 UTC", message)
         self.assertIn("just ci-local --cancel", message)
-
-    def test_a_landing_holds_the_worktrees_claim_and_cancel_stops_it(self):
-        """`just land` runs as tools/land.py and takes the same claim (#247)."""
-        _, landing = self.run_in("/work/here", script="land.py")
-        with self.assertRaises(ci_local.Refused):
-            ci_local.Claim("/work/here").take("b" * 40)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(ci_local.cancel("/work/here"), ci_local.EXIT_PASSED)
-        landing.wait(timeout=5)
 
     def test_a_run_from_another_worktree_is_not_refused(self):
         self.run_in("/work/elsewhere")

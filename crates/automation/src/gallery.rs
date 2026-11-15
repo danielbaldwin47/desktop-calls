@@ -10,11 +10,9 @@
 //! Omarchy's tray draws the menu: a stand-in.
 
 use std::fs;
-use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread;
 use std::time::Duration;
 
 use test_harness::vcards::{self, CallKind};
@@ -25,7 +23,9 @@ mod indicator;
 mod look;
 mod page;
 mod quiet_hours_window;
+mod render;
 mod setup_window;
+mod shard;
 
 use banner::BANNER_STATES;
 use call_pill::{CALL_PILL_STATES, expanded, hold_call_window_expanded};
@@ -35,7 +35,9 @@ use indicator::{
 use look::{LOOKS, Look};
 use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
+use render::render_all;
 use setup_window::SETUP_PROBLEM_STATES;
+pub use shard::Shard;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
 /// How many temporary captures the muted Call Window's state has taken.
@@ -800,24 +802,79 @@ pub struct Options {
     pub repeat: u32,
     /// How many states to render at a time. Default: one per CPU.
     pub workers: Option<u32>,
+    /// Only this part of the states, for one of several CI runners.
+    pub shard: Option<Shard>,
+    /// Print the states' names, in order, and render nothing.
+    pub list_states: bool,
+    /// How long to wait between reaching each state and capturing it, as a
+    /// slow runner might (#248).
+    pub late: Option<Duration>,
+    /// Only this look, by its name, as a PR's CI renders the gallery.
+    pub look: Option<String>,
+}
+
+/// The states to render: `only`, or the states of `shard`, or every state.
+/// None, having said why, if `only` names no state.
+fn chosen_states(options: &Options) -> Option<Vec<&'static State>> {
+    let Some(only) = &options.only else {
+        let in_shard = |position: usize| options.shard.is_none_or(|shard| shard.holds(position));
+        return Some(
+            all_states()
+                .enumerate()
+                .filter(|(position, _)| in_shard(*position))
+                .map(|(_, state)| state)
+                .collect(),
+        );
+    };
+    let state = all_states().find(|state| state.name == only);
+    if state.is_none() {
+        let names: Vec<&str> = all_states().map(|state| state.name).collect();
+        eprintln!(
+            "The gallery has no state {only:?}. Its states: {}.",
+            names.join(", ")
+        );
+    }
+    state.map(|state| vec![state])
+}
+
+/// The looks to render: `look`, or every look. None, having said why, if
+/// `look` names no look.
+fn chosen_looks(options: &Options) -> Option<Vec<Look>> {
+    let looks: Vec<Look> = LOOKS
+        .into_iter()
+        .filter(|look| {
+            options
+                .look
+                .as_ref()
+                .is_none_or(|only| only == look.as_str())
+        })
+        .collect();
+    if looks.is_empty() {
+        let names: Vec<&str> = LOOKS.iter().map(|look| look.as_str()).collect();
+        eprintln!(
+            "The gallery has no look {:?}. Its looks: {}.",
+            options.look.as_deref().unwrap_or_default(),
+            names.join(", ")
+        );
+        return None;
+    }
+    Some(looks)
 }
 
 /// `automation screenshot`: renders the gallery, or with `only` one state
 /// of it, `repeat` times, into `output` or `target/screenshots/gallery`.
 pub fn run(options: &Options) -> ExitCode {
-    let states: Vec<&State> = match &options.only {
-        None => all_states().collect(),
-        Some(only) => {
-            let Some(state) = all_states().find(|state| state.name == only) else {
-                let names: Vec<&str> = all_states().map(|state| state.name).collect();
-                eprintln!(
-                    "The gallery has no state {only:?}. Its states: {}.",
-                    names.join(", ")
-                );
-                return ExitCode::FAILURE;
-            };
-            vec![state]
+    if options.list_states {
+        for state in all_states() {
+            println!("{}", state.name);
         }
+        return ExitCode::SUCCESS;
+    }
+    let Some(states) = chosen_states(options) else {
+        return ExitCode::FAILURE;
+    };
+    let Some(looks) = chosen_looks(options) else {
+        return ExitCode::FAILURE;
     };
     let output = if let Some(output) = options.output.clone() {
         output
@@ -841,10 +898,10 @@ pub fn run(options: &Options) -> ExitCode {
 
     let shots: Vec<(&State, Look)> = states
         .iter()
-        .flat_map(|state| LOOKS.map(|look| (*state, look)))
+        .flat_map(|state| looks.iter().map(|look| (*state, *look)))
         .collect();
     for repetition in 1..=options.repeat {
-        render_all(&shots, &output, options.workers);
+        render_all(&shots, &output, options.workers, options.late);
         if options.repeat > 1 {
             println!("Rendered {repetition} of {} times.", options.repeat);
         }
@@ -893,11 +950,13 @@ pub fn run(options: &Options) -> ExitCode {
         eprintln!("Can't write {}: {error}", index.display());
         return ExitCode::FAILURE;
     }
-    let states = shots.len() / LOOKS.len();
+    let states = all_states()
+        .filter(|state| shots.iter().any(|(shot, _, _)| shot.name == state.name))
+        .count();
     let indicator_states = indicators.len() / INDICATOR_THEMES.len();
     let menu_states = menus.len() / INDICATOR_THEMES.len();
     println!(
-        "Gallery: {} screenshots of {states} state{}, light and dark, stock and under Omarchy; \
+        "Gallery: {} screenshots of {states} state{}; \
          the Indicator in {indicator_states} state{} and its menu in {menu_states}, light and dark.",
         shots.len(),
         if states == 1 { "" } else { "s" },
@@ -915,48 +974,6 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .chain(CALL_PILL_STATES)
         .chain(QUIET_HOURS_WINDOW_STATES)
         .chain(SETUP_PROBLEM_STATES)
-}
-
-/// Renders each of `shots` into `output`, several at a time: `workers`, or
-/// one scenario per CPU. Each has its own compositor, buses and app, so they
-/// don't meet. One at a time, the 56 shots took 139 s of a CI run (#118).
-/// With a CPU's worth of them each on a machine others are building on, a
-/// screen was late past its deadline (#167).
-fn render_all(shots: &[(&State, Look)], output: &Path, workers: Option<u32>) {
-    let next = AtomicUsize::new(0);
-    let workers = workers.map_or_else(
-        || thread::available_parallelism().map_or(1, NonZeroUsize::get),
-        |workers| workers as usize,
-    );
-    thread::scope(|scope| {
-        for _ in 0..workers.min(shots.len()) {
-            scope.spawn(|| {
-                while let Some(&(state, look)) = shots.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    render(state, look, output);
-                }
-            });
-        }
-    });
-}
-
-/// Renders `state` under `look` into `output`.
-fn render(state: &State, look: Look, output: &Path) {
-    let harness = (state.prepare)(look.builder())
-        .headless_screen()
-        .omarchy_bar()
-        .screenshot_directory(output.to_owned())
-        .start();
-    (state.reach)(&harness);
-    // A frame is judged after it is taken. A surface queues its
-    // new content for `Surfaces` as it renders it, and a task on
-    // the same GLib main context publishes it. That task runs at
-    // default priority, before GTK's redraw, which GLib runs at a
-    // lower one. Only that scheduling order, not any proof in the
-    // code, makes a frame judged while the app still reports the
-    // state show that state.
-    let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
-        (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
-    });
 }
 
 /// A state's file name under `look`, without `.png`.

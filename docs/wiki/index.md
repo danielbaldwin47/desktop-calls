@@ -20,7 +20,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated, including the disk filling on 2026-11-14 (updated 2026-11-14).
 
-- [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) and how it copes with load (#167), the load flakes by cause (#168 to #172, #180, #185), the rule that stand-ins are as strict as the real service (#166), the GitHub CI red from #182 and its fix in #211, GitHub's CI red or cancelled again on 2026-11-14, and the Real-Phone Checklist, dated (added 2026-11-05; updated 2026-11-14).
+- [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) and how it copes with load (#167), the load flakes by cause (#168 to #172, #180, #185), the rule that stand-ins are as strict as the real service (#166), the GitHub CI red from #182 and its fix in #211, GitHub's CI red or cancelled again on 2026-11-14, CI back on GitHub for PRs (#286), and the Real-Phone Checklist, dated (added 2026-11-05; updated 2026-11-14).
 
 ## Process
 

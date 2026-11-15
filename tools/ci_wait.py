@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Wait on one GitHub CI run, and say why it failed without anyone reading its log.
 
-GitHub runs CI only on pushes to main and on `gh workflow run CI`; a branch's
-CI is `just ci-local` (ticket #158), which prints its own failures. So this
-is for the run after a merge, and for a dispatched run.
+GitHub runs CI on every push to a PR, on pushes to main and on `gh workflow
+run CI` (ticket #286). This is for any of those runs: a PR's, the one after
+a merge, or a dispatched one.
 
 Usage (through just):
   just ci-wait               # the latest run for the current branch
@@ -41,7 +41,7 @@ EXIT_PASSED, EXIT_FAILED, EXIT_NO_RUN = 0, 1, 2
 
 # The workflow in .github/workflows/ci.yml.
 WORKFLOW = "CI"
-# Artifacts that hold scenario directories, from either CI job.
+# Artifacts that hold scenario directories, from any CI job.
 SCENARIO_LOGS = "*scenario-logs*"
 # Where the scenario directories live on the runner (see Harness::start).
 RUNNER_SCENARIO = re.compile(r"/tmp/(desktop-calls-test-\w+)")

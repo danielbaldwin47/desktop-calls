@@ -61,6 +61,11 @@ const STATES: &[&str] = &[
     "setup-problem-bluez-hands-free",
 ];
 
+/// The environment variable `name`, unless it is unset or empty.
+fn set(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
 /// Renders the gallery exactly as `just screenshot` does, into its default
 /// directory, `target/screenshots/gallery`. CI keeps that directory as an
 /// artifact, so this test is also what makes CI's gallery.
@@ -73,8 +78,42 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
         .expect("the binary is in target/<profile>/")
         .join("screenshots/gallery");
 
+    // CI renders the gallery in parts, one per runner (#286): GALLERY_SHARD
+    // is K/N, and this part holds every N-th of the gallery's states from
+    // the K-th, in the order `--list-states` prints.
+    let shard = set("GALLERY_SHARD");
+    let listed = Command::new(binary)
+        .args(["screenshot", "--list-states"])
+        .output()
+        .expect("run automation screenshot --list-states");
+    let listed = String::from_utf8(listed.stdout).expect("the states' names are text");
+    let order: Vec<&str> = listed.lines().collect();
+    for state in STATES {
+        assert!(
+            order.contains(state),
+            "the gallery lists {state}: {order:?}"
+        );
+    }
+    let in_this_part = |state: &str| {
+        let Some(shard) = &shard else { return true };
+        let (number, count) = shard.split_once('/').expect("GALLERY_SHARD is K/N");
+        let (number, count): (usize, usize) = (
+            number.parse().expect("K is a number"),
+            count.parse().expect("N is a number"),
+        );
+        let position = order.iter().position(|listed| *listed == state);
+        position.is_some_and(|position| position % count == number - 1)
+    };
+
+    // A PR's CI renders one look, GALLERY_LOOK, enough to catch a broken
+    // surface; the run on main renders every look.
+    let look = set("GALLERY_LOOK");
+
     let mut command = Command::new(binary);
     command.arg("screenshot");
+    for (flag, value) in [("--shard", &shard), ("--look", &look)] {
+        command.args(value.iter().flat_map(|value| [flag, value]));
+    }
     // The gallery is one test, so the test runner's limit on how many run at
     // once doesn't reach it. `just ci-local` sets that limit to what the
     // Desktop has to spare, and each state here is a compositor and an app.
@@ -97,9 +136,15 @@ fn the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy() {
     );
     let index =
         std::fs::read_to_string(output.join("index.html")).expect("the gallery has an index");
-    let files = STATES.iter().flat_map(|state| {
-        ["light", "dark", "omarchy-light", "omarchy-dark"].map(|look| format!("{state}-{look}.png"))
-    });
+    let files = STATES
+        .iter()
+        .filter(|state| in_this_part(state))
+        .flat_map(|state| {
+            ["light", "dark", "omarchy-light", "omarchy-dark"]
+                .into_iter()
+                .filter(|each| look.as_deref().is_none_or(|only| only == *each))
+                .map(move |look| format!("{state}-{look}.png"))
+        });
     for file in files {
         let file = file.as_str();
         assert!(index.contains(file), "the index shows {file}: {index}");

@@ -1,0 +1,41 @@
+# CI's image: Arch Linux, to match the user's Desktop (Omarchy), with every
+# package CI's jobs need and the pinned Rust toolchain already installed.
+#
+# .github/workflows/ci.yml builds it once, pushes it to GitHub's container
+# registry tagged with a hash of this file and rust-toolchain.toml, and every
+# job runs in it. Before #286 each of CI's seven jobs ran `pacman -Syu` and
+# `rustup toolchain install` itself, about 30 s each, on whatever the mirrors
+# held that minute (a mirror failure once failed a shard before any repo code
+# ran). Change this file to change the image; the next run builds it.
+#
+# `just ci-local` builds its own image from the same package list
+# (tools/local-ci/build-rootfs.sh; tools/ci_local_test.py keeps them equal).
+
+# A dated tag, never `latest`, so the base changes only when this line does.
+FROM archlinux:base-20261108.0.623074
+
+# gcc links, and pkgconf finds the system libraries; base-devel's other
+# tools (make, gdb, guile, perl's autotools) aren't needed. sway is the
+# screen harness's headless compositor, grim its screenshot tool,
+# wl-clipboard its clipboard for pasting, and libnotify's notify-send a
+# client of the notification stand-in. python-dbus and python-gobject let
+# the Real-Phone Checklist's --demo run the PBAP probe (tools/real-phone)
+# against the Simulated Phone. cargo-nextest runs the harness's shards.
+#
+# The package gives sway the file capability cap_sys_nice, which is outside
+# a CI container's bounding set, so exec fails with EPERM. sway runs
+# without it; only its realtime scheduling goes.
+RUN pacman -Syu --noconfirm --needed \
+        gcc pkgconf git rustup just cargo-deny cargo-nextest \
+        gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject \
+        sway grim wl-clipboard libnotify \
+    && pacman -Scc --noconfirm \
+    && rm -rf /var/cache/pacman/pkg/* /usr/share/man /usr/share/doc /usr/share/gtk-doc \
+    && setcap -r /usr/bin/sway
+
+# GitHub Actions sets HOME to /github/home in a job's container, so the
+# toolchain lives outside any home. Cargo's own home stays the default,
+# where the rust-cache action keeps the registry.
+ENV RUSTUP_HOME=/opt/rustup
+COPY rust-toolchain.toml /opt/toolchain/rust-toolchain.toml
+RUN cd /opt/toolchain && rustup toolchain install && rustc --version

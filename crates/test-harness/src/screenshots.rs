@@ -8,8 +8,13 @@ use std::time::{Duration, Instant};
 use super::{FRAMES_AHEAD, Harness, REDRAW_DEADLINE};
 use crate::redraw::OnScreen;
 use crate::screen::Screen;
-use crate::screencopy::Recorder;
+use crate::screencopy::{self, Recorder};
 use crate::{Region, Screenshot, redraw};
+
+/// How long one capture of the screen as it is may take. A plain copy of a
+/// still screen takes milliseconds; without a limit, a compositor that had
+/// hung held the scenario until the job's timeout.
+const CAPTURE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// The latest frame in the run of frames, starting with `found`, that
 /// satisfy `shown`, up to the first that doesn't. Frames passed over are
@@ -105,7 +110,7 @@ impl Harness {
     ) -> Screenshot {
         let give_up = Instant::now() + deadline;
         let captures = self.directory.join("captures");
-        let (mut recorder, stopper) = Recorder::connect(&self.screen().socket, &captures)
+        let (mut recorder, stopper) = Recorder::connect(&self.screen().socket, &captures, deadline)
             .unwrap_or_else(|error| panic!("record the screen: {error}"));
         let (found, last, failed) = thread::scope(|scope| {
             let (sender, receiver) = mpsc::sync_channel(FRAMES_AHEAD);
@@ -187,13 +192,14 @@ impl Harness {
         }
     }
 
-    /// One frame of the screen as it is now, as a PPM under `captures/`.
+    /// One frame of the screen as it is now, as a PPM under `captures/`,
+    /// within [`CAPTURE_DEADLINE`].
     fn capture_now(&self, file: &str) -> Screenshot {
         let captures = self.directory.join("captures");
         let path = captures.join(file);
-        let (width, height) = Recorder::connect(&self.screen().socket, &captures)
-            .and_then(|(mut recorder, _)| recorder.next_frame(&path))
-            .unwrap_or_else(|error| panic!("capture the screen: {error}"));
+        let (width, height) =
+            screencopy::capture_once(&self.screen().socket, &captures, &path, CAPTURE_DEADLINE)
+                .unwrap_or_else(|error| panic!("capture the screen: {error}"));
         Screenshot {
             path,
             width,

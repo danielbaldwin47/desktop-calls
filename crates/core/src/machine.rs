@@ -72,8 +72,9 @@ pub use view::{
 /// `OpenDialer` can select one.
 const RECENT_CALLS: usize = 16;
 
-/// How long the Call Window shows "Call ended" before it closes.
-const CALL_ENDED_MS: u32 = 2_000;
+/// How long the Call Window shows "Call ended" before it closes. Public
+/// for the gallery, which captures that look within it (#248).
+pub const CALL_ENDED_MS: u32 = 2_000;
 /// How long Calls from the earlier run may take to show again after
 /// startup: the Phone link lists them as soon as the Phone is attached.
 /// A Call seen later is a new one.
@@ -122,8 +123,9 @@ const LOST_CALL_BACK_MS: u32 = 2_000;
 /// report one before the Banner says the number is withheld. PipeWire 1.6.9
 /// registers the Call on `+CIEV: callsetup,1` and sets the number from the
 /// `+CLIP` after the first `RING`; the Simulated Phone's
-/// `late-line-identification` quirk sends it 1 s late (ticket #86).
-const NUMBER_LATE_MS: u32 = 2_000;
+/// `late-line-identification` quirk sends it 1 s late (ticket #86). Public
+/// for the gallery, which captures the Banner identifying within it (#248).
+pub const NUMBER_LATE_MS: u32 = 2_000;
 
 /// The hands-free microphone gain to restore when the Phone's own value is
 /// unusable: 15, the top of the hands-free range (0 to 15), which is also

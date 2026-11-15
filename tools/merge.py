@@ -6,14 +6,15 @@ Usage (through just):
   just merge 42 --wait 0     # don't wait: refuse if a check is still pending
   just merge 42 --wait 60    # wait up to 60 minutes
 
-Branch protection requires the status "CI passed" on a PR's head, which `just
-ci-local` posts after a green local run (ticket #158); GitHub doesn't run
-full CI on a PR. This is the only way to merge, and it checks more than
-protection does. For a PR that main has moved past, use `just land 42`
-(tools/land.py, ticket #247): it brings the branch up to date, tests the
-result and merges, holding the CI lane's lock, so nothing lands in between.
-This tool takes the same lock for its final recheck and squash, so the two
-can't race. It refuses unless all of these hold, in this order:
+Branch protection requires the check "CI passed" on a PR's head, which
+GitHub's CI posts once every job of its run on the PR passed (ticket #286;
+from #158 to #286 `just ci-local` posted it as a status instead). This is
+the only way to merge, and it checks more than protection does. For a PR
+that main has moved past, use `just land 42` (tools/land.py, ticket #247):
+it brings the branch up to date, waits for GitHub's run on the result and
+merges, holding the landing lock, so nothing lands in between. This tool
+takes the same lock for its final recheck and squash, so the two can't race.
+It refuses unless all of these hold, in this order:
 
   1. The PR is open.
   2. The PR head already contains the tip of origin/<base>, so the CI that
@@ -28,8 +29,8 @@ can't race. It refuses unless all of these hold, in this order:
      jobs can be missing while every check listed has passed. Pending checks
      and unfinished runs are waited for; one still pending when the wait ends
      counts as not passed. A skipped check counts as passed only beside a
-     passed "CI passed". A head with no check at all is refused at once:
-     nothing starts CI on a PR, so run `just ci-local` on it.
+     passed "CI passed". A head GitHub has started no run on within
+     CHECKS_APPEAR_SECONDS is refused.
   4. The head did not move while waiting, and still contains origin/<base>
      (with the same exception).
   5. GitHub reports the PR as mergeable, and it is not a draft.
@@ -37,8 +38,8 @@ can't race. It refuses unless all of these hold, in this order:
      with one the PR closes (tools/checklist_tickets.py, ticket #120).
 
 When the head lacks commits on <base>, the refusal names `just land`, which
-merges origin/<base> into the branch and tests that merge commit (one run)
-before it merges. It never calls `gh pr update-branch`.
+merges origin/<base> into the branch and pushes it, so GitHub's CI tests
+that merge commit (one run), before it merges. It never calls `gh pr update-branch`.
 
 Then it squash-merges the head it checked (`--match-head-commit`) and
 deletes the PR's branch on GitHub. Local branches and worktrees are left
@@ -51,6 +52,7 @@ Exit status: 0 merged and branch deleted; 1 refused, nothing merged;
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -68,6 +70,12 @@ EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
 POLL_SECONDS = 10
 # How long GitHub may take to work out whether a PR is mergeable.
 MERGEABLE_SECONDS = 60
+# How long GitHub may take to start CI on a head just pushed.
+CHECKS_APPEAR_SECONDS = 90
+# Landings take turns on this lock (#247): `just land` holds it from its first
+# look at main to the squash, and `just merge` for its final recheck and
+# squash. Before #286 it was ci-local's lock, when landing ran CI itself.
+LANDING_LOCK = ci_local.ROOT / "landing-lock"
 
 
 class Refused(Exception):
@@ -75,11 +83,25 @@ class Refused(Exception):
     what to run next."""
 
 
-# The commit status `just ci-local` posts when every job passed, and the
-# check run CI's summary job posts on main. `gh pr checks` lists both.
+# The check run CI's summary job posts on a PR's head, and on main, once
+# every job passed (.github/workflows/ci.yml). Branch protection requires it,
+# from GitHub Actions only.
 SUMMARY_CHECK = "CI passed"
 # The compare API lists at most this many files and commits.
 COMPARE_FILES_LIMIT, COMPARE_COMMITS_LIMIT = 300, 250
+
+
+def take_landing_turn() -> object:
+    """Holds the landing lock until the returned handle closes (or the
+    process exits), and says so if it must wait."""
+    LANDING_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(LANDING_LOCK, "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Another landing has the lock; waiting for it to finish.", flush=True)
+        fcntl.flock(handle, fcntl.LOCK_EX)
+    return handle
 
 
 def gh(*args: str) -> str:
@@ -186,12 +208,12 @@ def checkout_of(branch: str) -> str | None:
 
 def bring_up_to_date(pr: dict) -> str:
     """The `Next:` text for a head that lacks commits on the base: `just land`
-    merges the base into the branch, runs CI on that merge commit, pushes it
-    (a fast-forward, so never a force), posts "CI passed" on it and merges,
-    holding the CI lane's lock throughout, so main can't move in between
-    (ticket #247). It runs in the worktree that has the branch checked out.
-    `gh pr update-branch` would make the merge commit on GitHub, where no "CI
-    passed" is ever posted on it."""
+    merges the base into the branch, pushes it (a fast-forward, so never a
+    force), waits for GitHub's "CI passed" on it and merges, holding the
+    landing lock throughout, so main can't move in between (ticket #247). It
+    runs in the worktree that has the branch checked out. `gh pr
+    update-branch` would make the merge commit on GitHub, behind the back of
+    the worktree, and nothing would hold main still for it."""
     number, base, branch = pr["number"], pr["baseRefName"], pr["headRefName"]
     where = checkout_of(branch)
     here = git("rev-parse", "--show-toplevel").strip()
@@ -203,11 +225,11 @@ def bring_up_to_date(pr: dict) -> str:
         start = f"cd {where} && "
     return (
         f"Next: {start}just land {number}\n"
-        f"It merges origin/{base} into the branch, runs CI on the result, posts \"CI passed\" and "
-        "merges, holding the CI lane so nothing lands in between. On a conflict it stops and "
-        "says what to run.\n"
-        "Never rebase a pushed branch, and not `gh pr update-branch`: its merge commit has no "
-        '"CI passed".'
+        f"It merges origin/{base} into the branch, pushes it, waits for GitHub's \"CI passed\" and "
+        "merges, taking turns with other landings so nothing lands in between. On a conflict it "
+        "stops and says what to run.\n"
+        "Never rebase a pushed branch, and not `gh pr update-branch`: nothing holds main still "
+        "for its merge commit."
     )
 
 
@@ -260,8 +282,8 @@ def label(check: dict) -> str:
 
 
 def wait_for_checks(pr: dict, wait_seconds: float) -> None:
-    """Waits until every check has finished, or the wait ends, or there is
-    no check at all: nothing starts CI on a PR, so none is coming."""
+    """Waits until every check has finished, or the wait ends, or GitHub has
+    started nothing on the head within CHECKS_APPEAR_SECONDS."""
     number = str(pr["number"])
     started = time.monotonic()
     deadline = started + wait_seconds
@@ -287,7 +309,11 @@ def wait_for_checks(pr: dict, wait_seconds: float) -> None:
             # A run may have started more jobs meanwhile: look again.
             continue
         if not current:
-            return
+            if time.monotonic() - started >= CHECKS_APPEAR_SECONDS:
+                return
+            if "none yet" not in announced:
+                print(f"Waiting for GitHub to start CI on PR #{number}'s head.", flush=True)
+                announced.add("none yet")
         for run in unfinished:
             if run["link"] not in announced:
                 print(f"Waiting for {label(run)}: {run['state'].lower()}  {run['link']}", flush=True)
@@ -301,9 +327,9 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     if not found:
         raise Refused(
             f"No checks are reported on PR #{number}'s head ({pr['headRefOid'][:7]}), so "
-            "nothing shows it is green. GitHub doesn't run CI on a PR: `just ci-local` "
-            "does, on the commit checked out, and posts \"CI passed\".\n"
-            f"Next: git switch {pr['headRefName']} && just ci-local   (then `just merge {number}`)"
+            "nothing shows it is green. GitHub runs CI on every push to a PR; none has "
+            "started on this head.\n"
+            f"Next: gh run list --branch {pr['headRefName']}   (then `just merge {number}`)"
         )
     failed = [check for check in found if check["bucket"] in ("fail", "cancel")]
     pending = [check for check in found if check["bucket"] == "pending"]
@@ -398,7 +424,7 @@ def require_no_step_waits_on_a_closed_ticket(pr: dict, is_open=None) -> None:
 
 def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     """Squash-merges PR `number` if every condition holds. `lane_held` says the
-    caller (`just land`) already holds the CI lane's lock. Otherwise the final
+    caller (`just land`) already holds the landing lock. Otherwise the final
     recheck and the squash take it, so they can't fall between another
     landing's merge of main and its squash."""
     pr = pull_request(number)
@@ -417,7 +443,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     # Held while this function runs (`lane` stays alive to its end), so through
     # the squash. Waiting for the checks, above, is done without it: that wait
     # can take minutes.
-    lane = None if lane_held else ci_local.take_turn()
+    lane = None if lane_held else take_landing_turn()
     now = pull_request(number)
     require_open(now)
     if now["headRefOid"] != pr["headRefOid"]:

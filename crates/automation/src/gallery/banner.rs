@@ -3,6 +3,9 @@
 //! Waiting Call with and without hold. A third Call waiting, beside the
 //! Call Window with two Calls, is in the main list.
 
+use std::time::{Duration, Instant};
+
+use desktop_calls_core::NUMBER_LATE_MS;
 use test_harness::{AppState, Builder, DESKTOP_CALLS_BINDING, Harness};
 
 use super::call_pill::{expanded, hold_call_window_expanded};
@@ -67,20 +70,36 @@ pub(super) const BANNER_STATES: &[State] = &[
     State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
-        // The Banner identifies the caller for only 2 s, so a capture on a
-        // slow runner could show "Withheld number" under this caption.
+        // The Banner identifies the caller for only 2 s: `reach` stops the
+        // app within them, and `render` doesn't ask it again.
         still: identifying,
         prepare: with_keybinding,
         reach: |harness| {
             connect(harness);
+            // The app's first frame of a surface held its main loop up for
+            // 1.6 s of these 2 s on a loaded runner (run 43678330490), and
+            // the app was stopped too late. A Banner drawn and declined
+            // first leaves the identifying Banner's frame quick.
+            let warm_up = ring(harness);
+            harness.wait_for_app_log("Drew the banner surface's first frame", DEADLINE);
+            harness.decline(warm_up);
+            harness.wait_for_app("the first Banner has gone", DEADLINE, |state| {
+                state.calls.is_empty() && state.surface("banner").is_none()
+            });
             // A withheld number: the Banner identifies the caller for as long
             // as the Phone may still report one, longer than the
             // `late-line-identification` quirk's number takes.
+            let rang = Instant::now();
             let _path = harness.simulated_phone().ring("");
             harness.wait_for_app(
                 "the Banner is identifying the caller",
                 DEADLINE,
                 identifying,
+            );
+            // For only 2 s, so the app is stopped for the capture (#248).
+            harness.freeze_app_before(
+                rang + Duration::from_millis(NUMBER_LATE_MS.into()),
+                "the Banner identifying the caller",
             );
         },
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),

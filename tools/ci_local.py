@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-"""Run CI's jobs on this machine, and post "CI passed" on the commit if they pass.
+"""Run CI's jobs on this machine: an optional check before a push.
 
 Usage (through just):
   just ci-local                  # every job on HEAD: lint, test, scenarios, timings
-  just ci-local lint             # one or more jobs; nothing is posted
+  just ci-local lint             # one or more jobs
   just ci-local --full           # every job, even for a change that touches only docs
   just ci-local --cancel         # stop the run started from this worktree, queued or running
   just ci-local --rebuild-image  # throw the image away and build it again
 
-GitHub runs the full CI only on pushes to main (ticket #158). Everywhere
-else this is CI: run it before every push. It runs the same `just` recipes
-as .github/workflows/ci.yml, in the same base image (archlinux:latest, with
-the packages the workflow installs), unprivileged: a user namespace and a
-chroot, no sudo, no container engine.
+GitHub runs CI on every push to a PR and to main, and its "CI passed" check
+is what a merge needs (ticket #286). This posts nothing and pushes nothing:
+it is for finding a failure before a push, on this machine, and nothing
+needs it. (From #158 to #286 it was CI for PRs, and posted "CI passed".) It
+runs the same `just` recipes as .github/workflows/ci.yml, on Arch Linux
+with the packages CI's image has (.github/ci-image/Containerfile),
+unprivileged: a user namespace and a chroot, no sudo, no container engine.
 
 What it does, in order:
-  1. Refuses unless the working tree is clean: it tests the commit HEAD, and
-     the status it posts says that commit passed.
+  1. Refuses unless the working tree is clean: it tests the commit HEAD.
   2. Takes a lock, so runs from several agents take turns. A run waiting
      for it tests HEAD as it is when its turn comes, so committing while
      queued is fine. A worktree has one run at a time: a second is refused,
@@ -24,8 +25,7 @@ What it does, in order:
   3. Removes /tmp/desktop-calls-test-* folders of yours that are over an
      hour old (the harness leaks them).
   4. Builds the image the first time (a few minutes, 2 GB), and again once it
-     is two weeks old, as CI's is new each run. Refuses to run with
-     DESKTOP_CALLS_OFFLINE set, which would skip lint's ticket check.
+     is two weeks old.
   5. Checks out HEAD into a scratch directory and runs each job in the
      image, under nice (the timings, below, excepted), with a private /tmp. The jobs that run tests have
      no network, and nothing reaches the host's D-Bus, PipeWire, Bluetooth
@@ -38,22 +38,12 @@ What it does, in order:
      priority, since under nice they wait behind every build. Each job's last
      line says how much others used while it ran, and a failure says whether
      that was enough to blame (ticket #167).
-  6. If every job passed and HEAD is still the commit tested, pushes the
-     branch if GitHub doesn't have the commit yet (a status needs a commit
-     to sit on), and posts the commit status "CI passed" (state success).
-     If a job failed, posts "CI passed" with state failure. Branch
-     protection requires that context, and `just merge` reads it.
 
-Two shortcuts, both said in the log and the status:
+Two shortcuts, both said in the log:
   - Docs only: when HEAD contains origin/main and tools/changes.py says the
     change from origin/main to HEAD touches only docs that no code names, the
-    run is lint alone, and a pass posts "CI passed" as usual. GitHub CI skips
-    the test jobs for such a push through the same script. It is safe because
-    a squash merge keeps the tree of the head that passed. If main has moved
-    with code since, the head no longer contains origin/main: `just merge`
-    sends the PR back to be brought up to date, and the new run, whose change
-    from origin/main is docs only again, is lint alone as well, while that
-    code is already tested on main. --full runs every job regardless.
+    run is lint alone, as GitHub CI skips the test jobs for such a push
+    through the same script. --full runs every job regardless.
   - A failed lint ends the run: the other jobs would test a commit that must
     change before it can pass.
 
@@ -61,8 +51,7 @@ The cache, image and logs are under ~/.cache/desktop-calls-ci, never /tmp,
 which has a per-user quota. Each run's log is in logs/. A failed run keeps
 its /tmp (the failed scenarios' directories) in runs/.
 
-Exit status: 0 every job passed and the status was posted; 1 a job failed;
-2 refused, or could not run or post.
+Exit status: 0 every job passed; 1 a job failed; 2 refused, or could not run.
 """
 
 from __future__ import annotations
@@ -88,8 +77,6 @@ import changes  # the docs-only rule that CI's "Code changed?" job and `just mer
 EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
 
 REPO = "danielbaldwin47/desktop-calls"
-# The context branch protection requires, with no app pinned.
-CONTEXT = "CI passed"
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOCAL_CI = HERE / "local-ci"
@@ -108,12 +95,9 @@ CLAIMS = ROOT / "claims"
 # How long --cancel waits for the stopped run to exit.
 CANCEL_SECONDS = 20
 
-# How old the image may get before a run builds it again. CI installs the
-# newest packages on every run, so an old image drifts from it.
+# How old the image may get before a run builds it again, so it drifts no
+# further than this from the newest packages.
 IMAGE_STALE_DAYS = 14
-# Set, it makes the ticket check in lint skip itself (tools/checklist_tickets.py),
-# which a run that posts "CI passed" must not.
-OFFLINE = "DESKTOP_CALLS_OFFLINE"
 # How long logs and failed runs' /tmp are kept.
 KEEP_DAYS = 14
 # A /tmp/desktop-calls-test-* folder this old belongs to no running test.
@@ -125,22 +109,23 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 # .github/workflows/ci.yml runs every one of these commands.
 #
 #   lint       CI job "lint"
-#   test       CI job "check": the tests but the harness's scenarios, and the
-#              scorecard (the gallery test renders the gallery on the way)
+#   test       CI jobs "tests", "checklist" and "gallery": the tests but the
+#              harness's scenarios, and the scorecard, in one job rather than
+#              five (the gallery in one run rather than three shards)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
-#              four shards
+#              five shards
 #   timings    the rest of CI job "scenarios": the first-frame timings one at
 #              a time, so that no other scenario's app slows a first paint
 JOBS: dict[str, str] = {
     "lint": "just lint",
-    "test": "just test --exclude test-harness && just scorecard",
+    "test": "just ci-tests && just ci-checklist-group-6 && just ci-gallery && just scorecard",
     "scenarios": "just ci-scenarios",
     "timings": "just ci-first-frame-timings",
 }
 # Jobs that run tests in parallel, so are held to the Desktop's spare CPUs.
 PARALLEL_JOBS = {"test", "scenarios"}
 # A failure here ends the run: the fix is a new commit and a new run, so the
-# other jobs would only spend minutes on a commit that will not be posted.
+# other jobs would only spend minutes on a commit that must change.
 FAIL_FAST_JOBS = {"lint"}
 # Jobs whose timings are the test: they run at normal priority, one at a time.
 UNHURRIED_JOBS = {"timings"}
@@ -172,8 +157,7 @@ PREPARE = "rustup toolchain install && cargo fetch --locked"
 
 
 class Refused(Exception):
-    """The run can't start, or its result can't be posted. The message says
-    what to do next."""
+    """The run can't start. The message says what to do next."""
 
 
 def git(*args: str) -> str:
@@ -192,8 +176,8 @@ def require_clean_head() -> str:
     sha, dirty = head_and_cleanliness()
     if dirty:
         raise Refused(
-            "The working tree has uncommitted changes, so a run would test "
-            f"{sha[:7]} while the status described something else:\n{dirty}\n"
+            "The working tree has uncommitted changes, and a run tests a commit, "
+            f"{sha[:7]}, without them:\n{dirty}\n"
             "Next: commit or discard them, then just ci-local"
         )
     return sha
@@ -208,14 +192,13 @@ def worktree() -> str:
 
 
 def is_ci_local(pid: int) -> bool:
-    """Whether `pid` is a live ci-local run, or a `just land` (tools/land.py),
-    which holds the same claim and lock: a process ID alone may have been
+    """Whether `pid` is a live ci-local run: a process ID alone may have been
     reused by anything since the run that held it ended."""
     try:
         command = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return False
-    return any(argument.endswith((b"ci_local.py", b"land.py")) for argument in command.split(b"\0"))
+    return any(argument.endswith(b"ci_local.py") for argument in command.split(b"\0"))
 
 
 class Claim:
@@ -269,7 +252,7 @@ def cancel(directory: str) -> int:
     """Stops the run started from this worktree, and no other."""
     record = Claim(directory).read()
     if not record:
-        print("No ci-local run is queued or running from this worktree.")  # a landing counts as one
+        print("No ci-local run is queued or running from this worktree.")
         return EXIT_PASSED
     pid = int(record["pid"])
     # SIGTERM takes the run's whole tree down with it (stop_on_sigterm).
@@ -304,7 +287,7 @@ def take_turn() -> object:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print(
-            f"Another ci-local run (or landing) has the lock{running_elsewhere()}; waiting for it to finish. "
+            f"Another ci-local run has the lock{running_elsewhere()}; waiting for it to finish. "
             "This run tests HEAD as it is when its turn comes, so committing while it waits is "
             "fine. To stop it: just ci-local --cancel, in this worktree.",
             flush=True,
@@ -395,7 +378,7 @@ class Log:
         return process.wait()
 
     def display_path(self) -> str:
-        """The log's path with ~ for the home directory: a status is public."""
+        """The log's path with ~ for the home directory, for messages."""
         try:
             return "~/" + str(self.path.relative_to(pathlib.Path.home()))
         except ValueError:
@@ -687,101 +670,6 @@ def run_jobs(log: Log, sha: str, jobs: list[str]) -> tuple[list[str], pathlib.Pa
     return failed, tmp
 
 
-# -- The status ---------------------------------------------------------------
-
-
-def github_has(sha: str) -> bool:
-    result = subprocess.run(
-        ["gh", "api", f"repos/{REPO}/commits/{sha}", "--silent"], capture_output=True, text=True
-    )
-    return result.returncode == 0
-
-
-def push_branch(sha: str, log: Log) -> None:
-    """A status can only sit on a commit GitHub has, so push the branch, as
-    `git push` would. Never main, never a force."""
-    branch = git("branch", "--show-current")
-    if not branch or branch == "main":
-        raise Refused(
-            f"{sha[:7]} passed, but GitHub doesn't have it and "
-            f"{'HEAD is detached' if not branch else 'main is only pushed by a merge'}, "
-            "so there is nowhere to push it.\n"
-            "Next: switch to a branch, push it, then just ci-local"
-        )
-    log.line(f"GitHub doesn't have {sha[:7]} yet: pushing {branch}.")
-    # The commit that was tested, not whatever the branch points at now.
-    result = subprocess.run(
-        ["git", "push", "origin", f"{sha}:refs/heads/{branch}"], capture_output=True, text=True
-    )
-    log.line((result.stdout + result.stderr).strip())
-    if result.returncode != 0:
-        raise Refused(
-            f"{sha[:7]} passed, but pushing {branch} failed, so no status was posted.\n"
-            "Next: merge origin/main into the branch (or fix the push), then just ci-local"
-        )
-    # So `git status` and a bare `git push` know the branch, as after `git push -u`.
-    subprocess.run(
-        ["git", "branch", "--set-upstream-to", f"origin/{branch}", branch], capture_output=True
-    )
-
-
-def status_description(
-    state: str, seconds: float, failed: list[str], log: Log, docs_only: bool = False
-) -> str:
-    what = "passed" if state == "success" else f"failed: {', '.join(failed)}"
-    if docs_only:
-        what += " (docs only, lint alone)"
-    return f"just ci-local {what} in {seconds:.0f} s; log {log.display_path()}"[:140]
-
-
-def post_status(sha: str, state: str, description: str) -> None:
-    result = subprocess.run(
-        [
-            "gh", "api", f"repos/{REPO}/statuses/{sha}",
-            "-f", f"state={state}", "-f", f"context={CONTEXT}", "-f", f"description={description}",
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise Refused(
-            f"Posting the status on {sha[:7]} failed: {result.stderr.strip()}\n"
-            "Next: gh auth status, then just ci-local"
-        )
-
-
-def require_online() -> None:
-    if os.environ.get(OFFLINE):
-        raise Refused(
-            f"{OFFLINE} is set, which makes lint skip its ticket check, so this run "
-            "can't say \"CI passed\".\n"
-            f"Next: unset {OFFLINE}, then just ci-local"
-        )
-
-
-def settle(sha: str, failed: list[str], seconds: float, log: Log, docs_only: bool = False) -> int:
-    """Posts the result, if HEAD is still the commit that was tested."""
-    require_online()
-    now, dirty = head_and_cleanliness()
-    if now != sha or dirty:
-        raise Refused(
-            f"HEAD or the working tree changed during the run (tested {sha[:7]}, now {now[:7]}"
-            f"{', with uncommitted changes' if dirty else ''}), so nothing was posted.\n"
-            "Next: just ci-local"
-        )
-    state = "failure" if failed else "success"
-    if not github_has(sha):
-        if failed:
-            log.line(f"{', '.join(failed)} failed, and GitHub doesn't have {sha[:7]}: nothing posted.")
-            return EXIT_FAILED
-        push_branch(sha, log)
-    post_status(sha, state, status_description(state, seconds, failed, log, docs_only))
-    if failed:
-        log.line(f"{CONTEXT}: failure posted on {sha[:7]} ({', '.join(failed)} failed).")
-        return EXIT_FAILED
-    log.line(f"{CONTEXT}: success posted on {sha[:7]}.")
-    return EXIT_PASSED
-
-
 # -- Main ---------------------------------------------------------------------
 
 
@@ -815,13 +703,8 @@ def stop_on_sigterm() -> None:
     signal.signal(signal.SIGTERM, handler)
 
 
-def run_and_post(
-    sha: str, jobs: list[str], every_job: bool, full: bool, rebuild: bool, log: Log
-) -> int:
-    """Runs `jobs` on `sha` and, if every job was meant to run, posts the
-    result. The caller holds the lock and has made `sha` HEAD: `just ci-local`
-    does, and so does `just land` (tools/land.py), which runs this on the
-    merge it made."""
+def run(sha: str, jobs: list[str], every_job: bool, full: bool, rebuild: bool, log: Log) -> int:
+    """Runs `jobs` on `sha`, which the caller has made HEAD, holding the lock."""
     docs_only = False
     if every_job and not full and is_docs_only(sha, log):
         docs_only, jobs = True, ["lint"]
@@ -835,20 +718,21 @@ def run_and_post(
         log.line(f"Failed scenarios' directories are in {tmp}")
     else:
         remove_tree(tmp)
-    if not every_job:
-        log.line("Only some jobs ran, so no status was posted.")
-        return EXIT_FAILED if failed else EXIT_PASSED
-    return settle(sha, failed, seconds, log, docs_only)
+    if failed:
+        log.line(f"{', '.join(failed)} failed{' (docs only, lint alone)' if docs_only else ''}.")
+        return EXIT_FAILED
+    log.line(f"{sha[:7]} passed{' (docs only, lint alone)' if docs_only else ''}.")
+    return EXIT_PASSED
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run CI's jobs here, and post 'CI passed' on HEAD if they pass"
+        description="Run CI's jobs here before a push; optional, and nothing is posted"
     )
     parser.add_argument("jobs", nargs="*", choices=list(JOBS), metavar="JOB",
-                        help=f"one of {', '.join(JOBS)}; default all, which alone posts a status")
+                        help=f"one of {', '.join(JOBS)}; default all")
     parser.add_argument("--rebuild-image", action="store_true",
-                        help="remove the image and build it again from the newest archlinux:latest")
+                        help="remove the image and build it again from the newest packages")
     parser.add_argument("--cancel", action="store_true",
                         help="stop the run started from this worktree, queued or running, and no other")
     parser.add_argument("--full", action="store_true",
@@ -861,8 +745,6 @@ def main() -> int:
         if args.cancel:
             return cancel(worktree())
         stop_on_sigterm()
-        if every_job:
-            require_online()
         sha = require_clean_head()
         claim = Claim(worktree())
         claim.take(sha)
@@ -877,12 +759,12 @@ def main() -> int:
         # HEAD may have moved while this waited for its turn.
         sha = require_clean_head()
         claim.write("running", sha)
-        return run_and_post(sha, jobs, every_job, args.full, args.rebuild_image, log)
+        return run(sha, jobs, every_job, args.full, args.rebuild_image, log)
     except Refused as refusal:
         print(refusal, file=sys.stderr)
         return EXIT_REFUSED
     except KeyboardInterrupt:
-        print("Interrupted; nothing was posted.", file=sys.stderr)
+        print("Interrupted.", file=sys.stderr)
         return EXIT_REFUSED
     finally:
         if claim:

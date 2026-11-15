@@ -1,17 +1,18 @@
 name: CI
 
 on:
-  # Full CI runs here only on pushes to main, as a canary after each merge.
-  # Everywhere else CI runs on the author's machine: `just ci-local` runs
-  # these same jobs in this same image, and posts the commit status "CI
-  # passed" that branch protection requires (ticket #158). So nothing here
-  # runs on pull_request, and nothing here posts "CI passed" on a PR head.
+  # Every PR to main is gated here: GitHub's own "CI passed" job posts the
+  # check branch protection requires, on the PR's head (#286; from #158 to
+  # #286 a local run posted it instead).
+  pull_request:
+    branches: [main]
+  # And again on main after each merge, which tests what landed.
   push:
     branches: [main]
   # `gh workflow run CI --ref <branch> -f keep_scenario_logs=true` keeps the
   # logs of passing scenarios too, to compare them with failing ones. Its
-  # summary job is named differently (below), so it never stands in for, or
-  # contradicts, the status `just ci-local` posted on that commit.
+  # summary job is named differently (below), so it never stands in for the
+  # check on a PR.
   workflow_dispatch:
     inputs:
       keep_scenario_logs:
@@ -21,6 +22,8 @@ on:
 
 permissions:
   contents: read
+  # To pull CI's image from GitHub's container registry.
+  packages: read
 
 # The harness keeps a passing scenario's directory too when this is set (see
 # KEEP_SCENARIO_LOGS in crates/test-harness/src/lib.rs). Failing scenarios
@@ -28,22 +31,29 @@ permissions:
 env:
   KEEP_SCENARIO_LOGS: ${{ inputs.keep_scenario_logs && '1' || '' }}
 
+# A newer push to a PR cancels that PR's older run, which tested a head that
+# can no longer merge. A run on main is in a group of its own, so it is never
+# cancelled and never waits for another run: with one group for main, a
+# 6-hour hung run held every later push to main pending, and each newer push
+# replaced the pending one, so 12 runs on main were cancelled on 2026-11-14
+# and run 43648375459 waited 5 h to start (#286).
 concurrency:
-  group: ci-${{ github.ref }}
-  # Never cancel on main: a later wiki push must not cancel the run that
-  # verifies a merge (it did on 2026-11-05, for #41).
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# `changes` decides whether the change touches code. If it does, the suite
-# runs in parallel, on several runners: `just lint`; every test but the
-# harness's scenarios; and the harness's scenarios, split into shards. The
-# test jobs build every target between them, as `just check` does. If it
-# touches only docs that no code reads, they are all skipped. "CI passed"
-# needs every job, so it appears only once they have all finished.
+# `changes` decides whether the change touches code, and `image` makes sure
+# CI's image exists. If code changed, the suite runs in parallel, on several
+# runners: `just lint`; the tests outside the harness; the Real-Phone
+# Checklist's group 6 runs; the gallery, in parts; and the harness's
+# scenarios, in shards. If only docs that no code reads changed, they are all
+# skipped. "CI passed" needs every job, so it appears only once they have all
+# finished. The slowest job sets the time from push to "CI passed": the
+# checklist's group 6, which waits out real minutes.
 jobs:
   changes:
     name: Code changed?
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.decide.outputs.code }}
     steps:
@@ -52,135 +62,190 @@ jobs:
           # Both ends of the change, to compare them.
           fetch-depth: 0
 
-      # The rule is in tools/changes.py, which `just merge` uses too.
+      # The rule is in tools/changes.py, which `just merge` uses too. A PR is
+      # compared from where it left main; a push from the commit before it.
       - name: Decide whether code changed
         id: decide
         env:
-          BASE: ${{ github.event.before }}
-          HEAD: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+
+  # Built only when .github/ci-image/Containerfile or rust-toolchain.toml
+  # changes, since the tag is their hash; otherwise this finds it and ends.
+  image:
+    name: CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      name: ${{ steps.name.outputs.name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github/ci-image
+            rust-toolchain.toml
+          sparse-checkout-cone-mode: false
+      - name: Name the image
+        id: name
+        env:
+          TAG: ${{ hashFiles('.github/ci-image/Containerfile', 'rust-toolchain.toml') }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-ci:$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build and push the image, unless it exists
+        env:
+          IMAGE: ${{ steps.name.outputs.name }}
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "$IMAGE exists."
+          else
+            docker build --file .github/ci-image/Containerfile --tag "$IMAGE" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+            docker push "$IMAGE"
+          fi
 
   # `just check` is `just lint` and then a build of every target. CI runs
   # `just lint` in a job of its own, beside the tests rather than before
   # them: the test jobs build every target between them, so its build would
-  # be a third one, a minute spent on the harness's tests, which this job
-  # never ran (#118).
+  # be one more, a minute spent on the harness's tests, which this job never
+  # ran (#118).
   lint:
     name: just lint (just check but its build, which the test jobs do)
-    needs: changes
+    needs: [changes, image]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    container:
-      image: archlinux:latest
-    steps:
-      # The system libraries the -sys crates' build scripts look for, but
-      # none of the scenarios' tools.
-      - name: Install system packages
-        run: >-
-          pacman -Syu --noconfirm --needed
-          gcc pkgconf git rustup just cargo-deny python
-          gtk4 gtk4-layer-shell libadwaita dbus
-      - uses: actions/checkout@v5
-      - name: Install the pinned Rust toolchain
-        run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ hashFiles('Cargo.toml') }}
-      - name: just lint
-        env: { GH_TOKEN: "${{ github.token }}" }
-        run: just lint
-
-  check:
-    name: just test, all but the harness's scenarios
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    # A green run took 6 minutes (run 43545913400). Without a limit, a hung gallery held
-    # this job for GitHub's 6 h default (#282).
-    timeout-minutes: 30
-    # Arch Linux, to match the user's Desktop (Omarchy).
+    # Green in about a minute.
+    timeout-minutes: 15
     container: &container
-      image: archlinux:latest
+      image: ${{ needs.image.outputs.name }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
       # Headless sway and grim keep each 3840x2160 frame (33 MB) in /dev/shm,
       # and screen scenarios run several at a time. Docker's default 64 MB ran
       # out: grim died of SIGBUS and sway failed to start.
       options: --shm-size=1g
     steps:
-      # gcc links, and pkgconf finds the system libraries; base-devel's other
-      # tools (make, gdb, guile, perl's autotools) aren't needed. sway is the
-      # screen harness's headless compositor, grim its screenshot tool,
-      # wl-clipboard its clipboard for pasting, and libnotify's notify-send a
-      # client of the notification stand-in. python-dbus and python-gobject
-      # let the Real-Phone Checklist's --demo run the PBAP probe
-      # (tools/real-phone) against the Simulated Phone. cargo-nextest runs
-      # the harness's shards. Every job runs scenarios, so each installs
-      # everything.
-      - &install
-        name: Install system packages
-        run: >-
-          pacman -Syu --noconfirm --needed
-          gcc pkgconf git rustup just cargo-deny cargo-nextest
-          gtk4 gtk4-layer-shell libadwaita dbus python python-dbus python-gobject
-          sway grim wl-clipboard libnotify
-
       - &checkout
         uses: actions/checkout@v5
-
-      - &toolchain
-        name: Install the pinned Rust toolchain
-        # rustup reads rust-toolchain.toml.
-        run: rustup toolchain install
-
       # rust-cache keys on Cargo.lock and the crates' manifests, but not the
       # workspace's Cargo.toml. A change to its build profiles then restored
       # a cache that matched in name only: every dependency rebuilt, and the
-      # cache was never saved again. Its hash goes in the key.
-      - uses: Swatinem/rust-cache@v2
+      # cache was never saved again. Its hash goes in the key. Only runs on
+      # main save: a PR restores main's cache, and caches saved by PRs would
+      # evict it from the repository's 10 GB.
+      - &cache
+        uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: just lint
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: just lint
 
-      # The package gives sway the file capability cap_sys_nice, which is
-      # outside this container's bounding set, so exec fails with EPERM.
-      # sway runs without it; only its realtime scheduling goes.
-      - &sway
-        name: Let sway run in the container
-        run: setcap -r /usr/bin/sway
-
-      # The gallery test renders the gallery exactly as `just screenshot` does,
-      # into target/screenshots/gallery, so CI doesn't render it twice.
-      - name: just test, all but the harness's scenarios
-        run: just test --exclude test-harness
-
+  # Every test outside the harness's scenarios but the gallery and the
+  # checklist's group 6 runs, which have jobs of their own: together the
+  # three are `just test --exclude test-harness`, which took 12 minutes in
+  # one job (run 43648375459: 402 s of gallery, 219 s of checklist).
+  tests:
+    name: just ci-tests, all but the scenarios, the gallery and checklist group 6
+    needs: [changes, image]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: *container
+    steps:
+      - *checkout
+      - *cache
+      - name: just ci-tests
+        run: just ci-tests
+      # A report, not a gate: only the run on main makes it.
       - name: just scorecard
+        if: github.event_name != 'pull_request'
         run: just scorecard | tee scorecard.txt
-
-      - name: Keep the gallery
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gallery
-          path: target/screenshots
-          if-no-files-found: ignore
-
       - name: Keep the scorecard
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: scorecard
           path: scorecard.txt
           if-no-files-found: ignore
-
       # Every scenario directory left: those of failed scenarios, and of
       # passing ones too when KEEP_SCENARIO_LOGS is set. `just ci-wait`
       # downloads them.
-      - name: Keep the scenario logs
+      - &scenario-logs
+        name: Keep the scenario logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scenario-logs-check
+          name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}${{ matrix.names && format('-{0}', matrix.names) || '' }}
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
+
+  # The Real-Phone Checklist's demo runs of group 6 wait out real time:
+  # calls stay off for 60 s, and Quiet Hours begin at the next minute and
+  # end a minute later. Its three tests took 157, 157 and 60 s; two at a
+  # time on one runner, 217 s, the slowest job of run 43675318041. So one
+  # 157 s test gets a runner of its own, and the other two share one. The
+  # names, between them, are the justfile's checklist_group_6_tests.
+  #
+  # Only on main, not on PRs: it was the slowest job of a PR's run (4 min 50 s
+  # of run 43677761934, the rest done by 4 min 2 s), and it tests the
+  # checklist's demo runner, which the scenarios' Calls Off and Quiet Hours
+  # tests don't need (#286, 2026-11-15).
+  checklist:
+    name: just ci-checklist-group-6 ${{ matrix.names }}
+    needs: [changes, image]
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: *container
+    strategy:
+      fail-fast: false
+      matrix:
+        names: [group_6_times, step_6_2_]
+    steps:
+      - *checkout
+      - *cache
+      - name: just ci-checklist-group-6 ${{ matrix.names }}
+        run: just ci-checklist-group-6 ${{ matrix.names }}
+      - *scenario-logs
+
+  # The gallery, every surface in every state, in parts: each renders every
+  # N-th state. A PR's run renders the light stock look only, enough to catch
+  # a broken surface (the Omarchy theme has scenarios of its own); the run on
+  # main renders every look, light and dark, stock and under Omarchy.
+  gallery:
+    name: just ci-gallery (part ${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: [changes, image]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    # A part takes about 2.5 minutes. Without a limit, a hung gallery held a
+    # job for GitHub's 6 h default (#282).
+    timeout-minutes: 20
+    container: *container
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - *checkout
+      - *cache
+      - name: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }} ${{ github.event_name == 'pull_request' && 'light' || '' }}
+      - name: Keep the gallery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gallery-${{ matrix.shard }}
+          path: target/screenshots
+          if-no-files-found: ignore
+      - *scenario-logs
 
   # The harness's scenarios, in one shard per matrix entry, on as many runners
   # at once. cargo-nextest pools every scenario, rather than one slow
@@ -192,7 +257,7 @@ jobs:
   # under nextest, with two at a time either way (#118).
   scenarios:
     name: just test, the harness's scenarios (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    needs: changes
+    needs: [changes, image]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container: *container
@@ -203,17 +268,10 @@ jobs:
       # Every shard reports, so one failure doesn't hide another's.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
-      - *install
       - *checkout
-      - *toolchain
-      # The shards share one cache, which only the first saves.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ matrix.shard == 1 }}
-      - *sway
+      - *cache
 
       # Records whether unprivileged user and mount namespaces work here. The
       # harness uses them only to hide a reachable systemd journal from the
@@ -269,41 +327,46 @@ jobs:
           path: target/screenshots
           if-no-files-found: ignore
 
-      - name: Keep the scenario logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scenario-logs-${{ matrix.shard }}
-          path: /tmp/desktop-calls-test-*
-          if-no-files-found: ignore
+      - *scenario-logs
 
-  # The one check that says CI passed. It fails unless `changes` succeeded and
-  # both halves succeeded, or were skipped because `changes` found only docs.
-  # `just merge` waits on every check and every unfinished run.
+  # The one check that says CI passed, and the context branch protection
+  # requires, pinned to GitHub Actions. It fails unless `changes` succeeded
+  # and every other job succeeded, or was skipped because `changes` found only
+  # docs, or, for the checklist, because the run is a PR's. `just merge` and
+  # `just land` wait for it.
   ci-passed:
-    # Only a push to main posts the context branch protection requires. A
-    # dispatched run on a branch would post a "CI passed" on a commit
-    # `just ci-local` judged, and a failure there would contradict it.
-    name: ${{ github.event_name == 'push' && 'CI passed' || 'CI passed (dispatched run)' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && 'CI passed (dispatched run)' || 'CI passed' }}
     if: ${{ !cancelled() }}
-    needs: [changes, lint, check, scenarios]
+    needs: [changes, image, lint, tests, checklist, gallery, scenarios]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Every job passed, or was skipped for a docs-only change
         env:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
-          HALVES: ${{ needs.lint.result }} ${{ needs.check.result }} ${{ needs.scenarios.result }}
+          IMAGE: ${{ needs.image.result }}
+          JOBS: >-
+            ${{ needs.lint.result }} ${{ needs.tests.result }}
+            ${{ needs.gallery.result }} ${{ needs.scenarios.result }}
+          CHECKLIST: ${{ needs.checklist.result }}
+          PR: ${{ github.event_name == 'pull_request' }}
         run: |
-          echo "changes: $CHANGES, code changed: $CODE, halves: $HALVES"
+          echo "changes: $CHANGES, code changed: $CODE, image: $IMAGE, jobs: $JOBS, checklist: $CHECKLIST"
           [ "$CHANGES" = success ] || exit 1
-          for result in $HALVES; do
+          for result in $JOBS; do
             if [ "$CODE" = true ]; then
               [ "$result" = success ] || exit 1
             else
               [ "$result" = skipped ] || exit 1
             fi
           done
+          if [ "$CODE" = true ] && [ "$PR" != true ]; then
+            [ "$CHECKLIST" = success ] || exit 1
+          else
+            [ "$CHECKLIST" = skipped ] || exit 1
+          fi
+          if [ "$CODE" = true ]; then [ "$IMAGE" = success ] || exit 1; fi
 
       # A shard that didn't run, or a partition that left scenarios out, would
       # otherwise pass by running fewer.

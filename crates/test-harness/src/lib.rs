@@ -47,6 +47,7 @@ mod client;
 mod control;
 mod desktop;
 mod desktop_conditions;
+mod freeze;
 mod hyprland;
 mod input;
 mod omarchy_quiet;
@@ -200,6 +201,9 @@ pub struct Harness {
     processes: Vec<(&'static str, Child)>,
     /// What happened, for the panic when a wait times out.
     timeline: Arc<Timeline>,
+    /// The app's process ID while it is stopped to capture a state that
+    /// lasts a moment (`freeze.rs`).
+    frozen: Mutex<Option<u32>>,
     /// Holds every process above and their children. Dropped last, so it
     /// kills whatever they left running.
     group: ProcessGroup,
@@ -597,6 +601,8 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
+        // A stopped app would ignore the SIGTERM of a clean stop.
+        self.thaw_app();
         drop(self.service_manager.take());
         self.stop_activated_app();
         while let Some((_, mut child)) = self.processes.pop() {

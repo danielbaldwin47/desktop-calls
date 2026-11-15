@@ -98,6 +98,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "desktop-calls-core",
  "futures-util",
  "phonenumber",
  "serde_json",

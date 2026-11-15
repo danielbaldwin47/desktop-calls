@@ -24,7 +24,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## Process
 
-- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-15, morning to afternoon, `main` up to `2846987`: the after-v1 merges, the review gate, the `/tmp` quota, the UI pass finished, v1's agent-side work complete and what is open for the user; before it, 2026-11-15, CI back on GitHub and green; and 2026-11-14, the Call Pill, Calls Off and the UI pass merged).
+- [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-15, morning to afternoon, `main` up to `2846987`, with #357's later fix of that day's gallery failure noted: the after-v1 merges, the review gate, the `/tmp` quota, the UI pass finished, v1's agent-side work complete and what is open for the user; before it, 2026-11-15, CI back on GitHub and green; and 2026-11-14, the Call Pill, Calls Off and the UI pass merged).
 
 - [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05), the disk filling (2026-11-14), and the `/tmp` quota, the review gate and two CI reruns (2026-11-15).
 

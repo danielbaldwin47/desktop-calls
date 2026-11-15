@@ -167,17 +167,18 @@ pub fn start(
     events: Sender<Event>,
     locale_region: Option<String>,
 ) -> Result<Timeline, WatchError> {
-    let (stream, first) = zbus::block_on(subscribe(bus, locale_region.as_deref())).map_err(|error| match &error {
-        zbus::Error::FDO(fdo)
-            if matches!(
-                **fdo,
-                zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
-            ) =>
-        {
-            WatchError::NotRunning
-        }
-        _ => WatchError::Unexpected(error.to_string()),
-    })?;
+    let (stream, first) =
+        zbus::block_on(subscribe(bus, locale_region.as_deref())).map_err(|error| match &error {
+            zbus::Error::FDO(fdo)
+                if matches!(
+                    **fdo,
+                    zbus::fdo::Error::ServiceUnknown(_) | zbus::fdo::Error::NameHasNoOwner(_)
+                ) =>
+            {
+                WatchError::NotRunning
+            }
+            _ => WatchError::Unexpected(error.to_string()),
+        })?;
     let timeline: Timeline = Arc::new(Mutex::new(vec![(Instant::now(), first)]));
     let kept = timeline.clone();
     thread::spawn(move || zbus::block_on(follow(stream, &kept, &events, locale_region.as_deref())));

@@ -910,10 +910,7 @@ fn step_7_1_reads_the_locale_as_the_app_does_lc_all_before_lc_telephone() {
 fn step_7_1_passes_a_call_written_with_the_trunk_zero_after_the_country_code() {
     // `+44 07700 900999` is the Test Number written another way: safe to
     // accept, and a correct Call must not fail.
-    let keyboard = step_7_1_with(
-        &[("LANG", "en_GB.UTF-8")],
-        "type-test-number-with-trunk-zero",
-    );
+    let keyboard = step_7_1_with(&[("LANG", "en_GB.UTF-8")], "type-test-number-trunk-zero");
     assert_eq!(keyboard["result"], "pass", "{keyboard:#}");
     assert!(says(&keyboard, "keyboard alone"), "{keyboard:#}");
 }

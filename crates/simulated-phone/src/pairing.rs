@@ -35,8 +35,9 @@
 //!   hands-free, such as the Phone that forgot the pairing keeping the link
 //!   (ticket #373), is disconnected first, as BlueZ does: `Connected` goes
 //!   false (ticket #377). One with hands-free up fails
-//!   `org.bluez.Error.Failed`, because the simulation doesn't model taking
-//!   hands-free down for it: the test disconnects it, then removes it. The
+//!   `org.bluez.Error.Failed`, where BlueZ would disconnect it and succeed:
+//!   the simulation doesn't model taking hands-free down for it, so the
+//!   test disconnects it, then removes it. The
 //!   control interface's `FailNextRemoveDevice` fails the next one with
 //!   `org.bluez.Error.Failed`. The Phone, removed while in range, is nearby
 //!   and unpaired again: discovery under way finds it, as a Phone on its
@@ -140,6 +141,8 @@ pub struct Pairing {
     paired_signal_held: bool,
     /// The next `RemoveDevice` fails (`FailNextRemoveDevice`).
     pub fail_next_remove: bool,
+    /// Which `StartDiscovery` is current: only its loop finds devices.
+    discovery_run: u32,
 }
 
 impl Pairing {
@@ -452,13 +455,19 @@ fn start_discovery(
     if !crate::desktop::powered(&lock(world)) {
         return zbus::block_on(crate::desktop::not_ready().send(system, &message.header()));
     }
-    let signal = set(
-        &mut lock(world),
-        ADAPTER_PATH,
-        ADAPTER,
-        "Discovering",
-        true.into(),
-    );
+    let (signal, run) = {
+        let mut world = lock(world);
+        // One discovery at a time: a later start ends this one's loop.
+        world.pairing.discovery_run += 1;
+        let signal = set(
+            &mut world,
+            ADAPTER_PATH,
+            ADAPTER,
+            "Discovering",
+            true.into(),
+        );
+        (signal, world.pairing.discovery_run)
+    };
     zbus::block_on(async {
         Reply::body(()).send(system, &message.header()).await?;
         if let Some(signal) = signal {
@@ -472,7 +481,7 @@ fn start_discovery(
             let mut world = lock(world);
             // Discovery goes on until stopped, and finds a device removed
             // meanwhile, as BlueZ's does (ticket #377).
-            if !discovering(&world) {
+            if !discovering(&world) || world.pairing.discovery_run != run {
                 return Ok(());
             }
             if world.pairing.undiscovered.is_empty() {

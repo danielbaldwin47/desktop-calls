@@ -376,6 +376,107 @@ fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_aga
     }));
 }
 
+/// Paired, then asked for hands-free, which finds the pairing lost.
+fn pairing_lost() -> State {
+    let (state, _) = paired();
+    let (state, effects) = run(state, [Input::ConnectPhoneDone { attempt: 1 }]);
+    let (state, effects) = run(state, [Input::TimerFired(setup_timers(&effects)[0])]);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::RemovePairing { .. }))
+    );
+    let (state, effects) = run(state, [Input::HandsFreeUnpaired]);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::RemovePairing { .. })),
+        "nothing removed without Pair again"
+    );
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::PairingLost { phone: pixel() })
+    );
+    state
+}
+
+#[test]
+fn pair_again_removes_the_stale_pairing_and_pairs_the_phone_once_found() {
+    let (state, effects) = run(pairing_lost(), [Input::PairAgain]);
+    assert!(effects.contains(&Effect::RemovePairing {
+        address: PHONE.to_owned()
+    }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::PairingAgain { phone: pixel() })
+    );
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::PhoneUnpaired {
+                address: PHONE.to_owned(),
+            },
+            Input::PhoneNearby(pixel()),
+        ],
+    );
+    assert!(effects.contains(&Effect::PairPhone {
+        address: PHONE.to_owned()
+    }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Pairing { phone: pixel() })
+    );
+}
+
+#[test]
+fn pair_again_takes_the_code_of_the_phone_pairing_from_its_own_screen() {
+    let (state, _) = run(
+        pairing_lost(),
+        [
+            Input::PairAgain,
+            Input::PhoneUnpaired {
+                address: PHONE.to_owned(),
+            },
+        ],
+    );
+    let (state, effects) = run(
+        state,
+        [Input::PairingCode {
+            phone: pixel(),
+            code: 48_213,
+        }],
+    );
+    assert!(!effects.contains(&Effect::AnswerPairingCode { confirm: false }));
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Confirm {
+            phone: pixel(),
+            code: 48_213
+        })
+    );
+}
+
+#[test]
+fn a_pairing_not_removed_says_so_and_pair_again_tries_once_more() {
+    let (state, _) = run(pairing_lost(), [Input::PairAgain, Input::PairingNotRemoved]);
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::PairingLost { phone: pixel() })
+    );
+    assert_eq!(
+        state
+            .surfaces()
+            .setup_window
+            .and_then(|window| window.notice),
+        Some(SetupNotice::PairingNotRemoved)
+    );
+    let (_, effects) = run(state, [Input::PairAgain]);
+    assert!(effects.contains(&Effect::RemovePairing {
+        address: PHONE.to_owned()
+    }));
+}
+
 #[test]
 fn pairing_a_second_phone_switches_to_it() {
     let (state, _) = run(

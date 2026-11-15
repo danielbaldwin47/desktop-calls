@@ -1,11 +1,10 @@
 //! Scenarios: the Setup Window pairs a Phone from nothing, with the same
 //! code on both screens, from either side; checks the Phone shares Calls;
-//! pairs again, on Pair again, a Phone that forgot the pairing as it was
-//! asked for hands-free; opens again from the Indicator, the control
-//! interface and the command line; pairs again after the Phone forgot the
-//! pairing; and switches to a
-//! second Phone (ticket #21; polish scorecard items 4, 5, 7 and 8). Every
-//! step is taken with synthetic keys alone.
+//! opens again from the Indicator, the control interface and the command
+//! line; pairs again after the Phone forgot the pairing, on Pair again if
+//! it forgot while asked for hands-free; and switches to a second Phone
+//! (ticket #21; polish scorecard items 4, 5, 7 and 8). Every step is taken
+//! with synthetic keys alone.
 
 use std::collections::BTreeMap;
 use std::time::Duration;

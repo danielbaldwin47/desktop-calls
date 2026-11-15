@@ -225,6 +225,67 @@ fn call_back_clears_the_cue_and_dismissing_the_notification_does_not() {
 }
 
 #[test]
+fn a_missed_call_the_call_history_lacks_marks_no_older_row() {
+    // The refresh fails: the Call is counted as missed, but the Call
+    // History holds only Bob's older Missed Call, already seen.
+    let (state, _) = run(
+        synced(),
+        [
+            Input::CallAdded {
+                call: CallId(1),
+                state: CallState::Ringing,
+                caller: number(ALICE),
+                at: Timestamp(10_000),
+            },
+            Input::CallEnded {
+                call: CallId(1),
+                at: Timestamp(30_000),
+            },
+            Input::CallHistoryRefreshFailed,
+        ],
+    );
+    assert_eq!(state.unseen_missed_calls(), 1);
+    let (state, _) = run(state, [open_dialer()]);
+    let dialer = state.surfaces().dialer.unwrap_or_else(|| panic!("open"));
+    assert_eq!(dialer.new_missed, 0, "Bob's isn't new: {dialer:?}");
+}
+
+#[test]
+fn a_call_missed_while_the_dialer_is_open_is_marked_there_and_raises_no_cue() {
+    let (state, _) = run(synced(), [open_dialer()]);
+    let (state, effects) = missed(state, 1, ALICE, 10_000);
+    assert_eq!(kept(&effects), Vec::<u32>::new());
+    assert_eq!(state.unseen_missed_calls(), 0);
+    let dialer = state.surfaces().dialer.unwrap_or_else(|| panic!("open"));
+    assert_eq!(dialer.new_missed, 1);
+    assert_eq!(dialer.rows[0].caller, number(ALICE));
+}
+
+#[test]
+fn the_notification_opens_the_dialer_on_its_call_among_the_marked_ones() {
+    let (state, _) = missed(synced(), 1, ALICE, 10_000);
+    let (state, _) = missed(state, 2, BOB, 30_000);
+    let (state, _) = run(state, [Input::OpenMissedCall(CallId(1))]);
+    let dialer = state.surfaces().dialer.unwrap_or_else(|| panic!("open"));
+    assert_eq!(dialer.new_missed, 2);
+    let selected = dialer.selected.unwrap_or_else(|| panic!("a row"));
+    assert_eq!(dialer.rows[selected].caller, number(ALICE), "{dialer:?}");
+}
+
+#[test]
+fn unpairing_the_phone_clears_the_cue() {
+    let (state, _) = missed(synced(), 1, ALICE, 10_000);
+    let (state, effects) = run(
+        state,
+        [Input::PhoneUnpaired {
+            address: ADDRESS.to_owned(),
+        }],
+    );
+    assert_eq!(kept(&effects), [0]);
+    assert_eq!(state.unseen_missed_calls(), 0);
+}
+
+#[test]
 fn a_count_kept_by_an_earlier_run_is_picked_up() {
     let (state, effects) = run(synced(), [Input::MissedCallsKept(3)]);
     assert_eq!(kept(&effects), [3]);

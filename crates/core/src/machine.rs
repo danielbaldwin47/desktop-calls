@@ -727,7 +727,7 @@ impl State {
 /// Works out the new state and the effects that follow from `input`.
 #[must_use]
 pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
-    let (was_ringing, unseen) = (state.ringing(), state.missed.unseen);
+    let (was_ringing, unseen) = (state.ringing(), state.missed.unseen.count);
     let (mut state, mut effects) = decide(state, input);
     // Focus goes with the surface that had it.
     let surfaces = state.surfaces();

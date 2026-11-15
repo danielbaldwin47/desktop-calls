@@ -67,6 +67,8 @@ fn write(count: u32) -> io::Result<bool> {
             .mode(0o700)
             .create(directory)?;
     }
+    // One fixed name is enough: the app runs once per user, and only its
+    // main loop writes the cue.
     let temporary = path.with_extension("tmp");
     fs::write(&temporary, format!("{count}\n"))?;
     fs::rename(&temporary, &path)?;

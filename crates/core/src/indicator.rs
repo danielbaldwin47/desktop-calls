@@ -23,8 +23,9 @@ pub struct IndicatorView {
     /// How many Missed Calls the lasting cue counts, for the tooltip.
     pub missed_calls: u32,
     /// The menu's entries, in one order in every state: the status line,
-    /// the Missed Calls' line while the cue counts any, the main action, during a Call the Call's actions, calls on or off,
-    /// Quiet Hours, a separator, then setup and Problems.
+    /// the Missed Calls' line while the cue counts any, the main action,
+    /// during a Call the Call's actions, calls on or off, Quiet Hours, a
+    /// separator, then setup and Problems.
     pub menu: Vec<IndicatorEntry>,
 }
 

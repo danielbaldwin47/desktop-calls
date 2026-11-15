@@ -294,7 +294,7 @@ pub(super) fn open_dialer(state: &mut State, query: String, select_call: Option<
 fn search(state: &State, query: &str) -> Vec<DialerRow> {
     let rows = matching::search(query, &state.contacts, &state.call_history);
     if query.trim().is_empty() {
-        missed_first(rows, state.missed.marked)
+        missed_first(state, rows)
     } else {
         rows
     }

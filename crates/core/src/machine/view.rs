@@ -6,9 +6,8 @@ use super::setup::SetupWindowView;
 use super::{Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
 use crate::clock::TimeOfDay;
-use crate::contacts::CallHistoryKind;
 use crate::indicator::PhoneStatus;
-use crate::matching::{ContactMatch, DialerRow, DialerRowKind};
+use crate::matching::{ContactMatch, DialerRow};
 use crate::messages::Failure;
 
 /// What the Desktop surfaces show, worked out from the state.
@@ -664,15 +663,11 @@ impl State {
                 Some(DialerKey::QuietHours),
                 Some(DialerKey::Close),
             ];
-            let marked = usize::try_from(self.missed.marked).unwrap_or(usize::MAX);
+            // The marked rows are at the top: see `missed_first`.
             let new_missed = if dialer.query.trim().is_empty() {
-                dialer
-                    .rows
-                    .iter()
-                    .take(marked)
-                    .take_while(|row| {
-                        row.kind == DialerRowKind::CallHistory(CallHistoryKind::Missed)
-                    })
+                self.marks(&dialer.rows)
+                    .into_iter()
+                    .take_while(|marked| *marked)
                     .count()
             } else {
                 0

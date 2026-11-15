@@ -266,6 +266,36 @@ fn the_banner_sits_flush_in_the_top_right_corner_below_the_bar() {
     assert!(banner_placed(&harness.app_state(), "12"));
 }
 
+/// Ticket #323: the Banner keeps the room of the line under the caller
+/// when there is nothing to put in it, so Answer stays where it is while
+/// the number arrives, and sits where it would for any caller.
+#[test]
+fn answer_sits_at_the_same_height_for_a_withheld_number_as_for_a_known_one() {
+    let harness = connected_on_screen();
+    let (path, _) = ring_until_banner(&harness);
+    let known = find_on_screen(&harness, "banner-known", GREEN);
+    harness.simulated_phone().caller_hangs_up(&path);
+    harness.wait_for_app("the Banner goes", DEADLINE, |state| {
+        state.surface("banner").is_none()
+    });
+
+    let _path = harness.simulated_phone().ring("");
+    harness.wait_for_app("the Banner says Withheld number", DEADLINE, |state| {
+        state
+            .surface("banner")
+            .and_then(|banner| banner.get("caller"))
+            .is_some_and(|caller| caller == "Withheld number")
+    });
+    let withheld = find_on_screen(&harness, "banner-withheld", GREEN);
+
+    assert!(
+        (known.bottom - withheld.bottom).abs() <= 1.0,
+        "Answer's bottom moved from {} to {}",
+        known.bottom,
+        withheld.bottom
+    );
+}
+
 /// The standard gap is Omarchy's edge gap, half of Hyprland's
 /// `general:gaps_out`, read again when Hyprland reloads its configuration.
 #[test]

@@ -410,6 +410,11 @@ impl Banner {
         // Its own flag: `is_visible` is false until the window is shown.
         if self.meta.get_visible() {
             content.insert("meta".to_owned(), self.meta.text().to_string());
+        } else {
+            // With nothing to say, the line keeps its room, empty, so the
+            // buttons don't move as the number arrives (ticket #323).
+            self.meta.set_text("");
+            self.meta.set_visible(true);
         }
         let initial = messages::banner_initial(&view.caller);
         self.initial.set_text(&initial);

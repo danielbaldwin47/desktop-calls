@@ -703,6 +703,46 @@ fn once_a_call_ended_while_collapsed_has_gone_the_indicator_opens_the_dialer() {
     });
 }
 
+/// Where the Call Pill's first text starts: the leftmost dark pixel inside
+/// its border, in the stock light look, where the live dot is green.
+fn text_starts(screenshot: &Screenshot, pill: Region) -> f64 {
+    let inside = Region {
+        left: pill.left + 3.0,
+        right: pill.right - 3.0,
+        top: pill.top + 3.0,
+        bottom: pill.bottom - 3.0,
+    };
+    screenshot
+        .region_within(inside, |pixel| pixel.iter().all(|channel| *channel < 90))
+        .unwrap_or_else(|| panic!("no text on the Call Pill"))
+        .left
+}
+
+/// Ticket #323: once the Call has ended, the Call Pill keeps the room of
+/// its live dot, so who the Call was with stays where it was.
+#[test]
+fn once_the_call_ends_the_call_pill_keeps_the_name_where_it_was() {
+    let harness = connected_on(Harness::builder().headless_screen());
+    let call = live_on_desktop(&harness);
+    wait_until_collapsed(&harness);
+    let (live, screenshot) = pill_on_screen(&harness, "pill-live");
+    let live_text = text_starts(&screenshot, live);
+
+    harness.hang_up(call);
+    harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
+        pill(state)
+            .and_then(|pill| pill.get("status"))
+            .is_some_and(|status| status.starts_with("Call ended"))
+    });
+    let (ended, screenshot) = pill_on_screen(&harness, "pill-ended");
+    let ended_text = text_starts(&screenshot, ended);
+
+    assert!(
+        (live_text - ended_text).abs() <= 1.0,
+        "the name moved from x {live_text} to x {ended_text}"
+    );
+}
+
 /// Ticket #201: a notice expands the collapsed Call Window by itself, so a
 /// failure is never hidden in a strip.
 #[test]

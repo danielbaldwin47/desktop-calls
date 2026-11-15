@@ -237,7 +237,7 @@ fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
     let harness = Harness::builder()
         .headless_screen()
         .omarchy_bar()
-        .hyprland_bindings_unreadable(DESKTOP_CALLS_BINDING)
+        .hyprland_bindings_unreadable()
         .start();
     harness.simulated_phone().connect();
     harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {

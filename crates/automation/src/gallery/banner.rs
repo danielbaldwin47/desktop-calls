@@ -71,7 +71,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         name: "incoming-call-banner-keybinding-unreadable",
         title: "The Incoming Call Banner with bindings.lua unreadable: the footer says so, and where to find what to do",
         still: |state| footer(state).is_some_and(|footer| footer.starts_with("Couldn't read")),
-        prepare: |builder| builder.hyprland_bindings_unreadable(DESKTOP_CALLS_BINDING),
+        prepare: |builder| builder.hyprland_bindings_unreadable(),
         reach: |harness| {
             sync(harness);
             ring(harness);

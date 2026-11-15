@@ -515,6 +515,101 @@ fn a_phone_chosen_in_the_window_goes_on_when_bluez_never_resolves_its_services()
     wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
+/// A fresh install whose BlueZ never resolves the Phone's services, so its
+/// `UUIDs` never show hands-free, though `Paired` is signalled.
+fn fresh_install_services_unresolved() -> Harness {
+    Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .services_unresolved()
+        .start()
+}
+
+/// Chooses the Phone in the window and pairs it, through to the finish.
+fn choose_and_pair_to_done(harness: &Harness) -> AppState {
+    wait_for_phone_listed(harness, STARTUP);
+    harness.keyboard().press(Key::Return);
+    same_code_shown(harness);
+    harness.keyboard().press(Key::Return);
+    let state = connected(harness);
+    wait_for_step(harness, "done", CONNECT_DEADLINE);
+    state
+}
+
+/// Paired from the Phone's own screen, a Phone whose services BlueZ never
+/// resolves is still the Phone: bonded, and the one being paired. Before,
+/// the window sat at "confirmed" and then said pairing failed (ticket
+/// #375, case 1).
+#[test]
+fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_never_resolves_its_services() {
+    let harness = fresh_install_services_unresolved();
+    wait_for_phone_listed(&harness, STARTUP);
+    wait_until_discoverable(&harness);
+
+    harness
+        .simulated_phone()
+        .pair_from_phone()
+        .expect("the Phone finds the Desktop");
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+}
+
+/// The Phone followed with its services unresolved is followed by BlueZ's
+/// `Connected` as any Phone is, and its unpairing is seen as unpairing, not
+/// as leaving the nearby list (ticket #375, cases 2 and 3).
+#[test]
+fn a_phone_with_its_services_unresolved_is_followed_until_unpaired() {
+    let harness = fresh_install_services_unresolved();
+    let state = choose_and_pair_to_done(&harness);
+    let address = state.phone.expect("the Phone is followed").address;
+
+    harness.simulated_phone().disconnect();
+    harness.wait_for_app_log(r#""event_kind":"phone-absent""#, DEADLINE);
+
+    let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+    let path = zbus::ObjectPath::try_from(path.as_str())
+        .unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
+    harness.call_phone_method(
+        Bus::System,
+        "org.bluez",
+        "/org/bluez/hci0",
+        "org.bluez.Adapter1",
+        "RemoveDevice",
+        &(path,),
+    );
+    harness.wait_for_app("the Phone is no longer followed", DEADLINE, |state| {
+        state.phone.is_none()
+    });
+}
+
+/// After a restart, BlueZ lists the Phone chosen last as bonded, its
+/// services still unresolved: it is followed and connected, and the window
+/// doesn't open to say it is gone (ticket #375, case 4).
+#[test]
+fn after_a_restart_the_chosen_phone_with_its_services_unresolved_is_followed() {
+    let mut harness = fresh_install_services_unresolved();
+    choose_and_pair_to_done(&harness);
+    harness.keyboard().press(Key::Return);
+    closed(&harness);
+
+    harness.restart_app();
+
+    let state = harness.wait_for_app(
+        "the Phone chosen last is followed and connected",
+        STARTUP,
+        |state| state.connection_state == "connected",
+    );
+    assert_eq!(
+        state.phone.as_ref().map(|phone| phone.name.as_str()),
+        Some(PHONE_NAME)
+    );
+    assert!(setup_window(&state).is_none(), "the window stays closed");
+}
+
 #[test]
 fn a_phone_chosen_in_the_window_goes_on_when_bluez_signals_only_bonded() {
     let harness = fresh_install_holding_paired();

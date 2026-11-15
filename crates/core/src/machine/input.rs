@@ -32,6 +32,12 @@ pub enum Input {
     },
     /// A paired Phone that can carry Calls exists on the Desktop.
     PhonePaired(Phone),
+    /// A paired device that says it is a Phone, by its class, exists on the
+    /// Desktop, but its services don't show hands-free: BlueZ may never
+    /// have resolved them (ticket #375). It counts as [`Input::PhonePaired`]
+    /// if it is the Phone the user chose last, or the one the Setup Window
+    /// is pairing; otherwise it is ignored.
+    PhonePairedWithoutHandsFree(Phone),
     /// The paired Phone with this address is gone.
     PhoneUnpaired { address: String },
     /// The Phone with this address is connected for Calls.

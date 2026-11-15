@@ -376,6 +376,35 @@ fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_aga
     }));
 }
 
+#[test]
+fn a_paired_phone_without_hands_free_is_followed_only_if_chosen() {
+    // Nobody chose it: not followed, and the window opens by itself.
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePairedWithoutHandsFree(pixel()),
+            Input::PairedPhonesListed,
+        ],
+    );
+    assert_eq!(state.phone(), None);
+    assert!(state.surfaces().setup_window.is_some());
+
+    // Chosen last, in an earlier run: followed, as a paired Phone.
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::ChosenPhoneKept {
+                address: PHONE.to_owned(),
+                name: Some("My Pixel".to_owned()),
+            },
+            Input::PhonePairedWithoutHandsFree(pixel()),
+            Input::PairedPhonesListed,
+        ],
+    );
+    assert_eq!(state.phone(), Some(&pixel()));
+    assert!(state.surfaces().setup_window.is_none());
+}
+
 /// Paired, then asked for hands-free, which finds the pairing lost.
 fn pairing_lost() -> State {
     let (state, _) = paired();

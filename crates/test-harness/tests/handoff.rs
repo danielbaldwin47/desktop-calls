@@ -350,8 +350,9 @@ fn a_phone_that_ignores_the_first_activate_is_asked_again_after_a_second() {
     // the Call Window says it is coming the whole time, from the request
     // until the audio is here. Judged on what the app published, in order,
     // rather than over a second the harness times: that second starts only
-    // once the app answers the harness, and a busy app answered 580 ms
-    // late, past the second `Activate` (#146).
+    // once the app answers the harness, and a main loop held 561 ms pushed
+    // it past the second `Activate` (#146). That the audio stayed on the
+    // Phone until then is pinned by the order the Phone was asked, below.
     let call_windows = harness.surfaces_seen();
     let until_here: Vec<_> = call_windows
         .iter()

@@ -33,7 +33,7 @@ class Warming(unittest.TestCase):
         self.assertEqual(environment, {cache.VARIABLE: "/elsewhere"})
 
     def test_set_but_empty_keeps_every_scenario_cold(self):
-        # As `just ci-first-frame-timings` reports the cold first frames.
+        # For timing cold first frames by hand.
         environment, ran = self.warm({cache.VARIABLE: ""})
         self.assertEqual(ran, [])
         self.assertEqual(environment, {cache.VARIABLE: ""})

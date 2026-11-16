@@ -286,14 +286,6 @@ jobs:
       - *checkout
       - *cache
 
-      # Records whether unprivileged user and mount namespaces work here. The
-      # harness uses them only to hide a reachable systemd journal from the
-      # app, so its log lands in the scenario directory.
-      - name: Probe unshare -rm
-        run: |
-          ls -l /run/systemd/journal/socket || echo "No journal socket: the app logs to its file without help."
-          if unshare -rm true; then echo "unshare -rm: works"; else echo "unshare -rm: refused"; fi
-
       # Scenarios run the built binaries, as in `just test`. As many at once
       # as the runner has CPUs, as `cargo test` does: four at a time on two
       # CPUs failed Banner and Handoff timings in run 42034428129.

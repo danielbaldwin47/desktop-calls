@@ -10,8 +10,7 @@
 //! meets. `just ci-scenarios`, `just test`, `just test-file` and
 //! `just test-ci-like` run this first, with `SCENARIO_SHADER_CACHE` naming
 //! the cache, and then every scenario with the same
-//! (`tools/scenario_shader_cache.py`). `just ci-first-frame-timings` still
-//! reports the first frames with a cold cache.
+//! (`tools/scenario_shader_cache.py`).
 
 use std::path::Path;
 use std::time::{Duration, Instant};

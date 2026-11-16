@@ -11,8 +11,8 @@ surface's first frame into this cache, then give the same cache to every
 scenario through `SCENARIO_SHADER_CACHE`.
 
 `SCENARIO_SHADER_CACHE` already set is kept as it is, and set but empty
-means a cold cache for each scenario: `just ci-first-frame-timings` reports
-cold first frames that way, and fills a cache of its own to judge them.
+means a cold cache for each scenario, as when timing first frames by hand.
+`just ci-first-frame-timings` fills a cache of its own to judge them.
 """
 
 from __future__ import annotations

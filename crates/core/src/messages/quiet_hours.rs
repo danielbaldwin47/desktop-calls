@@ -23,6 +23,9 @@ pub struct QuietHoursWindowText {
     pub heading: &'static str,
     /// What the switch does, for screen readers.
     pub switch: &'static str,
+    /// The keycap beside the switch while it has keyboard focus, when Space
+    /// would flip it (#301).
+    pub switch_key: &'static str,
     /// The small headings over the two times.
     pub from: &'static str,
     pub until: &'static str,
@@ -48,6 +51,7 @@ pub fn quiet_hours_window(view: &QuietHoursWindowView) -> QuietHoursWindowText {
         title: "Quiet hours",
         heading: "Quiet hours",
         switch: "Quiet hours on",
+        switch_key: "Space",
         from: "Calls off from",
         until: "until",
         start: field(QuietHoursField::Start, view.start),

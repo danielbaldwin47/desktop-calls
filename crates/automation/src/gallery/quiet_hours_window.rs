@@ -15,13 +15,20 @@ const DAY: u64 = 86_400;
 pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
     State {
         name: "quiet-hours-window-off",
-        title: "The Quiet Hours Window, switched off: the times kept and dimmed, the switch focused",
+        title: "The Quiet Hours Window, switched off: the times kept and dimmed, the switch focused with its Space keycap",
         still: |_| true,
         prepare: at_noon,
         reach: |harness| {
             connect(harness);
             harness.tray().click("Quiet hours…");
-            wait_for(harness, &[("switch", "off"), ("focus", "switch")]);
+            wait_for(
+                harness,
+                &[
+                    ("switch", "off"),
+                    ("focus", "switch"),
+                    ("switch-key", "Space"),
+                ],
+            );
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -41,6 +48,30 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             wait_for(harness, &[("switch", "on"), ("focus", "switch")]);
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start"), ("start", "22:00")]);
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "quiet-hours-window-on-switch-focused",
+        title: "The Quiet Hours Window, on from 22:00 to 07:00, the switch focused: its Space keycap beside it, since Space turns Quiet Hours off and the footer doesn't say so",
+        still: |_| true,
+        prepare: at_noon,
+        reach: |harness| {
+            connect(harness);
+            if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
+                panic!("SetQuietHours: {error:?}");
+            }
+            harness
+                .tray()
+                .click_when_shown("Quiet hours…  22:00–07:00", DEADLINE);
+            wait_for(
+                harness,
+                &[
+                    ("switch", "on"),
+                    ("focus", "switch"),
+                    ("switch-key", "Space"),
+                ],
+            );
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },

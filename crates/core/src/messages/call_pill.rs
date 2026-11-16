@@ -19,11 +19,11 @@ pub fn call_pill_tag(tag: CallPillTag) -> &'static str {
 /// the Call to end (ticket #230), in the same style as the Call Pill's tags.
 #[must_use]
 pub fn calls_off_after_tag() -> &'static str {
-    "Calls off after"
+    "Off after call"
 }
 
 /// What sits between two tags on one line, as between the parts of every
-/// other line of details: "1 on hold · Calls off after" (#319).
+/// other line of details: "1 on hold · Off after call" (#319).
 #[must_use]
 pub fn tag_separator() -> &'static str {
     "·"

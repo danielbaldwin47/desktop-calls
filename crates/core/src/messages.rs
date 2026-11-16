@@ -666,7 +666,7 @@ pub fn label(label: Label) -> &'static str {
         Label::Unmute => "Unmute",
         Label::Keypad => "Keypad",
         Label::MicrophoneMuted => "Microphone muted",
-        Label::KeypadPlaceholder => "Type or paste digits to send tones",
+        Label::KeypadPlaceholder => "Type digits to send tones",
         Label::DialerPlaceholder => "Name or number",
         Label::NoMatches => "No matches",
         Label::Missed => "Missed",

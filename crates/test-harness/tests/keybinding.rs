@@ -229,9 +229,9 @@ fn the_banner_names_the_keybinding_set_and_follows_the_config_as_it_changes() {
     );
 }
 
-/// With `bindings.lua` there but unreadable, the Banner's footer says it
-/// couldn't read the file and where to find what to do, rather than
-/// guessing that no keybinding is set (#366).
+/// With `bindings.lua` there but unreadable, the Banner's footer says in one
+/// short line that the keybinding is unknown and where the detail is,
+/// rather than guessing that no keybinding is set (#366).
 #[test]
 fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
     let harness = Harness::builder()
@@ -247,10 +247,7 @@ fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
     harness.wait_for_app(
         "the footer says bindings.lua couldn't be read",
         DEADLINE,
-        |state| {
-            banner_footer(state)
-                == Some("Couldn't read bindings.lua. Phone setup… shows what to do.")
-        },
+        |state| banner_footer(state) == Some("Keybinding unknown. Phone setup… explains."),
     );
 }
 

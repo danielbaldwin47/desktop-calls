@@ -205,8 +205,12 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
     harness.keyboard().press_with_alt('q');
     let state = wait_for_quiet_hours(
         harness,
-        "Alt+Q opens the Quiet Hours Window with the switch focused",
-        &[("switch", "off"), ("focus", "switch")],
+        "Alt+Q opens the Quiet Hours Window with the switch focused and its Space keycap shown",
+        &[
+            ("switch", "off"),
+            ("focus", "switch"),
+            ("switch-key", "Space"),
+        ],
     );
     assert!(state.surface("dialer").is_none(), "the Dialer closed");
     performed.did("Open the Quiet Hours Window: Alt+Q");
@@ -218,7 +222,12 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
     assert!(quiet_hours_keys(&state, "↑ ↓ 15 min"), "{state:#?}");
     performed.did("Switch Quiet hours on: Space");
     harness.keyboard().press(Key::Tab);
-    wait_for_quiet_hours(harness, "Tab focuses the start", &[("focus", "start")]);
+    let state = wait_for_quiet_hours(harness, "Tab focuses the start", &[("focus", "start")]);
+    assert_eq!(
+        quiet_hours_window(&state, "switch-key"),
+        None,
+        "the switch's keycap goes with its focus: {state:#?}"
+    );
     harness.keyboard().press(Key::Up);
     harness.wait_for_app("Up steps the start", DEADLINE, |state| {
         state.quiet_hours == Some((22 * 60 + 15, 7 * 60))
@@ -244,8 +253,8 @@ fn quiet_hours_by_keys_alone(harness: &Harness, performed: &mut Performed) {
     harness.keyboard().press_with_shift(Key::Tab);
     wait_for_quiet_hours(
         harness,
-        "Shift+Tab focuses the switch",
-        &[("focus", "switch")],
+        "Shift+Tab focuses the switch, which shows its Space keycap",
+        &[("focus", "switch"), ("switch-key", "Space")],
     );
     harness.keyboard().type_text(" ");
     harness.wait_for_app("Space switches Quiet Hours off", DEADLINE, |state| {

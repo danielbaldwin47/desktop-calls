@@ -142,6 +142,7 @@ pub(super) const SETUP_OPENED_STATES: &[State] = &[
                     )
             });
         },
+        moment: None,
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
     State {
@@ -160,6 +161,7 @@ pub(super) const SETUP_OPENED_STATES: &[State] = &[
                         .is_some_and(|card| card.contains("couldn't be read"))
             });
         },
+        moment: None,
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
     State {
@@ -185,6 +187,7 @@ pub(super) const SETUP_OPENED_STATES: &[State] = &[
                 },
             );
         },
+        moment: None,
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];

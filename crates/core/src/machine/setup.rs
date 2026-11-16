@@ -42,11 +42,13 @@
 mod contacts;
 mod focus;
 mod keybinding;
+mod opened;
 mod step;
 
 use contacts::{begin_contacts, finish, follow_contacts, start_sync};
 pub(super) use contacts::{contacts_read, hold_sync, sync_progress};
 pub use focus::SetupFocus;
+use opened::{follow_opened, open, pair_another};
 pub use step::SetupStep;
 
 use super::dialling::phone_unpaired;
@@ -635,47 +637,6 @@ pub(super) fn bluetooth_on(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
-/// Opens the window: on the finish page for the Phone followed, so its
-/// keybinding card is a click away from the Banner's footer (ticket #389),
-/// or on choosing a Phone while none is followed or the one followed
-/// forgot the pairing.
-fn open(state: &mut State, effects: &mut Vec<Effect>) {
-    if state.setup.is_some() {
-        return;
-    }
-    state.setup_openings += 1;
-    let mut setup = Setup {
-        opened: state.setup_openings,
-        ..Setup::default()
-    };
-    match state.phone.clone().filter(|_| !state.presence.pairing_lost) {
-        Some(phone) => {
-            setup.opened_on = OpenedOn::Finish;
-            finish(&mut setup, phone, effects);
-        }
-        // The Desktop looks for Phones, and is discoverable, until the
-        // window closes.
-        None => effects.push(Effect::StartSetup),
-    }
-    state.setup = Some(setup);
-}
-
-/// Pair another phone, from the finish page the window opened on: back to
-/// choosing a Phone.
-fn pair_another(state: &mut State, effects: &mut Vec<Effect>) {
-    let Some(setup) = state.setup.as_mut() else {
-        return;
-    };
-    if !setup.opened_on_finish() {
-        return;
-    }
-    setup.opened_on = OpenedOn::Choose;
-    setup.notice = None;
-    setup.adding = false;
-    setup.step = Step::Choose;
-    effects.push(Effect::StartSetup);
-}
-
 fn close(state: &mut State, effects: &mut Vec<Effect>) {
     let Some(setup) = state.setup.take() else {
         return;
@@ -967,6 +928,7 @@ fn wait(setup: &mut Setup, after_ms: u32, effects: &mut Vec<Effect>) {
 pub(super) fn follow(state: &mut State, effects: &mut Vec<Effect>) {
     follow_connection(state, effects);
     follow_contacts(state, effects);
+    follow_opened(state, effects);
     focus::forget_once_gone(state);
 }
 

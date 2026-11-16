@@ -146,3 +146,79 @@ fn a_phone_that_forgot_the_pairing_opens_the_window_on_choosing() {
     assert_eq!(effects, [Effect::StartSetup]);
     assert!(matches!(setup_step(&state), Some(SetupStep::Choose { .. })));
 }
+
+/// Opened while the Phone is away and has never shared contacts, the
+/// finish page says they come over when it connects, not that Calls still
+/// work without names (#389).
+#[test]
+fn the_finish_page_opened_with_the_phone_away_says_contacts_come_when_it_connects() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::OpenSetupWindow,
+        ],
+    );
+    let text = messages::setup_window(
+        &state.surfaces().setup_window.expect("open"),
+        Timestamp(0),
+        None,
+    );
+    assert_eq!(text.heading, "My Pixel is set up");
+    assert_eq!(
+        text.summary.as_deref(),
+        Some("Contacts and recent calls come over from your phone when it connects.")
+    );
+}
+
+/// A finish page already open goes on to choosing once its Phone forgets
+/// the pairing, as the window would open then (#389).
+#[test]
+fn the_open_finish_page_goes_to_choosing_once_the_phone_forgets_the_pairing() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::OpenSetupWindow,
+        ],
+    );
+    let (state, effects) = run(
+        state,
+        [
+            Input::PhoneAbsent {
+                address: PHONE.to_owned(),
+            },
+            Input::ConnectPhoneFailed {
+                attempt: 1,
+                failure: ConnectFailure::PairingLost,
+            },
+        ],
+    );
+    assert!(effects.contains(&Effect::StartSetup), "{effects:?}");
+    assert!(matches!(setup_step(&state), Some(SetupStep::Choose { .. })));
+}
+
+/// And once its Phone is unpaired.
+#[test]
+fn the_open_finish_page_goes_to_choosing_once_the_phone_is_unpaired() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::OpenSetupWindow,
+        ],
+    );
+    let (state, effects) = run(
+        state,
+        [Input::PhoneUnpaired {
+            address: PHONE.to_owned(),
+        }],
+    );
+    assert!(effects.contains(&Effect::StartSetup), "{effects:?}");
+    assert!(matches!(setup_step(&state), Some(SetupStep::Choose { .. })));
+    let (_, effects) = run(state, [Input::CloseSetupWindow]);
+    assert!(effects.contains(&Effect::StopSetup), "{effects:?}");
+}

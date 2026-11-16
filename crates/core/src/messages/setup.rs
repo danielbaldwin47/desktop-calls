@@ -495,7 +495,14 @@ fn done(
     desktop: &str,
     home: Option<&str>,
 ) -> Page {
-    text.summary = Some(contacts_outcome(contacts, desktop));
+    // Away, a Phone that hasn't shared contacts yet just hasn't had the
+    // chance: not "Calls still work", which they can't while it is away
+    // (#389).
+    text.summary = Some(if !connected && contacts == ContactsOutcome::NotShared {
+        WHEN_CONNECTED.to_owned()
+    } else {
+        contacts_outcome(contacts, desktop)
+    });
     let (instructions, card, buttons) = finish(keybinding, &mut text.line, home);
     // While the line is confirmed, the page is about the line alone.
     if card.is_some() {
@@ -558,6 +565,10 @@ fn plural(count: impl Into<u64>, one: &str, many: &str) -> String {
         count => format!("{count} {many}"),
     }
 }
+
+/// The finish page's Contacts line while the Phone, never synced, is away.
+const WHEN_CONNECTED: &str =
+    "Contacts and recent calls come over from your phone when it connects.";
 
 fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
     match outcome {

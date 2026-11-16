@@ -23,6 +23,8 @@ import ci_local
 
 REPOSITORY = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = (REPOSITORY / ".github/workflows/ci.yml").read_text()
+# The checklist's group 6 runs nightly, not on every push (2026-11-16).
+NIGHTLY = (REPOSITORY / ".github/workflows/nightly.yml").read_text()
 BUILD_ROOTFS = (REPOSITORY / "tools/local-ci/build-rootfs.sh").read_text()
 CONTAINERFILE = (REPOSITORY / ".github/ci-image/Containerfile").read_text()
 JUSTFILE = (REPOSITORY / "justfile").read_text()
@@ -77,7 +79,7 @@ class SameAsCI(unittest.TestCase):
                 "just ci-first-frame-timings",
             },
         )
-        workflow = WORKFLOW.replace("run: >-\n          ", "run: ")
+        workflow = (WORKFLOW + NIGHTLY).replace("run: >-\n          ", "run: ")
         for command in commands:
             self.assertRegex(workflow, rf"run: {re.escape(command)}\b")
         for recipe in ("ci-tests", "ci-checklist-group-6", "ci-gallery", "ci-scenarios",
@@ -92,7 +94,7 @@ class SameAsCI(unittest.TestCase):
             for command in ci_local.JOBS.values()
             for recipe in command.split("&&")
         }
-        jobs = WORKFLOW.split("\njobs:\n", 1)[1]
+        jobs = WORKFLOW.split("\njobs:\n", 1)[1] + NIGHTLY.split("\njobs:\n", 1)[1]
         found = {
             line.split(" | ")[0].split(" --partition")[0].split(" ${{")[0].strip()
             for line in re.findall(r"(?m)^\s+run: (just [^\n]*)$", jobs)
@@ -100,10 +102,10 @@ class SameAsCI(unittest.TestCase):
         self.assertEqual(found, local)
 
     def test_the_checklist_jobs_run_every_group_6_test_ci_tests_skips(self):
-        # ci-tests skips checklist_group_6_tests, and CI's checklist jobs
-        # run one name each, so a name in one list must be in the other.
+        # ci-tests skips checklist_group_6_tests, and the nightly's checklist
+        # jobs run one name each, so a name in one list must be in the other.
         listed = re.search(r'(?m)^checklist_group_6_tests := "([^"]*)"$', JUSTFILE)
-        matrix = re.search(r"(?m)^        names: \[([^\]]*)\]$", WORKFLOW)
+        matrix = re.search(r"(?m)^        names: \[([^\]]*)\]$", NIGHTLY)
         self.assertIsNotNone(listed)
         self.assertIsNotNone(matrix)
         self.assertEqual(set(matrix.group(1).replace(",", " ").split()), set(listed.group(1).split()))

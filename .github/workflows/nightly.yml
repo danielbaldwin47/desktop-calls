@@ -1,0 +1,203 @@
+name: Nightly
+
+# The two parts of CI that gate nothing, against main's head once a night
+# rather than on every push to main (2026-11-16, the owner: "Sure change
+# those to nightly"): the Real-Phone Checklist's group 6 demo runs, which
+# wait out real minutes and set main's time to "CI passed" (207 to 262 s),
+# and the polish scorecard, a report. Every PR and every push to main still
+# runs the rest, in ci.yml; nothing here posts or holds back "CI passed".
+#
+# A scheduled night is skipped when main hasn't moved since the last green
+# nightly. A red night opens the issue "Nightly CI is red", or comments on it
+# while it is open (tools/nightly.py), since nothing else waits on it.
+on:
+  schedule:
+    # 08:17 UTC is 03:17 in UTC-5, when the owner and the agents are likely
+    # idle, so the account's 20 concurrent jobs are free. Off the hour:
+    # GitHub's scheduled runs queue longest on it.
+    - cron: "17 8 * * *"
+  # `gh workflow run Nightly --ref main` runs it now, whether or not main has
+  # moved; `-f dry_run_report=true` also runs the report and prints the issue
+  # it would post, posting nothing.
+  workflow_dispatch:
+    inputs:
+      dry_run_report:
+        description: Run the red-night report whatever the result, posting nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # To pull CI's image from GitHub's container registry.
+  packages: read
+
+# One night at a time, none cancelled.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  # Whether tonight runs, and which run of CI on main kept the scenario
+  # results the scorecard scores. It waits for CI's run on main at this
+  # head first: that run builds CI's image when the image changes, and keeps
+  # the results.
+  decide:
+    name: Has main moved? And whose scenario results
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      since: ${{ steps.decide.outputs.since }}
+      since_run: ${{ steps.decide.outputs.since_run }}
+      results_run: ${{ steps.results.outputs.run }}
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # For whether a run's commit is in this head's history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Has main moved since the last green nightly?
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD: ${{ github.sha }}
+        run: python3 tools/nightly.py decide >> "$GITHUB_OUTPUT"
+      - name: Whose scenario results to score
+        id: results
+        if: steps.decide.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.sha }}
+        run: python3 tools/nightly.py results >> "$GITHUB_OUTPUT"
+      # ci.yml's `setup` names it the same way, and builds it.
+      - name: Name CI's image
+        id: image
+        env:
+          TAG: ${{ hashFiles('.github/ci-image/Containerfile', 'rust-toolchain.toml') }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-ci:$TAG" >> "$GITHUB_OUTPUT"
+
+  # The Real-Phone Checklist's demo runs of group 6 wait out real time:
+  # calls stay off for 60 s, and Quiet Hours begin at the next minute and
+  # end a minute later. Its three tests took 157, 157 and 60 s; two at a
+  # time on one runner, 217 s. So one 157 s test gets a runner of its own,
+  # and the other two share one. The names, between them, are the justfile's
+  # checklist_group_6_tests, which `just ci-tests` skips. It tests the
+  # checklist's demo runner; the scenarios' own Calls Off and Quiet Hours
+  # tests still run on every PR (#286).
+  checklist:
+    name: just ci-checklist-group-6 ${{ matrix.names }}
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: &container
+      image: ${{ needs.decide.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+      # As in ci.yml: headless sway and grim need more than Docker's 64 MB.
+      options: --shm-size=1g
+    strategy:
+      fail-fast: false
+      matrix:
+        names: [group_6_times, step_6_2_]
+    steps:
+      - &checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      # As in ci.yml, keyed on the workspace's Cargo.toml too.
+      - &cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: just ci-checklist-group-6 ${{ matrix.names }}
+        run: just ci-checklist-group-6 ${{ matrix.names }}
+      # Every scenario directory left, as ci.yml keeps them; `just ci-wait
+      # <run>` downloads them.
+      - name: Keep the scenario logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-logs-${{ github.job }}-${{ matrix.names }}
+          path: /tmp/desktop-calls-test-*
+          if-no-files-found: ignore
+
+  # The polish scorecard (#27), from the scenario results CI's run on main
+  # kept (`scenario-results-1` to `-6`), so it scores the scenarios as
+  # main's push ran them, as it did when it ran in that run. A failing
+  # scenario shows as its item's FAIL, not as a red job.
+  scorecard:
+    name: just scorecard, from CI's scenario results on main
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      # To download another run's artifacts.
+      actions: read
+    container: *container
+    steps:
+      - *checkout
+      - *cache
+      # The container runs as root, and the checkout belongs to the runner's
+      # user; the scorecard reads git object ids for item 8.
+      - name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Fetch the scenario results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scenario-results-*
+          path: scenario-results
+          run-id: ${{ needs.decide.outputs.results_run }}
+          github-token: ${{ github.token }}
+      - name: Score
+        env:
+          GALLERY: "artifacts gallery-1 to gallery-3 of ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ needs.decide.outputs.results_run }}"
+        run: |
+          set -o pipefail
+          cargo build --quiet -p automation --locked
+          target/debug/automation scorecard --scenarios scenario-results --gallery "$GALLERY" | tee scorecard.txt
+      - name: Keep the scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard
+          path: scorecard.txt
+          if-no-files-found: ignore
+
+  # A red night: open the issue "Nightly CI is red" (labelled needs-triage)
+  # naming this run, its failed jobs and the commits since the last green
+  # nightly, or comment on it while it is open; never twice for one run.
+  report:
+    name: Report a red night
+    needs: [decide, checklist, scorecard]
+    if: failure() || (github.event_name == 'workflow_dispatch' && inputs.dry_run_report)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # For the commits since the last green nightly.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open or comment on "Nightly CI is red"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD: ${{ github.sha }}
+          SINCE: ${{ needs.decide.outputs.since }}
+          SINCE_RUN: ${{ needs.decide.outputs.since_run }}
+        run: python3 tools/nightly.py report ${{ inputs.dry_run_report && '--dry-run' || '' }}

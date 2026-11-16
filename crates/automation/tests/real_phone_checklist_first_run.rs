@@ -223,7 +223,10 @@ fn step_1_4_doesnt_run_while_the_pixel_doesnt_share_contacts_and_says_what_to_do
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
     // The user stops 1.3 before turning Contacts on, and 1.4's wait too.
-    runner.slips = vec![("contacts-access-on", "skip"), ("contacts-access-on", "skip")];
+    runner.slips = vec![
+        ("contacts-access-on", "skip"),
+        ("contacts-access-on", "skip"),
+    ];
     runner.play(|_| "y".to_owned());
     let result = result_file(results.path());
     let paging = step(&result, "1.4");

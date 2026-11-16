@@ -126,6 +126,10 @@ Sources: the PR bodies and comments named, `gh run list` and `gh run view` on 20
     - Step 1.2 offers to go back to 1.1 while the Pixel is still paired.
     - Step 1.3 is judged from the journal, which showed the Pixel sharing Contacts as it paired, with no prompt. Inferred, not checked on the Pixel: the Pair dialog's "Allow access…" box causes this, and the step handles whether an unticked Pixel asks or refuses.
   - The next sitting starts with `just real-phone-checklist 1 --fresh`. Step 1.1 asks for `just install` once the pairing is forgotten on both sides.
+  - In that sitting, with the box unticked, the Pixel refused Contacts at once with no prompt: obexd's `CreateSession` failed with `Transport got disconnected` (#392). #401 (`92cd552`, #394) made the app treat that as not shared, and ask again quietly while the Pixel stays connected, so turning Contacts on later is picked up without pairing again. Then #392's runner changes:
+    - Step 1.3 pairs with the box unticked. It checks the finish page says contacts aren't shared and Calls still work, and that the journal logged `contacts-sync-ended` as denied. Then the owner does what the "Contacts not shared" Problem says on the Pixel, and the step waits up to 330 s for the sync, with the Pixel connected and the app not restarted. Not picking it up is a product finding. The prompt left to time out is now only a Simulated Phone scenario.
+    - Step 1.4 doesn't run while the Pixel isn't sharing Contacts: it is skipped, and says what to turn on.
+    - A step that fails, or can't run yet, says how the Pixel is left (paired, connected, sharing Contacts) and the command that runs it again.
 
 ## Stand-ins must be as strict as the real service
 

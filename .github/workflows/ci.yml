@@ -126,6 +126,10 @@ jobs:
     steps:
       - &checkout
         uses: actions/checkout@v5
+        # Two commits, so `just lint`'s bound-change check (#398) can diff a
+        # PR's merge commit, or main's push, against its first parent.
+        with:
+          fetch-depth: 2
       # rust-cache keys on Cargo.lock and the crates' manifests, but not the
       # workspace's Cargo.toml. A change to its build profiles then restored
       # a cache that matched in name only: every dependency rebuilt, and the

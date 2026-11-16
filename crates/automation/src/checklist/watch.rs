@@ -54,6 +54,11 @@ pub struct AppState {
     /// How many times the app has started since watching began, as `just
     /// install` restarts it. The state is read afresh at each start.
     pub app_starts: u32,
+    /// How far Contacts are synced: "syncing", "ready",
+    /// "permission-needed", "denied" or "unavailable".
+    pub contacts_state: String,
+    /// The Problems shown, as (kind, sentence shown to the user).
+    pub problems: Vec<(String, String)>,
 }
 
 /// One `MissedCall` signal: a Missed Call notified.
@@ -151,6 +156,15 @@ impl AppState {
             "CallsOff" => {
                 (self.calls_off, self.calls_off_until, self.calls_off_pending) =
                     <(String, u64, bool)>::try_from(value)?;
+            }
+            "ContactsState" => {
+                (self.contacts_state, ..) = <(String, u32, u32, u64, String)>::try_from(value)?;
+            }
+            "Problems" => {
+                self.problems = <Vec<(String, String, String)>>::try_from(value)?
+                    .into_iter()
+                    .map(|(kind, message, _)| (kind, message))
+                    .collect();
             }
             _ => {}
         }

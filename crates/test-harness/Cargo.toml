@@ -209,6 +209,7 @@ test = false
 futures-channel.workspace = true
 futures-util.workspace = true
 png.workspace = true
+screen-pixels.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 wayland-backend.workspace = true

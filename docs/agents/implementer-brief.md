@@ -26,11 +26,11 @@ Standing instructions for an agent implementing an issue in this repo. The chief
 
 ## A red CI run
 
-GitHub runs CI on every push to a PR; its "CI passed" check on the head is what a merge needs. A red run is answered by its cause, found and fixed; CI alone posts statuses. `gh run rerun` is not used: a rerun's pass proves nothing, and on 2026-11-15 one nearly hid a lost Missed Call (#356).
+GitHub runs CI on every push to a PR; its "CI passed" check on the head is what a merge needs. A red run is answered by its cause, found and fixed; CI alone posts statuses. A rerun's pass proves nothing, and on 2026-11-15 one nearly hid a lost Missed Call (#356), so `just land` refuses a head whose green run is a rerun without a recorded cause.
 
 1. Read it: `just ci-wait <run>` prints each failed test's panic, with the event timeline, and downloads the scenario logs into `target/ci/<run>/`.
 2. Find the cause by event order, and post it as a PR comment. A timeout waiting for a state is a possible product defect until its timeline says otherwise. A failure that shows only under CI's two CPUs reproduces with `just test-ci-like`.
-3. Push the fix. Done when the run on the new head is green. For a cause outside your diff, file an issue with the evidence and send the chief of staff its number.
+3. Push the fix. Done when the run on the new head is green. For a cause outside your diff, file an issue with the evidence, then `just ci-rerun <run> <issue>`: it records the cause on the PR and reruns the failed jobs.
 
 ## Finishing
 

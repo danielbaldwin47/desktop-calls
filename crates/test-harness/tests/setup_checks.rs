@@ -197,6 +197,42 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
     });
 }
 
+/// With a Phone set up the window opens on its finish page, where
+/// Bluetooth off still takes Enter, as while choosing a Phone (#389).
+#[test]
+fn with_a_phone_set_up_and_bluetooth_off_the_finish_page_turns_bluetooth_on_on_enter() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .bluetooth_off()
+        .start();
+    harness.wait_for_app("the Phone is followed", STARTUP, |state| {
+        state.phone.is_some() && kinds(state) == ["bluetooth-off"]
+    });
+
+    let output = harness.cli(&["connect"]);
+    assert!(output.status.success(), "{output:?}");
+
+    let state = harness.wait_for_app(
+        "the finish page, with Enter on Turn on",
+        DEADLINE,
+        |state| {
+            window_field(state, "step") == Some("done")
+                && window_field(state, "keys")
+                    == Some("Enter Turn on · Tab Next button · Esc Close")
+        },
+    );
+    assert_eq!(window_field(&state, "dimmed"), Some("true"));
+    assert_eq!(field(&state, "buttons"), Some("Turn on"));
+
+    harness.keyboard().press(Key::Return);
+
+    harness
+        .simulated_phone()
+        .wait_for_recorded("Bluetooth is turned on", DEADLINE, sets_powered);
+    no_problems_shown(&harness);
+}
+
 #[test]
 fn a_problem_is_said_once_on_screen_as_one_card_with_its_fix() {
     let harness = Harness::builder()
@@ -314,10 +350,28 @@ fn wait_for_phone_listed(harness: &Harness) -> AppState {
     })
 }
 
-/// Moves keyboard focus back from the step to Set up audio, which takes
-/// none by itself, and presses it.
+/// Shift+Tabs back to Set up audio and presses it: once from a Phone
+/// listed, once per button on the finish page, past its cards (#389).
 fn press_set_up_audio(harness: &Harness) {
-    harness.keyboard().press_with_shift(Key::Tab);
+    let state = harness.wait_for_app("the Setup Window has the keyboard", DEADLINE, |state| {
+        window_field(state, "focused") == Some("true") && window_field(state, "keys").is_some()
+    });
+    let presses = match window_field(&state, "step") {
+        Some("done") => {
+            window_field(&state, "buttons").map_or(1, |buttons| buttons.lines().count())
+        }
+        _ => 1,
+    };
+    for press in 1..=presses {
+        let keys = window_field(&harness.app_state(), "keys").map(str::to_owned);
+        harness.keyboard().press_with_shift(Key::Tab);
+        if press < presses {
+            // The footer names the button left before the next press.
+            harness.wait_for_app("Shift+Tab moved to the button left", DEADLINE, |state| {
+                window_field(state, "keys").map(str::to_owned) != keys
+            });
+        }
+    }
     harness.wait_for_app("Set up audio has focus", DEADLINE, |state| {
         field(state, "focused") == Some("true")
     });
@@ -445,6 +499,15 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
 
     let state = wait_for_problems(&harness, "audio-not-set-up", STARTUP);
     assert_eq!(field(&state, "buttons"), Some("Set up audio"));
+    // What setting it up does, in plain words, before the user asks.
+    assert_eq!(
+        field(&state, "messages"),
+        Some(
+            "This computer's audio isn't set up for phone calls yet. Once it is, this computer \
+             connects to your phone for calls by itself. A call's audio stays on your phone until \
+             you move it here. Setting it up restarts the audio."
+        )
+    );
     let before = BTreeMap::from([(
         "51-music.conf".to_owned(),
         ROLES_WITHOUT_HANDS_FREE.to_owned(),

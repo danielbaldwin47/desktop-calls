@@ -390,6 +390,9 @@ impl Shell {
                 | Effect::CallPlacedWhileCallsOff { .. }
                 | Effect::BlockPhone { .. }) => self.calls_off_effect(effect),
                 Effect::SyncContacts => self.contacts_command(contacts::Command::Sync),
+                Effect::SyncContactsAgain => {
+                    self.contacts_command(contacts::Command::SyncAgain);
+                }
                 Effect::RefreshCallHistory => {
                     self.contacts_command(contacts::Command::RefreshCallHistory);
                 }

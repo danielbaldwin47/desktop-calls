@@ -34,8 +34,9 @@ pub(super) struct ReportedFocus {
 }
 
 /// A page of the Setup Window: its step, and on the finish page whether it
-/// shows the keybinding's line, the only change of buttons within a step
-/// that keeps two of them.
+/// shows the keybinding's line. The keybinding check ending can also put
+/// Add keybinding before Done (and Pair another phone, #389) on the same
+/// page; it is brief, and done before the user moves focus.
 type Page = (&'static str, bool);
 
 fn page(step: &SetupStep) -> Page {

@@ -781,13 +781,15 @@ impl Control {
     }
 
     /// How the person holding the Phone answers its prompt to share
-    /// Contacts, for each new PBAP session: `"grant"`, `"deny"` or
-    /// `"ignore"`; or `"ask"`, and the test answers with
-    /// `AnswerContactsPrompt`.
+    /// Contacts, for each new PBAP session: `"grant"`, `"deny"`,
+    /// `"ignore"`, or `"refuse"` (sharing off, as the Pixel refuses); or
+    /// `"ask"`, and the test answers with `AnswerContactsPrompt`. A change
+    /// takes effect at the next session, as turning sharing on or off in
+    /// the Phone's Bluetooth settings does.
     fn set_contacts_prompt(&self, answer: &str) -> zbus::fdo::Result<()> {
         let prompt = obex::Prompt::from_name(answer).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown answer {answer:?}; the answers are grant, deny, ignore and ask"
+                "unknown answer {answer:?}; the answers are grant, deny, refuse, ignore and ask"
             ))
         })?;
         lock(&self.world).obex.prompt = prompt;

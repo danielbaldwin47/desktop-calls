@@ -195,6 +195,7 @@ class MergeGate(unittest.TestCase):
                 "require_contains_base": lambda pr: None,
                 "wait_for_checks": lambda pr, seconds: None,
                 "require_checks_passed": lambda pr, minutes: None,
+                "require_no_unrecorded_rerun": lambda pr: None,
                 "require_mergeable": lambda pr: pr,
                 "require_no_step_waits_on_a_closed_ticket": gate,
                 "require_reviewed": lambda pr, head=None: None,

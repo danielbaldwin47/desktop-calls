@@ -4,7 +4,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## People and preferences
 
-- [user-preferences](user-preferences.md): how the user wants work done and reported, including the owner's 2026-11-15 leave to go ahead with design decisions that are simple to reverse, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
+- [user-preferences](user-preferences.md): how the user wants work done and reported, including the owner's 2026-11-15 leave to go ahead with design decisions that are simple to reverse, and the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
 
 ## Decisions
 

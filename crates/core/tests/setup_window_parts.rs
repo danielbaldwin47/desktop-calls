@@ -39,6 +39,7 @@ fn done(contacts: ContactsOutcome) -> SetupStep {
         connected: true,
         contacts,
         keybinding: KeybindingStage::Checking,
+        pair_another: false,
     }
 }
 

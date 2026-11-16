@@ -25,6 +25,9 @@
 //!   Call History times without a time zone read as the Desktop's local time.
 //! - **The cache** (`cache.rs`), read when the Phone is attached, written
 //!   after every pull, and deleted when the Phone refuses.
+//! - **Asking a Phone that refused again** (`Command::SyncAgain`): the same
+//!   sync, but a refusal is expected, so it is logged at debug, not as a
+//!   failure, however often the core asks.
 //!
 //! Reading files, parsing and indexing run on a thread of their own, so the
 //! main loop, and so the Banner, never waits for them.
@@ -71,6 +74,9 @@ pub enum Command {
     Detach,
     /// Sync Contacts and Call History.
     Sync,
+    /// Sync Contacts and Call History from a Phone that refused, in case
+    /// sharing has been turned on since: another refusal is logged quietly.
+    SyncAgain,
     /// Pull the Call History again.
     RefreshCallHistory,
     /// Delete everything held for the Phone, on disk too.
@@ -108,9 +114,14 @@ pub async fn run(
                 }
             }
             Command::Detach => held = Held::default(),
-            Command::Sync => {
+            Command::Sync | Command::SyncAgain => {
+                let asking = if matches!(command, Command::SyncAgain) {
+                    Asking::Again
+                } else {
+                    Asking::Afresh
+                };
                 if let Some(address) = held.address.clone() {
-                    sync.sync(&address, &mut held.cached).await;
+                    sync.sync(&address, &mut held.cached, asking).await;
                 }
             }
             Command::RefreshCallHistory => {
@@ -146,6 +157,14 @@ struct ContactsSync {
 enum Save {
     Yes,
     No,
+}
+
+/// Whether a sync asks a Phone that refused again, so that another
+/// refusal is expected and logged at debug.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Asking {
+    Afresh,
+    Again,
 }
 
 /// Why a sync gave up.
@@ -203,10 +222,25 @@ impl ContactsSync {
     }
 
     /// Pulls Contacts and Call History in one session.
-    async fn sync(&self, address: &str, held: &mut Cached) {
-        tracing::info!(event_kind = %EventKind::ContactsSyncStarted, "Syncing Contacts");
-        let session = match self.open_session(address).await {
+    async fn sync(&self, address: &str, held: &mut Cached, asking: Asking) {
+        if asking == Asking::Again {
+            tracing::debug!(
+                event_kind = %EventKind::ContactsSyncStarted,
+                "Asking the Phone again whether it shares Contacts"
+            );
+        } else {
+            tracing::info!(event_kind = %EventKind::ContactsSyncStarted, "Syncing Contacts");
+        }
+        let session = match self.open_session(address, asking).await {
             Ok(session) => session,
+            Err(Stop::Denied) if asking == Asking::Again => {
+                tracing::debug!(
+                    event_kind = %EventKind::ContactsSyncEnded,
+                    outcome = "denied",
+                    "The Phone still doesn't share Contacts"
+                );
+                return self.report(Input::ContactsSyncFailed(SyncFailure::Denied));
+            }
             Err(stop) => return self.stopped(stop),
         };
         self.report(Input::ContactsSyncProgress(SyncProgress::Shared));
@@ -327,7 +361,7 @@ impl ContactsSync {
     /// and puts it in front of the older Calls held. Reports the Call
     /// History, or that the refresh failed.
     async fn refresh_call_history(&self, address: &str, held: &mut Cached) {
-        let session = match self.open_session(address).await {
+        let session = match self.open_session(address, Asking::Afresh).await {
             Ok(session) => session,
             Err(stop) => return self.refresh_stopped(Some(stop)),
         };
@@ -384,7 +418,7 @@ impl ContactsSync {
     /// Opens a PBAP session, waiting out the Phone's prompt: while
     /// `CreateSession` is pending, permission is needed, and each time obexd
     /// gives up first, it asks again, until the prompt's deadline.
-    async fn open_session(&self, address: &str) -> Result<OwnedObjectPath, Stop> {
+    async fn open_session(&self, address: &str, asking: Asking) -> Result<OwnedObjectPath, Stop> {
         let started = Instant::now();
         let deadline = now() + millis(PROMPT_TIMEOUT);
         let mut prompt_reported = false;
@@ -417,7 +451,15 @@ impl ContactsSync {
                 Ok(session) => return Ok(session),
                 Err(error) => error,
             };
-            sync_failed("CreateSession", &error);
+            if asking == Asking::Again && matches!(stop_for(&error), Stop::Denied) {
+                tracing::debug!(
+                    event_kind = %EventKind::ContactsSyncFailed,
+                    error_kind = error.as_str(),
+                    "Contacts sync: the Phone refused again"
+                );
+            } else {
+                sync_failed("CreateSession", &error);
+            }
             match error {
                 ObexError::TimedOut
                     if started.elapsed() + Duration::from_secs(1) < PROMPT_TIMEOUT =>
@@ -616,10 +658,14 @@ impl ContactsSync {
     }
 }
 
-/// What the sync does when `error` stops it.
+/// What the sync does when `error` stops it. A Phone that closes the
+/// connection as a session opens has refused: the Pixel 9a does so, at
+/// once and without asking, while its Contacts sharing is off for this
+/// Desktop (ticket #394). Only `CreateSession` comes here with it; a pull
+/// that loses the connection fails that folder.
 fn stop_for(error: &ObexError) -> Stop {
     match error {
-        ObexError::Forbidden => Stop::Denied,
+        ObexError::Forbidden | ObexError::Disconnected => Stop::Denied,
         ObexError::NoService => Stop::Unavailable(Unavailable::NoContactsService),
         _ => Stop::Unavailable(Unavailable::Failed),
     }

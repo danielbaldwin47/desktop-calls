@@ -33,15 +33,22 @@
 //!    invitation to place a first Call, and the Desktop Calls keybinding,
 //!    which it offers to add to the Hyprland config, writing nothing until
 //!    the user confirms the exact line.
+//!
+//! Opened with a Phone set up and followed, the window opens on the finish
+//! page for it instead, with Pair another phone to go back to choosing,
+//! and looks for nothing until then (ticket #389). A Phone that forgot the
+//! pairing still opens on choosing, to pair it again.
 
 mod contacts;
 mod focus;
 mod keybinding;
+mod opened;
 mod step;
 
 use contacts::{begin_contacts, finish, follow_contacts, start_sync};
 pub(super) use contacts::{contacts_read, hold_sync, sync_progress};
 pub use focus::SetupFocus;
+use opened::{follow_opened, open, pair_another};
 pub use step::SetupStep;
 
 use super::dialling::phone_unpaired;
@@ -102,6 +109,21 @@ pub(super) struct Setup {
     just_failed: bool,
     /// What the window reported has the keyboard, and on which page.
     focus: Option<focus::ReportedFocus>,
+    /// Where the window opened, which says whether it is looking for
+    /// Phones.
+    opened_on: OpenedOn,
+}
+
+/// Where the Setup Window opened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OpenedOn {
+    /// Choosing a Phone: the Desktop looks for Phones and is discoverable
+    /// until the window closes. Pair another phone goes here too.
+    #[default]
+    Choose,
+    /// The finish page for the Phone already set up, which offers Pair
+    /// another phone; nothing is looked for (ticket #389).
+    Finish,
 }
 
 /// How far the sync the Setup Window follows has got.
@@ -183,6 +205,11 @@ pub enum ContactsOutcome {
     /// Not shared, for another reason: nobody answered the Phone, or the
     /// sync failed.
     NotShared,
+    /// Being read now, as after every connect: seen when the window opens
+    /// on the finish page for a Phone already set up.
+    Syncing,
+    /// The Phone is asking whether to share them.
+    Asking,
 }
 
 /// Where the finish page is with the keybinding.
@@ -265,6 +292,12 @@ impl Setup {
     /// Whether the window is at its first step, choosing a Phone.
     pub(super) fn choosing(&self) -> bool {
         matches!(self.step, Step::Choose)
+    }
+
+    /// Whether the window is on the finish page it opened on, for the
+    /// Phone already set up.
+    pub(super) fn opened_on_finish(&self) -> bool {
+        self.opened_on == OpenedOn::Finish && matches!(self.step, Step::Done(_))
     }
 }
 
@@ -349,6 +382,7 @@ impl State {
                 connected: self.phone_is_here(),
                 contacts: self.contacts_outcome(),
                 keybinding: setup.keybinding.clone(),
+                pair_another: setup.opened_on == OpenedOn::Finish,
             },
         };
         // A Problem card already says Bluetooth is off or blocked, with its
@@ -411,7 +445,9 @@ impl State {
                 calls: self.call_history.entries().len(),
             },
             ContactsState::Denied => ContactsOutcome::Denied,
-            _ => ContactsOutcome::NotShared,
+            ContactsState::Syncing => ContactsOutcome::Syncing,
+            ContactsState::PermissionNeeded { .. } => ContactsOutcome::Asking,
+            ContactsState::Unavailable(_) => ContactsOutcome::NotShared,
         }
     }
 
@@ -444,6 +480,7 @@ pub(super) fn setup_input(state: &mut State, input: Input, effects: &mut Vec<Eff
             }
         }
         Input::OpenSetupWindow => open(state, effects),
+        Input::PairAnotherPhone => pair_another(state, effects),
         Input::CloseSetupWindow => close(state, effects),
         Input::SetupReady { desktop_name } => {
             if let Some(setup) = state.setup.as_mut() {
@@ -600,18 +637,6 @@ pub(super) fn bluetooth_on(state: &mut State, effects: &mut Vec<Effect>) {
     }
 }
 
-fn open(state: &mut State, effects: &mut Vec<Effect>) {
-    if state.setup.is_some() {
-        return;
-    }
-    state.setup_openings += 1;
-    state.setup = Some(Setup {
-        opened: state.setup_openings,
-        ..Setup::default()
-    });
-    effects.push(Effect::StartSetup);
-}
-
 fn close(state: &mut State, effects: &mut Vec<Effect>) {
     let Some(setup) = state.setup.take() else {
         return;
@@ -619,7 +644,10 @@ fn close(state: &mut State, effects: &mut Vec<Effect>) {
     if matches!(setup.step, Step::Confirm(..)) {
         effects.push(Effect::AnswerPairingCode { confirm: false });
     }
-    effects.push(Effect::StopSetup);
+    // Opened on the finish page and closed there, nothing was looked for.
+    if setup.opened_on == OpenedOn::Choose {
+        effects.push(Effect::StopSetup);
+    }
     // The first sync waited for the warning, which won't be seen now.
     if setup.sync_held && state.phone_is_here() {
         state.contacts_sync = ContactsState::Syncing;
@@ -900,6 +928,7 @@ fn wait(setup: &mut Setup, after_ms: u32, effects: &mut Vec<Effect>) {
 pub(super) fn follow(state: &mut State, effects: &mut Vec<Effect>) {
     follow_connection(state, effects);
     follow_contacts(state, effects);
+    follow_opened(state, effects);
     focus::forget_once_gone(state);
 }
 

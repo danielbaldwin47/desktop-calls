@@ -27,9 +27,12 @@
 //! result is overwritten or loses its run. `run` is 0 in a file written
 //! before runs were kept.
 //!
-//! `result` is `pass`, `fail` or `skipped`. `journal` holds the app's info,
-//! warning and error lines from the step, kept for failed steps only. No
-//! phone number is ever written.
+//! `result` is `pass`, `fail`, `skipped` or `unexpected`. `unexpected` is
+//! "observed, unexpected": the step ran, the app logged no error, and the
+//! Phone did something the step did not anticipate, which its evidence
+//! lines starting `Unexpected: ` describe. `journal` holds the app's info,
+//! warning and error lines from the step, kept for failed and unexpected
+//! steps only. No phone number is ever written.
 
 use std::fs;
 use std::io;
@@ -83,6 +86,10 @@ pub enum Outcome {
     Pass,
     Fail,
     Skipped,
+    /// Observed, unexpected: the step ran and the app logged no error, but
+    /// the Phone did something the step did not anticipate. Its evidence
+    /// says what; the run carries on, and the step isn't run again.
+    Unexpected,
 }
 
 impl Outcome {
@@ -91,7 +98,14 @@ impl Outcome {
             Self::Pass => "pass",
             Self::Fail => "fail",
             Self::Skipped => "skipped",
+            Self::Unexpected => "unexpected",
         }
+    }
+
+    /// Whether the step is done with: passed, or observed something
+    /// unexpected, which running it again would only observe again.
+    pub fn is_done(self) -> bool {
+        matches!(self, Self::Pass | Self::Unexpected)
     }
 }
 
@@ -144,6 +158,7 @@ impl StepRecord {
             outcome: match value["result"].as_str()? {
                 "pass" => Outcome::Pass,
                 "fail" => Outcome::Fail,
+                "unexpected" => Outcome::Unexpected,
                 _ => Outcome::Skipped,
             },
             run: value["run"]

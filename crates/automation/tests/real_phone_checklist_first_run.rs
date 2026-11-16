@@ -124,7 +124,7 @@ fn step_1_1_fails_when_the_app_comes_back_from_the_install_with_the_pixel_still_
 }
 
 #[test]
-fn step_1_3_passes_a_pixel_that_shares_contacts_as_it_pairs_with_the_box_unticked_and_the_run_ends_with_a_summary()
+fn step_1_3_is_observed_unexpected_when_the_pixel_shares_contacts_with_the_box_unticked_and_the_run_carries_on()
  {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
@@ -135,16 +135,44 @@ fn step_1_3_passes_a_pixel_that_shares_contacts_as_it_pairs_with_the_box_unticke
     assert!(questions[0].contains("untick"), "{questions:?}");
     let result = result_file(results.path());
     let prompt = step(&result, "1.3");
-    assert_eq!(prompt["result"], "pass", "{prompt:#}");
+    assert_eq!(prompt["result"], "unexpected", "{prompt:#}");
     assert!(
-        says(prompt, "shares Contacts as it pairs even with"),
+        says(
+            prompt,
+            "Unexpected: This Pixel shares Contacts as it pairs even with"
+        ),
         "{prompt:#}"
     );
+    // Not failed, so no way back is offered and the owner pairs nothing
+    // again for it.
+    assert!(
+        !runner.printed("To run 1.3 again"),
+        "{}",
+        runner.transcript.join("\n")
+    );
+    assert!(
+        prompt["journal"]
+            .as_array()
+            .is_some_and(|journal| !journal.is_empty()),
+        "the step's log is kept for the agent who reads it: {prompt:#}"
+    );
     let summary = summary(&runner);
+    assert!(
+        summary.iter().any(|line| line
+            .starts_with("  1.3 observed, unexpected: This Pixel shares Contacts as it pairs")),
+        "{}",
+        summary.join("\n")
+    );
+    assert!(
+        summary
+            .iter()
+            .any(|line| line.starts_with("Observed, unexpected: 1.3. ")),
+        "{}",
+        summary.join("\n")
+    );
     for line in [
         "  1.1 passed.",
         "  1.2 passed.",
-        "  1.3 passed.",
         "  1.4 passed.",
         "Next: run `just real-phone-checklist --demo 2` for group 2.",
     ] {
@@ -199,6 +227,23 @@ fn step_1_3_has_a_phone_that_asks_told_no_then_follows_the_problem() {
     let later = step(&result, "1.3");
     assert_eq!(later["result"], "pass", "{later:#}");
     assert!(says(later, "without pairing again"), "{later:#}");
+}
+
+#[test]
+fn step_1_3_is_observed_unexpected_when_the_phones_prompt_times_out() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    // Nobody answers the Phone's prompt, which gives up by itself.
+    runner.slips = vec![
+        ("contacts-access-off", "contacts-prompt"),
+        ("deny-contacts", ""),
+    ];
+    runner.quit_at = Some("1.4");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+    let timed_out = step(&result, "1.3");
+    assert_eq!(timed_out["result"], "unexpected", "{timed_out:#}");
+    assert!(says(timed_out, "prompt timed out"), "{timed_out:#}");
 }
 
 #[test]
@@ -285,6 +330,64 @@ fn step_1_3_fails_when_the_box_was_left_ticked_and_the_summary_says_why_and_what
             .any(|line| line == "Next: run `just real-phone-checklist --demo 1` to retry 1.3."),
         "{}",
         summary.join("\n")
+    );
+}
+
+#[test]
+fn step_1_2_is_observed_unexpected_when_the_pixel_refuses_contacts_with_the_box_ticked_and_goes_on_to_the_first_call()
+ {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    // As the user confirms the code, this Phone turns out to have Contacts
+    // sharing off for the Desktop: it refuses them at once.
+    runner.slips = vec![("enter", "contacts-access-off;enter")];
+    runner.slip_after = 1;
+    runner.quit_at = Some("1.3");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+
+    let pairing = step(&result, "1.2");
+    assert_eq!(pairing["result"], "unexpected", "{pairing:#}");
+    assert!(
+        says(
+            pairing,
+            "Unexpected: The Pixel refused Contacts as it paired"
+        ) && says(pairing, "Calls still work"),
+        "{pairing:#}"
+    );
+    assert!(
+        says(pairing, "The first Call went to the Test Number."),
+        "{pairing:#}"
+    );
+    assert!(
+        runner.printed("1.2 observed, unexpected."),
+        "{}",
+        runner.transcript.join("\n")
+    );
+}
+
+#[test]
+fn a_resumed_run_counts_an_unexpected_step_as_done_and_doesnt_run_it_again() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut first = Runner::start(&["1"], results.path());
+    first.slips = vec![("enter", "contacts-access-off;enter")];
+    first.slip_after = 1;
+    first.quit_at = Some("1.3");
+    first.play(|_| "y".to_owned());
+
+    let mut second = Runner::start(&["1"], results.path());
+    second.quit_at = Some("1.3");
+    second.play(|_| "y".to_owned());
+    assert_eq!(
+        second.steps_started(),
+        ["1.3"],
+        "{}",
+        second.transcript.join("\n")
+    );
+    assert!(
+        second.printed("1.2 (run 1, observed, unexpected)"),
+        "{}",
+        second.transcript.join("\n")
     );
 }
 

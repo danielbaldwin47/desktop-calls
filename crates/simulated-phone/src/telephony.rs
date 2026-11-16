@@ -192,7 +192,7 @@ pub enum Quirk {
     ConnectedUnannounced,
     /// The next `Device1.Connect` for the Phone is never answered, and
     /// changes nothing: as the real Desktop's app seemed to wait on one for
-    /// good (ticket #216, inferred).
+    /// good (ticket #216, inferred, RPU-11).
     ConnectNeverAnswersOnce,
     /// The first `Device1.Connect` after the Desktop unblocks the Phone
     /// fails with `org.bluez.Error.Failed` `"br-connection-busy"`, as BlueZ
@@ -286,7 +286,7 @@ impl Behaviour {
 /// AOSP's `HeadsetService.isScoAcceptable` refuses audio for any other
 /// device, and `HeadsetSystemInterface.answerCall` makes the device that
 /// answers the active one. Newly connected earbuds becoming active is
-/// inferred, not read in the source.
+/// inferred, not read in the source (RPU-31).
 #[derive(Default)]
 pub struct Earbuds {
     pub connected: bool,

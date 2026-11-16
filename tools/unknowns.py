@@ -156,9 +156,6 @@ def code_problems(files: dict[str, str], entries: list[Entry]) -> list[str]:
 def step_problems(entries: list[Entry], steps: set[str]) -> list[str]:
     problems = []
     for entry in entries:
-        observed_by = entry.fields.get("Observed by", "")
-        if not observed_by:
-            continue
         for step in entry.steps():
             if step not in steps:
                 problems.append(

@@ -1,22 +1,22 @@
 # Real-Phone unknowns
 
-What the Simulated Phone, a Real-Phone Checklist step or the app assumes about the real Phone and its stack (the Pixel 9a, BlueZ, obexd, PipeWire and WirePlumber) without a real observation behind it. Started 2026-11-15 from retro candidate 3 of [2026-11-15](research/2026-11-15-retro.md): the first sitting failed three times on behaviour inferred from documents, and the research notes held 268 `[I]` marks that no list tracked.
+What the Simulated Phone or a Real-Phone Checklist step assumes about the real Phone and its stack (the Pixel 9a, BlueZ, obexd, PipeWire and WirePlumber) without a real observation behind it. The app's own "inferred" marks (in `crates/core` and `crates/desktop-calls`) are outside it for now. Started 2026-11-15 from retro candidate 3 of [2026-11-15](research/2026-11-15-retro.md): the first sitting failed three times on behaviour inferred from documents, and the research notes held 268 `[I]` marks that no list tracked.
 
 ## Rules
 
-- **Code that says "inferred" or "unverified"** about the real stack, in `crates/simulated-phone/src` or the checklist's steps (`crates/automation/src/checklist/steps.rs` and `steps/`), names the entry here within two lines of the word, as `RPU-7`. The lint reads only those two words; any other assumption ("a guess", "not seen") gets an entry and an id by the same rule, unenforced. `just check` fails otherwise, and on an id with no entry, an entry with no "Observed by", an open entry whose step doesn't exist, and code that still calls an observed entry inferred.
-- **A step that rests on an open unknown observes and never judges it.** What the Phone does there is recorded with `Sitting::observed`, or with `Sitting::unexpected` ("observed, unexpected") where the step had expected something; it never fails the step on that point alone. Failing on it is what sent the owner to re-pair three times on 2026-11-15.
+- **Code that says "inferred" or "unverified"** about the real stack, in `crates/simulated-phone/src` or the checklist's steps (`crates/automation/src/checklist/steps.rs` and `steps/`), names the entry here within two lines of the word, as `RPU-7`. The lint reads only those two words; any other assumption ("a guess", "not seen") gets an entry and an id by the same rule, unenforced. `just check` fails otherwise, and on an id with no entry, an entry with no "Observed by", an entry whose step doesn't exist, and code that still calls an observed entry inferred.
+- **A step that rests on an open unknown observes and never judges it.** What the Phone does there is recorded with `Sitting::observed`, or with `Sitting::unexpected` ("observed, unexpected") where the step had expected something; it never fails the step on that point alone. Failing on it is what sent the owner to re-pair three times on 2026-11-15. A step that still fails where an open unknown is involved says why under `- Judged:` in the entry: the failure is the app's or the step's purpose not met, never the Phone differing from the assumption.
 - **Before "agent-side complete"** for a sitting, `just real-phone-unknowns <group>` lists the open unknowns on that group's path, and the message to the owner names them.
 - **When a sitting observes one,** set its Status to `observed <date> (<issue or note>): <what was seen>`, correct the Simulated Phone or step that assumed it, and drop "inferred" from the code that cites it. A new assumption gets an entry in the same PR that makes it.
 
-Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed by:` (checklist step ids, such as `1.3`, or `no step yet`) and `- Status:` (`open`, or `observed ...`). Ids are never reused.
+Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed by:` (checklist step ids, such as `1.3`, or `no step yet`) and `- Status:` (`open`, or `observed ...`), and `- Judged:` where the rule above needs it. Ids are never reused.
 
 ## Pairing and BlueZ
 
 ## RPU-1: Pairing times
 - Assumed: discovery finds the Pixel, the page is answered and hands-free connects after pairing within the Simulated Phone's `FOUND_AFTER`, `PAGE_ANSWERED` and connect times.
 - Source: `crates/simulated-phone/src/pairing.rs` header; retro A5.
-- Observed by: 1.2
+- Observed by: no step yet (1.2 times only the whole, from the Setup Window's first step to the first Call)
 - Status: open
 
 ## RPU-2: A Phone that refuses Calls fails `ConnectProfile` with `br-connection-refused`
@@ -80,7 +80,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Status: open
 
 ## RPU-12: `ConnectProfile` errors on a Phone with unresolved services
-- Assumed: hands-free `ConnectProfile` on the Pixel fails with a `br-connection-*` error, and `Connect` on a device with one profile down brings it up; the error for unresolved services is unknown.
+- Assumed: hands-free `ConnectProfile` on the Pixel fails with a `br-connection-*` error, and `Connect` on a Phone with one profile down brings it up; the error for unresolved services is unknown.
 - Source: `docs/research/2026-11-05-handsfree-not-back.md`; #385; retro A5.
 - Observed by: 6.7
 - Status: open
@@ -94,10 +94,11 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 ## Contacts and obexd
 
 ## RPU-14: The Pixel's Contacts prompt
-- Assumed: Android's prompt to share Contacts lasts about 30 s, asks again on the next session if unanswered, and has no "Don't ask again". The Pixel 9a showed no prompt in two sittings: it shared at pairing with the box ticked, and refused at once with it unticked (#380, #392).
-- Source: `docs/research/2026-11-05-setup-contacts.md`; `crates/automation/src/checklist/steps/first_run.rs` (`PROMPT_DEADLINE`); retro "Open questions".
+- Assumed: what moves the Pixel between sharing Contacts, refusing them and asking is the Pair dialog's box and the per-Desktop Contacts switch, and with the box unticked it may ask rather than refuse (1.3's premise until #392). When it asks, the prompt lasts about 30 s, asks again on the next session if unanswered, and has no "Don't ask again". The Pixel 9a showed no prompt in two sittings: it shared at pairing with the box ticked, and refused at once with it unticked (#380, #392).
+- Source: `docs/research/2026-11-05-setup-contacts.md`; `crates/automation/src/checklist/steps/first_run.rs` (`PROMPT_DEADLINE`); retro B2 and "Open questions".
 - Observed by: 1.3
 - Status: open
+- Judged: 1.2 fails when a prompt times out before Allow is tapped, because it then has no first Call to time. 1.3 records it as observed, unexpected.
 
 ## RPU-15: The Pair dialog's Contacts box wording
 - Assumed: the Pixel's Pair dialog words its box "Allow access to your contacts and call history", as the runner quotes it.
@@ -110,6 +111,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Source: `docs/research/2026-11-04-contacts-sync.md`.
 - Observed by: 1.3
 - Status: open
+- Judged: 1.3 fails a finish page that says Contacts aren't shared "yet", and one with no `denied` line in the log, because the same page follows the Desktop's own sync failing, which the step must not pass. Telling the two apart from the log is #415's item 5.
 
 ## RPU-17: obexd when the link drops during the prompt
 - Assumed: real obexd fails a `CreateSession` waiting on the prompt with `Failed` when the Phone goes out of range, and a later pull starts cleanly.
@@ -230,7 +232,8 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 ## The Desktop
 
 ## RPU-36: The Incoming Call Banner draws above Omarchy's notifications
-- Assumed: from Hyprland's drawing order, the Banner shows above Omarchy's notification cards.
+- Assumed: from Hyprland's drawing order, the Incoming Call Banner shows above Omarchy's notification cards.
 - Source: `crates/automation/src/checklist/steps/keyboard_and_look.rs` (7.2); spec #221.
 - Observed by: 7.2
 - Status: open
+- Judged: 7.2 fails a Banner hidden under a notification: spec #221 requires it on top, so that is the app's bug however Hyprland draws.

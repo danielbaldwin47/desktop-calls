@@ -181,13 +181,7 @@ pub fn hands_free_up(world: &mut World) -> zbus::Result<Option<Change>> {
         OwnedVariant::from(true),
     );
     let mut change = Change::default();
-    if !world
-        .behaviour
-        .quirks
-        .contains(&telephony::Quirk::ConnectedUnannounced)
-    {
-        change.bluez(connected_changed(&device, true));
-    }
+    change.bluez(connected_changed(&device, true));
     if let Some(battery) = world.range.battery.take() {
         let copy = copy_properties(&battery);
         bluez::restore_battery(&mut world.bluez, &device, battery);

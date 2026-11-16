@@ -455,10 +455,11 @@ fn fresh_install_holding_paired() -> Harness {
         .headless_screen()
         .phone_name(PHONE_NAME)
         .phone_unpaired()
-        .paired_signal_held()
+        .signal_held("Paired")
         .start()
 }
 
+/// Read versus signal, `Paired` (retro candidate 7).
 #[test]
 fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
     let harness = fresh_install_holding_paired();
@@ -486,6 +487,35 @@ fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
     closed(&harness);
     harness.wait_for_app_log(r#""event_kind":"setup-closed""#, DEADLINE);
     never_offered_again(&harness);
+}
+
+/// Read versus signal, `Bonded` (retro candidate 7): BlueZ signals only
+/// `Paired`, and a read says `Bonded`. Paired from the Phone's own screen,
+/// no `Pair` returns to say so: the window goes on by `Paired`.
+#[test]
+fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_paired() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .signal_held("Bonded")
+        .start();
+    wait_for_phone_listed(&harness, STARTUP);
+    wait_until_discoverable(&harness);
+
+    harness
+        .simulated_phone()
+        .pair_from_phone()
+        .expect("the Phone finds the Desktop");
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    let state = connected(&harness);
+    assert_eq!(
+        state.phone.as_ref().map(|phone| phone.name.as_str()),
+        Some(PHONE_NAME)
+    );
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
 /// Opens the window again, on the finish page for the Phone, goes on to
@@ -518,7 +548,7 @@ fn a_phone_chosen_in_the_window_goes_on_when_bluez_never_resolves_its_services()
         .headless_screen()
         .phone_name(PHONE_NAME)
         .phone_unpaired()
-        .paired_signal_held()
+        .signal_held("Paired")
         .services_unresolved()
         .start();
     wait_for_phone_listed(&harness, STARTUP);

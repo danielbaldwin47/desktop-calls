@@ -134,3 +134,31 @@ fn contacts_shared_later_are_synced_without_pairing_again_or_reconnecting() {
     assert!(state.problems.is_empty(), "{:?}", state.problems);
     assert_eq!(state.connection_state, "connected");
 }
+
+/// A Phone that asks, told no on its prompt: Android remembers the answer,
+/// so asking again shows no prompt, and Contacts turned on later in its
+/// Bluetooth settings are picked up as for a Phone that never asked.
+#[test]
+fn contacts_shared_later_after_a_no_on_the_prompt_are_synced_without_reconnecting() {
+    let harness = Harness::start();
+    let phone = harness.simulated_phone();
+    phone.set_pbap_folder("pb", &vcards::contacts(CONTACTS, 0));
+    phone.set_contacts_prompt("ask");
+    phone.connect();
+    harness.wait_for_app("the Phone asking", SYNC_DEADLINE, |state| {
+        state.contacts.state == "permission-needed"
+    });
+    phone.answer_contacts_prompt("deny");
+    phone.set_contacts_prompt("deny");
+    harness.wait_for_app("ContactsState is denied", SYNC_DEADLINE, is_denied);
+
+    phone.set_contacts_prompt("grant");
+
+    let state = harness.wait_for_app(
+        "the Contacts shared later are synced",
+        SHARED_LATER_DEADLINE,
+        |state| is_ready(state) && usize::try_from(state.contacts.contacts) == Ok(CONTACTS),
+    );
+    assert!(state.problems.is_empty(), "{:?}", state.problems);
+    assert_eq!(state.connection_state, "connected");
+}

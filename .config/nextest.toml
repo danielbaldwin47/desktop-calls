@@ -37,8 +37,6 @@ test(=setup_contacts::an_ignored_prompt_runs_the_countdown_to_zero_and_try_again
 | test(=crash_restart::a_call_that_ended_while_the_app_was_down_is_forgotten_and_the_log_says_so)
 | test(=quiet_hours::quiet_hours_across_midnight_turn_calls_off_when_they_begin)
 | test(=quiet_hours::quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connects_within_10_s)
-| test(=quiet_hours::quiet_hours_beginning_sends_no_confirmation)
-| test(=quiet_hours::quiet_hours_ending_sends_no_confirmation)
 | test(=setup_contacts::a_phone_leaving_while_it_asks_is_waited_for_and_continue_asks_again)
 | test(=call_window_collapse::the_pointer_keeps_it_expanded_until_five_seconds_after_it_leaves_and_so_does_the_keyboard_until_escape)
 '''

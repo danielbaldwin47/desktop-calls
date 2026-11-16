@@ -53,6 +53,7 @@ fn pixel_chosen_over_the_old_phone() -> Harness {
 fn choose_the_pixel(harness: &Harness) {
     let output = harness.cli(&["connect"]);
     assert!(output.status.success(), "{output:?}");
+    harness.pair_another_phone();
     harness.wait_for_app(
         "the Setup Window lists the Pixel and has keyboard focus",
         STARTUP,

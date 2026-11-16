@@ -576,14 +576,12 @@ fn pairing_a_second_phone_switches_to_it() {
 
 #[test]
 fn the_setup_window_opens_on_request_and_closing_stops_the_looking() {
-    let (state, _) = run(
-        State::default(),
-        [Input::PhonePaired(pixel()), Input::PairedPhonesListed],
-    );
+    let (state, _) = run(State::default(), [Input::PairedPhonesListed]);
+    let (state, _) = run(state, [Input::CloseSetupWindow]);
 
     let (state, effects) = run(state, [Input::OpenSetupWindow]);
     assert_eq!(effects, [Effect::StartSetup]);
-    assert!(state.surfaces().setup_window.is_some());
+    assert!(matches!(setup_step(&state), Some(SetupStep::Choose { .. })));
 
     let (state, effects) = run(state, [Input::CloseSetupWindow]);
     assert_eq!(effects, [Effect::StopSetup]);
@@ -774,6 +772,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
                 calls: 1,
             },
             keybinding: KeybindingStage::Checking,
+            pair_another: false,
         }),
         Timestamp(0),
         None,

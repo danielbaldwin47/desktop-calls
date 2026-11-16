@@ -888,6 +888,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::DoNotDisturbChanged(on) => state.do_not_disturb = on,
         input @ (Input::PairedPhonesListed
         | Input::OpenSetupWindow
+        | Input::PairAnotherPhone
         | Input::CloseSetupWindow
         | Input::SetupReady { .. }
         | Input::SetupUnavailable

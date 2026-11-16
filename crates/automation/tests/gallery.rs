@@ -73,6 +73,9 @@ const STATES: &[&str] = &[
     "setup-problem-contacts-support-missing",
     "setup-problem-audio-not-set-up",
     "setup-problem-bluez-hands-free",
+    "setup-window-opened-set-up",
+    "setup-window-opened-keybinding-unreadable",
+    "setup-window-opened-calls-off-bluetooth-off",
 ];
 
 /// The environment variable `name`, unless it is unset or empty.

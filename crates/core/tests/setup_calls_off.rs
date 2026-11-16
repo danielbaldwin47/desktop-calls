@@ -97,12 +97,15 @@ fn off() -> State {
     .0
 }
 
-/// The Setup Window opened, with the other Phone nearby.
+/// The Setup Window opened and at choosing a Phone, with the other Phone
+/// nearby: with a Phone set up it opens on the finish page, and Pair
+/// another phone goes on to choosing (#389).
 fn opened(state: State) -> State {
     run(
         state,
         [
             Input::OpenSetupWindow,
+            Input::PairAnotherPhone,
             Input::SetupReady {
                 desktop_name: "desktop".to_owned(),
             },

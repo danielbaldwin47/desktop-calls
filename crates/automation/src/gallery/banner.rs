@@ -74,7 +74,9 @@ pub(super) const BANNER_STATES: &[State] = &[
     State {
         name: "incoming-call-banner-keybinding-unreadable",
         title: "The Incoming Call Banner with bindings.lua unreadable: one short footer line, the keybinding unknown, and where the detail is",
-        still: |state| footer(state).is_some_and(|footer| footer.starts_with("Keybinding unknown")),
+        still: |state| {
+            footer(state).is_some_and(|footer| footer.starts_with("Couldn't read your keybindings"))
+        },
         prepare: |builder| builder.hyprland_bindings_unreadable(),
         moment: None,
         reach: |harness| {

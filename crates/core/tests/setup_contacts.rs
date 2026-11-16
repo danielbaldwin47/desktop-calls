@@ -182,6 +182,7 @@ fn done(contacts: ContactsOutcome, keybinding: KeybindingStage) -> SetupStep {
         connected: true,
         contacts,
         keybinding,
+        pair_another: false,
     }
 }
 

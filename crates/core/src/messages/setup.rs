@@ -147,10 +147,13 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
             connected,
             contacts,
             keybinding,
+            ..
         } => done(
             &mut text, phone, *connected, *contacts, keybinding, &desktop, home,
         ),
     };
+    let instructions = again_not_first(&view.step, &mut text, instructions);
+    let buttons = with_pair_another(&view.step, &text, buttons);
     text.keys = keys(view, &buttons, text.calls_off.as_ref());
     // Escape does what a lone Cancel does: the footer says it in the
     // button's word, not a second word beside it.
@@ -165,6 +168,63 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
     text.instructions = instructions;
     text.buttons = buttons;
     text
+}
+
+/// The finish page's button back to choosing a Phone, when the window
+/// opened on it for the Phone already set up.
+pub const PAIR_ANOTHER: &str = "Pair another phone";
+
+/// On the finish page opened again for the Phone set up, the next Call
+/// isn't the first: "Place a call", not "Place your first call" (#389).
+fn again_not_first(
+    step: &SetupStep,
+    text: &mut SetupWindowText,
+    mut instructions: Vec<Instruction>,
+) -> Vec<Instruction> {
+    if matches!(
+        step,
+        SetupStep::Done {
+            pair_another: true,
+            ..
+        }
+    ) {
+        let card = text.keybinding.as_mut().map(|card| &mut card.text);
+        for sentence in instructions
+            .iter_mut()
+            .map(|instruction| &mut instruction.text)
+            .chain(card)
+        {
+            if let Some(rest) = sentence.strip_prefix(FIRST_CALL) {
+                *sentence = format!("{AGAIN_CALL}{rest}");
+            }
+        }
+    }
+    instructions
+}
+
+const FIRST_CALL: &str = "Place your first call:";
+const AGAIN_CALL: &str = "Place a call:";
+
+/// `buttons`, and on the finish page the window opened on for the Phone
+/// set up, the way back to choosing a Phone, last, after Done, so never
+/// Enter's (#389). Not while the keybinding's line is confirmed: that page
+/// is about the line alone.
+fn with_pair_another(
+    step: &SetupStep,
+    text: &SetupWindowText,
+    mut buttons: Vec<&'static str>,
+) -> Vec<&'static str> {
+    if matches!(
+        step,
+        SetupStep::Done {
+            pair_another: true,
+            ..
+        }
+    ) && text.line.is_none()
+    {
+        buttons.push(PAIR_ANOTHER);
+    }
+    buttons
 }
 
 /// A page's heading, instructions and buttons, the default one first.
@@ -435,7 +495,14 @@ fn done(
     desktop: &str,
     home: Option<&str>,
 ) -> Page {
-    text.summary = Some(contacts_outcome(contacts, desktop));
+    // Away, a Phone that hasn't shared contacts yet just hasn't had the
+    // chance: not "Calls still work", which they can't while it is away
+    // (#389).
+    text.summary = Some(if !connected && contacts == ContactsOutcome::NotShared {
+        WHEN_CONNECTED.to_owned()
+    } else {
+        contacts_outcome(contacts, desktop)
+    });
     let (instructions, card, buttons) = finish(keybinding, &mut text.line, home);
     // While the line is confirmed, the page is about the line alone.
     if card.is_some() {
@@ -499,6 +566,10 @@ fn plural(count: impl Into<u64>, one: &str, many: &str) -> String {
     }
 }
 
+/// The finish page's Contacts line while the Phone, never synced, is away.
+const WHEN_CONNECTED: &str =
+    "Contacts and recent calls come over from your phone when it connects.";
+
 fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
     match outcome {
         ContactsOutcome::Synced { contacts, calls } => format!(
@@ -511,6 +582,11 @@ fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
         ),
         ContactsOutcome::NotShared => {
             "Your phone isn't sharing contacts yet. Calls still work, and show numbers instead of names."
+                .to_owned()
+        }
+        ContactsOutcome::Syncing => "Getting contacts and recent calls from your phone…".to_owned(),
+        ContactsOutcome::Asking => {
+            "Your phone is asking whether to share contacts. Tap Allow on it so calls show names."
                 .to_owned()
         }
     }

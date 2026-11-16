@@ -77,10 +77,12 @@ impl Harness {
              check can't tell when the screen shows it"
         );
         let before = reach();
-        let first = self.first_frame_shown(what, before, &shown);
+        // Asked before the recording, so no time passes between the frame
+        // and the stop but the stop's own.
         let pid = self
             .app_process_id()
             .expect("the app owns its name on the session bus");
+        let first = self.first_frame_shown(what, before, &shown);
         signal(pid, "-STOP");
         *self
             .frozen
@@ -105,7 +107,7 @@ impl Harness {
         }
     }
 
-    /// When the screen's first frame that satisfies `shown` was judged,
+    /// When the screen's first frame that satisfies `shown` had been judged,
     /// recording it from now until `before`.
     fn first_frame_shown(
         &self,
@@ -147,6 +149,7 @@ impl Harness {
                         height,
                     });
                 let Ok(frame) = frame else {
+                    let _ = fs::remove_file(&path);
                     break None;
                 };
                 let showing = shown(&frame);

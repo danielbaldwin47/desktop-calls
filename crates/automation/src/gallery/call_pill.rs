@@ -364,7 +364,12 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         },
         // For only 2 s, so the app is stopped for the capture (#248, #384).
         moment: Some(|harness| {
-            let call = harness.app_state().calls.first().map_or(0, |call| call.id);
+            let call = harness
+                .app_state()
+                .calls
+                .first()
+                .unwrap_or_else(|| panic!("the Call is still on, collapsed to the Call Pill"))
+                .id;
             let hung_up = Instant::now();
             harness.hang_up(call);
             harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {

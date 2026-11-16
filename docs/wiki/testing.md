@@ -122,7 +122,7 @@ Sources: the PR bodies and comments named, `gh run list` and `gh run view` on 20
     - Each run is kept apart in one results file, with `runs` and `earlier` arrays.
     - Step 1.1 passes only on the Setup Window after the install restarted the app with no Phone, and it fails at once if the restarted app reports the Pixel.
     - Step 1.2 offers to go back to 1.1 while the Pixel is still paired.
-    - Step 1.3 is judged from the journal: this Pixel shares Contacts as it pairs when its Pair dialog's box is ticked.
+    - Step 1.3 is judged from the journal, which showed the Pixel sharing Contacts as it paired, with no prompt. Inferred, not checked on the Pixel: the Pair dialog's "Allow access…" box causes this, and the step handles whether an unticked Pixel asks or refuses.
   - The next sitting starts with `just real-phone-checklist 1 --fresh`. Step 1.1 asks for `just install` once the pairing is forgotten on both sides.
 
 ## Stand-ins must be as strict as the real service

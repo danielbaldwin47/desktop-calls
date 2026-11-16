@@ -330,11 +330,13 @@ impl Builder {
         self
     }
 
-    /// BlueZ holds back the `Paired` signal of each pairing, as BlueZ 5.87
-    /// does while the Phone's services aren't resolved: `Bonded` is
-    /// signalled, and a read says `Paired`, but no signal does (ticket #372).
-    pub fn paired_signal_held(mut self) -> Self {
-        self.nearby.push("--paired-signal-held".to_owned());
+    /// BlueZ holds back the signal of each change of the Phone's `Device1`
+    /// `property` to true, though a read says so: `Paired`, as BlueZ 5.87
+    /// does while the Phone's services aren't resolved (ticket #372),
+    /// `Bonded` or `Connected` (ticket #212). Call it once per property.
+    pub fn signal_held(mut self, property: &str) -> Self {
+        self.nearby.push("--signal-held".to_owned());
+        self.nearby.push(property.to_owned());
         self
     }
 

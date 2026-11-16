@@ -73,6 +73,12 @@ struct Arguments {
     /// A scenario file to act out once on the bus.
     #[arg(long)]
     scenario: Option<PathBuf>,
+    /// A `Device1` property whose change to true is set, so a read says
+    /// so, but never signalled: `Paired`, as BlueZ 5.87 holds it while the
+    /// Phone's services aren't resolved (ticket #372), `Bonded` or
+    /// `Connected` (ticket #212). Repeatable. Never released.
+    #[arg(long, value_name = "PROPERTY", value_parser = clap::builder::PossibleValuesParser::new(bluez::HOLDABLE))]
+    signal_held: Vec<String>,
     #[command(flatten)]
     nearby: pairing::Nearby,
     #[command(flatten)]
@@ -166,6 +172,7 @@ fn read_scenario(path: &std::path::Path) -> Result<Vec<Step>, String> {
 }
 
 async fn run(arguments: Arguments, steps: Vec<Step>) -> zbus::Result<()> {
+    bluez::hold_signals(arguments.signal_held);
     let mut bluez = bluez::new_tree(&arguments.name, &arguments.address)?;
     let device = bluez::device_path(&arguments.address)?;
     let mut range = range::Range::new(&mut bluez, &device);
@@ -683,12 +690,11 @@ impl Control {
     /// `"late-line-identification"`, `"chld-unsupported"`,
     /// `"hangup-ignored"`, `"hangup-unanswered-once"`,
     /// `"slow-service-level"`, `"calls-listed-late"`, `"calls-go-apart"`,
-    /// `"connected-unannounced"`,
     /// `"connect-never-answers-once"` or `"connect-busy-after-unblock"`.
     fn enable_quirk(&self, name: &str) -> zbus::fdo::Result<()> {
         let quirk = telephony::Quirk::from_name(name).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!(
-                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, calls-go-apart, connected-unannounced, connect-never-answers-once and connect-busy-after-unblock"
+                "unknown quirk {name:?}; the quirks are call1-hangup-missing, hangup-too-few-arguments, get-calls-empty-while-dialling, slow-property-writes, activate-ignored, activate-ignored-once, earbuds-keep-audio, disconnect-profile-refused, connect-profile-fails, connect-profile-fails-once, late-line-identification, chld-unsupported, hangup-ignored, hangup-unanswered-once, slow-service-level, calls-listed-late, calls-go-apart, connect-never-answers-once and connect-busy-after-unblock"
             ))
         })?;
         lock(&self.world).behaviour.quirks.insert(quirk);

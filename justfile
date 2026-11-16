@@ -239,6 +239,7 @@ review-record pr kind model verdict *findings:
 # PR (or on the issue, for a run on main). ISSUE holds the failure's cause,
 # found by event order; `just land` refuses a rerun PR without the record
 # (#396). For a run that already passed on a later attempt, it only records.
+# Rerun a red CI run's failed jobs, with the issue holding its cause on record.
 [positional-arguments]
 [no-exit-message]
 ci-rerun run issue:

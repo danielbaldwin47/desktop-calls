@@ -340,7 +340,7 @@ fn with_bindings_lua_unreadable_the_footer_says_so_rather_than_guessing_none_is_
     // knows and where the user finds what to do (#366).
     assert_eq!(
         footer(&state, &["A", "D"]).as_deref(),
-        Some("Keybinding unknown. Phone setup… explains.")
+        Some("Couldn't read your keybindings. See Phone setup…")
     );
 }
 

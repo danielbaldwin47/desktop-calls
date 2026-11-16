@@ -159,8 +159,10 @@ impl State {
 
     /// Whether a Problem stops the Setup Window's step from working, so
     /// the Problem's button takes keyboard focus (Enter presses it) and the
-    /// step is dimmed. Only while choosing a Phone, and only for what stops
-    /// pairing: later steps keep Enter for themselves.
+    /// step is dimmed. Only while choosing a Phone, or on the finish page
+    /// the window opened on for the Phone set up, where Bluetooth off keeps
+    /// Calls from it (#389), and only for Bluetooth: later steps keep Enter
+    /// for themselves.
     pub(super) fn problem_blocks_step(&self) -> bool {
         // While calls are off the button that turns them on has the
         // keyboard: turning calls on comes first (ticket #207).
@@ -169,7 +171,7 @@ impl State {
             && self
                 .setup
                 .as_ref()
-                .is_some_and(super::setup::Setup::choosing)
+                .is_some_and(|setup| setup.choosing() || setup.opened_on_finish())
     }
 }
 

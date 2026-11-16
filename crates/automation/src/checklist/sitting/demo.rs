@@ -28,7 +28,8 @@ use crate::checklist::watch::AppState;
 /// - the user at the Desktop, through the control interface, the
 ///   notification server and the keyboard: `answer`, `decline`, `hang-up`,
 ///   `mute`, `unmute`, `keybinding`, `escape`, `a`, `d`,
-///   `click-notification`, `enter`;
+///   `click-notification`, `enter`, `choose-done` (Done on the Setup
+///   Window's finish page, which opens with its first button focused);
 /// - the user's Desktop: `do-not-disturb-on`, `do-not-disturb-off`, as
 ///   Omarchy's bell records it; `suspend`, `resume`, as logind announces
 ///   them, with the Phone leaving on suspend and returning after resume as
@@ -48,7 +49,11 @@ use crate::checklist::watch::AppState;
 /// - the Phone and its surroundings: `callee-answers` (the Test Number
 ///   picks up), `earbuds-on`, `out-of-range`, `return-to-range`;
 /// - a first run: `forget-pairing` (the Phone forgets the Desktop and the
-///   Desktop removes the Phone, which stays nearby), `restart-app` (as
+///   Desktop removes the Phone, which stays nearby),
+///   `desktop-removes-phone` (only the Desktop removes the Phone, which
+///   keeps its pairing: paired on the Phone's side and unknown to the app),
+///   `phone-forgets-keeping-link` (the Phone forgets the pairing while BlueZ
+///   keeps the link up), `restart-app` (as
 ///   `just install` restarts it), `open-setup-window` (`desktop-calls
 ///   connect`), `pair-through-setup-window` (`desktop-calls connect`, then
 ///   the Phone chosen and its code confirmed, waited for), `contacts-access-off`
@@ -279,18 +284,70 @@ impl Demo {
     /// Desktop removes the Phone in its Bluetooth settings.
     fn forget_pairing(&self) {
         self.harness.simulated_phone().forget_pairing();
+        self.desktop_removes_phone();
+    }
+
+    /// Only the Desktop forgets the pairing: the Phone keeps it, unknown to
+    /// the app. The Simulated Phone refuses `RemoveDevice` with hands-free
+    /// up (RPU-4), so the Phone steps out of range for it, and is back,
+    /// unconnected, once the app has let go. Back in range, the Simulated
+    /// Phone doesn't page the Desktop for the pairing it kept (inferred,
+    /// RPU-37).
+    fn only_the_desktop_forgets(&self) {
+        let phone = self.harness.simulated_phone();
+        phone.disconnect();
+        self.desktop_removes_phone();
+        self.harness
+            .wait_for_app("the app letting go of the Phone", FOCUS_DEADLINE, |state| {
+                state.phone.is_none()
+            });
+        phone.return_to_range();
+    }
+
+    /// The Phone forgets the pairing and drops hands-free, keeping the
+    /// link; done once the app no longer has the Phone connected.
+    fn phone_forgets_keeping_link(&self) {
+        self.harness.simulated_phone().forget_pairing_keeping_link();
+        self.harness
+            .wait_for_app("the app seeing hands-free gone", FOCUS_DEADLINE, |state| {
+                state.connection_state != "connected"
+            });
+    }
+
+    /// Done on the Setup Window's finish page: its second button while it
+    /// offers the keybinding, else its only one. The page opens with its
+    /// first button focused, so one Tab reaches Done; a press of Tab
+    /// before this would leave Add keybinding chosen.
+    fn choose_done(&self) {
+        let keyboard = self.harness.keyboard();
+        if setup_window_shows(&self.harness.app_state(), "Add keybinding\nDone") {
+            keyboard.press(Key::Tab);
+        }
+        keyboard.press(Key::Return);
+    }
+
+    /// The Desktop removes the Phone in its Bluetooth settings, unless it
+    /// has already: an owner finds it gone from the list and goes on.
+    fn desktop_removes_phone(&self) {
         let address = self.harness.phone().address.replace(':', "_");
         let device = format!("/org/bluez/hci0/dev_{address}");
-        match zbus::ObjectPath::try_from(device.as_str()) {
-            Ok(device) => drop(self.harness.call_phone_method(
-                Bus::System,
-                "org.bluez",
-                "/org/bluez/hci0",
-                "org.bluez.Adapter1",
-                "RemoveDevice",
-                &(device,),
-            )),
-            Err(error) => println!("  demo: {device} isn't a device path: {error}"),
+        let device = match zbus::ObjectPath::try_from(device.as_str()) {
+            Ok(device) => device,
+            Err(error) => panic!("{device} isn't a device path: {error}"),
+        };
+        let removed = self.harness.try_call_phone_method(
+            Bus::System,
+            "org.bluez",
+            "/org/bluez/hci0",
+            "org.bluez.Adapter1",
+            "RemoveDevice",
+            &(device,),
+        );
+        match removed {
+            Ok(_) => {}
+            Err(zbus::Error::MethodError(name, _, _))
+                if name.as_str() == "org.bluez.Error.DoesNotExist" => {}
+            Err(error) => panic!("RemoveDevice: {error}"),
         }
     }
 
@@ -421,7 +478,28 @@ impl Demo {
         phone.set_contacts_prompt(answer);
     }
 
+    /// A first run's actions: pairing forgotten on either side or both, the
+    /// app restarted, the Setup Window opened, paired through and closed.
+    /// Returns whether `action` is one.
+    fn act_on_first_run(&mut self, action: &str) -> bool {
+        match action {
+            "forget-pairing" => self.forget_pairing(),
+            "desktop-removes-phone" => self.only_the_desktop_forgets(),
+            "phone-forgets-keeping-link" => self.phone_forgets_keeping_link(),
+            "restart-app" => self.harness.restart_app(),
+            "open-setup-window" => drop(self.harness.cli(&["connect"])),
+            "pair-through-setup-window" => self.pair_through_setup_window(),
+            "choose-done" => self.choose_done(),
+            _ => return false,
+        }
+        true
+    }
+
     fn act_or_panic(&mut self, action: &str, call: Option<u32>, waiting: Option<u32>) {
+        if self.act_on_first_run(action) {
+            flush();
+            return;
+        }
         match action {
             "call" => {
                 self.calling_from = Some(DEMO_NUMBER);
@@ -438,10 +516,6 @@ impl Demo {
                 );
             }
             "ring-out" => self.ring_out(),
-            "forget-pairing" => self.forget_pairing(),
-            "restart-app" => self.harness.restart_app(),
-            "open-setup-window" => drop(self.harness.cli(&["connect"])),
-            "pair-through-setup-window" => self.pair_through_setup_window(),
             "contacts-access-off" => self.harness.simulated_phone().set_contacts_prompt("refuse"),
             "contacts-prompt" => self.harness.simulated_phone().set_contacts_prompt("ask"),
             "contacts-refused" => self.harness.simulated_phone().set_contacts_prompt("deny"),
@@ -626,7 +700,8 @@ impl Demo {
                      answer-on-phone, decline-on-phone, hang-up-on-phone, ring-out, answer, \
                      decline, hang-up, hold-and-answer, end-and-answer, swap, answer-waiting, \
                      decline-waiting, call-third, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
-                     click-notification, enter, phone-dials, forget-pairing, restart-app, \
+                     click-notification, enter, choose-done, phone-dials, forget-pairing, desktop-removes-phone, \
+                     phone-forgets-keeping-link, restart-app, \
                      open-setup-window, pair-through-setup-window, contacts-access-off, \
                      contacts-prompt, contacts-refused, contacts-access-on, allow-contacts, deny-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm, indicator-click, indicator-mute, \

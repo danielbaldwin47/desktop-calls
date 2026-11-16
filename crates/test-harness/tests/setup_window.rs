@@ -612,6 +612,39 @@ fn a_phone_with_its_services_unresolved_is_let_go_when_unpaired() {
     });
 }
 
+/// The Phone removed on the Desktop while out of range is found again by
+/// discovery once back, still on its "Pair new device" screen (RPU-3).
+#[test]
+fn a_phone_removed_while_away_is_listed_once_back() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_connected()
+        .start();
+    connected(&harness);
+    let phone = harness.simulated_phone();
+    phone.disconnect();
+    let address = harness.phone().address.replace(':', "_");
+    let path = format!("/org/bluez/hci0/dev_{address}");
+    let path = zbus::ObjectPath::try_from(path.as_str())
+        .unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
+    harness.call_phone_method(
+        Bus::System,
+        "org.bluez",
+        "/org/bluez/hci0",
+        "org.bluez.Adapter1",
+        "RemoveDevice",
+        &(path,),
+    );
+    harness.wait_for_app("the Phone is no longer followed", DEADLINE, |state| {
+        state.phone.is_none()
+    });
+
+    phone.return_to_range();
+    harness.open_connect_window();
+    wait_for_phone_listed(&harness, STARTUP);
+}
+
 /// After a restart, BlueZ lists the Phone chosen last as bonded, its
 /// services still unresolved: it is followed and connected, and the window
 /// doesn't open to say it is gone (ticket #375, case 4).

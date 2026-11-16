@@ -40,9 +40,10 @@
 //!   the simulation doesn't model taking hands-free down for it, so the
 //!   test disconnects it, then removes it. The
 //!   control interface's `FailNextRemoveDevice` fails the next one with
-//!   `org.bluez.Error.Failed`. The Phone, removed while in range, is nearby
-//!   and unpaired again: discovery under way finds it, as a Phone on its
-//!   "Pair new device" screen (inferred, RPU-3).
+//!   `org.bluez.Error.Failed`. The Phone, once removed, is nearby and
+//!   unpaired again: discovery under way finds it while it is in range, as
+//!   a Phone on its "Pair new device" screen (inferred, RPU-3), also when it was
+//!   removed while away and has come back.
 //!
 //! [`Connected`]: https://git.kernel.org/pub/scm/bluetooth/bluez.git/tree/doc/org.bluez.Device.rst
 
@@ -356,7 +357,7 @@ fn remove_device(world: &mut World, message: &Message) -> (Reply, Vec<Signal>) {
             .into_iter()
             .filter(|name| removed.contains_key(*name))
             .collect();
-            if phone.as_ref() == Some(&device) && world.range.reachable {
+            if phone.as_ref() == Some(&device) {
                 world
                     .pairing
                     .undiscovered
@@ -489,10 +490,18 @@ fn start_discovery(
             if !discovering(&world) || world.pairing.discovery_run != run {
                 return Ok(());
             }
-            if world.pairing.undiscovered.is_empty() {
+            // The Phone is found only while it is in range.
+            let phone = bluez::device_path(&world.phone_address).ok();
+            let reachable = world.range.reachable;
+            let Some(next) = world
+                .pairing
+                .undiscovered
+                .iter()
+                .position(|(path, _)| reachable || phone.as_ref() != Some(path))
+            else {
                 continue;
-            }
-            let (path, interfaces) = world.pairing.undiscovered.remove(0);
+            };
+            let (path, interfaces) = world.pairing.undiscovered.remove(next);
             let signal = Signal::InterfacesAdded {
                 manager: OwnedObjectPath::try_from("/")?,
                 object: path.clone(),

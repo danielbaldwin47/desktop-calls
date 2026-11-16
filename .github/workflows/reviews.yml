@@ -1,0 +1,54 @@
+name: Reviews
+
+# Posts the "Reviews recorded" check on a PR's head: whether its comments
+# record passed reviews for that head, by tools/reviews.py's rule, the one
+# `just merge` and `just land` apply (retro of 2026-11-15, candidate 5). Once
+# branch protection requires it, a plain `gh pr merge` needs the records too.
+#
+# It runs on every push to a PR, with no path filter, so a docs-only PR gets
+# its verdict like any other; and on every review record, since a comment
+# changes the verdict without changing the head. Either way it judges the
+# PR's head as it is now and posts a completed check, never a pending one.
+# A clean merge of origin/main keeps the reviews (tools/reviews.py), so the
+# push `just land` makes is judged reviewed.
+on:
+  pull_request:
+    branches: [main]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  # To post the check run on the PR's head.
+  checks: write
+
+# One verdict at a time per PR, in order, none cancelled: the last to run
+# reads the latest comments and head.
+concurrency:
+  group: reviews-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  verdict:
+    name: Judge the review records
+    # A comment counts only on a PR, and only a record or a deletion can
+    # change the verdict.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request &&
+       (github.event.action == 'deleted' || startsWith(github.event.comment.body, 'Review:')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # main's copy of the rule, so a PR can't change the rule it is judged
+      # by, with full history: a review counts across clean merges of main.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Post "Reviews recorded" on the PR's head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: python3 tools/review_audit.py --post-check "$PR"

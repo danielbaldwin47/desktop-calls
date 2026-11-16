@@ -235,6 +235,16 @@ merge pr *args:
 review-record pr kind model verdict *findings:
     @python3 tools/review_record.py "$@"
 
+# Say for each PR, open or merged, whether its comments record passed
+# reviews for its head, by the rule `just land` applies: one line each,
+# exit 1 if any lacks one. The Reviews workflow posts the same verdict as
+# the "Reviews recorded" check (tools/review_audit.py).
+# Say whether PRs carry passed review records for their heads.
+[positional-arguments]
+[no-exit-message]
+review-audit +prs:
+    @python3 tools/review_audit.py "$@"
+
 # Wait on one GitHub CI run (default: the latest for this branch). If it
 # passed, print one line. If not, print each failed test's panic and download
 # the scenario logs into target/ci/<run-id>/. `just ci-wait --help`.

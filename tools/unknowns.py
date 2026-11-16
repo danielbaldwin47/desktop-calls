@@ -42,6 +42,8 @@ HEADING = re.compile(r"^## RPU-(\d+): (.+)$")
 FIELD = re.compile(r"^- ([A-Za-z ]+): (.*)$")
 FIELDS = ("Assumed", "Source", "Observed by", "Status")
 NO_STEP = "no step yet"
+# A line that looks meant as an entry's heading.
+LOOKS_LIKE_HEADING = re.compile(r"^#+\s*RPU-")
 STEP_ID = re.compile(r'\bid:\s*"(\d+\.\d+)"')
 
 
@@ -58,7 +60,7 @@ class Entry:
 
     def steps(self) -> list[str]:
         observed_by = self.fields.get("Observed by", "")
-        if observed_by == NO_STEP:
+        if observed_by.startswith(NO_STEP):
             return []
         return [step.strip() for step in observed_by.split(",") if step.strip()]
 
@@ -72,9 +74,15 @@ def ledger(text: str) -> tuple[list[Entry], list[str]]:
         if heading:
             entries.append(Entry(int(heading.group(1)), heading.group(2), number, {}))
             continue
+        if LOOKS_LIKE_HEADING.match(line):
+            # Its fields would land in the entry above, unnoticed.
+            problems.append(f"{LEDGER}:{number}: {line!r} isn't an entry's heading, `## RPU-<n>: <title>`.")
+            entries.append(Entry(-number, line, number, {}))
+            continue
         field = FIELD.match(line)
         if field and entries:
             entries[-1].fields[field.group(1)] = field.group(2).strip()
+    entries = [entry for entry in entries if entry.number >= 0]
     seen: set[int] = set()
     for entry in entries:
         where = f"{LEDGER}:{entry.line} RPU-{entry.number}"
@@ -91,8 +99,10 @@ def ledger(text: str) -> tuple[list[Entry], list[str]]:
 
 
 def comment_blocks(text: str) -> list[tuple[int, str]]:
-    """Each run of `//` comment lines, as (first line number, its text), and
-    each `/* */`-free line's trailing comment on its own."""
+    """Each run of whole-line `//` comments (`//`, `///` and `//!` alike), as
+    (first line number, its text), and each trailing `//` comment after code
+    on its own. Block comments (`/* */`) aren't read, and a `//` inside a
+    string counts as a comment: neither is in the scanned code today."""
     blocks: list[tuple[int, str]] = []
     current: list[str] = []
     start = 0
@@ -170,13 +180,15 @@ def open_on_path(ledger_text: str, group: int | None) -> str:
     is None), and those no step observes, for a message before a sitting."""
     entries, _ = ledger(ledger_text)
     open_entries = [entry for entry in entries if entry.open]
-    prefix = f"{group}." if group is not None else ""
-    observed = [entry for entry in open_entries if any(step.startswith(prefix) for step in entry.steps())]
+    def on_path(step: str) -> bool:
+        return group is None or step.split(".")[0] == str(group)
+
+    observed = [entry for entry in open_entries if any(on_path(step) for step in entry.steps())]
     lines = []
     scope = f"group {group}" if group is not None else "the Real-Phone Checklist"
     lines.append(f"Open unknowns on {scope}'s path: {len(observed)} (of {len(open_entries)} open in {LEDGER}).")
     for entry in observed:
-        steps = ", ".join(step for step in entry.steps() if step.startswith(prefix))
+        steps = ", ".join(step for step in entry.steps() if on_path(step))
         lines.append(f"  RPU-{entry.number} (step {steps}): {entry.title}")
     unobserved = [entry for entry in open_entries if not entry.steps()]
     if unobserved:
@@ -185,14 +197,20 @@ def open_on_path(ledger_text: str, group: int | None) -> str:
     return "\n".join(lines)
 
 
-def scanned_files(root: pathlib.Path) -> dict[str, str]:
+def scanned_files(root: pathlib.Path) -> tuple[dict[str, str], list[str]]:
+    """The scanned code, path to text, and each scanned directory that has
+    none: a moved directory must not pass by checking nothing."""
     files = {}
+    problems = []
     for directory in SCANNED:
-        for path in sorted((root / directory).rglob("*.rs")):
+        found = sorted((root / directory).rglob("*.rs"))
+        if not found:
+            problems.append(f"{directory} has no Rust files to check; if it moved, change SCANNED in tools/unknowns.py.")
+        for path in found:
             files[str(path.relative_to(root))] = path.read_text()
     for name in SCANNED_FILES:
         files[name] = (root / name).read_text()
-    return files
+    return files, problems
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -205,10 +223,16 @@ def main(arguments: list[str] | None = None) -> int:
     LEDGER = options.ledger
     root = pathlib.Path(__file__).resolve().parent.parent
     ledger_text = (root / LEDGER).read_text()
+    steps_text = (root / STEPS).read_text()
     if options.group is not None or options.list:
+        groups = {step.split(".")[0] for step in STEP_ID.findall(steps_text)}
+        if options.group is not None and str(options.group) not in groups:
+            print(f"The checklist has no group {options.group}; its groups are {', '.join(sorted(groups, key=int))}.", file=sys.stderr)
+            return 2
         print(open_on_path(ledger_text, options.group))
         return 0
-    problems = check(ledger_text, (root / STEPS).read_text(), scanned_files(root))
+    files, problems = scanned_files(root)
+    problems += check(ledger_text, steps_text, files)
     for problem in problems:
         print(problem, file=sys.stderr)
     return 1 if problems else 0

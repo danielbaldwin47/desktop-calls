@@ -1,10 +1,10 @@
 # Real-Phone unknowns
 
-What the Simulated Phone, a Real-Phone Checklist step or the app assumes about the real Phone and its stack (the Pixel 9a, BlueZ, obexd, PipeWire and WirePlumber) without a real observation behind it. Started 2026-11-16 from retro candidate 3 of [2026-11-15](research/2026-11-15-retro.md): the first sitting failed three times on behaviour inferred from documents, and the research notes held 268 `[I]` marks that no list tracked.
+What the Simulated Phone, a Real-Phone Checklist step or the app assumes about the real Phone and its stack (the Pixel 9a, BlueZ, obexd, PipeWire and WirePlumber) without a real observation behind it. Started 2026-11-15 from retro candidate 3 of [2026-11-15](research/2026-11-15-retro.md): the first sitting failed three times on behaviour inferred from documents, and the research notes held 268 `[I]` marks that no list tracked.
 
 ## Rules
 
-- **Code that says "inferred" or "unverified"** about the real stack, in `crates/simulated-phone/src` or the checklist's steps (`crates/automation/src/checklist/steps.rs` and `steps/`), names the entry here in the same comment, as `RPU-7`. `just check` fails otherwise, and on an id with no entry, an entry with no "Observed by", an open entry whose step doesn't exist, and code that still calls an observed entry inferred.
+- **Code that says "inferred" or "unverified"** about the real stack, in `crates/simulated-phone/src` or the checklist's steps (`crates/automation/src/checklist/steps.rs` and `steps/`), names the entry here within two lines of the word, as `RPU-7`. The lint reads only those two words; any other assumption ("a guess", "not seen") gets an entry and an id by the same rule, unenforced. `just check` fails otherwise, and on an id with no entry, an entry with no "Observed by", an open entry whose step doesn't exist, and code that still calls an observed entry inferred.
 - **A step that rests on an open unknown observes and never judges it.** What the Phone does there is recorded with `Sitting::observed`, or with `Sitting::unexpected` ("observed, unexpected") where the step had expected something; it never fails the step on that point alone. Failing on it is what sent the owner to re-pair three times on 2026-11-15.
 - **Before "agent-side complete"** for a sitting, `just real-phone-unknowns <group>` lists the open unknowns on that group's path, and the message to the owner names them.
 - **When a sitting observes one,** set its Status to `observed <date> (<issue or note>): <what was seen>`, correct the Simulated Phone or step that assumed it, and drop "inferred" from the code that cites it. A new assumption gets an entry in the same PR that makes it.
@@ -64,7 +64,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 ## RPU-9: A `Connect` paging when the adapter goes down fails `NotReady`
 - Assumed: a `Device1.Connect` still paging when the adapter is powered off fails as one made while it is down: `org.bluez.Error.NotReady` `"br-connection-adapter-not-powered"`.
 - Source: `crates/simulated-phone/src/desktop.rs` header.
-- Observed by: 6.2
+- Observed by: no step yet (6.2 suspends the Desktop once the Phone is connected, never while a `Connect` pages)
 - Status: open
 
 ## RPU-10: BlueZ's `Telephony1` child path
@@ -114,7 +114,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 ## RPU-17: obexd when the link drops during the prompt
 - Assumed: real obexd fails a `CreateSession` waiting on the prompt with `Failed` when the Phone goes out of range, and a later pull starts cleanly.
 - Source: `docs/research/2026-11-05-setup-contacts.md`.
-- Observed by: 6.1
+- Observed by: no step yet (6.1 takes the Pixel out of range with no prompt up)
 - Status: open
 
 ## RPU-18: The Pixel's vCards

@@ -50,6 +50,20 @@ class Check(unittest.TestCase):
         files = {"a.rs": "/// The link drops, which is inferred,\n/// not observed (RPU-1).\nfn x() {}\n"}
         self.assertEqual(self.check(entry(1), files), [])
 
+    def test_an_id_two_lines_above_covers_it(self):
+        files = {"a.rs": "/// Pairing (RPU-1):\n/// a\n/// the path is inferred.\n"}
+        self.assertEqual(self.check(entry(1), files), [])
+
+    def test_an_id_three_lines_away_does_not(self):
+        files = {"a.rs": "/// The path is inferred.\n/// a\n/// b\n/// RPU-1\n"}
+        problems = self.check(entry(1), files)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("a.rs:1", problems[0])
+
+    def test_inner_doc_lines_make_one_block(self):
+        files = {"a.rs": "//! The unverified points\n//! in the notes (RPU-1).\n"}
+        self.assertEqual(self.check(entry(1), files), [])
+
     def test_an_id_in_another_block_does_not(self):
         files = {"a.rs": "/// Inferred.\nfn x() {}\n/// RPU-1\nfn y() {}\n"}
         self.assertEqual(len(self.check(entry(1), files)), 1)
@@ -84,8 +98,15 @@ class Check(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("'9.9'", problems[0])
 
-    def test_no_step_yet_is_allowed(self):
+    def test_no_step_yet_is_allowed_with_why(self):
         self.assertEqual(self.check(entry(1, observed_by="no step yet")), [])
+        self.assertEqual(self.check(entry(1, observed_by="no step yet (6.1 can't)")), [])
+
+    def test_a_mistyped_heading_fails_and_keeps_the_entry_above_whole(self):
+        ledger = entry(1) + "### RPU-2: Typo\n- Status: seen\n"
+        problems = self.check(ledger)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("isn't an entry's heading", problems[0])
 
     def test_a_missing_field_fails(self):
         ledger = "## RPU-1: Something\n- Assumed: x.\n- Status: open\n"
@@ -118,6 +139,10 @@ class OpenOnPath(unittest.TestCase):
         self.assertNotIn("RPU-2 ", text)
         self.assertNotIn("RPU-3", text)
         self.assertIn("Open with no step to observe them: RPU-4.", text)
+
+    def test_group_1_is_not_group_10(self):
+        ledger = entry(1, observed_by="10.1", title="Later")
+        self.assertIn("group 1's path: 0 (of 1 open", unknowns.open_on_path(ledger, 1))
 
 
 if __name__ == "__main__":

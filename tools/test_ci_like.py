@@ -205,6 +205,11 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     unit = f"desktop-calls-test-ci-like-{os.getpid()}"
     try:
+        free_space.preflight()  # before the build, not after it (#397)
+    except free_space.Refused as refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+    try:
         build(arguments)
         lock = take_lock()
         temporary = pathlib.Path(tempfile.mkdtemp(prefix="dc-ci-like-", dir="/tmp"))

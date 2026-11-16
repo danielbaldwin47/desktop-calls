@@ -336,11 +336,11 @@ def main() -> int:
     parser.add_argument("run_id", nargs="?", help="the run (default: the current branch's latest)")
     arguments = parser.parse_args()
     try:
-        # It downloads scenario logs into target/ci/ (#397).
+        # It only downloads scenario logs into target/ci/, so a nearly full
+        # disk is worth a word, not a refusal (#397).
         free_space.preflight()
     except free_space.Refused as refusal:
-        print(f"just ci-wait: {refusal}", file=sys.stderr)
-        return EXIT_NO_RUN
+        print(f"Warning: {refusal}", file=sys.stderr)
     try:
         run_id = arguments.run_id or latest_run()
         # The live view goes nowhere: the verdict below is all anyone reads.

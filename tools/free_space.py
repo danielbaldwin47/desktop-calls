@@ -6,8 +6,8 @@ Three outages had one cause: `/home` filled on 2026-11-14 from worktrees'
 target/ folders, and the per-user `/tmp` quota was hit on 2026-11-05 and
 2026-11-15 from scenario folders. Nothing looked before work started. So
 `just land`, `just ci-wait`, and every run of the harness's scenarios
-(tools/scenario_shader_cache.py, tools/test_file.py) call `preflight()`
-first:
+(tools/scenario_shader_cache.py, and tools/test_ci_like.py before its
+build) call `preflight()` first; `just ci-wait` only warns:
 
   under the warning headroom: print a warning naming the largest folders;
   under the refusal headroom: refuse, naming them, so nothing starts that
@@ -43,6 +43,7 @@ class Place:
     warn_below: int
     refuse_below: int
     usual_suspects: tuple[str, ...]
+    next_step: str
 
 
 HOME = pathlib.Path.home()
@@ -66,14 +67,19 @@ REPO = main_checkout()
 PLACES = (
     Place("/home", HOME, warn_below=30 * GB, refuse_below=10 * GB,
           usual_suspects=(f"{REPO}/.claude/worktrees/*/target", f"{REPO}/target",
-                          f"{HOME}/.cache/desktop-calls-ci", f"{HOME}/.cache/*", f"{HOME}/.local/share/*")),
+                          f"{HOME}/.cache/desktop-calls-ci", f"{HOME}/.cache/*", f"{HOME}/.local/share/*"),
+          next_step="`cargo clean` in a finished worktree; a merged one can go with "
+                    "`claude-steward --dry-run --full` first"),
     Place("/tmp", pathlib.Path("/tmp"), warn_below=3 * GB, refuse_below=1 * GB,
-          usual_suspects=("/tmp/desktop-calls-test-*", "/tmp/*")),
+          usual_suspects=("/tmp/desktop-calls-test-*", "/tmp/*"),
+          # Other agents' runs share /tmp: never sweep it (chief-of-staff-practice).
+          next_step="delete the /tmp/desktop-calls-test-* folders your own finished runs left, "
+                    "or ask the chief of staff; never other agents'"),
 )
 LARGEST_SHOWN = 5
 DU_SECONDS = 60
 
-# quotactl_fd(2) on x86-64, and Q_GETQUOTA for user quotas (linux/quota.h).
+# quotactl_fd(2), the same number on x86-64 and arm64, and Q_GETQUOTA for user quotas (linux/quota.h).
 SYS_QUOTACTL_FD = 443
 Q_GETQUOTA_USER = 0x800007 << 8
 QUOTA_BLOCK = 1024
@@ -92,7 +98,7 @@ class _Quota(ctypes.Structure):
 def quota_left(path: pathlib.Path) -> int | None:
     """Bytes left of this user's quota on `path`'s filesystem, or None if it
     has none (or the kernel won't say)."""
-    if sys.platform != "linux" or os.uname().machine != "x86_64":
+    if sys.platform != "linux":
         return None
     try:
         libc = ctypes.CDLL(None, use_errno=True)
@@ -133,7 +139,6 @@ def largest(patterns: tuple[str, ...]) -> list[tuple[int, str]]:
         size, _, folder = line.partition("\t")
         if size.isdigit():
             sizes.append((int(size), folder))
-    # A folder inside another listed one is counted in it; show the inner one.
     return sorted(sizes, reverse=True)[:LARGEST_SHOWN]
 
 
@@ -164,8 +169,7 @@ def preflight(places: tuple[Place, ...] = PLACES, room_of=headroom, largest_of=l
         if room < place.refuse_below:
             raise Refused(
                 f"{text}\nThat is under {gb(place.refuse_below)}, so this would likely fail halfway (#397).\n"
-                "Next: free space (`cargo clean` in a finished worktree; a merged one can go with "
-                "`claude-steward --dry-run --full` first), then run this again"
+                f"Next: free space ({place.next_step}), then run this again"
             )
         print(f"Warning: {text}\n(under {gb(place.warn_below)}; this refuses under {gb(place.refuse_below)}, #397)",
               file=sys.stderr, flush=True)

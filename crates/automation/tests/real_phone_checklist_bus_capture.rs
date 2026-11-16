@@ -41,6 +41,8 @@ fn a_step_keeps_its_bluetooth_conversation_with_addresses_hidden() {
         "{text}"
     );
     assert!(!text.contains("Not captured"), "{text}");
+    // The app's own BlueZ method calls, which no outside monitor hears.
+    assert!(text.contains(" app: call "), "{text}");
 
     // 1.2, quit at its start, has no record but keeps its capture.
     assert!(

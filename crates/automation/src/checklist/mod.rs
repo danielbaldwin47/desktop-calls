@@ -9,6 +9,7 @@
 //! can play the user.
 
 mod app_log;
+mod bluez_switch;
 mod bus_capture;
 mod fingerprint;
 pub mod results;
@@ -24,6 +25,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
+
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 
 use test_harness::Harness;
 use zbus::Connection;
@@ -64,15 +67,9 @@ pub fn run(options: &Options) -> ExitCode {
     let Some(directory) = results_directory(options) else {
         return ExitCode::FAILURE;
     };
-    let interrupted = Arc::new(AtomicBool::new(false));
-    // Ctrl-C stops the run between waits, so the results are kept and, under
-    // the Simulated Phone, every process is stopped.
-    if let Err(error) =
-        signal_hook::flag::register(signal_hook::consts::SIGINT, interrupted.clone())
-    {
-        eprintln!("Can't handle Ctrl-C: {error}");
+    let Some(interrupted) = stop_on_signals() else {
         return ExitCode::FAILURE;
-    }
+    };
 
     let world = if options.demo {
         World::demo(options.headless)
@@ -91,7 +88,7 @@ pub fn run(options: &Options) -> ExitCode {
             // installed service. `just run` stops the service for its run and
             // starts it again afterwards (ADR-0006).
             eprintln!(
-                "Desktop Calls isn't running, so the checklist can't observe it. Start the installed service with `systemctl --user start desktop-calls`, or, to try this checkout's app instead, run `just run` in another terminal (it stops the installed service for the run and starts it again afterwards). Then run this again."
+                "Desktop Calls isn't running, so the checklist can't observe it. In another terminal, run `just run`: it runs this checkout's app in place of the installed service, with the app's BlueZ method calls logged for each step's capture, and starts the service again afterwards. (`systemctl --user start desktop-calls` starts the installed service instead, without those lines.) Then run this again."
             );
             return ExitCode::FAILURE;
         }
@@ -137,6 +134,11 @@ pub fn run(options: &Options) -> ExitCode {
         "Bluetooth D-Bus captures, a file a step: {}",
         captures.display()
     );
+    // Kept to the end of the run: dropping it turns the lines off again.
+    let Ok(_switched) = bluez_switch::offer(&mut sitting) else {
+        println!("Stopped.");
+        return ExitCode::SUCCESS;
+    };
     sitting.capture = Some(bus_capture::BusCapture::start(
         system_bus,
         session_bus,
@@ -163,6 +165,21 @@ pub fn run(options: &Options) -> ExitCode {
     }
     summarise(&file, &groups, options, false);
     ExitCode::SUCCESS
+}
+
+/// The flag that Ctrl-C, a closed terminal or SIGTERM sets: the run stops
+/// between waits, so the results are kept, a switch turned on for the
+/// sitting goes off, and, under the Simulated Phone, every process is
+/// stopped. `None`, having said why, if the signals can't be handled.
+fn stop_on_signals() -> Option<Arc<AtomicBool>> {
+    let interrupted = Arc::new(AtomicBool::new(false));
+    for signal in [SIGINT, SIGHUP, SIGTERM] {
+        if let Err(error) = signal_hook::flag::register(signal, interrupted.clone()) {
+            eprintln!("Can't handle Ctrl-C: {error}");
+            return None;
+        }
+    }
+    Some(interrupted)
 }
 
 /// The groups asked for, or `None`, having said why, if the run can't start.
@@ -485,12 +502,16 @@ fn run_step_captured(
     match ran {
         Ok((Some(mut record), back_to, way_back)) => {
             capture.snapshot("end");
-            record.bus = capture.write(step.id, started_us, results::unix_micros());
+            let (ended_us, app, unheard) = app_log::step_lines(sitting, started_us);
+            record.bus = capture.write(step.id, started_us, ended_us, &app, unheard.as_deref());
             Ok((Some(record), back_to, way_back))
         }
         Err(Stop::Quit) => {
             capture.snapshot("end");
-            if let Some(name) = capture.write(step.id, started_us, results::unix_micros()) {
+            let (ended_us, app, unheard) = app_log::step_lines(sitting, started_us);
+            if let Some(name) =
+                capture.write(step.id, started_us, ended_us, &app, unheard.as_deref())
+            {
                 println!(
                     "The Bluetooth D-Bus capture of step {}, to where you quit: {}",
                     step.id,

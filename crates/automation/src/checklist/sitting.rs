@@ -93,6 +93,17 @@ pub struct Sitting {
 }
 
 impl Sitting {
+    /// Whether Ctrl-C has stopped the run.
+    pub fn stopped(&self) -> bool {
+        self.interrupted.load(Ordering::Relaxed)
+    }
+
+    /// The session bus of the user's own app, which the runner didn't
+    /// start; `None` under the demo.
+    pub fn users_app(&self) -> Option<&Connection> {
+        self.demo.is_none().then_some(&self.bus)
+    }
+
     pub fn new(
         events: Receiver<Event>,
         timeline: Timeline,

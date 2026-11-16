@@ -16,7 +16,11 @@ process, even if this process is killed outright.
 It refuses to start without the Phone's hands-free link, or while the Phone
 has a Call, so it never takes a Call away from the installed service. The dev run keeps its own runtime state
 ($XDG_RUNTIME_DIR/desktop-calls-dev), apart from the service's, and logs to
-the journal like the service.
+the journal like the service. Unless RUST_LOG is set already, it runs with
+RUST_LOG=info,bluez_dbus=debug: each method call the app makes to BlueZ,
+and BlueZ's reply or error, goes to the journal at debug, for the
+Real-Phone Checklist's per-step capture. The installed service logs them
+only when the checklist turns them on for a sitting, at the owner's yes.
 
 Agents: only the Test Number may be Called from the dev run, and no real
 incoming Call may be answered or declined.
@@ -45,6 +49,10 @@ from test_call import (
     Guard,
     start_installed_service,
 )
+
+# The app's switch for its debug lines of each BlueZ method call, reply and
+# error (crates/desktop-calls/src/bluez_log.rs).
+BLUEZ_METHODS_SWITCH = "info,bluez_dbus=debug"
 
 USAGE = "usage: just run (or /usr/bin/python3 tools/real-phone/run.py BINARY)"
 
@@ -93,7 +101,7 @@ def run(binary: Path) -> int:
             service.stop()
         log("APP", f"starting a dev run: {binary} service (Ctrl-C to stop)")
         app = subprocess.Popen([str(binary), "service"], start_new_session=True,
-                               preexec_fn=rp.die_with_parent)
+                               preexec_fn=rp.die_with_parent, env=dev_run_environment())
         guard.tell(f"hook {app.pid}")
         outcome = app.wait()
         log("APP", f"the dev run exited with status {outcome}")
@@ -109,6 +117,14 @@ def run(binary: Path) -> int:
             service_started = start_installed_service(service)
             guard.done()
     return outcome if service_started else EXIT_SERVICE_STOPPED
+
+
+def dev_run_environment() -> dict[str, str]:
+    """This process's environment, with the app's BlueZ method lines on
+    unless RUST_LOG says otherwise."""
+    environment = dict(os.environ)
+    environment.setdefault("RUST_LOG", BLUEZ_METHODS_SWITCH)
+    return environment
 
 
 def main() -> int:

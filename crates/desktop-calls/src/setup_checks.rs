@@ -295,14 +295,15 @@ impl SetupChecks {
             .borrow()
             .adapter_off()
             .ok_or_else(|| failed("no adapter is off".to_owned()))?;
-        self.system
-            .call_method(
-                Some(BLUEZ),
-                adapter.as_str(),
-                Some(PROPERTIES),
-                "Set",
-                &(ADAPTER, "Powered", Variant::from(true)),
-            )
+        let body = (ADAPTER, "Powered", Variant::from(true));
+        let set = self.system.call_method(
+            Some(BLUEZ),
+            adapter.as_str(),
+            Some(PROPERTIES),
+            "Set",
+            &body,
+        );
+        crate::bluez_log::logged(&adapter, PROPERTIES, "Set", Some("Powered"), set)
             .await
             .map(drop)
             .map_err(|error| failed(error.to_string()))

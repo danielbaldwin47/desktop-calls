@@ -1,6 +1,8 @@
 //! The app's log for a stretch of time: the journal on the Desktop, or the
 //! app's log file under the Simulated Phone. Only info, warning and error
-//! lines are read, because debug lines carry phone numbers in full.
+//! lines are read, because debug lines carry phone numbers in full; and,
+//! for a step's Bluetooth D-Bus capture, the app's debug lines of each
+//! method call it makes to BlueZ, which carry none, and nothing else.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -77,16 +79,200 @@ impl AppLog {
     }
 }
 
+/// The app's `event_kind`s of a method call to BlueZ, its reply and its
+/// error (`bluez_log.rs` in the app).
+const BLUEZ_METHOD_KINDS: [&str; 3] = [
+    "bluez-method-called",
+    "bluez-method-replied",
+    "bluez-method-failed",
+];
+
+impl AppLog {
+    /// The app's lines of each method call it made to BlueZ, BlueZ's reply
+    /// and its error, from `from_us` to `to_us`, oldest first, each with
+    /// its time and as it goes in a step's capture:
+    /// `app: call org.bluez.Device1.Connect on device`. Their switch is
+    /// `RUST_LOG`; a log without them, or that can't be read, gives none.
+    pub fn bluez_methods(&self, from_us: u64, to_us: u64) -> Vec<(u64, String)> {
+        let records: Vec<(u64, Value)> = match self {
+            Self::Journal => {
+                let mut command = Command::new("journalctl");
+                command
+                    .args(["--user", "-t", "desktop-calls", "-o", "json", "--no-pager"])
+                    .args(window(from_us, to_us));
+                // Matches on one field are alternatives: only these lines
+                // leave the journal, never another debug line.
+                command.args(BLUEZ_METHOD_KINDS.map(|kind| format!("EVENT_KIND={kind}")));
+                let Ok(output) = command.output() else {
+                    return Vec::new();
+                };
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter_map(journal_record)
+                    .collect()
+            }
+            Self::File(path) => std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|text| {
+                    let value: Value = serde_json::from_str(text).ok()?;
+                    Some((value["timestamp_us"].as_u64()?, value))
+                })
+                .collect(),
+        };
+        records
+            .into_iter()
+            .filter(|(at_us, _)| (from_us..=to_us).contains(at_us))
+            .filter_map(|(at_us, value)| Some((at_us, bluez_method(&value)?)))
+            .collect()
+    }
+}
+
+/// The switch that turns on the app's BlueZ method lines, as `just run`
+/// sets it.
+pub const BLUEZ_METHODS_SWITCH: &str = "RUST_LOG=info,bluez_dbus=debug";
+
+/// The `tracing` target of the app's BlueZ method lines
+/// (`crates/desktop-calls/src/bluez_log.rs`).
+const BLUEZ_TARGET: &str = "bluez_dbus";
+
+/// Why the app on `session` doesn't log its BlueZ method calls, or `None`
+/// if it does: it does if its `RUST_LOG` turns on debug for them. Read from
+/// the environment it was started with, which only its own user can read.
+pub fn bluez_methods_unlogged(session: &zbus::Connection) -> Option<String> {
+    let environment = zbus::block_on(async {
+        let bus = zbus::fdo::DBusProxy::new(session).await.ok()?;
+        let name = zbus::names::BusName::try_from(super::watch::BUS_NAME).ok()?;
+        let process = bus.get_connection_unix_process_id(name).await.ok()?;
+        std::fs::read(format!("/proc/{process}/environ")).ok()
+    });
+    let Some(environment) = environment else {
+        return Some("the app's BlueZ method calls: can't tell whether the app logs them, since it wasn't on the session bus to ask (it may have been restarting)".to_owned());
+    };
+    let rust_log = environment
+        .split(|byte| *byte == 0)
+        .find_map(|variable| variable.strip_prefix(b"RUST_LOG="))
+        .map(String::from_utf8_lossy);
+    (!logs_bluez_methods(rust_log.as_deref())).then(|| {
+        format!(
+            "the app's BlueZ method calls: the app wasn't started with {BLUEZ_METHODS_SWITCH}, which `just run` sets"
+        )
+    })
+}
+
+/// How long after a step ends the app's lines are still its own: the
+/// journal times a line when it receives it, a moment after the app logged
+/// it, so a reply at the step's end would otherwise fall between steps.
+const APP_LINE_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The end of a step from `started_us`, its window for the bus capture as
+/// well, [`APP_LINE_GRACE`] on against the user's app (the demo's app
+/// times its own lines); the app's BlueZ method lines in it; and, if there
+/// are none, why, if the app logs none now: it may have been started again
+/// since the last step.
+pub fn step_lines(
+    sitting: &super::sitting::Sitting,
+    started_us: u64,
+) -> (u64, Vec<(u64, String)>, Option<String>) {
+    if sitting.users_app().is_some() {
+        std::thread::sleep(APP_LINE_GRACE);
+    }
+    let ended_us = super::results::unix_micros();
+    let lines = sitting.log.bluez_methods(started_us, ended_us);
+    let unheard = if lines.is_empty() {
+        sitting.users_app().and_then(bluez_methods_unlogged)
+    } else {
+        None
+    };
+    (ended_us, lines, unheard)
+}
+
+/// Whether a `RUST_LOG` of `filter` turns on the app's BlueZ method lines:
+/// debug or trace for everything, or for `bluez_dbus`.
+fn logs_bluez_methods(filter: Option<&str>) -> bool {
+    let Some(filter) = filter else {
+        return false;
+    };
+    let on = |level: &str| matches!(level.to_ascii_lowercase().as_str(), "debug" | "trace");
+    // EnvFilter: a target's own directive beats the default level; targets
+    // are case-sensitive, levels aren't; a bare target means every level.
+    let (mut default, mut own) = (None, None);
+    for directive in filter.split(',').map(str::trim) {
+        match directive.split_once('=') {
+            Some((BLUEZ_TARGET, level)) => own = Some(on(level)),
+            None if directive == BLUEZ_TARGET => own = Some(true),
+            None if !directive.is_empty() => default = Some(on(directive)),
+            Some(_) | None => {}
+        }
+    }
+    own.or(default).unwrap_or(false)
+}
+
+/// A `journalctl -o json` line: when the journal received it, and its
+/// fields under the names the app's log file uses.
+fn journal_record(text: &str) -> Option<(u64, Value)> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let at_us = value["__REALTIME_TIMESTAMP"].as_str()?.parse().ok()?;
+    Some((at_us, lower_case_keys(&value)))
+}
+
+/// A journal entry's fields under the names the app's log file uses.
+fn lower_case_keys(value: &Value) -> Value {
+    value
+        .as_object()
+        .map(|fields| {
+            fields
+                .iter()
+                .map(|(key, value)| (key.to_ascii_lowercase(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One of the app's BlueZ method lines as it goes in a capture, if
+/// `value` is one.
+fn bluez_method(value: &Value) -> Option<String> {
+    let field = |name: &str| value[name].as_str().unwrap_or_default();
+    let what = match field("event_kind") {
+        "bluez-method-called" => "call",
+        "bluez-method-replied" => "reply",
+        "bluez-method-failed" => "error",
+        _ => return None,
+    };
+    let property = match field("property") {
+        "" => String::new(),
+        property => format!(" ({property})"),
+    };
+    let detail = match field("detail") {
+        "" => String::new(),
+        detail => format!(": {detail}"),
+    };
+    Some(format!(
+        "app: {what} {}.{}{property} {} {}{detail}",
+        field("interface"),
+        field("method"),
+        if what == "call" { "on" } else { "from" },
+        field("object"),
+    ))
+}
+
+/// `journalctl`'s arguments for `from_us` to `to_us`.
+fn window(from_us: u64, to_us: u64) -> [String; 2] {
+    [
+        format!(
+            "--since=@{}.{:06}",
+            from_us / 1_000_000,
+            from_us % 1_000_000
+        ),
+        format!("--until=@{}.{:06}", to_us / 1_000_000, to_us % 1_000_000),
+    ]
+}
+
 fn journal(from_us: u64, to_us: u64) -> Option<Vec<LogLine>> {
-    let since = format!(
-        "--since=@{}.{:06}",
-        from_us / 1_000_000,
-        from_us % 1_000_000
-    );
-    let until = format!("--until=@{}.{:06}", to_us / 1_000_000, to_us % 1_000_000);
     let Ok(output) = Command::new("journalctl")
         .args(["--user", "-t", "desktop-calls", "-o", "json", "--no-pager"])
-        .args(["--priority=info", &since, &until])
+        .arg("--priority=info")
+        .args(window(from_us, to_us))
         .output()
     else {
         return None;
@@ -142,4 +328,74 @@ fn file_line(text: &str) -> Option<LogLine> {
         audio_location: value["audio_location"].as_str().map(str::to_owned),
         detail: value["detail"].as_str().map(str::to_owned),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_switch_is_on_for_debug_for_everything_or_for_bluez_dbus() {
+        for on in [
+            "info,bluez_dbus=DEBUG",
+            "info,bluez_dbus=debug",
+            "debug",
+            "warn, bluez_dbus",
+            "trace",
+        ] {
+            assert!(logs_bluez_methods(Some(on)), "{on}");
+        }
+        for off in [
+            "info",
+            "desktop_calls=debug",
+            "bluez_dbus=info",
+            "",
+            "BLUEZ_DBUS=debug",
+            "debug,bluez_dbus=off",
+        ] {
+            assert!(!logs_bluez_methods(Some(off)), "{off}");
+        }
+        assert!(!logs_bluez_methods(None));
+    }
+
+    #[test]
+    fn a_journal_line_reads_as_the_log_files_fields() {
+        let line = r#"{"__REALTIME_TIMESTAMP":"1794805679300037","PRIORITY":"7","SYSLOG_IDENTIFIER":"desktop-calls","EVENT_KIND":"bluez-method-called","OBJECT":"adapter","INTERFACE":"org.bluez.Adapter1","METHOD":"StartDiscovery","MESSAGE":"Called BlueZ"}"#;
+        let (at_us, value) = journal_record(line).expect("a record");
+        assert_eq!(at_us, 1_794_805_679_300_037);
+        assert_eq!(
+            bluez_method(&value).as_deref(),
+            Some("app: call org.bluez.Adapter1.StartDiscovery on adapter")
+        );
+    }
+
+    #[test]
+    fn a_bluez_method_line_reads_as_a_capture_line() {
+        let error = serde_json::json!({
+            "event_kind": "bluez-method-failed",
+            "object": "device",
+            "interface": "org.bluez.Device1",
+            "method": "ConnectProfile",
+            "detail": "org.bluez.Error.Failed: br-connection-refused",
+        });
+        assert_eq!(
+            bluez_method(&error).as_deref(),
+            Some(
+                "app: error org.bluez.Device1.ConnectProfile from device: org.bluez.Error.Failed: br-connection-refused"
+            )
+        );
+        let set = serde_json::json!({
+            "event_kind": "bluez-method-called",
+            "object": "adapter",
+            "interface": "org.freedesktop.DBus.Properties",
+            "method": "Set",
+            "property": "Discoverable",
+        });
+        assert_eq!(
+            bluez_method(&set).as_deref(),
+            Some("app: call org.freedesktop.DBus.Properties.Set (Discoverable) on adapter")
+        );
+        let other = serde_json::json!({"event_kind": "call-started", "phone_number": "5551234567"});
+        assert_eq!(bluez_method(&other), None);
+    }
 }

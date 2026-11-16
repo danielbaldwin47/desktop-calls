@@ -19,6 +19,7 @@ use zbus::message::Type;
 use zbus::names::UniqueName;
 use zbus::{Connection, MatchRule, Message, MessageStream, OwnedObjectPath, OwnedVariant};
 
+use crate::bluez_log::logged;
 use crate::logging::EventKind;
 
 /// An object's interfaces, each with its properties.
@@ -243,7 +244,16 @@ impl Lister<'_> {
     /// Reports every object the service has now. A service that isn't on the
     /// bus yet has none; its arrival is an owner change.
     async fn list(&self, manager: &ObjectManagerProxy<'_>) -> Result<(), WatchError> {
-        match manager.get_managed_objects().await {
+        let listing = manager.get_managed_objects();
+        // BlueZ's listing is one of the app's method calls to BlueZ, which
+        // are logged at debug where nothing outside the app can see them.
+        let answer = if self.watched.service == crate::bluez::SERVICE {
+            let path = manager.inner().path().as_str();
+            logged(path, OBJECT_MANAGER, "GetManagedObjects", None, listing).await
+        } else {
+            listing.await
+        };
+        match answer {
             Ok(objects) => {
                 // D-Bus replies carry a dictionary, which comes out in no
                 // order a run can rely on. Sorted by path, the Phone

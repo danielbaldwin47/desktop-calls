@@ -183,9 +183,18 @@ fn pair_through_the_window(sitting: &mut Sitting, contacts: ContactsBox) -> Resu
     Ok(())
 }
 
-/// Records what the finish page says Contacts came to: synced passes.
+/// Records what the finish page says Contacts came to, with
+/// [`CONTACTS_BOX`] left ticked: synced passes. A Pixel that didn't share
+/// them, where the page says so and that Calls still work, did something
+/// 1.2 didn't expect, and the step carries on to the first Call.
 fn check_synced(sitting: &mut Sitting, state: &AppState) {
     let summary = window_field(state, "summary").unwrap_or_default();
+    if !summary.starts_with("Synced") && summary.contains(CALLS_STILL_WORK) {
+        sitting.unexpected(&format!(
+            "The Pixel didn't share Contacts as it paired, though {CONTACTS_BOX} was to be left ticked. The finish page says: {summary}"
+        ));
+        return;
+    }
     sitting.check(
         summary.starts_with("Synced"),
         format!("The finish page says: {summary}"),
@@ -393,7 +402,9 @@ pub(super) fn contacts_shared_later(sitting: &mut Sitting) -> Result<(), Stop> {
 /// 1.3's finish page: the Pixel didn't share Contacts, so it says that,
 /// and that Calls still work, and the app's log says the Pixel refused.
 /// Returns whether that is so, for the rest of the step: a Pixel that
-/// shared Contacts as it paired has nothing to turn on later.
+/// shared Contacts as it paired has nothing to turn on later. A Pixel that
+/// shared them with the box unticked, or neither shared nor refused them,
+/// did something 1.3 didn't expect: observed, unexpected, not failed.
 fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> Result<bool, Stop> {
     let summary = window_field(state, "summary")
         .unwrap_or_default()
@@ -402,21 +413,27 @@ fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> 
         let unticked = sitting.ask(&format!(
             "The Pixel shared Contacts as it paired. Did you untick {CONTACTS_BOX} on the Pixel before tapping Pair?"
         ))?;
-        sitting.check(
-            unticked,
-            if unticked {
-                format!(
-                    "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so there is nothing to turn on later. The finish page says: {summary}"
-                )
-            } else {
+        if unticked {
+            sitting.unexpected(&format!(
+                "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so there is nothing to turn on later. The finish page says: {summary}"
+            ));
+        } else {
+            sitting.check(
+                false,
                 format!(
                     "{CONTACTS_BOX} was left ticked, so the Pixel shared Contacts as it paired. Run this step again and untick it."
-                )
-            },
-        );
+                ),
+            );
+        }
         return Ok(false);
     }
     let refused = summary.starts_with(REFUSED_SUMMARY);
+    if !refused && summary.contains(CALLS_STILL_WORK) {
+        sitting.unexpected(&format!(
+            "The Pixel neither shared Contacts nor refused them, so there is no \"Contacts not shared\" Problem to follow. The finish page says: {summary}"
+        ));
+        return Ok(false);
+    }
     sitting.check(
         refused && summary.contains(CALLS_STILL_WORK),
         format!("The finish page says: {summary}"),

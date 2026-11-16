@@ -56,7 +56,8 @@ class Decide(unittest.TestCase):
 
 
 def artifact(sha: str, branch: str = "main", expired: bool = False, run: int = 1) -> dict:
-    return {"expired": expired, "workflow_run": {"id": run, "head_branch": branch, "head_sha": sha}}
+    return {"expired": expired, "created_at": f"2026-11-16T0{run}:00:00Z",
+            "workflow_run": {"id": run, "head_branch": branch, "head_sha": sha}}
 
 
 class Results(unittest.TestCase):
@@ -70,8 +71,21 @@ class Results(unittest.TestCase):
         run = nightly.results_run(artifacts, lambda sha: sha in (HEAD, GREEN))
         self.assertEqual(run["id"], 1)
 
+    def test_newest_is_by_when_it_was_kept_whatever_order_github_lists(self):
+        artifacts = [artifact(GREEN, run=1), artifact(HEAD, run=2)]
+        self.assertEqual(nightly.results_run(artifacts, lambda sha: True)["id"], 2)
+
     def test_none_kept_is_none(self):
         self.assertIsNone(nightly.results_run([], lambda sha: True))
+
+    def test_with_none_kept_the_night_fails_saying_what_to_do(self):
+        def gh(*args: str) -> str:
+            if args[:2] == ("run", "list"):
+                return json.dumps([{"databaseId": 7, "status": "completed"}])
+            return json.dumps({"artifacts": []})
+        with mock.patch.object(nightly, "gh", gh), self.assertRaises(nightly.Failed) as failed:
+            nightly.results(HEAD)
+        self.assertIn("Next: gh workflow run CI --ref main", str(failed.exception))
 
 
 class Body(unittest.TestCase):

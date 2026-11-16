@@ -37,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 
 WORKFLOW = "nightly.yml"
@@ -47,6 +48,9 @@ LABEL = "needs-triage"
 # stands for the set.
 RESULTS_ARTIFACT = "scenario-results-1"
 FAILED = {"failure", "timed_out", "cancelled", "startup_failure"}
+# How long CI's run for a just-pushed head may take to be listed.
+RUN_APPEARS_SECONDS = 120
+POLL_SECONDS = 10
 
 
 class Failed(Exception):
@@ -109,8 +113,9 @@ def decide(event: str, head: str) -> list[str]:
 
 def results_run(artifacts: list[dict], is_ancestor: Callable[[str], bool]) -> dict | None:
     """The newest unexpired run on main, at HEAD or before it, among the
-    `scenario-results-1` artifacts (`GET /actions/artifacts`, newest first)."""
-    for artifact in artifacts:
+    `scenario-results-1` artifacts (`GET /actions/artifacts`, whose order
+    GitHub doesn't promise)."""
+    for artifact in sorted(artifacts, key=lambda artifact: artifact.get("created_at", ""), reverse=True):
         run = artifact.get("workflow_run") or {}
         if artifact.get("expired") or run.get("head_branch") != "main":
             continue
@@ -120,10 +125,19 @@ def results_run(artifacts: list[dict], is_ancestor: Callable[[str], bool]) -> di
 
 
 def wait_for_ci(head: str) -> None:
-    runs = json.loads(gh(
-        "run", "list", "--workflow", CI_WORKFLOW, "--branch", "main", "--event", "push",
-        "--commit", head, "--json", "databaseId,status",
-    ))
+    """Waits for CI's run on main at `head` to finish, giving a push made
+    moments ago time to get its run listed."""
+    give_up = time.monotonic() + RUN_APPEARS_SECONDS
+    while True:
+        runs = json.loads(gh(
+            "run", "list", "--workflow", CI_WORKFLOW, "--branch", "main", "--event", "push",
+            "--commit", head, "--json", "databaseId,status",
+        ))
+        if runs or time.monotonic() >= give_up:
+            break
+        time.sleep(POLL_SECONDS)
+    if not runs:
+        say(f"CI has no run on main at {head[:7]}; scoring the newest results kept before it.")
     for found in runs:
         if found["status"] != "completed":
             say(f"Waiting for CI's run {found['databaseId']} on main at {head[:7]} to finish.")

@@ -156,9 +156,9 @@ jobs:
 
   # Every test outside the harness's scenarios but the gallery and the
   # checklist's group 6 runs, which have jobs of their own (group 6's in
-  # nightly.yml): together the
-  # three are `just test --exclude test-harness`, which took 12 minutes in
-  # one job (run 43648375459: 402 s of gallery, 219 s of checklist). In two
+  # nightly.yml): together the three are `just test --exclude test-harness`,
+  # which took 12 minutes in one job (run 43648375459: 402 s of gallery,
+  # 219 s of checklist). In two
   # parts, the justfile's ci_tests_part_2 and the rest: in one, they were the
   # slowest job of a PR's run (225 s of run 43791000134, #410).
   tests:

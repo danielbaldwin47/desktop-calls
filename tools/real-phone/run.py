@@ -19,8 +19,8 @@ has a Call, so it never takes a Call away from the installed service. The dev ru
 the journal like the service. Unless RUST_LOG is set already, it runs with
 RUST_LOG=info,bluez_dbus=debug: each method call the app makes to BlueZ,
 and BlueZ's reply or error, goes to the journal at debug, for the
-Real-Phone Checklist's per-step capture. The installed service never logs
-them.
+Real-Phone Checklist's per-step capture. The installed service logs them
+only when the checklist turns them on for a sitting, at the owner's yes.
 
 Agents: only the Test Number may be Called from the dev run, and no real
 incoming Call may be answered or declined.

@@ -147,7 +147,7 @@ pub fn bluez_methods_unlogged(session: &zbus::Connection) -> Option<String> {
         std::fs::read(format!("/proc/{process}/environ")).ok()
     });
     let Some(environment) = environment else {
-        return Some("the app's BlueZ method calls: can't tell how the app was started".to_owned());
+        return Some("the app's BlueZ method calls: can't tell whether the app logs them, since it wasn't on the session bus to ask (it may have been restarting)".to_owned());
     };
     let rust_log = environment
         .split(|byte| *byte == 0)
@@ -160,37 +160,31 @@ pub fn bluez_methods_unlogged(session: &zbus::Connection) -> Option<String> {
     })
 }
 
-/// Says before the first step if the user's app logs no BlueZ method calls,
-/// so they can start it with them then rather than find them missing after.
-pub fn warn_if_bluez_methods_unlogged(sitting: &super::sitting::Sitting) {
-    if let Some(why) = sitting.users_app().and_then(bluez_methods_unlogged) {
-        println!(
-            "\nNot captured: {why}.\nTo have them in each step's capture, type quit now, run `just run` in another terminal, and run this again.\n"
-        );
-    }
-}
-
 /// How long after a step ends the app's lines are still its own: the
 /// journal times a line when it receives it, a moment after the app logged
 /// it, so a reply at the step's end would otherwise fall between steps.
 const APP_LINE_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// The app's BlueZ method lines for a step from `started_us` to
-/// `ended_us`, and, against the user's app, why there are none if it logs
-/// none now: it may have been started again since the last step.
+/// The end of a step from `started_us`, its window for the bus capture as
+/// well, [`APP_LINE_GRACE`] on against the user's app (the demo's app
+/// times its own lines); the app's BlueZ method lines in it; and, if there
+/// are none, why, if the app logs none now: it may have been started again
+/// since the last step.
 pub fn step_lines(
     sitting: &super::sitting::Sitting,
     started_us: u64,
-    ended_us: u64,
-) -> (Vec<(u64, String)>, Option<String>) {
-    std::thread::sleep(APP_LINE_GRACE);
-    let grace = u64::try_from(APP_LINE_GRACE.as_micros()).unwrap_or(u64::MAX);
-    (
-        sitting
-            .log
-            .bluez_methods(started_us, ended_us.saturating_add(grace)),
-        sitting.users_app().and_then(bluez_methods_unlogged),
-    )
+) -> (u64, Vec<(u64, String)>, Option<String>) {
+    if sitting.users_app().is_some() {
+        std::thread::sleep(APP_LINE_GRACE);
+    }
+    let ended_us = super::results::unix_micros();
+    let lines = sitting.log.bluez_methods(started_us, ended_us);
+    let unheard = if lines.is_empty() {
+        sitting.users_app().and_then(bluez_methods_unlogged)
+    } else {
+        None
+    };
+    (ended_us, lines, unheard)
 }
 
 /// Whether a `RUST_LOG` of `filter` turns on the app's BlueZ method lines:

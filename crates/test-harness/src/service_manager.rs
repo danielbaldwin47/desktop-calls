@@ -12,9 +12,11 @@
 //! again `RestartSec=` after it dies of a signal or fails.
 //!
 //! Over D-Bus it answers what the Real-Phone tools ask the real one:
-//! `Manager.GetUnit`, `Manager.StartUnit` and `Manager.StopUnit` (each
-//! returning a job at once and doing the work after), and the unit's
-//! `ActiveState` and `Job`. `Job` names a start job until the start ends,
+//! `Manager.GetUnit`, `Manager.StartUnit`, `Manager.StopUnit` and
+//! `Manager.RestartUnit` (each returning a job at once and doing the work
+//! after), the manager's `Environment` with `SetEnvironment` and
+//! `UnsetEnvironment` (given to the service from its next start, over the
+//! scenario's), and the unit's `ActiveState` and `Job`. `Job` names a start job until the start ends,
 //! active or not, as systemd's does; stop jobs aren't shown there.
 //!
 //! The scenario's session bus runs with `--systemd-activation`, as the
@@ -129,6 +131,9 @@ struct Unit {
     runtime: PathBuf,
     logs: PathBuf,
     environment: Vec<(&'static str, String)>,
+    /// The manager's own environment, as `NAME=value`, which a start
+    /// gives the service over `environment`.
+    manager_environment: Mutex<Vec<String>>,
     group: i32,
     session: Connection,
     running: Mutex<Running>,
@@ -185,6 +190,7 @@ impl ServiceManager {
             runtime,
             logs: logs.to_owned(),
             environment,
+            manager_environment: Mutex::default(),
             group,
             session,
             running: Mutex::new(Running {
@@ -238,6 +244,11 @@ impl ServiceManager {
         self.unit.running().history.clone()
     }
 
+    /// The manager's environment, as `NAME=value`.
+    pub fn manager_environment(&self) -> Vec<String> {
+        self.unit.manager_environment().clone()
+    }
+
     /// The service's process ID, while it has a process.
     pub fn main_pid(&self) -> Option<u32> {
         self.unit.running().child.as_ref().map(Child::id)
@@ -259,6 +270,12 @@ impl Drop for ServiceManager {
 impl Unit {
     fn running(&self) -> MutexGuard<'_, Running> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn manager_environment(&self) -> MutexGuard<'_, Vec<String>> {
+        self.manager_environment
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn next_job(&self) -> u32 {
@@ -304,6 +321,11 @@ impl Unit {
             .process_group(self.group)
             .env_clear()
             .envs(self.environment.iter().cloned())
+            .envs(
+                self.manager_environment()
+                    .iter()
+                    .filter_map(|assignment| assignment.split_once('=')),
+            )
             .args(arguments);
         if let Some(directory) = self.runtime_directory(file) {
             DirBuilder::new()
@@ -513,6 +535,40 @@ impl Manager {
         thread::spawn(move || unit.stop());
         job_path(job)
     }
+
+    /// Every `mode` acts as `"replace"`, the one the tools pass.
+    fn restart_unit(&self, name: &str, mode: &str) -> Result<OwnedObjectPath, ManagerError> {
+        self.known(name)?;
+        let _ = mode;
+        let job = self.unit.next_job();
+        let unit = self.unit.clone();
+        thread::spawn(move || {
+            unit.stop();
+            Unit::start(&unit);
+        });
+        job_path(job)
+    }
+
+    #[zbus(property)]
+    fn environment(&self) -> Vec<String> {
+        self.unit.manager_environment().clone()
+    }
+
+    fn set_environment(&self, assignments: Vec<String>) {
+        let mut environment = self.unit.manager_environment();
+        for assignment in assignments {
+            let name = assignment.split('=').next().unwrap_or_default().to_owned();
+            environment.retain(|each| each.split('=').next() != Some(name.as_str()));
+            environment.push(assignment);
+        }
+    }
+
+    fn unset_environment(&self, names: Vec<String>) {
+        let mut environment = self.unit.manager_environment();
+        for name in names {
+            environment.retain(|each| each.split('=').next() != Some(name.as_str()));
+        }
+    }
 }
 
 impl Manager {
@@ -586,6 +642,13 @@ impl crate::Harness {
     /// then restarts it as systemd would.
     pub fn kill_service(&self) {
         self.service_manager().crash();
+    }
+
+    /// The user manager's environment, as `NAME=value`: what
+    /// `systemctl --user set-environment` has set.
+    #[must_use]
+    pub fn service_manager_environment(&self) -> Vec<String> {
+        self.service_manager().manager_environment()
     }
 
     /// The installed service's process ID, while it has a process.

@@ -9,6 +9,7 @@
 //! can play the user.
 
 mod app_log;
+mod bluez_switch;
 mod bus_capture;
 mod fingerprint;
 pub mod results;
@@ -137,7 +138,11 @@ pub fn run(options: &Options) -> ExitCode {
         "Bluetooth D-Bus captures, a file a step: {}",
         captures.display()
     );
-    app_log::warn_if_bluez_methods_unlogged(&sitting);
+    // Kept to the end of the run: dropping it turns the lines off again.
+    let Ok(_switched) = bluez_switch::offer(&mut sitting) else {
+        println!("Stopped.");
+        return ExitCode::SUCCESS;
+    };
     sitting.capture = Some(bus_capture::BusCapture::start(
         system_bus,
         session_bus,
@@ -486,15 +491,13 @@ fn run_step_captured(
     match ran {
         Ok((Some(mut record), back_to, way_back)) => {
             capture.snapshot("end");
-            let ended_us = results::unix_micros();
-            let (app, unheard) = app_log::step_lines(sitting, started_us, ended_us);
+            let (ended_us, app, unheard) = app_log::step_lines(sitting, started_us);
             record.bus = capture.write(step.id, started_us, ended_us, &app, unheard.as_deref());
             Ok((Some(record), back_to, way_back))
         }
         Err(Stop::Quit) => {
             capture.snapshot("end");
-            let ended_us = results::unix_micros();
-            let (app, unheard) = app_log::step_lines(sitting, started_us, ended_us);
+            let (ended_us, app, unheard) = app_log::step_lines(sitting, started_us);
             if let Some(name) =
                 capture.write(step.id, started_us, ended_us, &app, unheard.as_deref())
             {

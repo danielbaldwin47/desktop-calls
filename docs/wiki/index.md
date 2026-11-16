@@ -4,11 +4,13 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## People and preferences
 
-- [user-preferences](user-preferences.md): how the user wants work done and reported, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
+- [user-preferences](user-preferences.md): how the user wants work done and reported, including the owner's 2026-11-15 leave to go ahead with design decisions that are simple to reverse, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
 
 ## Decisions
 
 - [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope; where the five criteria stood on 2026-11-14 and 2026-11-15, including the evening of 2026-11-15 at `2846987`: v1's agent-side work complete, the UI pass finished, the scorecard tool's 0 of 8 (item 7 FAIL on #292, item 8 NEEDS-REVIEW), and only the user's sitting remaining; and late that evening at `fc72ab3`: one red run traced without a rerun, 11 of the screenshot review's 14 findings closed, and the design questions open for the user (added 2026-11-13; updated 2026-11-15).
+
+- [decided-for-the-owner](decided-for-the-owner.md): design decisions made for the owner under the owner's leave of 2026-11-15, each with its issue, PR and how to overrule it (added 2026-11-15).
 
 - [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb, with the audit of 2026-11-14 against the Simulated Phone and the 2026-11-15 scorecard tool's four statuses per item (updated 2026-11-15).
 
@@ -26,10 +28,10 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [session-log](session-log.md): dated checkpoints for resuming the hill climb; read the newest entry first (newest: 2026-11-15 night, `main` from `615bcc5` up to `8aa9017`: the owner's first Real-Phone sitting, what the Pixel showed, the causes of #372 to #378 verified against inferred, the Simulated Phone's gaps, and the two CI reruns against the rule; before it, 2026-11-15 evening, `main` from `d71a7f4` up to `fc72ab3`: PRs #357 and #359 to #370, #104 closed as not reproducible, main's red after #359 traced by event order without a rerun (#362, #363), and the design questions open for the user; before it, 2026-11-15, morning to afternoon, `main` up to `2846987`, with #357's later fix of that day's gallery failure noted: the after-v1 merges, the review gate, the `/tmp` quota, the UI pass finished, v1's agent-side work complete and what is open for the user; before it, 2026-11-15, CI back on GitHub and green; and 2026-11-14, the Call Pill, Calls Off and the UI pass merged).
 
-- [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05), the disk filling (2026-11-14), and the `/tmp` quota, the review gate and two CI reruns (2026-11-15).
+- [retros](retros.md): subagent-session retros and the improvements pursued, including the Fable retro decisions, the Sonnet implementer trial (2026-11-05), the disk filling (2026-11-14), and the `/tmp` quota, the review gate and two CI reruns (2026-11-15), and the whole-day retro of 2026-11-15, filed in full as [research/2026-11-15-retro](../research/2026-11-15-retro.md): the first Real-Phone sitting, ten reruns and the candidates chosen (updated 2026-11-15).
 
 - [chief-of-staff-practice](chief-of-staff-practice.md): dated rules for writing tickets, planning batches and merging, including the feature freeze, the local-CI merge rules, PR-only docs, the #154 triage, merging from behind main, owned PRs, the concept review before specs, probes before building, clearing build caches, the 2026-11-15 after-v1 batches and held items, the review records `just land` requires since #327 (PR #332) and why, the rule that agents never sweep shared `/tmp`, and the reruns against the rule (updated 2026-11-15).
 
-- [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows (added 2026-11-04).
+- [implementer-brief](../agents/implementer-brief.md): standing instructions every ticket implementer follows, with the day's scratch brief folded in and the real-phone rules in [real-phone](../agents/real-phone.md) (added 2026-11-04; updated 2026-11-15).
 
 - [docs-layout](docs-layout.md): what goes in GLOSSARY, ADRs, wiki, research, and the issue tracker; wiki changes go through PRs (2026-11-05).

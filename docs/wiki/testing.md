@@ -116,6 +116,14 @@ Sources: the PR bodies and comments named, `gh run list` and `gh run view` on 20
 ### Real-Phone Checklist changes, 2026-11-15
 
 - #297 (`4a65a3f`, #144 and #147): step 7.1 reads a Call's number in the locale's region (one rule in the core, `LC_ALL` first) and the not-running hint offers the installed service or `just run`. #305 (`e20343d`, #148): group 4 (call waiting) has scripts for steps 4.1 to 4.6, which need two helpers or a third phone, so no step waits on a ticket any more. #310 and #333 added questions to step 2.5 (the missed-call glyph on the notification; the arrow on the Indicator, "1 missed call…" in the menu, and the arrow gone once the notification has opened the Dialer). None ran on the Pixel.
+- After the owner's first sitting, 2026-11-15 night ([session-log](session-log.md)):
+  - **Step 1.1's order changed** (#376, `6283a2a`). The owner now removes the Pixel on this computer first, waits for Desktop Calls to let go, and only then forgets the pairing on the Pixel. The contacts step that pairs again follows the same order. The old order, Pixel first, left BlueZ connected to a Pixel without the pairing, and the app's hands-free requests made the Pixel show "incorrect PIN or passkey" (#373).
+  - #383 (`f1692f0`, #380) made four runner changes:
+    - Each run is kept apart in one results file, with `runs` and `earlier` arrays.
+    - Step 1.1 passes only on the Setup Window after the install restarted the app with no Phone, and it fails at once if the restarted app reports the Pixel.
+    - Step 1.2 offers to go back to 1.1 while the Pixel is still paired.
+    - Step 1.3 is judged from the journal, which showed the Pixel sharing Contacts as it paired, with no prompt. Inferred, not checked on the Pixel: the Pair dialog's "Allow access…" box causes this, and the step handles whether an unticked Pixel asks or refuses.
+  - The next sitting starts with `just real-phone-checklist 1 --fresh`. Step 1.1 asks for `just install` once the pairing is forgotten on both sides.
 
 ## Stand-ins must be as strict as the real service
 

@@ -44,6 +44,13 @@ fn render(state: &State, look: Look, output: &Path, late: Option<Duration>) {
         .screenshot_directory(output.to_owned())
         .start();
     (state.reach)(&harness);
+    if let Some(moment) = state.moment {
+        harness.freeze_app_once_shown(
+            state.name,
+            |screenshot| (state.shown)(screenshot, look),
+            || moment(&harness),
+        );
+    }
     if let Some(late) = late {
         thread::sleep(late);
     }
@@ -55,10 +62,10 @@ fn render(state: &State, look: Look, output: &Path, late: Option<Duration>) {
     // code, makes a frame judged while the app still reports the
     // state show that state.
     //
-    // A state that lasts a moment had the app stopped in it by `reach`
-    // (#248). Stopped, the app can't answer, and can't have left the
-    // state: `freeze_app_before` proved it stopped before the state's
-    // timer could fire.
+    // A state that lasts a moment had the app stopped in it, on the first
+    // frame that showed it (#248, #384). Stopped, the app can't answer, and
+    // can't have left the state: `freeze_app_once_shown` proved it stopped
+    // before the state's timer could fire.
     let frozen = harness.app_is_frozen();
     let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
         (state.shown)(screenshot, look) && (frozen || (state.still)(&harness.app_state()))

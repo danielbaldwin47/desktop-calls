@@ -18,6 +18,7 @@ pub(super) const DURATION_STATES: &[State] = &[
         title: "The Call Window, just after the Call ended: who and how long it lasted, and no controls",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             let call = live_for(harness);
             harness.hang_up(call);
@@ -41,6 +42,7 @@ pub(super) const DURATION_STATES: &[State] = &[
         title: "The Call Window, after the audio went to the phone and hands-free didn't come back: the timer struck through, a notice to hang up on the phone, and no controls",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             let _call = live_for(harness);
             harness

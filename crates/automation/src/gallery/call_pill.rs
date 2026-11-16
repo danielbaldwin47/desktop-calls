@@ -29,6 +29,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill: the Call Window collapsed by itself 5 s after the Call connected, bottom right",
         still: collapsed,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -46,6 +47,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill with the pointer over Hang up: red, with its tooltip",
         still: collapsed,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -63,6 +65,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill with the pointer over its body: the chevron, a lighter strip, and Show Call",
         still: collapsed,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -80,6 +83,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill, muted: the strip in the warning tint, the crossed microphone, and Muted",
         still: |state| collapsed(state) && state.muted,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -104,6 +108,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Window while a turn-off waits for the Call to end: the Calls off after tag on the line under who, below the timer",
         still: |state| expanded(state) && window_has(state, "calls-off-after"),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -120,6 +125,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill while a turn-off waits for the Call to end: the Calls off after tag on the small line under the caller",
         still: |state| collapsed(state) && pill_has(state, "calls-off-after"),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -139,6 +145,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill, muted while a turn-off waits for the Call to end, with a long number not in Contacts: Muted and Calls off after under the number, which reads in full",
         still: |state| muted_and_calls_off_after(state),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call_from(harness, LONG_NUMBER);
@@ -168,6 +175,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                 && says(state, "call-window", "caller-cut-short", "no")
         },
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call_from(harness, LONG_NUMBER);
@@ -194,6 +202,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                 && says(state, "call-pill", "caller-cut-short", "no")
         },
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call_from(harness, LONG_NUMBER);
@@ -221,6 +230,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             collapsed(state) && state.muted && says(state, "call-pill", "caller-cut-short", "no")
         },
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call_from(harness, LONG_NUMBER);
@@ -249,6 +259,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill, answered on the phone: On phone, and Mute unavailable",
         still: |state| collapsed(state) && pill_has(state, "audio-location"),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             let path = harness.simulated_phone().ring(NUMBER);
@@ -273,6 +284,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill, collapsed by hand after contact with the Call was lost: On your phone, in place of the timer",
         still: |state| collapsed(state) && !pill_has(state, "hang-up"),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             on_a_call(harness);
@@ -305,6 +317,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill, collapsed by hand with a Call on hold: 1 on hold",
         still: |state| collapsed(state) && pill_has(state, "held"),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             held(harness);
             collapse_by_hand(harness);
@@ -319,6 +332,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
         title: "The Call Pill with a Call on hold while a turn-off waits: 1 on hold and Calls off after under the caller, who reads in full",
         still: |state| held_and_calls_off_after(state),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             held(harness);
             turn_calls_off(harness);
@@ -347,6 +361,10 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             let call = ring(harness);
             harness.answer(call);
             wait_until_collapsed(harness);
+        },
+        // For only 2 s, so the app is stopped for the capture (#248, #384).
+        moment: Some(|harness| {
+            let call = harness.app_state().calls.first().map_or(0, |call| call.id);
             let hung_up = Instant::now();
             harness.hang_up(call);
             harness.wait_for_app("the Call Pill says Call ended", DEADLINE, |state| {
@@ -355,14 +373,16 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
                     .and_then(|pill| pill.get("status"))
                     .is_some_and(|status| status.starts_with("Call ended · "))
             });
-            // For only 2 s, so the app is stopped for the capture (#248).
-            harness.freeze_app_before(
-                hung_up + Duration::from_millis(CALL_ENDED_MS.into()),
-                "the Call Pill saying Call ended",
-            );
+            hung_up + Duration::from_millis(CALL_ENDED_MS.into())
+        }),
+        // Mute and Hang up go once the Call has ended, as the app reports,
+        // and so does the live Call's green dot, which tells it from the
+        // Call Pill at rest.
+        shown: |screenshot, look| {
+            without_controls(screenshot, look)
+                && !shows(screenshot, look.green())
+                && in_corner(screenshot)
         },
-        // Mute and Hang up go once the Call has ended, as the app reports.
-        shown: |screenshot, look| without_controls(screenshot, look) && in_corner(screenshot),
     },
 ];
 

@@ -18,6 +18,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
         title: "The Quiet Hours Window, switched off: the times kept and dimmed, the switch focused",
         still: |_| true,
         prepare: at_noon,
+        moment: None,
         reach: |harness| {
             connect(harness);
             harness.tray().click("Quiet hours…");
@@ -30,6 +31,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
         title: "The Quiet Hours Window, on from 22:00 to 07:00: the saved sentence and the bar in two pieces, the start focused",
         still: |_| true,
         prepare: at_noon,
+        moment: None,
         reach: |harness| {
             connect(harness);
             if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {
@@ -49,6 +51,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
         title: "The Quiet Hours Window, refusing a start typed equal to the end",
         still: |_| true,
         prepare: at_noon,
+        moment: None,
         reach: |harness| {
             connect(harness);
             if let Err(error) = harness.set_quiet_hours(22 * 60, 7 * 60) {

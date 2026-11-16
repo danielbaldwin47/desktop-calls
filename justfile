@@ -39,11 +39,15 @@ gallery_test := "the_gallery_shows_every_state_in_light_and_dark_stock_and_under
 # minutes (calls off for 60 s, Quiet Hours from the next minute for one).
 checklist_group_6_tests := "group_6_times step_6_2_"
 
-# The test files CI's second `ci-tests` part runs; the first runs every other.
-# Run one after another, the files outside the harness took about 150 s, the
-# slowest job of a PR's run: the checklist's take 66 s of it (run
-# 43791000134, #410).
-ci_tests_part_2 := "real_phone_checklist real_phone_checklist_call_waiting"
+# The test files CI's second `ci-tests` part runs; the first runs every other,
+# so a new test file lands in part 1. Each part runs its files one after
+# another, and the slower part can set a PR's time from push to "CI passed":
+# a new file that takes more than a few seconds belongs in whichever part is
+# shorter. The test files' times in run 43805702399 (#410): part 1,
+# gallery_short_states 33 s and real_phone_checklist_first_run 58 s; part 2,
+# real_phone_checklist 54 s, real_phone_checklist_leftover_state 52 s and
+# real_phone_checklist_call_waiting 5 s; every other file under 2 s.
+ci_tests_part_2 := "real_phone_checklist real_phone_checklist_call_waiting real_phone_checklist_leftover_state"
 
 # CI passes `1/2` or `2/2` to run one part on a runner of its own; empty, both.
 # Run every test outside the harness's scenarios but the gallery and the checklist's group 6 runs.

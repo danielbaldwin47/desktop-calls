@@ -279,7 +279,7 @@ fn a_turn_off_during_a_call_says_calls_go_off_after_it() {
     assert_eq!(text.summary, "Calls off after this call (until 07:00)");
     assert_eq!(
         text.body,
-        "My Pixel stays connected until then. Keep calls on from the bar to cancel."
+        "My Pixel stays connected until then. To cancel, choose Keep calls on from the bar."
     );
 }
 

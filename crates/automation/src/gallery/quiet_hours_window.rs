@@ -92,7 +92,7 @@ pub(super) const QUIET_HOURS_WINDOW_STATES: &[State] = &[
             harness.keyboard().press(Key::Tab);
             wait_for(harness, &[("focus", "start")]);
             harness.keyboard().type_text("0700");
-            wait_for(harness, &[("notice", "Start and end must differ")]);
+            wait_for(harness, &[("notice", "Start and end can't be the same")]);
         },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },

@@ -151,7 +151,7 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     let state = dialer_typed(&harness);
     assert_eq!(
         shown(&state, "dialer", "calls-off"),
-        Some("Calls are off. Enter calls anyway; calls go off again after.")
+        Some("Calls are off. Enter calls anyway, then calls turn off again.")
     );
     assert!(
         shown(&state, "dialer", "keys").is_some_and(|keys| keys.starts_with("Enter Call anyway")),
@@ -199,7 +199,7 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
     assert!(
         cli_ok(&harness, &["status"])
-            .contains("Calls are off until you turn them on: your phone stays disconnected.")
+            .contains("Calls are off until you turn them on. Your phone stays disconnected.")
     );
     // Ticket #231: only the user's own turn-off and turn-on confirm, not
     // the exception or the return to off. A notification comes in the step

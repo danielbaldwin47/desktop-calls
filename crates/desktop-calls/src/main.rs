@@ -36,7 +36,7 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory as _, Parser, Subcommand};
 use desktop_calls_core::AudioLocation;
 
-/// Take and place your Phone's Calls on this Desktop.
+/// Take and place your phone's calls on this computer.
 #[derive(Parser)]
 #[command(
     name = "desktop-calls",
@@ -46,8 +46,7 @@ use desktop_calls_core::AudioLocation;
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
-    /// A `tel:` link to Call, as the desktop file passes it when a link is
-    /// opened.
+    /// A `tel:` link to call, as passed when you open one.
     #[arg(value_name = "TEL_LINK")]
     link: Option<String>,
 }
@@ -59,32 +58,32 @@ enum Command {
         /// The number as typed, with spaces if you like, or a `tel:` link.
         number: String,
     },
-    /// Say whether the Phone is connected.
+    /// Show whether your phone is connected.
     Status {
         /// Print JSON: `connection_state` and `phone` (`name`, `address`, or null).
         #[arg(long)]
         json: bool,
     },
-    /// Open the Dialer, to find someone in Contacts or the Call History and
-    /// Call them.
+    /// Open the dialer, to find someone in your contacts or call history
+    /// and call them.
     Dialer {
         /// Text to start the search with: part of a name or number.
         #[arg(default_value = "")]
         query: String,
     },
-    /// Mute the microphone during a Call, or unmute it if it is muted.
+    /// Mute or unmute the microphone during a call.
     Mute,
     /// Open the window that pairs your phone with this computer: to set it
     /// up, pair it again, or switch to another phone.
     Connect,
-    /// Move the Call's audio to this computer or to your phone.
+    /// Move the call's audio to this computer or to your phone.
     Audio {
         /// Where the audio goes.
         #[arg(value_enum)]
         to: AudioTarget,
     },
-    /// Turn calls off, so your phone stays disconnected from this computer
-    /// until you turn them on or a time you choose, or turn them on.
+    /// Turn calls off or on. While calls are off, your phone stays
+    /// disconnected from this computer.
     Calls {
         #[command(subcommand)]
         turn: CallsTurn,
@@ -94,9 +93,9 @@ enum Command {
         #[arg(long, hide = true, global = true)]
         uninstalling: bool,
     },
-    /// Set Quiet Hours: daily times when calls are off, such as
-    /// 22:00-07:00, which crosses midnight. Or turn them off. Without
-    /// either, open the window that sets them.
+    /// Set quiet hours, the daily times when calls are off, such as
+    /// 22:00-07:00, or turn them off. With no argument, open the quiet
+    /// hours window.
     QuietHours {
         /// HH:MM-HH:MM on the 24-hour clock, or off.
         #[arg(value_name = "HH:MM-HH:MM|off")]
@@ -112,14 +111,13 @@ enum Command {
 enum CallsTurn {
     /// Turn calls off until you turn them on, or until a time you choose.
     Off {
-        /// For this long, then on again: minutes or hours, such as 90m or
-        /// 2h, up to 24h.
+        /// For this long: minutes or hours, such as 90m or 2h, up to 24h.
         #[arg(long = "for", value_name = "LENGTH", group = "deadline")]
         length: Option<String>,
-        /// Until this time, then on again: HH:MM on the 24-hour clock.
+        /// Until this time: HH:MM on the 24-hour clock.
         #[arg(long, value_name = "HH:MM", group = "deadline")]
         until: Option<String>,
-        /// Until morning at 07:00, then on again.
+        /// Until morning: 07:00, or when your quiet hours end.
         #[arg(long, group = "deadline")]
         until_morning: bool,
     },

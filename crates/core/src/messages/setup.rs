@@ -341,7 +341,7 @@ fn pairing_lost(text: &mut SetupWindowText, phone: &Phone) -> Page {
     (
         format!("Pair {} again", phone.name),
         vec![Instruction::here(
-            "Choose Pair again: this computer forgets its old pairing and pairs with your phone afresh.",
+            "Choose Pair again: this computer removes its old pairing, then pairs with your phone.",
         )],
         vec!["Pair again", "Close"],
     )
@@ -402,7 +402,7 @@ fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timesta
     (
         "Tap Allow on your phone".to_owned(),
         vec![Instruction::phone(
-            "Tap Allow, to share contacts and call history.",
+            "Tap Allow to share contacts and call history.",
         )],
         vec!["Close"],
     )
@@ -574,7 +574,7 @@ fn finish(
     let (text, buttons) = match check {
         KeybindingCheck::Available { keys, file, .. } => (
             format!(
-                "Add keybinding puts {} in {}, which doesn't use those keys yet. You see the exact line first.",
+                "Add keybinding binds {} in {}, which doesn't use those keys yet. You'll see the exact line first.",
                 shown_keys(keys),
                 shown_path(file, home)
             ),
@@ -593,7 +593,7 @@ fn finish(
             command,
         } => (
             format!(
-                "{} already does something else in {}; to open the dialer from a key, bind another one to run {command}",
+                "{} is already used in {}. To open the dialer from a key, bind another one to run {command}",
                 shown_keys(keys),
                 shown_path(file, home)
             ),
@@ -663,7 +663,7 @@ fn notice(notice: &SetupNotice) -> String {
             "The keybinding couldn't be added to the Hyprland config; choose Add keybinding to try again."
         }
         SetupNotice::KeybindingConfigChanged => {
-            "The Hyprland config changed after the line was shown, so nothing was written; this is what it can take now."
+            "The Hyprland config changed after the line was shown, so nothing was written. Check the updated line."
         }
     };
     text.to_owned()

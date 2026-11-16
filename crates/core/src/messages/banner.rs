@@ -43,21 +43,22 @@ pub fn banner_initial(caller: &RingingCaller) -> String {
         .map_or_else(|| "#".to_owned(), |first| first.to_uppercase().collect())
 }
 
-/// What `choice` does to the user's other Call, said under its label: "Alice
-/// Smith waits on hold", "Ends the Call with Alice". `None` for a choice
-/// that leaves it as it is, and for the only Call ringing.
+/// What `choice` does to the user's other Call, said under its label, naming
+/// a Contact by their first name: "Alice waits on hold", "Ends the Call
+/// with Alice". `None` for a choice that leaves it as it is, and for the
+/// only Call ringing.
 #[must_use]
 pub fn banner_consequence(view: &BannerView, choice: BannerChoice) -> Option<String> {
     let other = view.other.as_ref()?;
     match (view.waiting?, choice) {
         (WaitingOptions::HoldOrEnd, BannerChoice::HoldAndAnswer) => {
-            Some(format!("{} waits on hold", full_name(other)))
+            Some(format!("{} waits on hold", first_name(other)))
         }
         (WaitingOptions::HoldOrEnd | WaitingOptions::End, BannerChoice::EndAndAnswer) => {
             Some(format!("Ends the call with {}", first_name(other)))
         }
         (WaitingOptions::Answer, BannerChoice::Answer) => {
-            Some(format!("{} stays on hold", full_name(other)))
+            Some(format!("{} stays on hold", first_name(other)))
         }
         _ => None,
     }

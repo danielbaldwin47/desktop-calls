@@ -59,18 +59,20 @@ ci-tests part="":
     case "{{part}}" in
         "") "${tests[@]}" -- "${skips[@]}" ;;
         1/2)
-            targets=()
-            for target in $(cargo metadata --format-version 1 --no-deps --locked \
+            # An assignment, not a loop over $(...), so a failure here fails
+            # the recipe rather than run no test files.
+            names=$(cargo metadata --format-version 1 --no-deps --locked \
                 | python3 -c 'import json, sys
     for p in json.load(sys.stdin)["packages"]:
         if p["name"] != "test-harness":
             for t in p["targets"]:
                 if "test" in t["kind"] and t["name"] not in sys.argv[1:]:
-                    print(t["name"])' {{ci_tests_part_2}}); do
-                targets+=(--test "$target")
-            done
+                    print(t["name"])' {{ci_tests_part_2}})
+            [ -n "$names" ] || { echo "ci-tests 1/2: found no test files" >&2; exit 1; }
+            targets=()
+            for target in $names; do targets+=(--test "$target"); done
             "${tests[@]}" --lib --bins "${targets[@]}" -- "${skips[@]}"
-            "${tests[@]}" --doc
+            "${tests[@]}" --doc -- "${skips[@]}"
             ;;
         2/2)
             targets=()

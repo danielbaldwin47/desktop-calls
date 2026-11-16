@@ -43,7 +43,7 @@ concurrency:
 
 # `setup` decides whether the change touches code, and makes sure CI's image
 # exists. If code changed, the suite runs in parallel, on several runners:
-# `just lint`; the tests outside the harness; the Real-Phone Checklist's
+# `just lint`; the tests outside the harness, in two parts; the Real-Phone Checklist's
 # group 6 runs (on main); the gallery, in parts; and the harness's
 # scenarios, in shards. On main, the polish scorecard follows
 # the shards. If only docs that no code reads changed, they are all skipped.
@@ -87,10 +87,6 @@ jobs:
         env:
           TAG: ${{ hashFiles('.github/ci-image/Containerfile', 'rust-toolchain.toml') }}
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-ci:$TAG" >> "$GITHUB_OUTPUT"
-      # Every job pulls the image, about 740 MB: its layers go up compressed
-      # with zstd, which unpacks faster than gzip (#410). Docker's own
-      # builder can't choose the compression; buildx's container builder can.
-      - uses: docker/setup-buildx-action@v3
       - name: Build and push the image, unless it exists
         env:
           IMAGE: ${{ steps.name.outputs.name }}
@@ -101,6 +97,12 @@ jobs:
           if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "$IMAGE exists."
           else
+            # Every job pulls the image, 600 MB: its layers go up compressed
+            # with zstd, 19% smaller than gzip and faster to unpack (#410).
+            # Docker's own builder can't choose the compression; buildx's
+            # container builder can, made here so a run that finds the image
+            # doesn't spend 11 s on it.
+            docker buildx create --use --driver docker-container
             # The Containerfile copies in only rust-toolchain.toml.
             context=$(mktemp -d)
             cp rust-toolchain.toml "$context"

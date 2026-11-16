@@ -531,7 +531,8 @@ fn run_step(
     );
     if outcome == Outcome::Unexpected {
         println!(
-            "  The Pixel did something this step didn't expect, and Desktop Calls logged no error. What was seen is kept in the results for an agent to read, and the run carries on."
+            "  The Pixel did something this step didn't expect, and Desktop Calls logged no error. What was seen is kept in the results for an agent to read, and the run carries on. The Pixel is left {}.",
+            pixel_left(&sitting.now())
         );
     }
     if let Some(id) = back_to {
@@ -753,8 +754,13 @@ fn unexpected_unless_the_app_erred(
     findings: &mut sitting::Findings,
     started_us: u64,
 ) -> Outcome {
-    let errors: Vec<String> = log
-        .lines(started_us, results::unix_micros())
+    let Some(lines) = log.read(started_us, results::unix_micros()) else {
+        let why = "The Pixel did something this step didn't expect, and Desktop Calls' log couldn't be read to check it logged no error";
+        println!("  Failed: {why}.");
+        findings.evidence.push(format!("Failed: {why}."));
+        return Outcome::Fail;
+    };
+    let errors: Vec<String> = lines
         .iter()
         .filter(|line| line.level == "error")
         .map(app_log::LogLine::excerpt)
@@ -827,5 +833,68 @@ impl std::fmt::Display for Stop {
             Self::BackTo(id) => write!(formatter, "going back to step {id}"),
             Self::NotReady(why) => formatter.write_str(why),
         }
+    }
+}
+
+/// The rule that keeps "observed, unexpected" from hiding a fault of the
+/// app's own, at the runner's interface: the demo can't make the app log
+/// an error on cue, so these give it a log file directly.
+#[cfg(test)]
+mod tests {
+    use super::{AppLog, Outcome, results, sitting::Findings, unexpected_unless_the_app_erred};
+
+    /// A log file holding one line at `level`, logged now.
+    fn log_with(level: &str) -> (tempfile::TempDir, AppLog) {
+        let directory = tempfile::tempdir().expect("a directory");
+        let path = directory.path().join("desktop-calls.log");
+        let line = format!(
+            r#"{{"timestamp_us":{},"level":"{level}","event_kind":"phone-command-failed","message":"Hang up never confirmed"}}"#,
+            results::unix_micros()
+        );
+        std::fs::write(&path, line + "\n").expect("write the log");
+        (directory, AppLog::File(path))
+    }
+
+    #[test]
+    fn an_unexpected_step_fails_when_the_app_logged_an_error_in_its_time() {
+        let started = results::unix_micros() - 1_000_000;
+        let (_directory, log) = log_with("ERROR");
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, started);
+        assert_eq!(outcome, Outcome::Fail);
+        assert!(
+            findings.evidence.iter().any(|line| line
+                .starts_with("Failed: Desktop Calls logged an error")
+                && line.contains("Hang up never confirmed")),
+            "{:?}",
+            findings.evidence
+        );
+    }
+
+    #[test]
+    fn an_unexpected_step_stays_unexpected_when_the_app_logged_only_warnings() {
+        let started = results::unix_micros() - 1_000_000;
+        let (_directory, log) = log_with("WARN");
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, started);
+        assert_eq!(outcome, Outcome::Unexpected);
+        assert!(findings.evidence.is_empty(), "{:?}", findings.evidence);
+    }
+
+    #[test]
+    fn an_unexpected_step_fails_when_the_apps_log_cant_be_read() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let log = AppLog::File(directory.path().join("never-written.log"));
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, 0);
+        assert_eq!(outcome, Outcome::Fail);
+        assert!(
+            findings
+                .evidence
+                .iter()
+                .any(|line| line.contains("couldn't be read")),
+            "{:?}",
+            findings.evidence
+        );
     }
 }

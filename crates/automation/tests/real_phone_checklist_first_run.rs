@@ -150,10 +150,23 @@ fn step_1_3_is_observed_unexpected_when_the_pixel_shares_contacts_with_the_box_u
         "{}",
         runner.transcript.join("\n")
     );
+    assert!(
+        prompt["journal"]
+            .as_array()
+            .is_some_and(|journal| !journal.is_empty()),
+        "the step's log is kept for the agent who reads it: {prompt:#}"
+    );
     let summary = summary(&runner);
     assert!(
         summary.iter().any(|line| line
             .starts_with("  1.3 observed, unexpected: This Pixel shares Contacts as it pairs")),
+        "{}",
+        summary.join("\n")
+    );
+    assert!(
+        summary
+            .iter()
+            .any(|line| line.starts_with("Observed, unexpected: 1.3. ")),
         "{}",
         summary.join("\n")
     );
@@ -321,7 +334,7 @@ fn step_1_2_is_observed_unexpected_when_the_pixel_refuses_contacts_with_the_box_
     assert!(
         says(
             pairing,
-            "Unexpected: The Pixel didn't share Contacts as it paired"
+            "Unexpected: The Pixel refused Contacts as it paired"
         ) && says(pairing, "Calls still work"),
         "{pairing:#}"
     );

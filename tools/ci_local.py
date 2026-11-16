@@ -106,11 +106,13 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 
 # Each job is the command CI's job runs, from a `just` recipe, and whether it
 # runs with the host's network. tools/ci_local_test.py checks that
-# .github/workflows/ci.yml runs every one of these commands.
+# .github/workflows/ci.yml, or nightly.yml for the checklist's group 6, runs
+# every one of these commands.
 #
 #   lint       CI job "lint"
-#   test       CI jobs "tests", "checklist" and "gallery": the tests but the
-#              harness's scenarios, in one job rather than seven (both
+#   test       CI jobs "tests" and "gallery", and the nightly's "checklist":
+#              the tests but the harness's scenarios, in one job rather than
+#              seven (both
 #              ci-tests parts, and the gallery in one run rather than three)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
 #              six shards

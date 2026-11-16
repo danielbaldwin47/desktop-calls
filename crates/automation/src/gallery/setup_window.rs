@@ -12,8 +12,8 @@ use std::time::Duration;
 use test_harness::{AppState, Builder, Harness};
 
 use super::{
-    DEADLINE, PHONE_NAME, State, app_region, as_is, fresh_install, pair_through_setup_window,
-    setup_window_shows, sync, with_hyprland_config,
+    DEADLINE, PHONE_NAME, State, app_region, as_is, connect, fresh_install,
+    pair_through_setup_window, setup_window_shows, sync, with_hyprland_config,
 };
 
 /// Audio settings that leave out hands-free, so Calls' audio isn't set up.
@@ -160,6 +160,34 @@ pub(super) const SETUP_OPENED_STATES: &[State] = &[
                         .and_then(|window| window.get("keybinding"))
                         .is_some_and(|card| card.contains("couldn't be read"))
             });
+        },
+        moment: None,
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-opened-contacts-denied",
+        title: "\"Phone setup…\" with a Phone set up that refused Contacts: the finish page points at this computer's name on the phone, which it hasn't read (#393)",
+        still: |_| true,
+        prepare: |builder| builder.config_under_home(),
+        reach: |harness| {
+            with_hyprland_config(harness);
+            harness.simulated_phone().set_contacts_prompt("deny");
+            connect(harness);
+            harness.wait_for_app("ContactsState is denied", DEADLINE, |state| {
+                state.contacts.state == "denied"
+            });
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app(
+                "the finish page says where to allow Contacts",
+                DEADLINE,
+                |state| {
+                    setup_window_shows(state, "step", "done")
+                        && state
+                            .surface("setup-window")
+                            .and_then(|window| window.get("summary"))
+                            .is_some_and(|summary| summary.contains("next to this computer's name"))
+                },
+            );
         },
         moment: None,
         shown: |screenshot, _| app_region(screenshot).is_some(),

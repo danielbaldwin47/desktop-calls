@@ -32,7 +32,8 @@ test *args:
     python3 tools/scenario_shader_cache.py cargo test --workspace --locked {{args}}
 
 # CI splits `just test --exclude test-harness` across three jobs, which took
-# 12 minutes as one (#286): `ci-tests`, `ci-checklist-group-6` and
+# 12 minutes as one (#286): `ci-tests`, `ci-checklist-group-6` (in the
+# nightly run since 2026-11-16, .github/workflows/nightly.yml) and
 # `ci-gallery`. The tests the last two run, by name; `ci-tests` skips them.
 gallery_test := "the_gallery_shows_every_state_in_light_and_dark_stock_and_under_omarchy"
 # The Real-Phone Checklist's demo runs of group 6, which wait out real
@@ -186,8 +187,9 @@ screenshot *args:
 # Runs the scenarios the scorecard reads (a few minutes, four at a time as
 # CI's limits allow, so a deadline isn't missed for load), then scores them
 # with the latest real Real-Phone Checklist and the screenshot review. A
-# failing scenario fails its item rather than stop the report. CI's run on
-# main scores its own shards' results instead (`--scenarios DIR`).
+# failing scenario fails its item rather than stop the report. The nightly
+# run (.github/workflows/nightly.yml) scores the shards' results of CI's
+# latest run on main instead (`--scenarios DIR`).
 # Report every polish-scorecard item with its status and evidence.
 scorecard *args:
     #!/usr/bin/env bash

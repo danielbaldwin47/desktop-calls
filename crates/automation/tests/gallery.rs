@@ -75,6 +75,7 @@ const STATES: &[&str] = &[
     "setup-problem-bluez-hands-free",
     "setup-window-opened-set-up",
     "setup-window-opened-keybinding-unreadable",
+    "setup-window-opened-contacts-denied",
     "setup-window-opened-calls-off-bluetooth-off",
 ];
 

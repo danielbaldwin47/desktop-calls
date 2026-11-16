@@ -65,10 +65,13 @@ pub struct SetupWindowText {
 /// home directory, which a file in it is shown relative to, as `~`.
 #[must_use]
 pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) -> SetupWindowText {
-    let desktop = view
-        .desktop_name
-        .as_deref()
-        .map_or_else(|| "this computer".to_owned(), |name| format!("“{name}”"));
+    // On the Phone, the Desktop is listed by its Bluetooth name. A window
+    // opened on the finish page has read none, so the text points at the
+    // name, never at an entry called "this computer" (#393).
+    let desktop = view.desktop_name.as_deref().map_or_else(
+        || "this computer's name".to_owned(),
+        |name| format!("“{name}”"),
+    );
     let mut text = SetupWindowText {
         title: "Connect your phone",
         stages: stage_marks(&view.step),

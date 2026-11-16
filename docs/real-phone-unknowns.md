@@ -62,7 +62,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Status: open
 
 ## RPU-8: Every `Device1` property the app reads arrives as a signal
-- Assumed: each `Device1` property the app depends on is signalled when it changes, as `Paired` turned out not to be (#372); `InterfacesAdded` names what `GetManagedObjects` lists, and Phones list in a stable order. With `--signal-held`, scenarios hold back `Paired`, `Bonded` and `Connected` going true and the app catches up; `UUIDs`, `Name`, `Alias` and `Class` never change in the Simulated Phone once a Phone is listed, so their read-versus-signal split is untested.
+- Assumed: each `Device1` property the app depends on is signalled when it changes, as `Paired` turned out not to be (#372); `InterfacesAdded` names what `GetManagedObjects` lists, and Phones list in a stable order. With `--signal-held`, scenarios hold back `Paired`, `Bonded` and `Connected` going true and the app catches up; `UUIDs`, `Name`, `Alias` and `Class` stay fixed in the Simulated Phone for as long as a Phone is listed, so their read-versus-signal split is untested.
 - Source: retro A5; `docs/research/2026-11-04-test-seam.md`; `docs/research/2026-11-05-two-phones.md`.
 - Observed by: no step yet
 - Status: open

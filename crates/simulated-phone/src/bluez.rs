@@ -36,6 +36,7 @@ pub fn hold_signals(names: Vec<String>) {
 pub fn held(name: &str, value: &OwnedVariant) -> bool {
     HELD.get()
         .is_some_and(|held| held.iter().any(|one| one == name))
+        // `HOLDABLE` names booleans only, so any other value isn't held.
         && bool::try_from(value).unwrap_or(false)
 }
 

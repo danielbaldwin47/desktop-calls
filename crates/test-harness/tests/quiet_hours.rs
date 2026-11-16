@@ -135,6 +135,8 @@ fn minutes(hour: u16, minute: u16) -> u16 {
     hour * 60 + minute
 }
 
+/// Turning calls off as they begin sends no confirmation: the only
+/// notification is the one for calls turned on by hand afterwards.
 #[test]
 fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
     let start = now() + EDGE_AHEAD;
@@ -178,8 +180,20 @@ fn quiet_hours_across_midnight_turn_calls_off_when_they_begin() {
     assert!(kept.contains(&format!(r#""until":{end}"#)), "{kept}");
     assert!(harness.simulated_phone().blocked());
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
+
+    // A notification comes in the step that causes it, in order: one more
+    // by hand, and nothing came before it.
+    cli_ok(&harness, &["calls", "on"]);
+    harness.notifications().wait_for(
+        "the confirmation of calls turned on by hand",
+        DEADLINE,
+        |notification| notification.app_name == "Desktop Calls",
+    );
+    assert_eq!(summaries(&harness), ["Calls on"]);
 }
 
+/// Set while under way, or ending, Quiet Hours send no confirmation: the
+/// only notification is the one for calls turned off by hand afterwards.
 #[test]
 fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connects_within_10_s() {
     let end = now() + EDGE_AHEAD;
@@ -214,6 +228,14 @@ fn quiet_hours_across_midnight_turn_calls_on_when_they_end_and_the_phone_connect
     assert!(!harness.simulated_phone().blocked());
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);
     indicator_says(&harness, "My Pixel connected");
+
+    cli_ok(&harness, &["calls", "off"]);
+    harness.notifications().wait_for(
+        "the confirmation of calls turned off by hand",
+        DEADLINE,
+        |notification| notification.app_name == "Desktop Calls",
+    );
+    assert_eq!(summaries(&harness), ["Calls off"]);
 }
 
 #[test]
@@ -362,54 +384,4 @@ fn summaries(harness: &Harness) -> Vec<String> {
         .filter(|notification| notification.app_name == "Desktop Calls")
         .map(|notification| notification.summary)
         .collect()
-}
-
-#[test]
-fn quiet_hours_beginning_sends_no_confirmation() {
-    let start = now() + EDGE_AHEAD;
-    let harness = harness_in(&time_zone_reading(23, 59, start));
-    harness
-        .set_quiet_hours(minutes(23, 59), minutes(6, 0))
-        .expect("Quiet Hours set");
-    assert!(now() < start, "the setup took too long to test the start");
-
-    let left = Duration::from_secs(start.saturating_sub(now()));
-    harness.wait_for_app(
-        "calls go off as Quiet Hours begin",
-        left + DEADLINE,
-        |state| state.calls_off == "off",
-    );
-    wait_off_until(&harness, start + 6 * 3_600 + 60);
-
-    // A notification comes in the step that causes it, in order: one more
-    // by hand, and nothing came before it.
-    cli_ok(&harness, &["calls", "on"]);
-    harness.notifications().wait_for(
-        "the confirmation of calls turned on by hand",
-        DEADLINE,
-        |notification| notification.app_name == "Desktop Calls",
-    );
-    assert_eq!(summaries(&harness), ["Calls on"]);
-}
-
-#[test]
-fn quiet_hours_ending_sends_no_confirmation() {
-    let end = now() + EDGE_AHEAD;
-    let harness = harness_in(&time_zone_reading(0, 0, end));
-    harness
-        .set_quiet_hours(minutes(23, 0), minutes(0, 0))
-        .expect("Quiet Hours set");
-    wait_off_until(&harness, end);
-    assert!(now() < end, "the setup took too long to test the end");
-
-    let left = Duration::from_secs(end.saturating_sub(now()));
-    wait_connected(&harness, left + RECONNECT_DEADLINE);
-
-    cli_ok(&harness, &["calls", "off"]);
-    harness.notifications().wait_for(
-        "the confirmation of calls turned off by hand",
-        DEADLINE,
-        |notification| notification.app_name == "Desktop Calls",
-    );
-    assert_eq!(summaries(&harness), ["Calls off"]);
 }

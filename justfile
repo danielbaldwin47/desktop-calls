@@ -13,7 +13,7 @@ check: lint
 # CI runs this rather than `just check`: its test jobs build every target
 # between them, and building them again cost a minute (#118).
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
-lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets _bound-changes-are-measured
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets _bound-changes-are-measured _real-phone-unknowns-are-ledgered
     cargo fmt --all --check
     # The harness's scenario files reach the compiler only through
     # build.rs's generated `#[path]` modules and `include!`, which cargo fmt
@@ -326,6 +326,22 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# "Inferred" or "unverified" about the real Phone, in the Simulated Phone or
+# the checklist's steps, names its entry in docs/real-phone-unknowns.md, and
+# the ledger's entries are well formed and name real steps (retro of
+# 2026-11-15, candidate 3).
+[private]
+[no-exit-message]
+_real-phone-unknowns-are-ledgered:
+    @python3 tools/unknowns.py --ledger docs/real-phone-unknowns.md
+
+# The open Real-Phone unknowns a checklist group's steps observe, to name
+# to the owner before a sitting: `just real-phone-unknowns 1`, or `--list`
+# for every group. See docs/real-phone-unknowns.md.
+[positional-arguments]
+real-phone-unknowns *args:
+    @python3 tools/unknowns.py --ledger docs/real-phone-unknowns.md "$@"
 
 # A timing bound in the harness raised, or chosen on whether this is CI,
 # names the measurement behind it in a `bound-change:` comment (#398).

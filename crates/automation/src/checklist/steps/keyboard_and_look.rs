@@ -233,7 +233,7 @@ fn end_wrong_call(sitting: &mut Sitting, call: u32, why: &str) -> Result<(), Sto
 /// 7.2: the Banner flush top right over a real notification. While it
 /// rings it shows in full above the notification sent meanwhile, and once
 /// it goes the notification is in view. That the Banner draws above
-/// Omarchy's notification cards is inferred from Hyprland's drawing order
+/// Omarchy's notification cards is inferred (RPU-36) from Hyprland's drawing order
 /// (spec #221), so this step is where it is judged.
 pub(super) fn banner_over_a_notification(sitting: &mut Sitting) -> Result<(), Stop> {
     let call = helper_calls(sitting, "Ask your helper to call you. Don't answer yet.")?;

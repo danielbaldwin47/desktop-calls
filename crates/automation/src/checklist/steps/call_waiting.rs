@@ -4,6 +4,7 @@
 //! runner sees each choice's result in the app's published Calls and in
 //! the Call Window's fields, and records what the app shows when the Phone
 //! does something else, so a real Phone's answer to each of the unverified
+//! (RPU-29, RPU-30)
 //! points in `docs/research/2026-11-05-call-waiting.md` lands in the result
 //! file.
 //!

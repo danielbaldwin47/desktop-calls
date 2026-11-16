@@ -16,7 +16,7 @@
 //!   `"br-connection-page-timeout"`, as measured on the Desktop. A Phone
 //!   that comes into range meanwhile answers the page. A Phone that has
 //!   forgotten the pairing fails it for want of the link key:
-//!   `"br-connection-key-missing"`, which is inferred from BlueZ's error
+//!   `"br-connection-key-missing"`, which is inferred (RPU-5) from BlueZ's error
 //!   table, not seen.
 //! - `Connect` to a Phone that is connected already, or that connects by
 //!   itself while the `Connect` is under way, fails with

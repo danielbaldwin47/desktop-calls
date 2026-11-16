@@ -247,7 +247,7 @@ pub struct Restart {
 /// [`calls_back_after_restart`]; its volumes stay. Its audio link drops
 /// with the old service, so the new one starts idle and rejecting audio, as
 /// for a new AudioGateway. That the link drops, and that the new service
-/// doesn't list the Calls before it announces them, are inferred, not
+/// doesn't list the Calls before it announces them, are inferred (RPU-34), not
 /// observed.
 pub fn restart(tree: &mut ObjectTree, audio_gateway: &OwnedObjectPath) -> zbus::Result<Restart> {
     let mut gone = Vec::new();

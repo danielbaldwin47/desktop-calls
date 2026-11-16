@@ -235,9 +235,19 @@ merge pr *args:
 review-record pr kind model verdict *findings:
     @python3 tools/review_record.py "$@"
 
+# Rerun RUN's failed jobs, after posting `Rerun: RUN cause: #ISSUE` on its
+# PR (or on the issue, for a run on main). ISSUE holds the failure's cause,
+# found by event order; `just land` refuses a rerun PR without the record
+# (#396). For a run that already passed on a later attempt, it only records.
+[positional-arguments]
+[no-exit-message]
+ci-rerun run issue:
+    @python3 tools/ci_rerun.py "$@"
+
 # Wait on one GitHub CI run (default: the latest for this branch). If it
 # passed, print one line. If not, print each failed test's panic and download
-# the scenario logs into target/ci/<run-id>/. `just ci-wait --help`.
+# the scenario logs into target/ci/<run-id>/. Then names any of main's
+# latest runs past attempt 1 (#396). `just ci-wait --help`.
 [positional-arguments]
 [no-exit-message]
 ci-wait *args:

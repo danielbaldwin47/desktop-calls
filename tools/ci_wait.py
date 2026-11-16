@@ -21,6 +21,10 @@ The latest run for the current branch is the one for the commit checked out
 here, if CI has one; right after a push this waits up to a minute for it to
 appear. Otherwise it is the newest run for the branch, and a line says so.
 
+Either way it then names any of main's latest runs that reached attempt 2
+or later (ticket #396): a rerun's pass proves nothing, and one on main nearly
+hid a lost Missed Call (#356).
+
 Exit status: 0 the run passed; 1 it failed or was cancelled; 2 no run, or gh
 failed.
 """
@@ -50,6 +54,8 @@ RUN_APPEARS_SECONDS = 60
 POLL_SECONDS = 5
 # How a run that didn't pass ended, as gh names it, in words.
 VERDICTS = {"failure": "failed", "cancelled": "was cancelled", "timed_out": "timed out"}
+# How many of main's latest runs to look through for reruns.
+MAIN_RUNS_SEEN = 20
 # How much of a failed step's log to show when no test failed in it.
 STEP_TAIL_LINES = 20
 
@@ -286,6 +292,34 @@ def download_logs(run_id: str, directory: pathlib.Path) -> str:
     return f"Downloaded {len(scenarios)} scenario {noun} into {directory}/"
 
 
+def main_reruns(runs: list[dict]) -> list[str]:
+    """A line for each of main's runs (`gh run list --json`) past attempt 1."""
+    return [
+        f"  run {found['databaseId']} on {found['headSha'][:7]}: attempt {found['attempt']}, "
+        f"{found.get('conclusion') or 'not finished'}"
+        for found in runs
+        if found.get("attempt", 1) > 1
+    ]
+
+
+def report_main_reruns() -> None:
+    """Prints main's recent reruns, if any. A gh failure here is said and
+    changes nothing: the run waited on has its verdict."""
+    try:
+        runs = json.loads(run(
+            "gh", "run", "list", "--branch", "main", "--workflow", WORKFLOW, "--limit", str(MAIN_RUNS_SEEN),
+            "--json", "databaseId,attempt,headSha,conclusion",
+        ))
+    except (Failed, json.JSONDecodeError) as error:
+        print(f"Couldn't look for reruns on main: {error}", file=sys.stderr)
+        return
+    lines = main_reruns(runs)
+    if lines:
+        print(f"\nReruns on main, among its latest {MAIN_RUNS_SEEN} runs (ticket #396); "
+              "each needs its cause found by event order (`gh run view <run>`):")
+        print("\n".join(lines))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="just ci-wait",
@@ -308,6 +342,7 @@ def main() -> int:
         conclusion, url = summary["conclusion"], summary["url"]
         if conclusion == "success":
             print(f"CI passed: run {run_id} on {summary['headBranch']}, {url}")
+            report_main_reruns()
             return EXIT_PASSED
         failed_jobs = [job["name"] for job in summary["jobs"] if job["conclusion"] == "failure"]
         verdict = VERDICTS.get(conclusion, conclusion or "did not finish")
@@ -326,6 +361,7 @@ def main() -> int:
         downloaded = download_logs(run_id, directory)
         report(failures, steps, directory)
         print(f"\n{downloaded}")
+        report_main_reruns()
         return EXIT_FAILED
     except Failed as failed:
         print(f"just ci-wait: {failed}", file=sys.stderr)

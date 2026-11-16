@@ -52,6 +52,7 @@ import sys
 import tempfile
 import time
 
+import free_space
 import scenario_shader_cache
 
 # The calibrated limits: see the module's documentation. TEST_CI_LIKE_CPU_QUOTA
@@ -224,7 +225,7 @@ def main() -> int:
                 )
             except KeyboardInterrupt:
                 status = 130
-            except scenario_shader_cache.WarmUpFailed as failure:
+            except (scenario_shader_cache.WarmUpFailed, free_space.Refused) as failure:
                 print(f"just test-ci-like: {failure}", file=sys.stderr)
                 status = 1
             kept = keep_failed(temporary)

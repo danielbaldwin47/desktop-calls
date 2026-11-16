@@ -22,6 +22,8 @@ import pathlib
 import subprocess
 import sys
 
+import free_space
+
 VARIABLE = "SCENARIO_SHADER_CACHE"
 CACHE = pathlib.Path(__file__).resolve().parent.parent / "target" / "scenario-shader-cache"
 WARM_UP_SCENARIO = (
@@ -48,7 +50,10 @@ def warm(environment: dict[str, str], run=subprocess.run) -> dict[str, str]:
     none, and returns the environment that gives it to every scenario.
     `run` stands in for running the warm-up in tests, and runs it confined
     for `just test-ci-like`, since Mesa keeps each renderer's programs
-    apart."""
+    apart. First it looks at free space on /tmp and /home, where scenarios
+    keep their folders and cargo its builds, and raises free_space.Refused
+    if either is nearly full (#397)."""
+    free_space.preflight()
     if not wanted(environment):
         return environment
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -68,7 +73,7 @@ def main() -> int:
     named, as `just test` and `just ci-scenarios` do."""
     try:
         environment = warm(dict(os.environ))
-    except WarmUpFailed as failure:
+    except (WarmUpFailed, free_space.Refused) as failure:
         print(failure, file=sys.stderr)
         return 1
     return subprocess.run(sys.argv[1:], env=environment).returncode

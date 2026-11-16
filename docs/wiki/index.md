@@ -4,11 +4,13 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 ## People and preferences
 
-- [user-preferences](user-preferences.md): how the user wants work done and reported, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
+- [user-preferences](user-preferences.md): how the user wants work done and reported, including the owner's 2026-11-15 leave to go ahead with design decisions that are simple to reverse, including the 2026-11-13 rules on Fable, subagent interactions, concept review before specs, the UI pass and replying to outside requesters, and the 2026-11-14 rule that every agent clears its build cache when done, and the 2026-11-15 instruction to make CI as minimal as is sensible, the postponed reply to #194 (not to be posted until the user says), "merging everything is fine" and the go-ahead for after-v1 work (updated 2026-11-15).
 
 ## Decisions
 
 - [destination](destination.md): what "v1 is done, pause" means, the fog of war (the UI pass, a media-audio mode, the Companion App) and what is out of scope; where the five criteria stood on 2026-11-14 and 2026-11-15, including the evening of 2026-11-15 at `2846987`: v1's agent-side work complete, the UI pass finished, the scorecard tool's 0 of 8 (item 7 FAIL on #292, item 8 NEEDS-REVIEW), and only the user's sitting remaining; and late that evening at `fc72ab3`: one red run traced without a rerun, 11 of the screenshot review's 14 findings closed, and the design questions open for the user (added 2026-11-13; updated 2026-11-15).
+
+- [decided-for-the-owner](decided-for-the-owner.md): design decisions made for the owner under the owner's leave of 2026-11-15, each with its issue, PR and how to overrule it (added 2026-11-15).
 
 - [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb, with the audit of 2026-11-14 against the Simulated Phone and the 2026-11-15 scorecard tool's four statuses per item (updated 2026-11-15).
 

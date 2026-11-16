@@ -6,12 +6,14 @@
 //! switch and the two times; Space toggles the switch; in a time, Up and
 //! Down step it, digits type one, and leaving it or Enter reads what was
 //! typed. Escape or closing the window closes it, reading a time being
-//! typed first.
+//! typed first. While the switch has keyboard focus, a Space keycap shows
+//! beside it, since Space then flips it (#301).
 //!
 //! It reports `quiet-hours-window` with `switch` (`on` or `off`), `start`,
 //! `end`, `notice`, `sentence`, `bar` (the spans the 24-hour bar fills, as
 //! `HH:MM-HH:MM`, space-separated), `keys` (one per line), `focus`
-//! (`switch`, `start` or `end`) and `focused`.
+//! (`switch`, `start` or `end`), `switch-key` (the keycap beside the
+//! switch, while it shows) and `focused`.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -101,6 +103,9 @@ pub(super) struct QuietHoursWindow {
     window: gtk::Window,
     heading: gtk::Label,
     switch: gtk::Switch,
+    /// The keycap beside the switch, shown while the switch has keyboard
+    /// focus.
+    switch_key: gtk::Label,
     times: gtk::Box,
     from: gtk::Label,
     until: gtk::Label,
@@ -147,8 +152,13 @@ impl QuietHoursWindow {
         heading.set_hexpand(true);
         let switch = gtk::Switch::new();
         switch.set_valign(gtk::Align::Center);
+        let switch_key = gtk::Label::new(None);
+        switch_key.add_css_class(class::KEYCAP);
+        switch_key.set_valign(gtk::Align::Center);
+        switch_key.set_visible(false);
         let top = gtk::Box::new(gtk::Orientation::Horizontal, space::M);
         top.append(&heading);
+        top.append(&switch_key);
         top.append(&switch);
 
         let (from, start) = time_field(QuietHoursField::Start);
@@ -200,6 +210,7 @@ impl QuietHoursWindow {
             window,
             heading,
             switch,
+            switch_key,
             times,
             from,
             until,
@@ -413,6 +424,7 @@ impl QuietHoursWindow {
         self.heading.set_text(text.heading);
         self.switch
             .update_property(&[gtk::accessible::Property::Label(text.switch)]);
+        self.switch_key.set_text(text.switch_key);
         self.from.set_text(text.from);
         self.until.set_text(text.until);
         for (time, shown) in [(&self.start, &text.start), (&self.end, &text.end)] {
@@ -473,7 +485,15 @@ impl QuietHoursWindow {
         }
         let mut content = self.content.borrow().clone();
         let focus = GtkWindowExt::focus(&self.window);
-        let focus = if focus.as_ref() == Some(self.switch.upcast_ref()) {
+        let on_switch = focus.as_ref() == Some(self.switch.upcast_ref());
+        // Space flips the switch only while it has keyboard focus in the
+        // active window, so its keycap shows only then.
+        let space_flips = on_switch && self.window.is_active();
+        self.switch_key.set_visible(space_flips);
+        if space_flips {
+            content.insert("switch-key".to_owned(), self.switch_key.text().into());
+        }
+        let focus = if on_switch {
             Some("switch")
         } else {
             self.focused_time().map(|field| match field {

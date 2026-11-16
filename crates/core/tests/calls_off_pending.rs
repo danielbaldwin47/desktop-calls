@@ -479,7 +479,7 @@ fn unpairing_the_phone_drops_the_waiting_turn_off() {
 }
 
 /// Ticket #230: whether the Call Window, and so the Call Pill, carry the
-/// "Calls off after" tag. Panics without a Call Window.
+/// "Off after call" tag. Panics without a Call Window.
 fn tagged(state: &State) -> bool {
     let Some(window) = state.surfaces().call_window else {
         panic!("the Call Window shows");

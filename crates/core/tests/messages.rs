@@ -348,11 +348,21 @@ fn the_call_pill_says_its_tags_and_tooltips_in_sentence_case() {
     assert_eq!(messages::call_pill_tag(CallPillTag::Muted), "Muted");
     assert_eq!(messages::call_pill_tag(CallPillTag::OnPhone), "On phone");
     assert_eq!(messages::call_pill_tag(CallPillTag::OneOnHold), "1 on hold");
-    assert_eq!(messages::calls_off_after_tag(), "Calls off after");
+    assert_eq!(messages::calls_off_after_tag(), "Off after call");
     assert_eq!(
         messages::call_pill_tooltip(Label::HangUp, "Ctrl+H"),
         "Hang up · Ctrl+H"
     );
     assert_eq!(messages::call_pill_tooltip(Label::Mute, "M"), "Mute · M");
     assert_eq!(messages::show_call_tooltip(), "Show call · Super+Alt+C");
+}
+
+/// Ticket #301: the tone entry's placeholder doesn't mention paste; the
+/// user knows a text field takes one.
+#[test]
+fn the_tone_entry_asks_for_digits_without_mentioning_paste() {
+    assert_eq!(
+        messages::label(Label::KeypadPlaceholder),
+        "Type digits to send tones"
+    );
 }

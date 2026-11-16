@@ -100,8 +100,10 @@ const PHONE_NAME: &str = "My Pixel";
 /// A caller in the range Ofcom keeps for drama (07700 900xxx).
 const NUMBER: &str = "+447700900123";
 /// A caller with a long number, in the London range Ofcom keeps for drama
-/// (020 7946 0xxx): "+44 20 7946 0123", 16 characters.
-const LONG_NUMBER: &str = "+442079460123";
+/// (020 7946 0xxx), with an extension: "+44 20 7946 0123 x4567", 22
+/// characters, too long for the Call Pill, which cuts it at its end, while
+/// the Call Window shows it in full (#325).
+const LONG_NUMBER: &str = "+442079460123,4567";
 /// The caller of a Waiting Call.
 const SECOND_NUMBER: &str = "+447700900456";
 /// A third caller, while the first Call is on hold and the second live.

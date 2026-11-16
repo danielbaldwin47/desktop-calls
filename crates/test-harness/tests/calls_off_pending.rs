@@ -244,7 +244,7 @@ fn a_deadline_that_passes_during_the_call_leaves_calls_on() {
 /// How long the Call Window may take to collapse by itself: the 5 s, and a
 /// margin for a loaded runner.
 const COLLAPSE_DEADLINE: Duration = Duration::from_secs(9);
-const TAG: &str = "Calls off after";
+const TAG: &str = "Off after call";
 
 /// The app on a headless screen, so its surfaces are reported, with the
 /// Phone connected.
@@ -261,7 +261,7 @@ fn on_screen() -> Harness {
     harness
 }
 
-/// What `surface` says its "Calls off after" tag reads, if it shows one.
+/// What `surface` says its "Off after call" tag reads, if it shows one.
 fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
     state
         .surface(surface)
@@ -270,7 +270,7 @@ fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
 }
 
 /// What the Call Window, or once it has collapsed the Call Pill, says its
-/// "Calls off after" tag reads.
+/// "Off after call" tag reads.
 fn tagged(state: &AppState) -> Option<&str> {
     tag(state, "call-window").or_else(|| tag(state, "call-pill"))
 }
@@ -329,8 +329,9 @@ fn the_call_pill_is_tagged_too_and_the_tag_goes_when_the_call_ends() {
 }
 
 /// A number not in Contacts, in the London range Ofcom keeps for drama, as
-/// long as a number reads: "+44 20 7946 0123".
-const LONG_NUMBER: &str = "+442079460123";
+/// long as an ordinary number gets: "+44 20 7946 0123". A longer one is cut
+/// at its end on the Call Pill (#325; the gallery's long-number states).
+const ORDINARY_NUMBER: &str = "+442079460123";
 /// Longer than the timer's one-second redraw, after which a surface
 /// reports how its caller was last laid out.
 const LAID_OUT: Duration = Duration::from_millis(2500);
@@ -344,9 +345,10 @@ fn cut_short<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn a_long_number_reads_in_full_with_the_calls_off_after_tag_on_the_call_pill_and_the_call_window() {
+fn an_ordinary_number_reads_in_full_with_the_off_after_call_tag_on_the_call_pill_and_the_call_window()
+ {
     let harness = on_screen();
-    let path = harness.simulated_phone().ring(LONG_NUMBER);
+    let path = harness.simulated_phone().ring(ORDINARY_NUMBER);
     harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
     harness.simulated_phone().answer_on_phone(&path);
     harness.wait_for_app("the Call is live", DEADLINE, is_live);
@@ -396,9 +398,10 @@ fn tag_line(state: &AppState) -> Option<&str> {
 }
 
 #[test]
-fn muted_with_a_long_number_the_call_pill_joins_its_tags_and_cuts_neither_them_nor_the_number() {
+fn muted_with_an_ordinary_number_the_call_pill_joins_its_tags_and_cuts_neither_them_nor_the_number()
+{
     let harness = on_screen();
-    let path = harness.simulated_phone().ring(LONG_NUMBER);
+    let path = harness.simulated_phone().ring(ORDINARY_NUMBER);
     let state = harness.wait_for_app("the Call rings", DEADLINE, |state| state.ringing);
     // Answered here, so the audio is here and Mute works.
     harness.answer(state.calls.first().map_or(0, |call| call.id));
@@ -414,7 +417,7 @@ fn muted_with_a_long_number_the_call_pill_joins_its_tags_and_cuts_neither_them_n
         COLLAPSE_DEADLINE,
         |state| {
             state.surface("call-window").is_none()
-                && tag_line(state) == Some("Muted · Calls off after")
+                && tag_line(state) == Some("Muted · Off after call")
                 && cut_short(state, "call-pill").is_some()
         },
     );

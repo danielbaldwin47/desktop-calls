@@ -55,6 +55,7 @@ const STATES: &[&str] = &[
     "call-window-phone-kept-audio",
     "quiet-hours-window-off",
     "quiet-hours-window-on",
+    "quiet-hours-window-on-switch-focused",
     "quiet-hours-window-refused",
     "setup-window-choose",
     "setup-window-confirm",

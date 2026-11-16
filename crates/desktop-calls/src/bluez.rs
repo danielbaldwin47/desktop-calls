@@ -7,11 +7,15 @@
 //! It reports each paired Bluetooth device that offers the Hands-Free Audio
 //! Gateway profile, which is what makes it a Phone that can carry Calls,
 //! and whether it has a Bluetooth connection to the Desktop: `Connected`.
+//! A paired device whose `Class` says Phone, but whose services don't show
+//! hands-free, is reported apart, and followed the same way: BlueZ may
+//! never resolve the services of a Phone paired from its own screen, and
+//! the core takes it as the Phone if the user chose it (ticket #375).
 //! For the Setup Window it also reports each nearby device that isn't
 //! paired and whose `Class` says Phone, by its name, and when BlueZ has
 //! listed what it knows at startup. Pairing itself is `pairing.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use desktop_calls_core::{ConnectFailure, Input, Phone};
@@ -74,6 +78,8 @@ struct Devices {
     properties: HashMap<String, HashMap<String, OwnedVariant>>,
     /// Paired Phones by object path: their addresses.
     phones: HashMap<String, String>,
+    /// Those of them whose services didn't show hands-free when found.
+    without_hands_free: HashSet<String>,
     /// Nearby Phones not paired, by object path, as last reported.
     nearby: HashMap<String, Phone>,
 }
@@ -111,6 +117,7 @@ impl Devices {
                     return Vec::new();
                 }
                 self.properties.remove(&path);
+                self.without_hands_free.remove(&path);
                 if let Some(phone) = self.nearby.remove(&path) {
                     return vec![Input::PhoneNotNearby {
                         address: phone.address,
@@ -134,30 +141,43 @@ impl Devices {
     }
 
     /// What the device at `path` is now, as inputs: newly a paired Phone,
-    /// its presence if `connected` changed, or a nearby Phone found,
-    /// renamed or paired.
+    /// with hands-free or without, or one found without it whose services
+    /// now show hands-free; its presence if `connected` changed; or a
+    /// nearby Phone found, renamed or paired.
     fn follow(&mut self, path: &str, connected: Option<bool>) -> Vec<Input> {
         let Some(device) = self.properties.get(path) else {
             return Vec::new();
         };
         let mut inputs = Vec::new();
         if let Some(address) = self.phones.get(path) {
+            // Its services resolved since, showing hands-free.
+            if let Some(phone) = paired_phone(device)
+                && self.without_hands_free.remove(path)
+            {
+                found_paired(&phone, true);
+                inputs.push(Input::PhonePaired(phone));
+            }
             inputs.extend(connected.map(|connected| presence(address, connected)));
-        } else if let Some(phone) = paired_phone(device) {
-            // At info: diagnosing the Setup Window needs it (ticket #372).
-            tracing::info!(
-                event_kind = %EventKind::PhonePaired,
-                phone_address = %phone.address,
-                "Found a paired Phone"
-            );
+        } else if let Some((phone, hands_free)) = paired_phone(device)
+            .map(|phone| (phone, true))
+            .or_else(|| bonded_phone(device).map(|phone| (phone, false)))
+        {
+            found_paired(&phone, hands_free);
             if self.nearby.remove(path).is_some() {
                 inputs.push(Input::PhoneNotNearby {
                     address: phone.address.clone(),
                 });
             }
             self.phones.insert(path.to_owned(), phone.address.clone());
+            if !hands_free {
+                self.without_hands_free.insert(path.to_owned());
+            }
             let presence = self::connected(device).map(|now| presence(&phone.address, now));
-            inputs.push(Input::PhonePaired(phone));
+            inputs.push(if hands_free {
+                Input::PhonePaired(phone)
+            } else {
+                Input::PhonePairedWithoutHandsFree(phone)
+            });
             inputs.extend(presence);
         } else if let Some(phone) = nearby_phone(device)
             && self.nearby.get(path) != Some(&phone)
@@ -177,14 +197,7 @@ impl Devices {
 /// The Phone a `Device1` describes, if it isn't paired, says it is a Phone
 /// by its `Class`, and has a name to list it by.
 fn nearby_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
-    let paired = paired(device);
-    // The major device class, bits 8 to 12 of the Class of Device: 2 is
-    // Phone (Bluetooth Assigned Numbers, 2.8.2).
-    let is_phone = device
-        .get("Class")
-        .and_then(|class| u32::try_from(class.clone()).ok())
-        .is_some_and(|class| (class >> 8) & 0x1f == 2);
-    if paired || !is_phone {
+    if paired(device) || !says_phone(device) {
         return None;
     }
     let text = |name: &str| {
@@ -198,6 +211,26 @@ fn nearby_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
         name: text("Alias").or_else(|| text("Name"))?,
         address: text("Address")?,
     })
+}
+
+/// Whether a `Device1`'s `Class` says Phone: the major device class, bits 8
+/// to 12 of the Class of Device, is 2 (Bluetooth Assigned Numbers, 2.8.2).
+fn says_phone(device: &HashMap<String, OwnedVariant>) -> bool {
+    device
+        .get("Class")
+        .and_then(|class| u32::try_from(class.clone()).ok())
+        .is_some_and(|class| (class >> 8) & 0x1f == 2)
+}
+
+/// Logs a paired Phone found, at info: diagnosing the Setup Window needs it
+/// (ticket #372).
+fn found_paired(phone: &Phone, hands_free: bool) {
+    tracing::info!(
+        event_kind = %EventKind::PhonePaired,
+        phone_address = %phone.address,
+        hands_free,
+        "Found a paired Phone"
+    );
 }
 
 /// Whether a `Device1` is paired: `Paired`, or `Bonded`. BlueZ 5.87 signals
@@ -590,18 +623,36 @@ fn bounce_failed(kind: BounceError, error: &zbus::Error) -> BounceError {
 
 /// The Phone a `Device1` describes, if it is paired and offers hands-free.
 fn paired_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
-    let paired = paired(device);
-    let offers_hands_free = device
+    if !paired(device) || !offers_hands_free(device) {
+        return None;
+    }
+    phone(device)
+}
+
+/// The Phone a `Device1` describes, if it is paired and says it is a Phone
+/// by its `Class`, though its services don't show hands-free: BlueZ may
+/// never resolve them for a Phone paired from its own screen (ticket #375).
+fn bonded_phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
+    if !paired(device) || !says_phone(device) || offers_hands_free(device) {
+        return None;
+    }
+    phone(device)
+}
+
+/// Whether a `Device1`'s services include the Hands-Free Audio Gateway.
+fn offers_hands_free(device: &HashMap<String, OwnedVariant>) -> bool {
+    device
         .get("UUIDs")
         .and_then(|uuids| Vec::<String>::try_from(uuids.clone()).ok())
         .is_some_and(|uuids| {
             uuids
                 .iter()
                 .any(|uuid| uuid.eq_ignore_ascii_case(HANDS_FREE_AUDIO_GATEWAY_UUID))
-        });
-    if !paired || !offers_hands_free {
-        return None;
-    }
+        })
+}
+
+/// A paired `Device1` as a Phone: its address, and the name the user sees.
+fn phone(device: &HashMap<String, OwnedVariant>) -> Option<Phone> {
     let text = |name: &str| {
         device
             .get(name)

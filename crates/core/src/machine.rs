@@ -697,9 +697,11 @@ impl State {
     }
 
     /// Keeps `paired_phones` as BlueZ reports Phones paired and unpaired.
+    /// A Phone without hands-free is listed too, so the user can choose it
+    /// (ticket #375), though it isn't followed unless chosen.
     fn note_paired_phones(&mut self, input: &Input) {
         match input {
-            Input::PhonePaired(phone) => {
+            Input::PhonePaired(phone) | Input::PhonePairedWithoutHandsFree(phone) => {
                 match self
                     .paired_phones
                     .iter_mut()
@@ -778,6 +780,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
 )]
 fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
     let mut effects = Vec::new();
+    let input = setup::paired_as_chosen(&state, input);
     state.note_paired_phones(&input);
     match input {
         // Desktop Calls works with one Phone: the first one paired.
@@ -939,6 +942,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
             quiet_hours_window::quiet_hours_window_input(&mut state, &input, &mut effects);
         }
         Input::PhonePaired(_)
+        | Input::PhonePairedWithoutHandsFree(_)
         | Input::PhoneUnpaired { .. }
         | Input::PhoneConnected { .. }
         | Input::PhoneDisconnected { .. } => {}

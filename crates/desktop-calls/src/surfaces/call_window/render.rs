@@ -174,7 +174,7 @@ impl CallWindow {
         }
     }
 
-    /// The "Calls off after" tag on the line under who, while a turn-off
+    /// The "Off after call" tag on the line under who, while a turn-off
     /// waits for the Call to end.
     fn show_calls_off_after(&self, view: &CallWindowView, content: &mut BTreeMap<String, String>) {
         self.calls_off.set_visible(view.calls_off_after);

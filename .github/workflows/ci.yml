@@ -43,14 +43,13 @@ concurrency:
 
 # `setup` decides whether the change touches code, and makes sure CI's image
 # exists. If code changed, the suite runs in parallel, on several runners:
-# `just lint`; the tests outside the harness, in two parts; the Real-Phone Checklist's
-# group 6 runs (on main); the gallery, in parts; and the harness's
-# scenarios, in shards. On main, the polish scorecard follows
-# the shards. If only docs that no code reads changed, they are all skipped.
-# "CI passed" needs every job, so it appears only once they have all
-# finished. The slowest job sets the time from push to "CI passed": on a PR,
-# a scenario shard; on main, the checklist's group 6, which waits out real
-# minutes.
+# `just lint`; the tests outside the harness, in two parts; the gallery, in
+# parts; and the harness's scenarios, in shards. If only docs that no code
+# reads changed, they are all skipped. "CI passed" needs every job, so it
+# appears only once they have all finished; the slowest, a scenario shard,
+# sets the time from push to "CI passed". The Real-Phone Checklist's group 6
+# runs and the polish scorecard, which gate nothing, run nightly instead
+# (nightly.yml; 2026-11-16, the owner's decision).
 jobs:
   setup:
     name: Code changed? And CI's image
@@ -156,9 +155,10 @@ jobs:
         run: just lint
 
   # Every test outside the harness's scenarios but the gallery and the
-  # checklist's group 6 runs, which have jobs of their own: together the
-  # three are `just test --exclude test-harness`, which took 12 minutes in
-  # one job (run 43648375459: 402 s of gallery, 219 s of checklist). In two
+  # checklist's group 6 runs, which have jobs of their own (group 6's in
+  # nightly.yml): together the three are `just test --exclude test-harness`,
+  # which took 12 minutes in one job (run 43648375459: 402 s of gallery,
+  # 219 s of checklist). In two
   # parts, the justfile's ci_tests_part_2 and the rest: in one, they were the
   # slowest job of a PR's run (225 s of run 43791000134, #410).
   tests:
@@ -178,8 +178,7 @@ jobs:
       # The container runs as root, and the checkout belongs to the runner's
       # user, so git refuses the repository as of dubious ownership. The
       # scorecard reads git object ids for item 8, and its tests do too.
-      - &git-trusts-checkout
-        name: Let git read the checkout
+      - name: Let git read the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: just ci-tests ${{ matrix.part }}/2
         run: just ci-tests ${{ matrix.part }}/2
@@ -194,35 +193,6 @@ jobs:
           name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}${{ matrix.names && format('-{0}', matrix.names) || '' }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
-
-  # The Real-Phone Checklist's demo runs of group 6 wait out real time:
-  # calls stay off for 60 s, and Quiet Hours begin at the next minute and
-  # end a minute later. Its three tests took 157, 157 and 60 s; two at a
-  # time on one runner, 217 s, the slowest job of run 43675318041. So one
-  # 157 s test gets a runner of its own, and the other two share one. The
-  # names, between them, are the justfile's checklist_group_6_tests.
-  #
-  # Only on main, not on PRs: it was the slowest job of a PR's run (4 min 50 s
-  # of run 43677761934, the rest done by 4 min 2 s), and it tests the
-  # checklist's demo runner, which the scenarios' Calls Off and Quiet Hours
-  # tests don't need (#286, 2026-11-15).
-  checklist:
-    name: just ci-checklist-group-6 ${{ matrix.names }}
-    needs: setup
-    if: needs.setup.outputs.code == 'true' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    container: *container
-    strategy:
-      fail-fast: false
-      matrix:
-        names: [group_6_times, step_6_2_]
-    steps:
-      - *checkout
-      - *cache
-      - name: just ci-checklist-group-6 ${{ matrix.names }}
-        run: just ci-checklist-group-6 ${{ matrix.names }}
-      - *scenario-logs
 
   # The gallery, every surface in every state, in parts: each renders every
   # N-th state. A PR's run renders the light stock look only, enough to catch
@@ -315,7 +285,8 @@ jobs:
           name: shard-count-${{ matrix.shard }}
           path: target/shard-counts
 
-      # Each scenario's result (.config/nextest.toml), for the scorecard job.
+      # Each scenario's result (.config/nextest.toml), for the nightly
+      # scorecard (nightly.yml), which scores main's latest kept set.
       - name: Keep this shard's results
         if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -344,50 +315,14 @@ jobs:
 
       - *scenario-logs
 
-  # The polish scorecard (#27), from the scenario shards' results: a report,
-  # not a gate, so only the run on main makes it and "CI passed" doesn't
-  # wait for it. It runs after the shards, whether or not they passed, so a
-  # failing scenario shows as its item's FAIL.
-  scorecard:
-    name: just scorecard, from the scenarios' results
-    needs: [setup, scenarios]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.setup.outputs.code == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    container: *container
-    steps:
-      - *checkout
-      - *cache
-      - *git-trusts-checkout
-      - name: Fetch the shards' results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: scenario-results-*
-          path: scenario-results
-      - name: Score
-        env:
-          GALLERY: "artifacts gallery-1 to gallery-3 of ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        run: |
-          set -o pipefail
-          cargo build --quiet -p automation --locked
-          target/debug/automation scorecard --scenarios scenario-results --gallery "$GALLERY" | tee scorecard.txt
-      - name: Keep the scorecard
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scorecard
-          path: scorecard.txt
-          if-no-files-found: ignore
-
   # The one check that says CI passed, and the context branch protection
   # requires, pinned to GitHub Actions. It fails unless `setup` succeeded
   # and every other job succeeded, or was skipped because `setup` found only
-  # docs, or, for the checklist, because the run is a PR's. `just merge` and
-  # `just land` wait for it.
+  # docs. `just merge` and `just land` wait for it.
   ci-passed:
     name: ${{ github.event_name == 'workflow_dispatch' && 'CI passed (dispatched run)' || 'CI passed' }}
     if: ${{ !cancelled() }}
-    needs: [setup, lint, tests, checklist, gallery, scenarios]
+    needs: [setup, lint, tests, gallery, scenarios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -398,10 +333,8 @@ jobs:
           JOBS: >-
             ${{ needs.lint.result }} ${{ needs.tests.result }}
             ${{ needs.gallery.result }} ${{ needs.scenarios.result }}
-          CHECKLIST: ${{ needs.checklist.result }}
-          PR: ${{ github.event_name == 'pull_request' }}
         run: |
-          echo "setup: $SETUP, code changed: $CODE, jobs: $JOBS, checklist: $CHECKLIST"
+          echo "setup: $SETUP, code changed: $CODE, jobs: $JOBS"
           [ "$SETUP" = success ] || exit 1
           for result in $JOBS; do
             if [ "$CODE" = true ]; then
@@ -410,11 +343,6 @@ jobs:
               [ "$result" = skipped ] || exit 1
             fi
           done
-          if [ "$CODE" = true ] && [ "$PR" != true ]; then
-            [ "$CHECKLIST" = success ] || exit 1
-          else
-            [ "$CHECKLIST" = skipped ] || exit 1
-          fi
 
       # A shard that didn't run, or a partition that left scenarios out, would
       # otherwise pass by running fewer.

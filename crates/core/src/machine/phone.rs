@@ -10,7 +10,7 @@ use super::presence::{
     wait_for_lost_call,
 };
 use super::setup::{contacts_read, hold_sync, sync_progress};
-use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State};
+use super::{AudioToRestore, FORGET_EARLIER_RUN_MS, Muting, State, contacts_again};
 use crate::call::{AudioLocation, Request, Transport};
 use crate::connection::{ConnectionState, Phone};
 use crate::contacts::{
@@ -52,6 +52,7 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             contacts,
             call_history,
         } => {
+            contacts_again::sync_ended(state);
             state.contacts_sync = ContactsState::Ready;
             state.contacts_held = true;
             state.contacts = contacts;
@@ -60,12 +61,16 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
         }
         Input::CallHistoryRefreshed(call_history) => state.call_history = call_history,
         Input::ContactsPermissionNeeded { deadline } => {
+            contacts_again::prompt_shown(state);
             state.contacts_sync = ContactsState::PermissionNeeded { deadline };
         }
         Input::ContactsSyncProgress(progress) => {
             match &progress {
+                // Shared now, after a prompt or after refusing before.
                 SyncProgress::Shared => {
-                    if let ContactsState::PermissionNeeded { .. } = state.contacts_sync {
+                    if let ContactsState::PermissionNeeded { .. } | ContactsState::Denied =
+                        state.contacts_sync
+                    {
                         state.contacts_sync = ContactsState::Syncing;
                     }
                 }
@@ -77,17 +82,42 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
             sync_progress(state, &progress);
         }
         Input::ContactsSyncFailed(SyncFailure::Denied) => {
-            // The person said no: keep nothing of theirs.
-            state.contacts_sync = ContactsState::Denied;
-            state.contacts_held = false;
-            state.contacts = Contacts::default();
-            state.call_history = CallHistory::default();
-            effects.push(Effect::ForgetContacts);
+            contacts_again::sync_ended(state);
+            if !state.phone_is_here() {
+                // The link closing as the Phone left reads as a refusal;
+                // the next connect syncs afresh, so nothing is forgotten.
+                return;
+            }
+            let was = std::mem::replace(&mut state.contacts_sync, ContactsState::Denied);
+            if let ContactsState::PermissionNeeded { .. } = was {
+                contacts_again::said_no(state);
+            }
+            if was != ContactsState::Denied {
+                // The person said no: keep nothing of theirs.
+                state.contacts_held = false;
+                state.contacts = Contacts::default();
+                state.call_history = CallHistory::default();
+                effects.push(Effect::ForgetContacts);
+            }
+            contacts_again::ask_later(state, effects);
         }
-        // A sync cut short by the Phone leaving isn't a failure to report;
-        // what was synced before still names callers.
-        Input::ContactsSyncFailed(SyncFailure::Unavailable(reason)) if state.phone_is_here() => {
-            state.contacts_sync = ContactsState::Unavailable(reason);
+        Input::ContactsSyncFailed(SyncFailure::Unavailable(reason)) => {
+            let again = contacts_again::sync_ended(state);
+            if !state.phone_is_here() {
+                // A sync cut short by the Phone leaving isn't a failure to
+                // report; what was synced before still names callers.
+            } else if again
+                && state.contacts_sync == ContactsState::Denied
+                && reason != Unavailable::PromptTimedOut
+            {
+                // Asking again failed before the Phone shared: it still
+                // hasn't, so it is asked again later. Once it has shared, a
+                // failure is reported as any other sync's.
+                state.contacts_sync = ContactsState::Denied;
+                contacts_again::ask_later(state, effects);
+            } else {
+                state.contacts_sync = ContactsState::Unavailable(reason);
+            }
         }
         _ => {}
     }
@@ -97,6 +127,7 @@ pub(super) fn phone_connected(state: &mut State, effects: &mut Vec<Effect>) {
     pairing_found(state);
     hands_free_back(state);
     wait_for_lost_call(state, effects);
+    state.asking_again = state.asking_again.afresh();
     // Every connect syncs, so the Desktop catches up with changes made on
     // the Phone while apart; the Setup Window first warns that the Phone
     // is about to ask whether to share Contacts.

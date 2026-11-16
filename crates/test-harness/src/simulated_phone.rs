@@ -524,8 +524,12 @@ impl SimulatedPhone<'_> {
 
     /// How the person holding the Phone answers its "Allow access to
     /// contacts and call history?" prompt for each new PBAP session:
-    /// `"grant"` (the default), `"deny"` or `"ignore"`; or `"ask"`, and the
-    /// test answers with [`SimulatedPhone::answer_contacts_prompt`].
+    /// `"grant"` (the default), `"deny"` or `"ignore"`; `"refuse"`, as the
+    /// Pixel does with Contacts sharing off for this Desktop: no prompt,
+    /// and the PBAP connection closed at once; or `"ask"`, and the test
+    /// answers with [`SimulatedPhone::answer_contacts_prompt`]. A change
+    /// takes effect at the next PBAP session, as turning sharing on in the
+    /// Phone's Bluetooth settings does.
     ///
     /// # Panics
     ///

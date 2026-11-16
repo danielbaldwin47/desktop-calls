@@ -172,6 +172,7 @@ pub(super) fn forget_phone(state: &State) -> State {
         handoffs: state.handoffs,
         waiting_notices: state.waiting_notices,
         losses: state.losses,
+        asking_again: state.asking_again.afresh(),
         presence: Presence {
             suspended: state.presence.suspended,
             reconnect: Reconnect {

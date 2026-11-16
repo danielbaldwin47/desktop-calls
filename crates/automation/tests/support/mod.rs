@@ -33,6 +33,9 @@ pub struct Runner {
     /// How many times the user does the suggested action as asked before
     /// slipping, for an action suggested more than once.
     pub slip_after: usize,
+    /// Demo actions the user does at the first "Press Enter to start
+    /// group", before pressing Enter: the state an earlier attempt left.
+    pub before_start: Vec<&'static str>,
 }
 
 impl Runner {
@@ -87,6 +90,7 @@ impl Runner {
             quit_at: None,
             slips: Vec::new(),
             slip_after: 0,
+            before_start: Vec::new(),
         }
     }
 
@@ -131,6 +135,11 @@ impl Runner {
                     self.type_line(action);
                 }
             } else if line.starts_with("Press Enter") {
+                if line.starts_with("Press Enter to start group") {
+                    for action in std::mem::take(&mut self.before_start) {
+                        self.type_line(action);
+                    }
+                }
                 self.type_line("");
             } else if let Some(question) = line.trim_start().strip_prefix("Question: ") {
                 let question = question.trim_end_matches(" [y/n]").to_owned();

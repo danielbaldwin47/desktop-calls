@@ -12,7 +12,7 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [polish-scorecard](polish-scorecard.md): the agreed definition of "polished" for the hill climb, with the audit of 2026-11-14 against the Simulated Phone and the 2026-11-15 scorecard tool's four statuses per item (updated 2026-11-15).
 
-- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, built behaviour as implementers shipped it, the 2026-11-13 decisions on the Call Pill (spec #197) and Calls Off with Quiet Hours (spec #198), what the merged PRs built of them and of the UI pass, and, for 2026-11-15, the pass's finish per surface (Missed Call notification and cue, Dialer rows, Setup Window, Call Window, Banner, motion, copy), the lost-contact words, and the design questions left open from #323 and #324 (updated 2026-11-15).
+- [product-shape](product-shape.md): v1 scope and UX decisions from grilling, built behaviour as implementers shipped it, the 2026-11-13 decisions on the Call Pill (spec #197) and Calls Off with Quiet Hours (spec #198), what the merged PRs built of them and of the UI pass, and, for 2026-11-15, the pass's finish per surface (Missed Call notification and cue, Dialer rows, Setup Window, Call Window, Banner, motion, copy), the lost-contact words, the design questions left open from #323 and #324, and the owner's answers to them that evening ("Off after call", the long number cut on the Call Pill, the Quiet Hours Space keycap, the short unreadable-keybinding footer) (updated 2026-11-15).
 
 ## Environment
 

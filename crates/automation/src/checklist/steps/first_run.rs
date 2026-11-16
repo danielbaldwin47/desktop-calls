@@ -2,6 +2,14 @@
 //! the Setup Window from pairing to the first Call, timed (1.2), and the
 //! Phone's Contacts prompt left to time out, then allowed (1.3). Each step
 //! follows the Setup Window through the `setup-window` surface it reports.
+//!
+//! On 2026-11-15 the real Pixel 9a, paired afresh through the Setup Window,
+//! shared Contacts as it paired: the window went from `contacts-warning`
+//! straight to `contacts-syncing`, with no prompt (#380). Its Pair dialog
+//! carries "Allow access to your contacts and call history", ticked, and
+//! forgetting the pairing forgets a Contacts switch turned off before it.
+//! So 1.2 leaves the box ticked and 1.3 has it unticked; whether the Pixel
+//! then asks, or refuses outright, is inferred until 1.3 is run.
 
 use std::time::{Duration, Instant};
 
@@ -26,7 +34,25 @@ const ASK_AGAIN_DEADLINE: Duration = Duration::from_secs(30);
 
 const FORGET_ON_THE_PIXEL: &str = "Straight away, on the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and tap Forget.";
 const REMOVE_ON_THE_DESKTOP: &str = "On this computer: remove the Pixel in Bluetooth settings, or with `bluetoothctl remove` and its address.";
-const STILL_PAIRED: &str = "The Pixel is still paired, and this step pairs it afresh. Run `just real-phone-checklist 1 --fresh` instead: step 1.1 forgets the pairing on both sides first.";
+const STILL_PAIRED: &str = "The Pixel is still paired, and this step pairs it afresh.";
+const GO_BACK_TO_1_1: &str = "Press Enter to go back to step 1.1, which forgets the pairing on both sides, or type skip or quit.";
+const PAIRED_AT_INSTALL: &str = "Desktop Calls found the Pixel still paired when it started again, so this computer kept the pairing through the install.";
+const DO_1_1_AGAIN: &str = "Press Enter to do step 1.1 again, or type skip or quit.";
+/// How the finish page's summary starts when the Phone refused Contacts,
+/// as against "…isn't sharing contacts yet." when nobody answered or the
+/// sync failed.
+const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts. ";
+/// The box on the Pixel's Pair dialog, as the Pixel words it (inferred).
+const CONTACTS_BOX: &str = "\"Allow access to your contacts and call history\"";
+
+/// What the user does with [`CONTACTS_BOX`] while pairing.
+#[derive(Clone, Copy)]
+enum ContactsBox {
+    /// Leave it ticked: Contacts are shared as the Pixel pairs.
+    Ticked,
+    /// Untick it, so the Pixel doesn't share Contacts as it pairs.
+    Unticked,
+}
 
 /// One of the Setup Window's reported fields, while it shows.
 fn window_field<'state>(state: &'state AppState, name: &str) -> Option<&'state str> {
@@ -72,20 +98,34 @@ fn forget_on_both_sides(sitting: &mut Sitting) -> Result<(), Stop> {
 
 /// 1.1: the pairing forgotten on both sides, then `just install`, which
 /// starts the app again: with no Phone, the Setup Window opens by itself.
+/// Only the app started by the install counts, and only with no Phone: a
+/// Setup Window opened by hand, or an app that found the Pixel still
+/// paired, doesn't pass (#380).
 pub(super) fn forget_and_install(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     forget_on_both_sides(sitting)?;
     sitting.observed("Desktop Calls let go of the Pixel once it was removed.".to_owned());
+    let starts = sitting.now().app_starts;
     sitting.say(
         "Now install and start Desktop Calls: run `just install` in your Desktop Calls checkout.",
         &["restart-app"],
     );
     let started = Instant::now();
     let opened = sitting.wait_for(
-        "the Setup Window opening by itself",
+        "the Setup Window opening by itself after the install",
         INSTALL_DEADLINE,
-        |state| at_step(state, "choose"),
+        |state| {
+            state.app_starts > starts && (at_step(state, "choose") || !state.phone_name.is_empty())
+        },
     )?;
+    if !opened.state.phone_name.is_empty() {
+        sitting.check(false, PAIRED_AT_INSTALL.to_owned());
+        return Err(sitting.offer_to_go_back(
+            "1.1",
+            "This step needs the pairing gone on both sides before the install.",
+            DO_1_1_AGAIN,
+        ));
+    }
     sitting.observed(format!(
         "The Setup Window opened by itself at its first step, {} after you were asked to install.",
         seconds(opened.at.saturating_duration_since(started))
@@ -94,8 +134,8 @@ pub(super) fn forget_and_install(sitting: &mut Sitting) -> Result<(), Stop> {
 }
 
 /// Pairs the Pixel through the Setup Window, from its first step to
-/// connected.
-fn pair_through_the_window(sitting: &mut Sitting) -> Result<(), Stop> {
+/// connected, with [`CONTACTS_BOX`] as `contacts` says.
+fn pair_through_the_window(sitting: &mut Sitting, contacts: ContactsBox) -> Result<(), Stop> {
     sitting.say(
         "On the Pixel: open Settings, then Connected devices, and tap Pair new device. Keep that screen open.",
         &[],
@@ -113,10 +153,20 @@ fn pair_through_the_window(sitting: &mut Sitting) -> Result<(), Stop> {
     sitting.wait_for("the pairing code showing", ACT_DEADLINE, |state| {
         at_step(state, "confirm")
     })?;
-    sitting.say(
-        "Check the Pixel shows the same code, tap Pair on the Pixel, and choose Confirm here.",
-        &["enter"],
-    );
+    match contacts {
+        ContactsBox::Ticked => sitting.say(
+            &format!(
+                "Check the Pixel shows the same code. Leave {CONTACTS_BOX} ticked on the Pixel, tap Pair there, and choose Confirm here."
+            ),
+            &["enter"],
+        ),
+        ContactsBox::Unticked => sitting.say(
+            &format!(
+                "Check the Pixel shows the same code. Untick {CONTACTS_BOX} on the Pixel, tap Pair there, and choose Confirm here."
+            ),
+            &["contacts-access-off", "enter"],
+        ),
+    }
     sitting.wait_for("the Pixel connected", ACT_DEADLINE, |state| {
         state.connection_state == "connected"
     })?;
@@ -147,18 +197,19 @@ fn close_the_window(sitting: &mut Sitting) -> Result<(), Stop> {
 pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     // With the Pixel still paired, the Setup Window never lists it, and the
-    // wait for it would run out its two minutes.
+    // wait for it would run out its two minutes. A run resumed after 1.1
+    // passed in an earlier one finds it so: 1.1 is offered there and then,
+    // so the pairing isn't done under 1.3 instead (#380).
     if !sitting.now().phone_name.is_empty() {
-        sitting.check(false, STILL_PAIRED.to_owned());
-        return Ok(());
+        return Err(sitting.offer_to_go_back("1.1", STILL_PAIRED, GO_BACK_TO_1_1));
     }
     let Some(test_number) = test_number_or_why_not(sitting) else {
         return Ok(());
     };
     let started = Instant::now();
-    pair_through_the_window(sitting)?;
+    pair_through_the_window(sitting, ContactsBox::Ticked)?;
     sitting.say(
-        "When the Pixel asks to allow access to contacts and call history, tap Allow.",
+        "If the Pixel asks to allow access to contacts and call history, tap Allow.",
         &[],
     );
     let finished = sitting.wait_for("the Setup Window's finish page", SYNC_DEADLINE, |state| {
@@ -274,17 +325,16 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
     Ok(added_now)
 }
 
-/// 1.3: with Contacts access off, the Phone asks again once paired
-/// afresh. The prompt is left to time out, Try again asks again, and Allow
-/// then syncs.
+/// 1.3: paired afresh with [`CONTACTS_BOX`] unticked, the Phone asks
+/// about Contacts once connected. The prompt is left to time out, Try
+/// again asks again, and Allow then syncs. A Pixel that shares or refuses
+/// Contacts without asking has no prompt to time out (#380).
 pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     sitting.say(
-        "On the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and switch off Contacts and call history.",
-        &["contacts-access-off"],
-    );
-    sitting.say(
-        "So that the Pixel asks again, pair afresh. First forget the pairing on both sides:",
+        &format!(
+            "The Pixel asks about Contacts only when {CONTACTS_BOX} is unticked as it pairs, so this step pairs it afresh. First forget the pairing on both sides:"
+        ),
         &[],
     );
     forget_on_both_sides(sitting)?;
@@ -292,16 +342,12 @@ pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(),
         "Then open the Setup Window: run `desktop-calls connect`.",
         &["open-setup-window"],
     );
-    pair_through_the_window(sitting)?;
+    pair_through_the_window(sitting, ContactsBox::Unticked)?;
     let asked = sitting.wait_for("the Pixel asking about contacts", ACT_DEADLINE, |state| {
         at_step(state, "contacts-prompt") || at_step(state, "done")
     })?;
     if at_step(&asked.state, "done") {
-        sitting.check(
-            false,
-            "The Pixel shared Contacts without asking, so its prompt couldn't time out.".to_owned(),
-        );
-        return close_the_window(sitting);
+        return judge_without_a_prompt(sitting, &asked.state);
     }
     sitting.say(
         "Don't answer the Pixel's prompt: let the countdown here reach zero.",
@@ -356,5 +402,48 @@ pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(),
     sitting.wait_for("the finish page's buttons", ACT_DEADLINE, |state| {
         state.focused("setup-window") && window_field(state, "buttons").is_some()
     })?;
+    close_the_window(sitting)
+}
+
+/// 1.3 when the Setup Window finished with no prompt shown: the Pixel
+/// shared Contacts as it paired, or refused them. Either way it has no
+/// prompt to time out, which passes, unless the box was left ticked.
+fn judge_without_a_prompt(sitting: &mut Sitting, state: &AppState) -> Result<(), Stop> {
+    let summary = window_field(state, "summary")
+        .unwrap_or_default()
+        .to_owned();
+    if summary.starts_with("Synced") {
+        let unticked = sitting.ask(&format!(
+            "The Pixel shared Contacts as it paired. Did you untick {CONTACTS_BOX} on the Pixel before tapping Pair?"
+        ))?;
+        sitting.check(
+            unticked,
+            if unticked {
+                format!(
+                    "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so it never shows a prompt that could time out. The finish page says: {summary}"
+                )
+            } else {
+                format!(
+                    "{CONTACTS_BOX} was left ticked, so the Pixel shared Contacts as it paired and there was no prompt to time out. Run this step again and untick it."
+                )
+            },
+        );
+    } else if summary.starts_with(REFUSED_SUMMARY) {
+        sitting.observed(format!(
+            "This Pixel refuses Contacts when {CONTACTS_BOX} is unticked, rather than asking, so it never shows a prompt that could time out. The finish page says: {summary}"
+        ));
+        sitting.say(
+            "So that Calls show names for the rest of the checklist: on the Pixel, open Settings, then Connected devices, tap the settings icon next to this computer, and switch on Contacts and call history.",
+            &["contacts-access-on"],
+        );
+    } else {
+        // Not shared for another reason: the sync failed, or the Pixel left.
+        sitting.check(
+            false,
+            format!(
+                "The Pixel neither asked nor said whether it shares Contacts. The finish page says: {summary} Run this step again."
+            ),
+        );
+    }
     close_the_window(sitting)
 }

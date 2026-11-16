@@ -15,8 +15,8 @@
 //! [`ACTIONS`] names every action and the case that performs it; a case
 //! fails unless it performed exactly its actions, and `every_action_is_performed_by_a_case_or_names_its_ticket`
 //! fails if an action is left with neither a case nor a ticket. [`UNSHOWN`]
-//! names the keys a case presses that its surface doesn't show yet, each
-//! with its ticket.
+//! names the keys a case presses that its surface doesn't show, each with
+//! why it needs no hint.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -186,15 +186,28 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ),
 ];
 
-/// Keys a case presses that its surface doesn't show yet: the action, and
-/// the open ticket that shows them. Close on a Setup Window step is not
-/// here: Escape closes it, and its footer says so on every step.
-const UNSHOWN: &[(&str, u32)] = &[
-    ("Send tones by pasting them: Ctrl+V", 301),
-    ("Move a page down the Call History: Page Down", 301),
-    ("Move a page up the Call History: Page Up", 301),
-    ("Erase a digit typed in a time: Backspace", 301),
-    ("Switch Quiet Hours off: Shift+Tab, Space", 301),
+/// Keys a case presses that its surface doesn't show, by the owner's
+/// decision of 2026-11-15 on #301: the action, and why it needs no hint.
+/// Close on a Setup Window step is not here: Escape closes it, and its
+/// footer says so on every step. Space on the Quiet Hours switch is not
+/// here either: a keycap beside the switch shows it while it has focus.
+const UNSHOWN: &[(&str, &str)] = &[
+    (
+        "Send tones by pasting them: Ctrl+V",
+        "the user knows a text field takes a paste",
+    ),
+    (
+        "Move a page down the Call History: Page Down",
+        "a list's convention; the footer's Move keys are enough",
+    ),
+    (
+        "Move a page up the Call History: Page Up",
+        "a list's convention; the footer's Move keys are enough",
+    ),
+    (
+        "Erase a digit typed in a time: Backspace",
+        "the convention for erasing what was typed",
+    ),
 ];
 
 const BANNER: &str = "the_banner_by_keys_alone";
@@ -223,8 +236,8 @@ const CASES: [&str; 8] = [
     SETUP_COPY,
 ];
 
-/// Open tickets that add a missing key path, or show a key.
-const OPEN_TICKETS: [u32; 2] = [292, 301];
+/// Open tickets that add a missing key path.
+const OPEN_TICKETS: [u32; 1] = [292];
 
 #[test]
 fn every_action_is_performed_by_a_case_or_names_its_ticket() {
@@ -240,17 +253,14 @@ fn every_action_is_performed_by_a_case_or_names_its_ticket() {
             Elsewhere(why) => assert!(!why.is_empty(), "{action:?}: say whose keys"),
         }
     }
-    for (action, ticket) in UNSHOWN {
+    for (action, why) in UNSHOWN {
         assert!(
             ACTIONS
                 .iter()
                 .any(|(listed, path)| listed == action && matches!(path, Case(_))),
             "{action:?} is unshown but no case performs it"
         );
-        assert!(
-            OPEN_TICKETS.contains(ticket),
-            "{action:?}: #{ticket} is not a ticket this suite waits on"
-        );
+        assert!(!why.is_empty(), "{action:?}: say why it needs no hint");
     }
     for case in CASES {
         assert!(

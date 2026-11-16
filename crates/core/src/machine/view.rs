@@ -204,14 +204,14 @@ pub struct CallWindowView {
     /// and Hang up, in a strip in the bottom-right corner.
     pub collapsed: bool,
     /// A turn-off waits for the Call to end, so calls go off after it: the
-    /// Call Window and the Call Pill tag themselves "Calls off after"
+    /// Call Window and the Call Pill tag themselves "Off after call"
     /// (ticket #230). Not on a window whose Call is over, or was never
     /// placed.
     pub calls_off_after: bool,
 }
 
 /// The one state tag the Call Pill shows under the caller, where one
-/// applies. "Calls off after" is a second tag beside it, on its own flag
+/// applies. "Off after call" is a second tag beside it, on its own flag
 /// (`CallWindowView::calls_off_after`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallPillTag {

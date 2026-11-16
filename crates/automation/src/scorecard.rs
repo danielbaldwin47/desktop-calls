@@ -395,10 +395,16 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
     } else {
         format!(", not run: group {}", not_run.join(", "))
     };
+    // Named only when there are some, as the scorecard read before.
+    let unexpected = if unexpected == 0 {
+        String::new()
+    } else {
+        format!(", {unexpected} observed unexpected")
+    };
     Score::new(
         status,
         format!(
-            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped, {unexpected} observed unexpected{not_run}, {}",
+            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped{unexpected}{not_run}, {}",
             checklist.started,
             checklist.path.display()
         ),

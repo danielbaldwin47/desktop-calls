@@ -477,8 +477,13 @@ fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
     harness.keyboard().press(Key::Return);
     closed(&harness);
     harness.wait_for_app_log(r#""event_kind":"setup-closed""#, DEADLINE);
+    never_offered_again(&harness);
+}
+
+/// Opens the window again, and checks the Phone isn't offered in it.
+fn never_offered_again(harness: &Harness) {
     harness.open_connect_window();
-    wait_for_step(&harness, "choose", DEADLINE);
+    wait_for_step(harness, "choose", DEADLINE);
     // Discovery lists a nearby Phone within a second or so: for longer
     // than that, the window never lists this one.
     let until = std::time::Instant::now() + Duration::from_secs(3);
@@ -513,6 +518,130 @@ fn a_phone_chosen_in_the_window_goes_on_when_bluez_never_resolves_its_services()
 
     connected(&harness);
     wait_for_step(&harness, "done", CONNECT_DEADLINE);
+}
+
+/// A fresh install whose BlueZ never resolves the Phone's services, so its
+/// `UUIDs` never show hands-free, though `Paired` is signalled.
+fn fresh_install_services_unresolved() -> Harness {
+    Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .phone_unpaired()
+        .services_unresolved()
+        .start()
+}
+
+/// Chooses the Phone in the window and pairs it, through to the finish.
+fn choose_and_pair_to_done(harness: &Harness) -> AppState {
+    wait_for_phone_listed(harness, STARTUP);
+    harness.keyboard().press(Key::Return);
+    same_code_shown(harness);
+    harness.keyboard().press(Key::Return);
+    let state = connected(harness);
+    wait_for_step(harness, "done", CONNECT_DEADLINE);
+    state
+}
+
+/// Paired from the Phone's own screen, a Phone whose services BlueZ never
+/// resolves is still the Phone: bonded, and the one being paired. Before,
+/// the window sat at "confirmed" and then said pairing failed (ticket
+/// #375, case 1).
+#[test]
+fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_never_resolves_its_services() {
+    let harness = fresh_install_services_unresolved();
+    wait_for_phone_listed(&harness, STARTUP);
+    wait_until_discoverable(&harness);
+
+    harness
+        .simulated_phone()
+        .pair_from_phone()
+        .expect("the Phone finds the Desktop");
+    same_code_shown(&harness);
+    harness.keyboard().press(Key::Return);
+
+    connected(&harness);
+    wait_for_step(&harness, "done", CONNECT_DEADLINE);
+}
+
+/// The Phone followed with its services unresolved is followed by BlueZ's
+/// `Connected` as any Phone is (ticket #375, case 3).
+#[test]
+fn a_phone_with_its_services_unresolved_is_seen_to_go_out_of_range() {
+    let harness = fresh_install_services_unresolved();
+    choose_and_pair_to_done(&harness);
+
+    harness.simulated_phone().disconnect();
+    harness.wait_for_app_log(r#""event_kind":"phone-absent""#, DEADLINE);
+}
+
+/// Removed in BlueZ, the Phone followed with its services unresolved is
+/// unpaired, and no longer followed (ticket #375, case 2). Before, the
+/// client still had it as nearby, and took the removal as only that.
+#[test]
+fn a_phone_with_its_services_unresolved_is_let_go_when_unpaired() {
+    let harness = fresh_install_services_unresolved();
+    let state = choose_and_pair_to_done(&harness);
+    let address = state.phone.expect("the Phone is followed").address;
+    // The simulation removes a device only with hands-free down.
+    harness.simulated_phone().disconnect();
+
+    let path = format!("/org/bluez/hci0/dev_{}", address.replace(':', "_"));
+    let path = zbus::ObjectPath::try_from(path.as_str())
+        .unwrap_or_else(|error| panic!("{path} isn't a device path: {error}"));
+    harness.call_phone_method(
+        Bus::System,
+        "org.bluez",
+        "/org/bluez/hci0",
+        "org.bluez.Adapter1",
+        "RemoveDevice",
+        &(path,),
+    );
+    harness.wait_for_app("the Phone is no longer followed", DEADLINE, |state| {
+        state.phone.is_none()
+    });
+}
+
+/// After a restart, BlueZ lists the Phone chosen last as bonded, its
+/// services still unresolved: it is followed and connected, and the window
+/// doesn't open to say it is gone (ticket #375, case 4).
+#[test]
+fn after_a_restart_the_chosen_phone_with_its_services_unresolved_is_followed() {
+    let mut harness = fresh_install_services_unresolved();
+    choose_and_pair_to_done(&harness);
+    harness.keyboard().press(Key::Return);
+    closed(&harness);
+
+    harness.restart_app();
+
+    let state = harness.wait_for_app(
+        "the Phone chosen last is followed and connected",
+        STARTUP,
+        |state| state.connection_state == "connected",
+    );
+    assert_eq!(
+        state.phone.as_ref().map(|phone| phone.name.as_str()),
+        Some(PHONE_NAME)
+    );
+    assert!(setup_window(&state).is_none(), "the window stays closed");
+}
+
+/// A Phone paired before the app ran, in the computer's own Bluetooth
+/// settings, with its services unresolved, and never chosen: the window
+/// offers it as paired already, and choosing it follows it (ticket #375,
+/// case 4). It isn't followed unasked, as it may not be a Phone for Calls.
+#[test]
+fn a_phone_paired_elsewhere_with_its_services_unresolved_can_be_chosen() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .services_unresolved()
+        .start();
+    let state = wait_for_phone_listed(&harness, STARTUP);
+    assert_eq!(state.phone, None, "not followed before it is chosen");
+
+    harness.simulated_phone().return_to_range();
+    harness.keyboard().press(Key::Return);
+    connected(&harness);
 }
 
 #[test]

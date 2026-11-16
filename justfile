@@ -235,6 +235,16 @@ merge pr *args:
 review-record pr kind model verdict *findings:
     @python3 tools/review_record.py "$@"
 
+# Say for each PR, open or merged, whether its comments record passed
+# reviews for its head, by the rule `just land` applies: one line each,
+# exit 1 if any lacks one. The Reviews workflow posts the same verdict as
+# the "Reviews recorded" check (tools/review_audit.py).
+# Say whether PRs carry passed review records for their heads.
+[positional-arguments]
+[no-exit-message]
+review-audit +prs:
+    @python3 tools/review_audit.py "$@"
+
 # Rerun RUN's failed jobs, after posting `Rerun: RUN cause: #ISSUE` on its
 # PR (or on the issue, for a run on main). ISSUE holds the failure's cause,
 # found by event order; `just land` refuses a rerun PR without the record

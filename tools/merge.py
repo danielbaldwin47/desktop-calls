@@ -98,6 +98,11 @@ class Refused(Exception):
 # not a commit status of that name, which anyone who can push may post (as
 # `just ci-local` did before #286), nor another workflow's job.
 SUMMARY_CHECK, SUMMARY_WORKFLOW, SUMMARY_EVENT = "CI passed", "CI", "pull_request"
+# The Reviews workflow's job and the check it posts (.github/workflows/
+# reviews.yml): a verdict on the review records, which this tool reads
+# itself (require_reviewed). Left out of the checks it waits for and judges,
+# so a verdict GitHub has not yet caught up with never holds a landing back.
+REVIEWS_WORKFLOW, REVIEWS_CHECK = "Reviews", "Reviews recorded"
 # The compare API lists at most this many files and commits.
 COMPARE_FILES_LIMIT, COMPARE_COMMITS_LIMIT = 300, 250
 
@@ -270,10 +275,16 @@ def checks(pr: dict) -> list[dict]:
             f"`gh pr checks {number}` failed: {result.stderr.strip()}\n"
             "Next: check `gh auth status`, then run this again."
         )
-    found = json.loads(result.stdout) if result.stdout.strip() else []
-    runs = json.loads(
-        gh("run", "list", "--commit", pr["headRefOid"], "--json", "name,event,status,url")
-    )
+    found = [
+        check
+        for check in (json.loads(result.stdout) if result.stdout.strip() else [])
+        if check["name"] != REVIEWS_CHECK and check.get("workflow") != REVIEWS_WORKFLOW
+    ]
+    runs = [
+        run
+        for run in json.loads(gh("run", "list", "--commit", pr["headRefOid"], "--json", "name,event,status,url"))
+        if run["name"] != REVIEWS_WORKFLOW
+    ]
     return found + [
         {
             "name": f"{run['name']} (workflow run)",

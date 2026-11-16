@@ -40,6 +40,9 @@ It refuses unless all of these hold, in this order:
      and `spec` if it touches product or harness code, else `tooling`
      (tools/reviews.py, ticket #327). Checked before the wait for CI, so a
      PR missing one waits for nothing, and again at the final recheck.
+  8. The run behind the head's "CI passed" is a first attempt, or the PR
+     carries a `Rerun: <run> cause: #<issue>` record for it, which
+     `just ci-rerun` posts (tools/reruns.py, ticket #396).
 
 When the head lacks commits on <base>, the refusal names `just land`, which
 merges origin/<base> into the branch and pushes it, so GitHub's CI tests
@@ -67,6 +70,7 @@ import time
 import changes
 import checklist_tickets
 import ci_local
+import reruns
 import reviews
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = 0, 1, 2
@@ -328,6 +332,15 @@ def wait_for_checks(pr: dict, wait_seconds: float) -> None:
         time.sleep(POLL_SECONDS)
 
 
+def is_summary(check: dict) -> bool:
+    """Whether `check` is CI's "CI passed" from its pull_request run."""
+    return (
+        check["name"] == SUMMARY_CHECK
+        and check.get("workflow") == SUMMARY_WORKFLOW
+        and check.get("event") == SUMMARY_EVENT
+    )
+
+
 def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     number = pr["number"]
     found = checks(pr)
@@ -342,13 +355,7 @@ def require_checks_passed(pr: dict, wait_minutes: float) -> None:
     pending = [check for check in found if check["bucket"] == "pending"]
     # A skipped job passes only with the summary that judged it.
     judged = ["pass", "fail", "cancel", "pending"]
-    summary_passed = any(
-        check["name"] == SUMMARY_CHECK
-        and check.get("workflow") == SUMMARY_WORKFLOW
-        and check.get("event") == SUMMARY_EVENT
-        and check["bucket"] == "pass"
-        for check in found
-    )
+    summary_passed = any(is_summary(check) and check["bucket"] == "pass" for check in found)
     if summary_passed:
         judged.append("skipping")
     other = [check for check in found if check["bucket"] not in judged]
@@ -485,6 +492,28 @@ def require_reviewed(pr: dict, head: str | None = None) -> None:
     )
 
 
+def require_no_unrecorded_rerun(pr: dict) -> None:
+    """The run whose "CI passed" lets the head land must be a first attempt,
+    or carry a `Rerun:` record naming the issue that holds its cause
+    (tools/reruns.py, ticket #396)."""
+    number = pr["number"]
+    runs = sorted({run for check in checks(pr) if is_summary(check) and (run := reruns.run_of(check["link"]))})
+    attempts = {run: int(gh("api", f"repos/{{owner}}/{{repo}}/actions/runs/{run}", "--jq", ".run_attempt")) for run in runs}
+    if all(attempt <= 1 for attempt in attempts.values()):
+        return
+    comments = json.loads(gh("pr", "view", str(number), "--json", "comments"))["comments"]
+    records = reruns.records_in(comments)
+    missing = [why for run, attempt in attempts.items() if (why := reruns.problem(run, attempt, records))]
+    if missing:
+        lines = "\n".join(f"  {line}" for line in missing)
+        raise Refused(
+            f"PR #{number}'s CI was rerun without a recorded cause (ticket #396):\n{lines}\n"
+            "A rerun's pass proves nothing: find the cause by event order, then push the fix.\n"
+            "Next: push a fix (a new commit gets a new run), or, for a cause outside this PR's diff, "
+            "file an issue with the evidence and record it: just ci-rerun <run> <issue>"
+        )
+
+
 def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     """Squash-merges PR `number` if every condition holds. `lane_held` says the
     caller (`just land`) already holds the landing lock. Otherwise the final
@@ -503,6 +532,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
             f"Stopped waiting for PR #{number}'s checks.\nNext: just merge {number}"
         ) from None
     require_checks_passed(pr, wait_minutes)
+    require_no_unrecorded_rerun(pr)
 
     # Held while this function runs (`lane` stays alive to its end), so through
     # the squash. Waiting for the checks, above, is done without it: that wait
@@ -522,6 +552,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     now = require_mergeable(now)
     require_no_step_waits_on_a_closed_ticket(now)
     require_reviewed(now)  # a FAIL may have been posted while CI ran
+    require_no_unrecorded_rerun(now)  # or the run rerun
 
     head, branch = now["headRefOid"], now["headRefName"]
     gh("pr", "merge", str(number), "--squash", "--match-head-commit", head)

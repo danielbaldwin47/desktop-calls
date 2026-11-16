@@ -473,6 +473,9 @@ pub enum Timer {
     DismissCallWaitingNotice(u32),
     /// The Setup Window's step with this number has waited long enough.
     SetupStep(u32),
+    /// Time to ask the Phone, which refused to share Contacts, again: by
+    /// the wait with this number.
+    AskForContactsAgain(u32),
     /// The Phone has had long enough to report the number of this Call,
     /// which rang with none: if it hasn't by now, the number is withheld.
     NumberLate(CallId),
@@ -519,6 +522,10 @@ pub enum Effect {
     DialProgress(DialProgress),
     /// Sync Contacts and Call History from the attached Phone.
     SyncContacts,
+    /// Sync Contacts and Call History from the attached Phone, which
+    /// refused to share them, in case sharing has been turned on since. A
+    /// refusal again is expected, so it isn't reported as a failure.
+    SyncContactsAgain,
     /// Pull the Phone's Call History again.
     RefreshCallHistory,
     /// Show the Missed Call notification, replacing the one with the same

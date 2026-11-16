@@ -4,7 +4,8 @@
 //!   obexd reports by `PropertiesChanged` and then removes the transfer. So
 //!   the signals are subscribed to before `PullAll` is called.
 //! - Errors are sorted by what they mean for the app: the Phone refusing
-//!   (`Forbidden`, as an error name or an OBEX response), the Phone not
+//!   (`Forbidden`, as an error name or an OBEX response), the Phone closing
+//!   the connection (`Transport got disconnected`), the Phone not
 //!   answering in time, a folder the Phone lacks, or obexd missing.
 
 use std::collections::HashMap;
@@ -31,6 +32,10 @@ const PULL_SILENCE: Duration = Duration::from_secs(60);
 pub enum ObexError {
     /// The Phone refuses to share Contacts.
     Forbidden,
+    /// The Phone closed the connection: obexd's `Transport got
+    /// disconnected`. The Pixel 9a answers a new PBAP session so, at once,
+    /// while its Contacts sharing is off for this Desktop (ticket #394).
+    Disconnected,
     /// The Phone didn't answer in time, as when its prompt is still up.
     TimedOut,
     /// The Phone lacks the folder.
@@ -50,6 +55,7 @@ impl ObexError {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Forbidden => "forbidden",
+            Self::Disconnected => "disconnected",
             Self::TimedOut => "timed-out",
             Self::NotFound => "not-found",
             Self::NoService => "no-contacts-service",
@@ -80,6 +86,7 @@ impl From<zbus::Error> for ObexError {
             "org.bluez.obex.Error.Forbidden" => Self::Forbidden,
             _ if is_forbidden_response(message) => Self::Forbidden,
             _ if message.eq_ignore_ascii_case("Not Found") => Self::NotFound,
+            _ if message.eq_ignore_ascii_case("Transport got disconnected") => Self::Disconnected,
             _ if message.contains("Timed out") => Self::TimedOut,
             _ => Self::Other(format!("{name}: {message}")),
         }

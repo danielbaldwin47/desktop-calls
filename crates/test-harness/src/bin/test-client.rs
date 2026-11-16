@@ -24,6 +24,13 @@
 //! [`PIXEL`] for an even one. The harness's self-tests use it to prove that
 //! an action straight after a state change waits for the redraw.
 //!
+//! With `--busy` it stands in for anything that keeps moving on screen,
+//! such as the audio tile's progress bar: once drawn, it draws a new frame,
+//! [`PIXEL`] and [`DRAWING_PIXEL`] in turn, each time the compositor shows
+//! the last, so the screen never holds still. The harness's self-tests use
+//! it to prove that a state that lasts only a moment is caught however busy
+//! the screen.
+//!
 //! With `--bar` it is instead a stand-in for Omarchy's bar: a layer-shell
 //! surface across the top of the output, [`BAR_HEIGHT`] tall, that reserves
 //! its height as an exclusive zone, drawn in [`BAR_PIXEL`]. It prints
@@ -138,6 +145,7 @@ fn run() -> Result<(), String> {
         modifiers: 0,
         pointer_position: (0.0, 0.0),
         slow_redraw: std::env::args().any(|argument| argument == "--slow-redraw"),
+        busy: std::env::args().any(|argument| argument == "--busy"),
         state: 0,
         shown: 0,
         steps_left: 0,
@@ -165,6 +173,8 @@ struct Client {
     pointer_position: (f64, f64),
     /// Whether each key pressed is a state change, redrawn slowly.
     slow_redraw: bool,
+    /// Whether it draws a new frame each time the last is shown.
+    busy: bool,
     /// The latest state, and the one the window last finished drawing.
     state: u32,
     shown: u32,
@@ -176,6 +186,9 @@ struct Client {
 impl Client {
     /// Draws at the size the compositor chose and prints `configured`.
     fn configured(&mut self, connection: &Connection, handle: &QueueHandle<Self>) {
+        if self.busy {
+            self.surface.frame(handle, ());
+        }
         let drawn = self
             .draw(handle)
             .and_then(|()| connection.flush().map_err(|error| error.to_string()));
@@ -205,7 +218,14 @@ impl Client {
     /// Draws the next frame on the way to the latest state, or the state
     /// itself once there are no more.
     fn next_frame(&mut self, connection: &Connection, handle: &QueueHandle<Self>) {
-        if self.steps_left == 0 {
+        if self.busy {
+            self.pixel = if self.pixel == PIXEL {
+                DRAWING_PIXEL
+            } else {
+                PIXEL
+            };
+            self.surface.frame(handle, ());
+        } else if self.steps_left == 0 {
             self.pixel = if self.state % 2 == 1 {
                 ODD_STATE_PIXEL
             } else {

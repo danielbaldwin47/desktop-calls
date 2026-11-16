@@ -194,7 +194,7 @@ impl Harness {
 
     /// One frame of the screen as it is now, as a PPM under `captures/`,
     /// within [`CAPTURE_DEADLINE`].
-    fn capture_now(&self, file: &str) -> Screenshot {
+    pub(super) fn capture_now(&self, file: &str) -> Screenshot {
         let captures = self.directory.join("captures");
         let path = captures.join(file);
         let (width, height) =

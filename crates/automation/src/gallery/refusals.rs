@@ -13,6 +13,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         title: "The Dialer, after Enter on a Missed Call from a withheld number: why it can't be called back, as a strip under the search row",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "");
@@ -30,6 +31,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         title: "The Dialer, after Enter during a Call: hang up the current Call first, as a strip under the search row",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             on_a_call(harness);
@@ -44,6 +46,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         title: "The Dialer with a number no phone can dial typed: no rows, and why, before Enter",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "0770 09!00");
@@ -56,6 +59,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         title: "The Call Window after the Phone refused to take the audio: it stayed here, a notice to use the phone's audio button, and the Call still live",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             live_here(harness);
             harness
@@ -80,6 +84,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         title: "The Call Window after a Call answered here stayed on the Phone's earbuds: a notice to use the phone's audio button, and the Call still live",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().set_earbuds(true);

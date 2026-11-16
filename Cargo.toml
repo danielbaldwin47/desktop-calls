@@ -6,6 +6,7 @@ members = [
     "crates/simulated-phone",
     "crates/test-harness",
     "crates/automation",
+    "crates/screen-pixels",
 ]
 
 [workspace.package]
@@ -18,6 +19,7 @@ publish = false
 
 [workspace.dependencies]
 desktop-calls-core = { path = "crates/core" }
+screen-pixels = { path = "crates/screen-pixels" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 roxmltree = "0.21"
@@ -76,12 +78,11 @@ opt-level = 3
 [profile.dev.package.regex-syntax]
 opt-level = 3
 
-# The screen harness's PNG decoding and pixel scans, optimised even in debug
-# builds. Unoptimised, checking one 3840x2160 screenshot took about 0.6 s of
-# one CPU here and several seconds on a loaded one, so a screen scenario
-# could miss a 5 s deadline after only a couple of captures; optimised it
-# takes about 16 ms. `region_where` is generic, so it compiles into the crate
-# that calls it: the harness's own tests, and the gallery in automation.
+# The screen harness's PNG decoding, optimised even in debug builds.
+# Unoptimised, checking one 3840x2160 screenshot took about 0.6 s of one CPU
+# here and several seconds on a loaded one, so a screen scenario could miss a
+# 5 s deadline after only a couple of captures; optimised it takes about
+# 16 ms. Its pixel scans are in screen-pixels, below.
 [profile.dev.package.png]
 opt-level = 3
 
@@ -100,17 +101,15 @@ opt-level = 3
 [profile.dev.package.simd-adler32]
 opt-level = 3
 
-# The harness and the gallery, where `region_where` scans the decoded pixels,
-# at opt-level 1, not 3. One decode and scan of a 3840x2160 screenshot took
-# 7 ms at opt-level 3, 32 ms at 1 and 117 ms at 0 on the Desktop. But opt-level
-# 3 applies to each of the harness's test binaries too, and rebuilding the
-# workspace on two CPUs took 49 s at opt-level 3 (or 2), 16 s at 1 and 7 s at 0:
-# about two minutes of every CI run (ticket #55).
-[profile.dev.package.test-harness]
-opt-level = 1
-
-[profile.dev.package.automation]
-opt-level = 1
+# The harness's per-pixel work, optimised even in debug builds, in a crate
+# of its own: finding a colour in a 3840x2160 screenshot and converting the
+# compositor's frames. The harness and the gallery themselves build
+# unoptimised. At opt-level 1 for them (ticket #55), compiling the
+# scenarios took 45 s of every CI job that ran them (run 43721020495), and
+# unoptimised about a third of that. One decode and scan of a screenshot
+# took 7 ms at opt-level 3, 32 ms at 1 and 117 ms at 0 on the Desktop (#55).
+[profile.dev.package.screen-pixels]
+opt-level = 3
 
 # Line tables only for our crates, enough for file and line in a backtrace,
 # and no debuginfo for dependencies. A cold build of every target on two CPUs

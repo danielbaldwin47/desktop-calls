@@ -1,0 +1,12 @@
+[package]
+name = "screen-pixels"
+description = "The test harness's per-pixel work on screenshots, optimised even in debug builds. Used only by tests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

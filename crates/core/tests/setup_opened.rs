@@ -4,8 +4,8 @@
 //! on choosing (ticket #389).
 
 use desktop_calls_core::{
-    ConnectFailure, Effect, Input, KeybindingStage, Phone, SetupStep, State, Timestamp, messages,
-    step,
+    ConnectFailure, Effect, Input, KeybindingStage, Phone, SetupStep, State, SyncFailure,
+    Timestamp, messages, step,
 };
 
 const PHONE: &str = "AA:BB:CC:DD:EE:FF";
@@ -169,6 +169,37 @@ fn the_finish_page_opened_with_the_phone_away_says_contacts_come_when_it_connect
     assert_eq!(
         text.summary.as_deref(),
         Some("Contacts and recent calls come over from your phone when it connects.")
+    );
+}
+
+/// Opened directly, nothing has read the Desktop's Bluetooth name, so the
+/// Contacts-denied text points at this computer's name in the Phone's list,
+/// never at an entry called "this computer" (#393).
+#[test]
+fn the_finish_page_opened_directly_names_no_entry_called_this_computer_when_contacts_are_denied() {
+    let (state, _) = run(
+        State::default(),
+        [
+            Input::PhonePaired(pixel()),
+            Input::PairedPhonesListed,
+            Input::PhoneConnected {
+                address: PHONE.to_owned(),
+            },
+            Input::OpenSetupWindow,
+            Input::ContactsSyncFailed(SyncFailure::Denied),
+        ],
+    );
+    let text = messages::setup_window(
+        &state.surfaces().setup_window.expect("open"),
+        Timestamp(0),
+        None,
+    );
+    let summary = text.summary.expect("a Contacts line");
+    assert!(
+        summary.ends_with(
+            "tap the settings icon next to this computer's name and turn on Contacts and call history."
+        ),
+        "{summary}"
     );
 }
 

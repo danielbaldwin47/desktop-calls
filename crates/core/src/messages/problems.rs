@@ -53,7 +53,7 @@ pub fn problem(problem: ProblemKind) -> Message {
     }
     let (text, next_action) = match problem {
         ProblemKind::ContactsDenied => (
-            "Your phone isn't sharing contacts, so calls show numbers instead of names. To allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer and turn on Contacts and call history.",
+            "Your phone isn't sharing contacts, so calls show numbers instead of names. To allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer's name and turn on Contacts and call history.",
             None,
         ),
         ProblemKind::ContactsPromptUnanswered => (

@@ -14,6 +14,14 @@
 # A dated tag, never `latest`, so the base changes only when this line does.
 FROM archlinux:base-20261108.0.623074
 
+# Packages from the Arch Linux Archive's copy of the repositories on one
+# day, never whatever the mirrors hold the minute the image builds, so a
+# rebuild installs the same versions. 2026/11/15 holds every version the
+# image built from the live mirrors that morning had, all 294 packages
+# (#410). Change the date to upgrade.
+RUN echo 'Server = https://archive.archlinux.org/repos/2026/11/15/$repo/os/$arch' \
+        > /etc/pacman.d/mirrorlist
+
 # gcc links, and pkgconf finds the system libraries; base-devel's other
 # tools (make, gdb, guile, perl's autotools) aren't needed. sway is the
 # screen harness's headless compositor, grim its screenshot tool,

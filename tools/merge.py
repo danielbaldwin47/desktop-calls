@@ -259,7 +259,7 @@ def checks(pr: dict) -> list[dict]:
     """The checks on the PR head, and a pending check marked `unfinished` for
     every workflow run on the head that hasn't completed. A job gets its check
     only when it starts, so while a run is unfinished every check listed may
-    have passed with more to come: CI's Rust jobs start after its `changes`
+    have passed with more to come: CI's Rust jobs start after its `setup`
     job, and its "CI passed" after them. Empty if CI has reported nothing for
     the head."""
     number = str(pr["number"])

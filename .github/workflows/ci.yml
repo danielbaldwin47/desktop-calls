@@ -43,7 +43,7 @@ concurrency:
 
 # `setup` decides whether the change touches code, and makes sure CI's image
 # exists. If code changed, the suite runs in parallel, on several runners:
-# `just lint`; the tests outside the harness; the Real-Phone Checklist's
+# `just lint`; the tests outside the harness, in two parts; the Real-Phone Checklist's
 # group 6 runs (on main); the gallery, in parts; and the harness's
 # scenarios, in shards. On main, the polish scorecard follows
 # the shards. If only docs that no code reads changed, they are all skipped.
@@ -97,9 +97,19 @@ jobs:
           if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "$IMAGE exists."
           else
-            docker build --file .github/ci-image/Containerfile --tag "$IMAGE" \
-              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
-            docker push "$IMAGE"
+            # Every job pulls the image, 600 MB: its layers go up compressed
+            # with zstd, 19% smaller than gzip and faster to unpack (#410).
+            # Docker's own builder can't choose the compression; buildx's
+            # container builder can, made here so a run that finds the image
+            # doesn't spend 11 s on it.
+            docker buildx create --use --driver docker-container
+            # The Containerfile copies in only rust-toolchain.toml.
+            context=$(mktemp -d)
+            cp rust-toolchain.toml "$context"
+            docker buildx build --file .github/ci-image/Containerfile \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --output "type=image,name=$IMAGE,push=true,oci-mediatypes=true,compression=zstd,compression-level=19,force-compression=true" \
+              "$context"
           fi
 
   # `just check` is `just lint` and then a build of every target. CI runs
@@ -148,14 +158,20 @@ jobs:
   # Every test outside the harness's scenarios but the gallery and the
   # checklist's group 6 runs, which have jobs of their own: together the
   # three are `just test --exclude test-harness`, which took 12 minutes in
-  # one job (run 43648375459: 402 s of gallery, 219 s of checklist).
+  # one job (run 43648375459: 402 s of gallery, 219 s of checklist). In two
+  # parts, the justfile's ci_tests_part_2 and the rest: in one, they were the
+  # slowest job of a PR's run (225 s of run 43791000134, #410).
   tests:
-    name: just ci-tests, all but the scenarios, the gallery and checklist group 6
+    name: just ci-tests, all but the scenarios, the gallery and checklist group 6 (part ${{ matrix.part }} of 2)
     needs: setup
     if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
     steps:
       - *checkout
       - *cache
@@ -165,8 +181,8 @@ jobs:
       - &git-trusts-checkout
         name: Let git read the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: just ci-tests
-        run: just ci-tests
+      - name: just ci-tests ${{ matrix.part }}/2
+        run: just ci-tests ${{ matrix.part }}/2
       # Every scenario directory left: those of failed scenarios, and of
       # passing ones too when KEEP_SCENARIO_LOGS is set. `just ci-wait`
       # downloads them.
@@ -175,7 +191,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}${{ matrix.names && format('-{0}', matrix.names) || '' }}
+          name: scenario-logs-${{ github.job }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}${{ matrix.names && format('-{0}', matrix.names) || '' }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: /tmp/desktop-calls-test-*
           if-no-files-found: ignore
 

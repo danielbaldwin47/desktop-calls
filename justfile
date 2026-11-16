@@ -39,14 +39,48 @@ gallery_test := "the_gallery_shows_every_state_in_light_and_dark_stock_and_under
 # minutes (calls off for 60 s, Quiet Hours from the next minute for one).
 checklist_group_6_tests := "group_6_times step_6_2_"
 
+# The test files CI's second `ci-tests` part runs; the first runs every other.
+# Run one after another, the files outside the harness took about 150 s, the
+# slowest job of a PR's run: the checklist's take 66 s of it (run
+# 43791000134, #410).
+ci_tests_part_2 := "real_phone_checklist real_phone_checklist_call_waiting"
+
+# CI passes `1/2` or `2/2` to run one part on a runner of its own; empty, both.
 # Run every test outside the harness's scenarios but the gallery and the checklist's group 6 runs.
-ci-tests:
+ci-tests part="":
     #!/usr/bin/env bash
     set -euo pipefail
     skips=()
     for name in {{gallery_test}} {{checklist_group_6_tests}}; do skips+=(--skip "$name"); done
     cargo build --workspace --bins --locked
-    cargo test --workspace --exclude test-harness --locked -- "${skips[@]}"
+    # One package selection for every part, so each builds the dependencies
+    # with the same features and reuses them.
+    tests=(cargo test --workspace --exclude test-harness --locked)
+    case "{{part}}" in
+        "") "${tests[@]}" -- "${skips[@]}" ;;
+        1/2)
+            # An assignment, not a loop over $(...), so a failure here fails
+            # the recipe rather than run no test files.
+            names=$(cargo metadata --format-version 1 --no-deps --locked \
+                | python3 -c 'import json, sys
+    for p in json.load(sys.stdin)["packages"]:
+        if p["name"] != "test-harness":
+            for t in p["targets"]:
+                if "test" in t["kind"] and t["name"] not in sys.argv[1:]:
+                    print(t["name"])' {{ci_tests_part_2}})
+            [ -n "$names" ] || { echo "ci-tests 1/2: found no test files" >&2; exit 1; }
+            targets=()
+            for target in $names; do targets+=(--test "$target"); done
+            "${tests[@]}" --lib --bins "${targets[@]}" -- "${skips[@]}"
+            "${tests[@]}" --doc -- "${skips[@]}"
+            ;;
+        2/2)
+            targets=()
+            for target in {{ci_tests_part_2}}; do targets+=(--test "$target"); done
+            "${tests[@]}" "${targets[@]}" -- "${skips[@]}"
+            ;;
+        *) echo "ci-tests: no part {{part}}; give 1/2, 2/2 or nothing" >&2; exit 2 ;;
+    esac
 
 # CI passes one of the names above, to run its tests on a runner of their
 # own: all on one runner, they took 217 s, the slowest job of a run (#286).

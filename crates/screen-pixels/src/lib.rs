@@ -5,8 +5,10 @@
 //! even in debug builds while the harness and the gallery, whose scenarios
 //! are most of what CI compiles, build unoptimised: at the harness's old
 //! opt-level 1, compiling the scenarios took 45 s of every CI job that ran
-//! them, against about 15 s unoptimised. Unoptimised, these loops would
-//! take a frame's worth of time a screenshot (ticket #55).
+//! them (run 43721020495), and 20 s unoptimised with every dependency
+//! rebuilt (run 43786388905). Unoptimised, one decode and scan of a
+//! screenshot took 117 ms against 7 ms optimised, and converting a frame
+//! 160 ms, long enough to miss a window shown for 200 ms (ticket #55).
 
 /// A rectangle of pixels: columns `left..right` and rows `top..bottom`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

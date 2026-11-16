@@ -106,7 +106,7 @@ opt-level = 3
 # compositor's frames. The harness and the gallery themselves build
 # unoptimised. At opt-level 1 for them (ticket #55), compiling the
 # scenarios took 45 s of every CI job that ran them (run 43721020495), and
-# unoptimised about a third of that. One decode and scan of a screenshot
+# unoptimised 20 s with every dependency rebuilt (run 43786388905). One decode and scan of a screenshot
 # took 7 ms at opt-level 3, 32 ms at 1 and 117 ms at 0 on the Desktop (#55).
 [profile.dev.package.screen-pixels]
 opt-level = 3

@@ -100,7 +100,8 @@ impl Region {
 
 impl Screenshot {
     /// The smallest region holding every pixel whose RGB colour satisfies
-    /// `matches`, or `None` if no pixel does.
+    /// `matches`, or `None` if no pixel does. `matches` is asked once a run
+    /// of same-coloured pixels, so it must answer by the colour alone.
     ///
     /// # Panics
     ///

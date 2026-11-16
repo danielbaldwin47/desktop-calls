@@ -25,8 +25,8 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Observed by: no step yet
 - Status: open
 
-## RPU-3: A Phone removed in range is found again by discovery
-- Assumed: a Phone removed on the Desktop while in range, still on its "Pair new device" screen, is found again by discovery under way.
+## RPU-3: A removed Phone is found again by discovery
+- Assumed: a Phone removed on the Desktop, on its "Pair new device" screen, is found again by discovery under way, whether it was removed in range or away and back.
 - Source: `crates/simulated-phone/src/pairing.rs` header.
 - Observed by: 1.3
 - Status: open
@@ -96,7 +96,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 ## RPU-14: The Pixel's Contacts prompt
 - Assumed: what moves the Pixel between sharing Contacts, refusing them and asking is the Pair dialog's box and the per-Desktop Contacts switch, and with the box unticked it may ask rather than refuse (1.3's premise until #392). When it asks, the prompt lasts about 30 s, asks again on the next session if unanswered, and has no "Don't ask again". The Pixel 9a showed no prompt in two sittings: it shared at pairing with the box ticked, and refused at once with it unticked (#380, #392).
 - Source: `docs/research/2026-11-05-setup-contacts.md`; `crates/automation/src/checklist/steps/first_run.rs` (`PROMPT_DEADLINE`); retro B2 and "Open questions".
-- Observed by: 1.3
+- Observed by: 1.2, 1.3
 - Status: open
 - Judged: 1.2 fails when a prompt times out before Allow is tapped, because it then has no first Call to time. 1.3 records it as observed, unexpected.
 

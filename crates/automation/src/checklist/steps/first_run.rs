@@ -209,7 +209,7 @@ fn check_synced(sitting: &mut Sitting, state: &AppState, paired_us: u64) {
 
 /// Closes the finish page with Done, its default button.
 fn close_the_window(sitting: &mut Sitting) -> Result<(), Stop> {
-    sitting.say("Choose Done to close the Setup Window.", &["enter"]);
+    sitting.say("Choose Done to close the Setup Window.", &["choose-done"]);
     sitting.wait_for("the Setup Window closing", ACT_DEADLINE, |state| {
         !state.shows("setup-window")
     })?;

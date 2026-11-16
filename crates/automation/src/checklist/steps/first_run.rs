@@ -28,7 +28,7 @@ const FIRST_CALL_TARGET: Duration = Duration::from_secs(180);
 /// How long `just install` may take to build, install and start the app.
 const INSTALL_DEADLINE: Duration = Duration::from_secs(600);
 /// How long the Phone's prompt may last before it gives up: Android's is
-/// about 30 s (inferred).
+/// about 30 s (inferred, RPU-14).
 const PROMPT_DEADLINE: Duration = Duration::from_secs(90);
 /// How long Desktop Calls may take to pick up Contacts turned on later on
 /// the Pixel: it asks again every 10 s for about 10 minutes after the Pixel
@@ -51,7 +51,8 @@ const DO_1_1_AGAIN: &str = "Press Enter to do step 1.1 again, or type skip or qu
 const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts. ";
 /// What the finish page adds when Contacts aren't shared.
 const CALLS_STILL_WORK: &str = "Calls still work";
-/// The box on the Pixel's Pair dialog, as the Pixel words it (inferred).
+/// The box on the Pixel's Pair dialog, as the Pixel words it (inferred,
+/// RPU-15).
 const CONTACTS_BOX: &str = "\"Allow access to your contacts and call history\"";
 
 /// What the user does with [`CONTACTS_BOX`] while pairing.
@@ -383,10 +384,11 @@ pub(super) fn contacts_shared_later(sitting: &mut Sitting) -> Result<(), Stop> {
             sitting.wait_for("the Setup Window's finish page", PROMPT_DEADLINE, |state| {
                 at_step(state, "done") || at_step(state, "contacts-prompt-timed-out")
             })?;
+        // How long the prompt lasts is open (RPU-14): one that times out
+        // is the Pixel's doing, observed, and not the step's failure.
         if at_step(&finished.state, "contacts-prompt-timed-out") {
-            sitting.check(
-                false,
-                "The Pixel's prompt timed out before Don't allow was tapped.".to_owned(),
+            sitting.unexpected(
+                "The Pixel's prompt timed out before Don't allow was tapped, so Contacts weren't shared; how long the prompt lasts is still to be observed.",
             );
             return Ok(());
         }

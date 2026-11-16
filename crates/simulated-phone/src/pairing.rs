@@ -3,7 +3,7 @@
 //! pairable switches, the Desktop's pairing agent, and the Phone's choice to
 //! share Calls. Shaped after BlueZ 5.87's documented API
 //! (`org.bluez.Adapter1`, `Device1`, `AgentManager1`, `Agent1`); none of it is
-//! measured against the real Pixel 9a yet, so the times are inferred.
+//! measured against the real Pixel 9a yet, so the times are inferred (RPU-1).
 //!
 //! - With `--unpaired`, the Phone is nearby and not paired. Discovery finds
 //!   it [`FOUND_AFTER`] after `StartDiscovery`, with any headphones nearby
@@ -24,7 +24,7 @@
 //! - Whether the Phone shares Calls: `shared` brings hands-free up on every
 //!   connect; `when-asked` connects media alone, and brings hands-free up
 //!   only for `ConnectProfile`; `refused` fails that `ConnectProfile` with
-//!   `org.bluez.Error.Failed` `"br-connection-refused"` (inferred).
+//!   `org.bluez.Error.Failed` `"br-connection-refused"` (inferred, RPU-2).
 //! - With `--old-phone`, another Phone is paired too, and out of range:
 //!   connects to it page and time out. The control interface's
 //!   `ConnectOtherPhone` brings it into range, connected with hands-free
@@ -35,13 +35,14 @@
 //!   hands-free, such as the Phone that forgot the pairing keeping the link
 //!   (ticket #373), is disconnected first, as BlueZ does: `Connected` goes
 //!   false (ticket #377). One with hands-free up fails
-//!   `org.bluez.Error.Failed`, where BlueZ would disconnect it and succeed:
+//!   `org.bluez.Error.Failed`, where BlueZ would disconnect it and succeed
+//!   (RPU-4):
 //!   the simulation doesn't model taking hands-free down for it, so the
 //!   test disconnects it, then removes it. The
 //!   control interface's `FailNextRemoveDevice` fails the next one with
 //!   `org.bluez.Error.Failed`. The Phone, removed while in range, is nearby
 //!   and unpaired again: discovery under way finds it, as a Phone on its
-//!   "Pair new device" screen (inferred).
+//!   "Pair new device" screen (inferred, RPU-3).
 //!
 //! [`Connected`]: https://git.kernel.org/pub/scm/bluetooth/bluez.git/tree/doc/org.bluez.Device.rst
 

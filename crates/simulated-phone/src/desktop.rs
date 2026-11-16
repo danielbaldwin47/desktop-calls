@@ -13,14 +13,14 @@
 //!   while the adapter is down: `Connect`'s message is
 //!   `"br-connection-adapter-not-powered"`, as the real Desktop logged it
 //!   (ticket #213). A `Connect` paging when the adapter goes down fails the
-//!   same way, which is inferred.
+//!   same way, which is inferred (RPU-9).
 //! - The adapter going down while the Phone is connected drops the Phone,
 //!   as going out of range does. It stays in range: when the adapter comes
 //!   back on, it connects only when paged.
 //! - `--without-obex`: nobody takes `org.bluez.obex` on the session bus.
 //! - `--bluez-telephony`: the Phone's device has an `org.bluez.Telephony1`
 //!   child, as BlueZ's experimental `hfp` plugin adds once it holds the
-//!   Phone's hands-free link. Its path's last part is inferred.
+//!   Phone's hands-free link. Its path's last part is inferred (RPU-10).
 //! - `org.freedesktop.systemd1` on the session bus answers `RestartUnit`:
 //!   restarting `wireplumber.service` restarts the Telephony service as
 //!   [`crate::Control::restart_telephony`] does, with the real Pixel's

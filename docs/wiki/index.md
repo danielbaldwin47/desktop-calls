@@ -22,6 +22,8 @@ Chief-of-staff memory for this project: a dated, historical record. Domain terms
 
 - [hardware-and-stack](hardware-and-stack.md): the user's Desktop, Phone and installed stack, dated, including the disk filling on 2026-11-14 and the `/tmp` per-user quota hit on 2026-11-15 (updated 2026-11-15).
 
+- [Real-Phone unknowns](../real-phone-unknowns.md): what the Simulated Phone and the checklist assume about the real Pixel and its stack without a real observation, each with the step that will observe it; `just check` keeps the code's "inferred" marks tied to it, and `just real-phone-unknowns <group>` lists a group's open ones before a sitting (added 2026-11-15).
+
 - [testing](testing.md): the harness, CI timings against the Desktop, local CI (`just ci-local`, #158) and how it copes with load (#167), the load flakes by cause (#168 to #172, #180, #185), the rule that stand-ins are as strict as the real service (#166), the GitHub CI red from #182 and its fix in #211, GitHub's CI red or cancelled again on 2026-11-14, CI back on GitHub for PRs (#286), the cold review of #287 (#290, #291), and, for 2026-11-15, what gates a PR and its timings, the flakes by cause (#146, #298, #303, #331, #338 and the gallery failure on `2846987`, found to be a product bug in Missed Call counting, #356), the Dialer's keystroke regression (#340, #348, #351), the gallery, keyboard-only suite and scorecard, and the Real-Phone Checklist, dated, including step 1.1's new order and the runner's changes after the owner's first sitting (added 2026-11-05; updated 2026-11-15).
 
 ## Process

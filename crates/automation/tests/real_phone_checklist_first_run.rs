@@ -230,6 +230,23 @@ fn step_1_3_has_a_phone_that_asks_told_no_then_follows_the_problem() {
 }
 
 #[test]
+fn step_1_3_is_observed_unexpected_when_the_phones_prompt_times_out() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    // Nobody answers the Phone's prompt, which gives up by itself.
+    runner.slips = vec![
+        ("contacts-access-off", "contacts-prompt"),
+        ("deny-contacts", ""),
+    ];
+    runner.quit_at = Some("1.4");
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+    let timed_out = step(&result, "1.3");
+    assert_eq!(timed_out["result"], "unexpected", "{timed_out:#}");
+    assert!(says(timed_out, "prompt timed out"), "{timed_out:#}");
+}
+
+#[test]
 fn step_1_4_has_contacts_turned_on_when_the_pixel_doesnt_share_them_then_reads_the_second_page() {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());

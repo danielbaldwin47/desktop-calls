@@ -249,6 +249,7 @@ ci-rerun run issue:
 # passed, print one line. If not, print each failed test's panic and download
 # the scenario logs into target/ci/<run-id>/. Then names any of main's
 # latest runs past attempt 1 (#396). `just ci-wait --help`.
+# Wait on a CI run and say why it failed, and name reruns on main.
 [positional-arguments]
 [no-exit-message]
 ci-wait *args:

@@ -135,7 +135,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     );
     assert_eq!(
         field(&state, "sentence"),
-        Some("Saved. Calls go off tonight at 22:00 and come back at 07:00, every day.")
+        Some("Saved. Calls are off from 22:00 to 07:00 every day, starting tonight.")
     );
     assert_eq!(field(&state, "bar"), Some("00:00-07:00 22:00-24:00"));
     assert_eq!(
@@ -164,10 +164,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
         &harness,
         &[("switch", "off"), ("start", "22:00"), ("end", "07:00")],
     );
-    assert_eq!(
-        field(&state, "sentence"),
-        Some("Off. Calls stay on unless you turn them off from Desktop Calls in the bar.")
-    );
+    assert_eq!(field(&state, "sentence"), Some("Quiet hours are off."));
     assert_eq!(field(&state, "keys"), Some("Space Switch on\nEsc Close"));
 }
 
@@ -222,13 +219,16 @@ fn with_keys_alone_each_change_is_saved_at_once_and_kept_across_a_restart() {
     harness.keyboard().type_text("0600");
     let state = wait_for_window(
         &harness,
-        &[("start", "06:00"), ("notice", "Start and end must differ")],
+        &[
+            ("start", "06:00"),
+            ("notice", "Start and end can't be the same"),
+        ],
     );
     assert_eq!(state.quiet_hours, Some((minutes(22, 15), minutes(6, 0))));
     // Beside the refusal, what is still saved, and no "Saved." (#314).
     assert_eq!(
         field(&state, "sentence"),
-        Some("Still 22:15–06:00: nothing changed.")
+        Some("Not saved. Still 22:15–06:00.")
     );
     harness.keyboard().press(Key::Up);
     wait_for_hours(&harness, Some((minutes(6, 15), minutes(6, 0))));
@@ -238,7 +238,7 @@ fn with_keys_alone_each_change_is_saved_at_once_and_kept_across_a_restart() {
     // Equal again, then switched off: the last saved times come back, so
     // switching on saves them and the switch shows on.
     harness.keyboard().press(Key::Down);
-    wait_for_window(&harness, &[("notice", "Start and end must differ")]);
+    wait_for_window(&harness, &[("notice", "Start and end can't be the same")]);
     harness.keyboard().press_with_shift(Key::Tab);
     wait_for_window(&harness, &[("focus", "switch")]);
     harness.keyboard().type_text(" ");

@@ -11,7 +11,7 @@ const CAROL: &str = "+447700900789";
 
 /// What the Call Window says, and a refused Hang up or Swap, while a Call is
 /// on hold and another waits.
-const WAITING_CALL_FIRST: &str = "Answer or decline the waiting call first: until then, your phone would act on it instead of these calls.";
+const WAITING_CALL_FIRST: &str = "Answer or decline the waiting call first.";
 
 /// Alice live, Bob on hold, and Carol waiting, the Banner showing her
 /// options. Returns the Calls' object paths and ids: Bob's, Alice's, then

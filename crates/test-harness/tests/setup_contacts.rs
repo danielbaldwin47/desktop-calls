@@ -549,8 +549,7 @@ fn keys_the_user_already_bound_are_left_alone_and_the_finish_page_names_the_comm
     wait_for_step(&harness, "done", SYNC_DEADLINE);
 
     let state = harness.wait_for_app("the finish page names the clash", DEADLINE, |state| {
-        field(state, "keybinding")
-            .is_some_and(|text| text.contains("Super+Alt+C already does something else"))
+        field(state, "keybinding").is_some_and(|text| text.contains("Super+Alt+C is already used"))
     });
     assert_eq!(field(&state, "buttons"), Some("Done"), "{state:?}");
     assert!(

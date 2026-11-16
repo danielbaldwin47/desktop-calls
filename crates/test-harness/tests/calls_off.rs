@@ -157,13 +157,13 @@ fn calls_on_from_the_cli_connects_the_phone_within_10_s_and_clears_the_record() 
     let said = cli_ok(&harness, &["calls", "off"]);
     assert_eq!(
         said,
-        "Calls are off: your phone stays disconnected until you turn calls on.\n"
+        "Calls are off. Your phone stays disconnected until you turn calls on.\n"
     );
     wait_off(&harness);
     // Not "out of range": the Phone is away by the user's choice.
     assert_eq!(
         cli_ok(&harness, &["status"]),
-        "Calls are off until you turn them on: your phone stays disconnected.\n"
+        "Calls are off until you turn them on. Your phone stays disconnected.\n"
     );
 
     let said = cli_ok(&harness, &["calls", "on"]);

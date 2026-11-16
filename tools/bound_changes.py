@@ -9,16 +9,23 @@ its reviews passed it. So, in the harness and the automation crate's tests,
 each of these needs a `bound-change:` comment on the line or within the
 three lines above it, naming the measurement (and its PR or issue):
 
-  - a raised Duration: a line changed only by a bigger number of
-    `Duration::from_secs/millis/micros/nanos(...)` or `from_secs_f64(...)`;
+  - a raised Duration: a hunk whose largest `Duration::from_secs/millis/
+    micros/nanos(...)`, `from_secs_f64(...)` or `Duration::new(s, ns)` is
+    bigger than the largest it removed, where it adds no more Durations
+    than it removed (arguments may be sums and products of numbers, and may
+    run over several lines), which also catches a deadline renamed and
+    raised in one go;
   - a bound chosen on whether this is CI (`var_os("CI")`, `var("CI")`,
-    `GITHUB_ACTIONS`), and a new `const` or `static` named for CI.
+    `GITHUB_ACTIONS`, outside comments), and a new `const` or `static` of
+    any type but a string named for CI (`CI_SLACK_MS`).
 
 A new scenario's own deadlines are not flagged: on the last 30 commits to
 these crates that would have asked for 14 records, 12 of them for ordinary
 new deadlines, and a record every change writes is a record nobody reads.
-Over main's last 200 commits to these crates, as written, it flags only
-#379 and the CI_SHOW_DEADLINE that #379 cited as precedent (1e5d39c).
+Over main's last 200 commits to these crates, as written, it flags three:
+#379, the CI_SHOW_DEADLINE that #379 cited as precedent (1e5d39c), and a
+100 ms settle replaced by a 10 s redraw wait (ebe59be, #87), where the
+record would say it is a wait, not a bound.
 
   // bound-change: first keystroke measured at 12 ms warm, 31 ms cold on CI (#378)
   const CI_FIRST_KEYSTROKE: Duration = Duration::from_millis(100);
@@ -31,6 +38,7 @@ the diff adds, so a bound already in the tree is left alone.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import os
 import re
@@ -42,13 +50,12 @@ RECORD = "bound-change:"
 RECORD_REACH = 3
 
 UNIT_NANOS = {"nanos": 1, "micros": 1_000, "millis": 1_000_000, "secs": 1_000_000_000}
-DURATION = re.compile(r"Duration::from_(nanos|micros|millis|secs)\(\s*([\d_]+)\s*\)"
-                      r"|Duration::from_secs_f(?:32|64)\(\s*([\d_.]+)\s*\)")
+UNIT_NANOS.update(secs_f32=UNIT_NANOS["secs"], secs_f64=UNIT_NANOS["secs"])
+DURATION = re.compile(r"Duration::(?:from_(nanos|micros|millis|secs_f32|secs_f64|secs)|(new))\s*\(")
 DECLARATION = re.compile(r"^\s*(?:pub(?:\([\w:]+\))?\s+)?(?:const|static)\s+(\w+)\s*:")
 CI_TEST = re.compile(r"""var(?:_os)?\(\s*"(?:CI|GITHUB_ACTIONS)"\s*\)""")
 CI_NAME = re.compile(r"(?:^|_)CI(?:_|$)")
-NUMBERS = re.compile(r"[\d_.]+")
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 @dataclasses.dataclass
@@ -59,37 +66,76 @@ class Hunk:
     added: list[tuple[int, str]] = dataclasses.field(default_factory=list)
 
 
-def nanos(line: str) -> list[int]:
-    """Every Duration literal on `line`, in nanoseconds."""
+def arithmetic(text: str) -> float | None:
+    """The value of `text` if it is numbers joined by + - * / and brackets,
+    else None (a name, a call)."""
+    try:
+        tree = ast.parse(text.replace("_", "").strip(), mode="eval")
+    except SyntaxError:
+        return None
+    def value(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            left, right = value(node.left), value(node.right)
+            if left is None or right is None or (isinstance(node.op, ast.Div) and right == 0):
+                return None
+            return {ast.Add: left + right, ast.Sub: left - right,
+                    ast.Mult: left * right, ast.Div: left / right}[type(node.op)]
+        return None
+    return value(tree.body)
+
+
+def arguments(text: str, start: int) -> str:
+    """The text between the bracket before `start` and its match."""
+    depth = 1
+    for index in range(start, len(text)):
+        depth += {"(": 1, ")": -1}.get(text[index], 0)
+        if depth == 0:
+            return text[start:index]
+    return text[start:]
+
+
+def nanos(text: str) -> list[int]:
+    """Every Duration on `text` whose length is written out in numbers, in
+    nanoseconds."""
     found = []
-    for unit, whole, seconds in DURATION.findall(line):
-        found.append(int(whole.replace("_", "")) * UNIT_NANOS[unit] if unit
-                     else int(float(seconds.replace("_", "")) * UNIT_NANOS["secs"]))
+    for match in DURATION.finditer(text):
+        inside = arguments(text, match.end())
+        if match.group(2):  # Duration::new(seconds, nanoseconds)
+            parts = [arithmetic(part) for part in inside.split(",")]
+            if len(parts) == 2 and None not in parts:
+                found.append(int(parts[0] * UNIT_NANOS["secs"] + parts[1]))
+        elif (number := arithmetic(inside)) is not None:
+            found.append(int(number * UNIT_NANOS[match.group(1)]))
     return found
 
 
-def shape(line: str) -> str:
-    """`line` with every Duration and number blanked, so two lines that differ
-    only in a bound compare equal, whatever its unit."""
-    return NUMBERS.sub("#", DURATION.sub("Duration", line))
+def code(line: str) -> str:
+    """`line` without a `//` comment."""
+    return line.split("//", 1)[0]
 
 
 def hunks(diff: str) -> list[Hunk]:
     """The hunks of a `git diff -U0`, with each added line's number in the new file."""
     found: list[Hunk] = []
     path = ""
+    removing = adding = 0  # lines the current hunk still holds
     for line in diff.splitlines():
-        if line.startswith("+++ "):
+        if removing and line.startswith("-"):
+            removing -= 1
+            if path:
+                found[-1].removed.append(line[1:])
+        elif adding and line.startswith("+"):
+            adding -= 1
+            if path:
+                hunk = found[-1]
+                hunk.added.append((hunk.start + len(hunk.added), line[1:]))
+        elif line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else ""
-        elif line.startswith("--- "):
-            continue
         elif heading := HUNK.match(line):
-            found.append(Hunk(path, int(heading.group(1))))
-        elif found and path and line.startswith("-"):
-            found[-1].removed.append(line[1:])
-        elif found and path and line.startswith("+"):
-            hunk = found[-1]
-            hunk.added.append((hunk.start + len(hunk.added), line[1:]))
+            removing, adding = int(heading.group(1) or 1), int(heading.group(3) or 1)
+            found.append(Hunk(path, int(heading.group(2))))
     return found
 
 
@@ -97,20 +143,18 @@ def loosened(hunk: Hunk) -> list[tuple[int, str]]:
     """The added lines of `hunk` that need a record, and why."""
     found = []
     removed_names = {match.group(1) for line in hunk.removed if (match := DECLARATION.match(line))}
-    raised = set()
-    if len(hunk.removed) == len(hunk.added):
-        for old, (number, new) in zip(hunk.removed, hunk.added):
-            if shape(old) == shape(new) and nanos(old) and nanos(new):
-                if any(after > before for before, after in zip(nanos(old), nanos(new))):
-                    raised.add(number)
+    before = nanos("\n".join(code(line) for line in hunk.removed))
+    after = nanos("\n".join(code(line) for _, line in hunk.added))
+    # As many Durations or fewer: a bound changed, not new deadlines added.
+    if before and after and len(after) <= len(before) and max(after) > max(before):
+        number = next(number for number, line in hunk.added if "Duration" in code(line))
+        found.append((number, f"raises a Duration from {max(before) / 1e6:g} ms to {max(after) / 1e6:g} ms"))
     for number, line in hunk.added:
         declared = DECLARATION.match(line)
-        if number in raised:
-            found.append((number, "raises a Duration"))
-        elif (declared and declared.group(1) not in removed_names and CI_NAME.search(declared.group(1))
-              and (nanos(line) or "Duration" in line)):
+        if (declared and declared.group(1) not in removed_names and CI_NAME.search(declared.group(1))
+                and not re.search(r":\s*&(?:'static\s+)?str\b", line)):  # an env var's name, not a bound
             found.append((number, f"adds the CI bound {declared.group(1)}"))
-        elif CI_TEST.search(line):
+        elif CI_TEST.search(code(line)):
             found.append((number, "chooses a bound on whether this is CI"))
     return found
 
@@ -141,6 +185,18 @@ def base() -> str | None:
     return result.stdout.strip() or None
 
 
+def untracked() -> str:
+    """New files git doesn't track yet, as diffs, so a bound in one is read
+    before it is added."""
+    listed = subprocess.run(["git", "-c", "safe.directory=*", "ls-files", "--others", "--exclude-standard",
+                             "-z", "--", *PATHS], capture_output=True, text=True)
+    diffs = []
+    for path in filter(None, listed.stdout.split("\0")):
+        diffs.append(subprocess.run(["git", "diff", "--no-index", "-U0", "--no-ext-diff", "--src-prefix=a/",
+                                     "--dst-prefix=b/", "/dev/null", path], capture_output=True, text=True).stdout)
+    return "".join(diffs)
+
+
 def main() -> int:
     start = base()
     if not start:
@@ -152,7 +208,7 @@ def main() -> int:
     if result.returncode != 0:
         print(f"bound changes: `git diff {start}` failed: {result.stderr.strip()}", file=sys.stderr)
         return 1
-    found = problems(result.stdout)
+    found = problems(result.stdout + untracked())
     if found:
         print("Timing bounds loosened without a recorded measurement (#398). Fix the cause, or put\n"
               f"`// {RECORD} <the measurement, with its PR or issue>` on or just above each line:", file=sys.stderr)

@@ -55,15 +55,46 @@ class Flags(unittest.TestCase):
         self.assertEqual(
             problems(["    wait_until(&app, Duration::from_millis(300));"],
                      ["    wait_until(&app, Duration::from_secs(1));"]),
-            [f"  {PATH}:10: raises a Duration"],
+            [f"  {PATH}:10: raises a Duration from 300 ms to 1000 ms"],
         )
 
     def test_a_raised_constant_is_flagged(self):
         self.assertEqual(
             problems(["const DEADLINE: Duration = Duration::from_millis(50);"],
                      ["const DEADLINE: Duration = Duration::from_millis(80);"]),
-            [f"  {PATH}:10: raises a Duration"],
+            [f"  {PATH}:10: raises a Duration from 50 ms to 80 ms"],
         )
+
+    def test_raises_written_other_ways_are_flagged(self):
+        for removed, added in [
+            (["const D: Duration = Duration::from_millis(100);"], ["const D: Duration = Duration::from_millis(100 * 2);"]),
+            (["const D: Duration = Duration::from_millis(", "    200);"],
+             ["const D: Duration = Duration::from_millis(", "    400);"]),
+            (["const D: Duration = Duration::from_millis(50);"],
+             ["/// Slower now.", "const SLOW_D: Duration = Duration::from_millis(500);"]),
+            (["const D: Duration = Duration::new(1, 0);"], ["const D: Duration = Duration::new(5, 0);"]),
+            (["const D: Duration = Duration::from_secs(1);"], ["const D: Duration = Duration::from_secs_f64(1.5);"]),
+        ]:
+            with self.subTest(added=added):
+                self.assertEqual(len(problems(removed, added)), 1, problems(removed, added))
+
+    def test_a_new_ci_constant_of_any_type_is_flagged(self):
+        self.assertEqual(problems([], ["const CI_SLACK_MS: u64 = 300;"]),
+                         [f"  {PATH}:10: adds the CI bound CI_SLACK_MS"])
+
+    def test_a_ci_test_in_a_comment_is_not_flagged(self):
+        self.assertEqual(problems([], ['// unlike var_os("CI"), this runs everywhere']), [])
+
+    def test_each_hunk_is_judged_alone(self):
+        text = diff(["const A: Duration = Duration::from_millis(80);"],
+                    ["const A: Duration = Duration::from_millis(50);"]) + \
+            f"@@ -40,0 +40,1 @@\n+const B: Duration = Duration::from_secs(9);\n"
+        self.assertEqual(bound_changes.problems(text, read=lambda _: ""), [])
+
+    def test_a_line_that_looks_like_a_header_inside_a_hunk_is_read_as_a_line(self):
+        text = diff(["--- a/old", "    let a = Duration::from_millis(1);"],
+                    ["+++ b/new", "    let a = Duration::from_millis(2);"])
+        self.assertEqual(bound_changes.problems(text, read=lambda _: ""), [f"  {PATH}:11: raises a Duration from 1 ms to 2 ms"])
 
 
 class LetsThrough(unittest.TestCase):
@@ -88,7 +119,7 @@ class LetsThrough(unittest.TestCase):
 
 
 class AgainstGit(unittest.TestCase):
-    def test_it_reads_a_real_diff_whatever_the_users_git_prefixes(self):
+    def test_it_reads_a_real_diff_and_new_files_whatever_the_users_git_prefixes(self):
         with tempfile.TemporaryDirectory() as repo:
             git = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *a],
                                             check=True, capture_output=True)
@@ -100,6 +131,9 @@ class AgainstGit(unittest.TestCase):
             git("add", "-A")
             git("commit", "-qm", "base")
             open(path, "a").write(PR_379[0] + "\n")
+            fresh = os.path.join(repo, "crates/automation/src/new.rs")
+            os.makedirs(os.path.dirname(fresh))
+            open(fresh, "w").write("const CI_GRACE_MS: u64 = 300;\n")  # untracked
             here = os.getcwd()
             os.chdir(repo)
             try:
@@ -109,6 +143,7 @@ class AgainstGit(unittest.TestCase):
             finally:
                 os.chdir(here)
         self.assertIn("CI_COLD_KEYSTROKE_DEADLINE", err.getvalue())
+        self.assertIn("crates/automation/src/new.rs:1: adds the CI bound CI_GRACE_MS", err.getvalue())
 
 
 class Values(unittest.TestCase):

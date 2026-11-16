@@ -41,28 +41,35 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# `changes` decides whether the change touches code, and `image` makes sure
-# CI's image exists. If code changed, the suite runs in parallel, on several
-# runners: `just lint`; the tests outside the harness; the Real-Phone
-# Checklist's group 6 runs; the gallery, in parts; and the harness's
-# scenarios, in shards. On main, the polish scorecard follows the shards.
-# If only docs that no code reads changed, they are all skipped.
+# `setup` decides whether the change touches code, and makes sure CI's image
+# exists. If code changed, the suite runs in parallel, on several runners:
+# `just lint`; the tests outside the harness; the Real-Phone Checklist's
+# group 6 runs (on main); the gallery, in parts; and the harness's
+# scenarios, in shards. On main, the polish scorecard follows
+# the shards. If only docs that no code reads changed, they are all skipped.
 # "CI passed" needs every job, so it appears only once they have all
 # finished. The slowest job sets the time from push to "CI passed": on a PR,
-# a scenario shard (run 43680311355: "CI passed" 3 min 49 s after the first
-# job's start); on main, the checklist's group 6, which waits out real minutes.
+# a scenario shard; on main, the checklist's group 6, which waits out real
+# minutes.
 jobs:
-  changes:
-    name: Code changed?
+  setup:
+    name: Code changed? And CI's image
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     outputs:
       code: ${{ steps.decide.outputs.code }}
+      image: ${{ steps.name.outputs.name }}
     steps:
       - uses: actions/checkout@v5
         with:
           # Both ends of the change, to compare them.
           fetch-depth: 0
+          # The PR's tools/changes.py runs here, and this job's token can
+          # write packages: keep the token out of .git/config.
+          persist-credentials: false
 
       # The rule is in tools/changes.py, which `just merge` uses too. A PR is
       # compared from where it left main; a push from the commit before it.
@@ -73,24 +80,8 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
 
-  # Built only when .github/ci-image/Containerfile or rust-toolchain.toml
-  # changes, since the tag is their hash; otherwise this finds it and ends.
-  image:
-    name: CI image
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      name: ${{ steps.name.outputs.name }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            .github/ci-image
-            rust-toolchain.toml
-          sparse-checkout-cone-mode: false
+      # Built only when .github/ci-image/Containerfile or rust-toolchain.toml
+      # changes, since the tag is their hash; otherwise this finds it.
       - name: Name the image
         id: name
         env:
@@ -118,13 +109,13 @@ jobs:
   # ran (#118).
   lint:
     name: just lint (just check but its build, which the test jobs do)
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Green in about a minute.
     timeout-minutes: 15
     container: &container
-      image: ${{ needs.image.outputs.name }}
+      image: ${{ needs.setup.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}
@@ -160,8 +151,8 @@ jobs:
   # one job (run 43648375459: 402 s of gallery, 219 s of checklist).
   tests:
     name: just ci-tests, all but the scenarios, the gallery and checklist group 6
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
@@ -201,8 +192,8 @@ jobs:
   # tests don't need (#286, 2026-11-15).
   checklist:
     name: just ci-checklist-group-6 ${{ matrix.names }}
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    needs: setup
+    if: needs.setup.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
@@ -223,8 +214,8 @@ jobs:
   # main renders every look, light and dark, stock and under Omarchy.
   gallery:
     name: just ci-gallery (part ${{ matrix.shard }} of ${{ strategy.job-total }})
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     # A part takes about 2.5 minutes. Without a limit, a hung gallery held a
     # job for GitHub's 6 h default (#282).
@@ -255,11 +246,16 @@ jobs:
   # listing it. N is the matrix's size, so adding or dropping a shard keeps
   # every scenario in one; "CI passed" checks that the shards' counts add up.
   # In run 42034428129, one runner took 326 s under `cargo test` and 231 s
-  # under nextest, with two at a time either way (#118).
+  # under nextest, with two at a time either way (#118). Six shards, not
+  # five: each shard's scenarios took up to 93 s of five (run 43721020495).
+  # More shards finish sooner alone but queue longer: every job of every
+  # run counts against the account's 20 at once, and each spends about a
+  # minute starting and building before its first scenario. The slowest
+  # scenario, 48 s, is the floor.
   scenarios:
     name: just test, the harness's scenarios (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     container: *container
     # A hung scenario fails after nextest's terminate-after (.config/nextest.toml),
@@ -269,7 +265,7 @@ jobs:
       # Every shard reports, so one failure doesn't hide another's.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - *checkout
       - *cache
@@ -323,7 +319,8 @@ jobs:
       # First-frame timings, judged one scenario at a time as on the Desktop,
       # which runs one app (issue #47). In the whole run above, every
       # scenario's app at once slows each first paint past its target. Only
-      # the first shard runs them.
+      # the first shard runs them: a job of their own cost one more build,
+      # 190 s of runner time, for 20 s off this shard (run 43786693313).
       - name: just ci-first-frame-timings
         if: matrix.shard == 1
         run: just ci-first-frame-timings
@@ -345,8 +342,8 @@ jobs:
   # failing scenario shows as its item's FAIL.
   scorecard:
     name: just scorecard, from the scenarios' results
-    needs: [changes, image, scenarios]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.changes.outputs.code == 'true' }}
+    needs: [setup, scenarios]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.setup.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container: *container
@@ -375,30 +372,29 @@ jobs:
           if-no-files-found: ignore
 
   # The one check that says CI passed, and the context branch protection
-  # requires, pinned to GitHub Actions. It fails unless `changes` succeeded
-  # and every other job succeeded, or was skipped because `changes` found only
+  # requires, pinned to GitHub Actions. It fails unless `setup` succeeded
+  # and every other job succeeded, or was skipped because `setup` found only
   # docs, or, for the checklist, because the run is a PR's. `just merge` and
   # `just land` wait for it.
   ci-passed:
     name: ${{ github.event_name == 'workflow_dispatch' && 'CI passed (dispatched run)' || 'CI passed' }}
     if: ${{ !cancelled() }}
-    needs: [changes, image, lint, tests, checklist, gallery, scenarios]
+    needs: [setup, lint, tests, checklist, gallery, scenarios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every job passed, or was skipped for a docs-only change
         env:
-          CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-          IMAGE: ${{ needs.image.result }}
+          SETUP: ${{ needs.setup.result }}
+          CODE: ${{ needs.setup.outputs.code }}
           JOBS: >-
             ${{ needs.lint.result }} ${{ needs.tests.result }}
             ${{ needs.gallery.result }} ${{ needs.scenarios.result }}
           CHECKLIST: ${{ needs.checklist.result }}
           PR: ${{ github.event_name == 'pull_request' }}
         run: |
-          echo "changes: $CHANGES, code changed: $CODE, image: $IMAGE, jobs: $JOBS, checklist: $CHECKLIST"
-          [ "$CHANGES" = success ] || exit 1
+          echo "setup: $SETUP, code changed: $CODE, jobs: $JOBS, checklist: $CHECKLIST"
+          [ "$SETUP" = success ] || exit 1
           for result in $JOBS; do
             if [ "$CODE" = true ]; then
               [ "$result" = success ] || exit 1
@@ -411,12 +407,11 @@ jobs:
           else
             [ "$CHECKLIST" = skipped ] || exit 1
           fi
-          if [ "$CODE" = true ]; then [ "$IMAGE" = success ] || exit 1; fi
 
       # A shard that didn't run, or a partition that left scenarios out, would
       # otherwise pass by running fewer.
       - name: Fetch the shards' counts
-        if: needs.changes.outputs.code == 'true'
+        if: needs.setup.outputs.code == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: shard-count-*
@@ -424,7 +419,7 @@ jobs:
           path: shard-counts
 
       - name: The shards ran every scenario
-        if: needs.changes.outputs.code == 'true'
+        if: needs.setup.outputs.code == 'true'
         run: |
           every=$(cat shard-counts/every-scenario)
           ran=$(cat shard-counts/shard-* | awk '{ sum += $1 } END { print sum + 0 }')

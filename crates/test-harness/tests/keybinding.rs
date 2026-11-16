@@ -247,7 +247,7 @@ fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
     harness.wait_for_app(
         "the footer says bindings.lua couldn't be read",
         DEADLINE,
-        |state| banner_footer(state) == Some("Keybinding unknown. Phone setup… explains."),
+        |state| banner_footer(state) == Some("Couldn't read your keybindings. See Phone setup…"),
     );
 }
 
@@ -305,7 +305,7 @@ fn with_a_phone_set_up_and_no_keybinding_phone_setup_offers_to_add_one() {
     harness.tray().click("Phone setup…");
 
     let card = setup_keybinding_card(&harness);
-    assert!(card.contains("Add keybinding puts Super+Alt+C"), "{card}");
+    assert!(card.contains("Add keybinding binds Super+Alt+C"), "{card}");
     let state = harness.app_state();
     let window = state.surface("setup-window");
     assert_eq!(

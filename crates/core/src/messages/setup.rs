@@ -152,6 +152,7 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
             &mut text, phone, *connected, *contacts, keybinding, &desktop, home,
         ),
     };
+    let instructions = again_not_first(&view.step, &mut text, instructions);
     let buttons = with_pair_another(&view.step, &text, buttons);
     text.keys = keys(view, &buttons, text.calls_off.as_ref());
     // Escape does what a lone Cancel does: the footer says it in the
@@ -172,6 +173,37 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
 /// The finish page's button back to choosing a Phone, when the window
 /// opened on it for the Phone already set up.
 pub const PAIR_ANOTHER: &str = "Pair another phone";
+
+/// On the finish page opened again for the Phone set up, the next Call
+/// isn't the first: "Place a call", not "Place your first call" (#389).
+fn again_not_first(
+    step: &SetupStep,
+    text: &mut SetupWindowText,
+    mut instructions: Vec<Instruction>,
+) -> Vec<Instruction> {
+    if matches!(
+        step,
+        SetupStep::Done {
+            pair_another: true,
+            ..
+        }
+    ) {
+        let card = text.keybinding.as_mut().map(|card| &mut card.text);
+        for sentence in instructions
+            .iter_mut()
+            .map(|instruction| &mut instruction.text)
+            .chain(card)
+        {
+            if let Some(rest) = sentence.strip_prefix(FIRST_CALL) {
+                *sentence = format!("{AGAIN_CALL}{rest}");
+            }
+        }
+    }
+    instructions
+}
+
+const FIRST_CALL: &str = "Place your first call:";
+const AGAIN_CALL: &str = "Place a call:";
 
 /// `buttons`, and on the finish page the window opened on for the Phone
 /// set up, the way back to choosing a Phone, last, after Done, so never

@@ -36,12 +36,15 @@ const SESSION_SERVICES: [&str; 3] = [
 ];
 
 /// Properties whose values may name a person or carry a number.
-const PRIVATE_PROPERTIES: [&str; 5] = [
+const PRIVATE_PROPERTIES: [&str; 8] = [
     "Name",
     "Alias",
     "LineIdentification",
     "IncomingLine",
     "Number",
+    "Title",
+    "Artist",
+    "Album",
 ];
 
 /// Keys whose values, on the session bus, say a state and are kept.
@@ -122,6 +125,7 @@ impl BusCapture {
 
     /// Writes what was captured from `from_us` to `to_us` for step `id`,
     /// redacted, and forgets it. Returns the file's name in the directory.
+    /// A file that can't be written is said on the terminal.
     pub fn write(&self, id: &str, from_us: u64, to_us: u64) -> Option<String> {
         let mut lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
         let mut text = String::new();
@@ -138,9 +142,21 @@ impl BusCapture {
         lines.retain(|(at_us, _)| *at_us > to_us);
         drop(lines);
         let name = format!("{id}-{from_us}.txt");
-        std::fs::create_dir_all(&self.directory).ok()?;
-        std::fs::write(self.directory.join(&name), text).ok()?;
+        let written = std::fs::create_dir_all(&self.directory)
+            .and_then(|()| std::fs::write(self.path(&name), text));
+        if let Err(error) = written {
+            println!(
+                "Step {id}'s Bluetooth D-Bus capture couldn't be written to {}: {error}",
+                self.directory.display()
+            );
+            return None;
+        }
         Some(name)
+    }
+
+    /// Where the capture file `name` is.
+    pub fn path(&self, name: &str) -> PathBuf {
+        self.directory.join(name)
     }
 }
 
@@ -235,11 +251,17 @@ fn spawn(
 ) {
     std::thread::spawn(move || {
         zbus::block_on(async move {
-            while let Some(Ok(message)) = stream.next().await {
-                if keeps(&message) {
-                    note(&lines, describe(bus, &message));
+            while let Some(message) = stream.next().await {
+                match message {
+                    Ok(message) if keeps(&message) => note(&lines, describe(bus, &message)),
+                    Ok(_) => {}
+                    Err(error) => {
+                        note(&lines, format!("{bus}: capture stopped: {error}"));
+                        return;
+                    }
                 }
             }
+            note(&lines, format!("{bus}: capture stopped: the bus closed it"));
         });
     });
 }
@@ -274,7 +296,7 @@ fn describe(bus: &str, message: &Message) -> String {
     )
 }
 
-/// BlueZ's adapters and devices, a line each, with their properties.
+/// BlueZ's adapters and Phones, a line each, with their properties.
 async fn bluez_objects(system: &Connection) -> zbus::Result<String> {
     let objects = zbus::fdo::ObjectManagerProxy::builder(system)
         .destination("org.bluez")
@@ -319,8 +341,11 @@ fn redact(line: &str, addresses: &mut HashMap<String, String>) -> String {
 }
 
 /// Each string in `line` as `…`, but a key, an object path, a D-Bus name,
-/// and any string inside the value of one of [`STATE_KEYS`].
+/// any string inside the value of one of [`STATE_KEYS`], and an error's.
 fn hide_session_strings(line: &str) -> String {
+    // An error's message is what an agent filing the step needs, and
+    // carries no person: obexd's and PipeWire's are fixed texts.
+    let error = line.starts_with("session: error ");
     let mut out = String::with_capacity(line.len());
     let mut characters = line.chars().peekable();
     let mut depth = 0_usize;
@@ -351,8 +376,11 @@ fn hide_session_strings(line: &str) -> String {
                 }
                 let key = characters.peek() == Some(&':');
                 state_key = key && STATE_KEYS.contains(&text.as_str());
-                let kept =
-                    key || state_depth.is_some() || out.ends_with("objectpath ") || is_name(&text);
+                let kept = key
+                    || state_depth.is_some()
+                    || error
+                    || out.ends_with("objectpath ")
+                    || is_name(&text);
                 out.push('"');
                 out.push_str(if kept { &text } else { "…" });
                 out.push('"');
@@ -365,15 +393,15 @@ fn hide_session_strings(line: &str) -> String {
     out
 }
 
-/// Whether `text` is empty, a unique name (`:1.10`) or a dotted D-Bus name
-/// (`org.bluez.obex.Client1`): no spaces, no person.
+/// Whether `text` is empty, a unique name (`:1.10`) or a D-Bus name of two
+/// dots or more (`org.bluez.obex.Client1`): no spaces, no person.
 fn is_name(text: &str) -> bool {
     text.is_empty()
         || text.strip_prefix(':').is_some_and(|rest| {
             rest.chars()
                 .all(|character| character.is_ascii_digit() || character == '.')
         })
-        || (text.contains('.')
+        || (text.matches('.').count() >= 2
             && text.starts_with(|character: char| character.is_ascii_lowercase())
             && text
                 .chars()
@@ -489,6 +517,17 @@ mod tests {
             hide_numbers("call 5551234 at 12:30"),
             "call <number> at 12:30"
         );
+    }
+
+    #[test]
+    fn a_contact_with_a_dot_is_hidden_and_an_error_kept() {
+        let call = r#"session: signal :1.10 -> - /p a.b.C ("ann.lee", "org.bluez.obex.Client1")"#;
+        assert_eq!(
+            hide_session_strings(call),
+            r#"session: signal :1.10 -> - /p a.b.C ("…", "org.bluez.obex.Client1")"#
+        );
+        let error = r#"session: error :1.5 -> :1.10 - -.- ("Forbidden",)"#;
+        assert_eq!(hide_session_strings(error), error);
     }
 
     #[test]

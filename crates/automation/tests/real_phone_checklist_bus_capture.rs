@@ -41,6 +41,13 @@ fn a_step_keeps_its_bluetooth_conversation_with_addresses_hidden() {
         "{text}"
     );
     assert!(!text.contains("Not captured"), "{text}");
+
+    // 1.2, quit at its start, has no record but keeps its capture.
+    assert!(
+        runner.printed("Step 1.2's Bluetooth D-Bus capture, to where you quit: "),
+        "{:#?}",
+        runner.transcript
+    );
     assert!(text.contains("dev-"), "{text}");
     assert!(!has_address(&text), "an address is left in:\n{text}");
 }

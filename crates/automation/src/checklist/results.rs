@@ -34,7 +34,7 @@
 //! warning and error lines from the step, kept for failed and unexpected
 //! steps only. No phone number is ever written. `bus` names the step's
 //! Bluetooth D-Bus capture, in the directory beside the file with its
-//! extension `.bus` (`bus_capture`); absent for a step that didn't run or
+//! extension `.bus` (`bus_capture`); `null` for a step that didn't run or
 //! a capture that couldn't be written.
 
 use std::fs;

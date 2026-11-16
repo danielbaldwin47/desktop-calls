@@ -468,7 +468,8 @@ fn which_run(run: u32) -> String {
 }
 
 /// [`run_step`], with the step's Bluetooth D-Bus capture written beside
-/// the result file and named in its record.
+/// the result file and named in its record. A step quit part way keeps
+/// its capture too, said on the terminal, since it has no record.
 fn run_step_captured(
     sitting: &mut Sitting,
     step: &Step,
@@ -477,12 +478,29 @@ fn run_step_captured(
     if let Some(capture) = &sitting.capture {
         capture.snapshot("start");
     }
-    let (mut record_of_step, back_to, way_back) = run_step(sitting, step)?;
-    if let (Some(capture), Some(record)) = (&sitting.capture, &mut record_of_step) {
-        capture.snapshot("end");
-        record.bus = capture.write(step.id, started_us, results::unix_micros());
+    let ran = run_step(sitting, step, started_us);
+    let Some(capture) = &sitting.capture else {
+        return ran;
+    };
+    match ran {
+        Ok((Some(mut record), back_to, way_back)) => {
+            capture.snapshot("end");
+            record.bus = capture.write(step.id, started_us, results::unix_micros());
+            Ok((Some(record), back_to, way_back))
+        }
+        Err(Stop::Quit) => {
+            capture.snapshot("end");
+            if let Some(name) = capture.write(step.id, started_us, results::unix_micros()) {
+                println!(
+                    "Step {}'s Bluetooth D-Bus capture, to where you quit: {}",
+                    step.id,
+                    capture.path(&name).display()
+                );
+            }
+            Err(Stop::Quit)
+        }
+        other => other,
     }
-    Ok((record_of_step, back_to, way_back))
 }
 
 /// Runs one step's script and returns its record, if it has one; the step
@@ -491,11 +509,11 @@ fn run_step_captured(
 fn run_step(
     sitting: &mut Sitting,
     step: &Step,
+    started_us: u64,
 ) -> Result<(Option<StepRecord>, Option<&'static str>, bool), Stop> {
     println!();
     println!("Step {}: {}", step.id, step.title);
     flush();
-    let started_us = results::unix_micros();
     let finished = match step.script {
         Some(script) => script(sitting),
         None => Err(Stop::Skipped),

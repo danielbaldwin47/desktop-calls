@@ -233,6 +233,16 @@ impl Harness {
 }
 
 impl Harness {
+    /// The address of the scenario's private system bus, for a client
+    /// that listens to BlueZ as the Desktop's would.
+    #[must_use]
+    pub fn system_bus_address(&self) -> &str {
+        self.environment
+            .iter()
+            .find(|(name, _)| *name == "DBUS_SYSTEM_BUS_ADDRESS")
+            .map_or("", |(_, address)| address.as_str())
+    }
+
     /// The address of the scenario's private session bus, for a test that
     /// acts as another Desktop client.
     #[must_use]

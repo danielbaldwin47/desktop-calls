@@ -88,6 +88,8 @@ pub struct Sitting {
     demo: Option<Demo>,
     pub log: AppLog,
     pub findings: Findings,
+    /// The Bluetooth D-Bus conversation, written out a step at a time.
+    pub capture: Option<super::bus_capture::BusCapture>,
 }
 
 impl Sitting {
@@ -108,6 +110,7 @@ impl Sitting {
             demo,
             log,
             findings: Findings::default(),
+            capture: None,
         }
     }
 

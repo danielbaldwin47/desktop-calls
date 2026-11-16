@@ -177,6 +177,8 @@ pub fn result_file(results: &Path) -> serde_json::Value {
     let files: Vec<_> = std::fs::read_dir(results)
         .expect("list the results")
         .map(|entry| entry.expect("a result file").path())
+        // Beside it, the directory of its bus captures.
+        .filter(|path| path.is_file())
         .collect();
     assert_eq!(files.len(), 1, "one dated result file: {files:?}");
     let name = files[0].file_name().and_then(|name| name.to_str());

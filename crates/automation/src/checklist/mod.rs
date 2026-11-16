@@ -9,6 +9,7 @@
 //! can play the user.
 
 mod app_log;
+mod bus_capture;
 mod fingerprint;
 pub mod results;
 mod sitting;
@@ -103,6 +104,7 @@ pub fn run(options: &Options) -> ExitCode {
     let mode = world.mode;
     let log = world.log();
     let bus = world.bus.clone();
+    let (system_bus, session_bus) = world.capture_buses();
     let mut sitting = Sitting::new(events, timeline, interrupted, bus, world.demo, log);
 
     let state = sitting.now();
@@ -130,6 +132,16 @@ pub fn run(options: &Options) -> ExitCode {
         state.phone_name
     );
     println!("Results: {}", file.path.display());
+    let captures = bus_capture::directory_for(&file.path);
+    println!(
+        "Bluetooth D-Bus captures, a file a step: {}",
+        captures.display()
+    );
+    sitting.capture = Some(bus_capture::BusCapture::start(
+        system_bus,
+        session_bus,
+        captures,
+    ));
     println!("While the runner waits, type skip to skip a step, or quit to stop.");
     flush();
 
@@ -238,6 +250,24 @@ impl World {
             bus,
             demo: Some(Demo::new(harness)),
         })
+    }
+
+    /// New connections to the system and session buses, for the bus
+    /// capture alone: the session one becomes a monitor.
+    fn capture_buses(&self) -> (zbus::Result<Connection>, zbus::Result<Connection>) {
+        let at = |address: &str| {
+            zbus::block_on(async { zbus::connection::Builder::address(address).build().await })
+        };
+        match &self.demo {
+            Some(demo) => (
+                at(demo.harness.system_bus_address()),
+                at(demo.harness.session_bus_address()),
+            ),
+            None => (
+                zbus::block_on(Connection::system()),
+                zbus::block_on(Connection::session()),
+            ),
+        }
     }
 
     fn log(&self) -> AppLog {
@@ -406,7 +436,7 @@ fn run_group(
     }
     let mut queue: VecDeque<&Step> = to_run.into();
     while let Some(step) = queue.pop_front() {
-        let (record_of_step, back_to, way_back) = run_step(sitting, step)?;
+        let (record_of_step, back_to, way_back) = run_step_captured(sitting, step)?;
         if let Some(record_of_step) = record_of_step {
             record(file, order, record_of_step);
         }
@@ -435,6 +465,24 @@ fn which_run(run: u32) -> String {
     } else {
         format!("run {run}")
     }
+}
+
+/// [`run_step`], with the step's Bluetooth D-Bus capture written beside
+/// the result file and named in its record.
+fn run_step_captured(
+    sitting: &mut Sitting,
+    step: &Step,
+) -> Result<(Option<StepRecord>, Option<&'static str>, bool), Stop> {
+    let started_us = results::unix_micros();
+    if let Some(capture) = &sitting.capture {
+        capture.snapshot("start");
+    }
+    let (mut record_of_step, back_to, way_back) = run_step(sitting, step)?;
+    if let (Some(capture), Some(record)) = (&sitting.capture, &mut record_of_step) {
+        capture.snapshot("end");
+        record.bus = capture.write(step.id, started_us, results::unix_micros());
+    }
+    Ok((record_of_step, back_to, way_back))
 }
 
 /// Runs one step's script and returns its record, if it has one; the step
@@ -507,18 +555,7 @@ fn run_step(
             Outcome::Pass | Outcome::Unexpected => false,
         };
     let ended_us = results::unix_micros();
-    // A failed or unexpected step keeps the app's log from its time, for
-    // the agent who files it.
-    let journal = if matches!(outcome, Outcome::Fail | Outcome::Unexpected) {
-        sitting
-            .log
-            .lines(started_us, ended_us)
-            .iter()
-            .map(app_log::LogLine::excerpt)
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let journal = journal(&sitting.log, outcome, started_us, ended_us);
     println!(
         "  {} {}.",
         step.id,
@@ -549,8 +586,21 @@ fn run_step(
         started_us,
         ended_us,
         journal,
+        bus: None,
     };
     Ok((Some(record_of_step), back_to, way_back))
+}
+
+/// A failed or unexpected step keeps the app's log from its time, for the
+/// agent who files it; any other step, none.
+fn journal(log: &AppLog, outcome: Outcome, from_us: u64, to_us: u64) -> Vec<String> {
+    if !matches!(outcome, Outcome::Fail | Outcome::Unexpected) {
+        return Vec::new();
+    }
+    log.lines(from_us, to_us)
+        .iter()
+        .map(app_log::LogLine::excerpt)
+        .collect()
 }
 
 /// For `step`, which failed or couldn't run yet: how the Pixel is left, and
@@ -627,6 +677,7 @@ fn skipped(step: &Step, evidence: String) -> StepRecord {
         started_us: now,
         ended_us: now,
         journal: Vec::new(),
+        bus: None,
     }
 }
 

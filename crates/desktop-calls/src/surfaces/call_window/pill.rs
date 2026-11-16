@@ -53,12 +53,12 @@ pub(super) struct CallPill {
     /// Whether the pointer is over the body, and what leads at rest.
     pointer: Rc<Pointer>,
     caller: gtk::Label,
-    /// The line under the caller, with the state tag and "Calls off after".
+    /// The line under the caller, with the state tag and "Off after call".
     tag_line: gtk::Box,
     tag: gtk::Label,
     /// The "·" between the two tags, while both show (#319).
     tag_separator: gtk::Label,
-    /// "Calls off after", after the state tag, while a turn-off waits.
+    /// "Off after call", after the state tag, while a turn-off waits.
     calls_off: gtk::Label,
     status: gtk::Label,
     divider: gtk::Separator,
@@ -316,7 +316,7 @@ impl CallPill {
     }
 
     /// Shows the tags on the line under the caller: the state tag, then
-    /// "Calls off after" while a turn-off waits. Returns the state tag.
+    /// "Off after call" while a turn-off waits. Returns the state tag.
     fn show_tags(&self, view: &CallWindowView) -> Option<CallPillTag> {
         let tag = view.call_pill_tag();
         self.tag
@@ -419,7 +419,7 @@ fn report_tags(
     }
 }
 
-/// The "Calls off after" tag, hidden until a turn-off waits for the Call.
+/// The "Off after call" tag, hidden until a turn-off waits for the Call.
 /// The Call Window's line under who has the same one.
 pub(super) fn calls_off_tag() -> gtk::Label {
     let tag = gtk::Label::new(Some(messages::calls_off_after_tag()));

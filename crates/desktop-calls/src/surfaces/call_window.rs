@@ -55,12 +55,12 @@ pub(super) struct CallWindow {
     pub(super) surface: Surface,
     intents: UnboundedSender<Input>,
     caller: gtk::Label,
-    /// "Calls off after", while a turn-off waits for the Call to end.
+    /// "Off after call", while a turn-off waits for the Call to end.
     calls_off: gtk::Label,
     timer: gtk::Label,
     /// The number's label and the number, or "Not in contacts".
     meta: gtk::Label,
-    /// The line under who: the meta and the "Calls off after" tag.
+    /// The line under who: the meta and the "Off after call" tag.
     detail_line: gtk::Box,
     state: StateRow,
     notice: Notice,
@@ -721,7 +721,7 @@ fn top_line() -> (gtk::Box, gtk::Label, gtk::Label) {
 }
 
 /// The line under who: the meta, and at the right, under the timer, the
-/// "Calls off after" tag while a turn-off waits. Returns the line, the meta
+/// "Off after call" tag while a turn-off waits. Returns the line, the meta
 /// and the tag; the line shows only while one of them does.
 fn detail_line() -> (gtk::Box, gtk::Label, gtk::Label) {
     let meta = detail_label();

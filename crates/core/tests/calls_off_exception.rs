@@ -617,7 +617,7 @@ fn quiet_hours_that_ended_during_the_call_leave_calls_on() {
     assert!(!effects.contains(&block_phone(true)), "{effects:?}");
 }
 
-/// Ticket #230: whether the Call Window carries the "Calls off after" tag.
+/// Ticket #230: whether the Call Window carries the "Off after call" tag.
 fn calls_off_after(state: &State) -> bool {
     let Some(window) = state.surfaces().call_window else {
         panic!("the Call Window shows");

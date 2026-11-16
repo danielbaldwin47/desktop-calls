@@ -64,7 +64,7 @@ fn shown<'a>(state: &'a AppState, surface: &str, key: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-/// What `surface` says its "Calls off after" tag reads, if it shows one.
+/// What `surface` says its "Off after call" tag reads, if it shows one.
 fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
     shown(state, surface, "calls-off-after")
 }
@@ -172,7 +172,7 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     // collapsed, says calls go off after the Call.
     assert_eq!(
         tag(&state, "call-window").or_else(|| tag(&state, "call-pill")),
-        Some("Calls off after")
+        Some("Off after call")
     );
     says_again(&harness);
     // The Indicator shows the change in its tooltip before its menu.
@@ -237,7 +237,7 @@ fn the_phone_not_connecting_in_15_s_says_out_of_range_and_calls_go_back_off() {
     });
     // Ticket #230: from "Connecting to your phone…" on, the Call Window
     // says calls go off after the Call.
-    assert_eq!(tag(&state, "call-window"), Some("Calls off after"));
+    assert_eq!(tag(&state, "call-window"), Some("Off after call"));
     let state = harness.wait_for_app(
         "the Call Window says the Phone is out of range",
         PHONE_FOR_DIAL,

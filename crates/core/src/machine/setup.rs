@@ -741,6 +741,24 @@ fn pair_done(state: &mut State, address: &str, effects: &mut Vec<Effect>) {
     }
 }
 
+/// A paired Phone whose services don't show hands-free, as a paired Phone
+/// if the user chose it: the one chosen last, or the one the Setup Window
+/// is pairing (ticket #375).
+pub(super) fn paired_as_chosen(state: &State, input: Input) -> Input {
+    match input {
+        Input::PhonePairedWithoutHandsFree(phone)
+            if state.setup_pairs(&phone.address)
+                || state
+                    .chosen_phone
+                    .as_ref()
+                    .is_some_and(|chosen| chosen.is(&phone.address)) =>
+        {
+            Input::PhonePaired(phone)
+        }
+        input => input,
+    }
+}
+
 /// An earlier run kept the Phone with `address`, and its `name`, as the
 /// Phone the user chose last.
 pub(super) fn kept(state: &mut State, address: String, name: Option<String>) {

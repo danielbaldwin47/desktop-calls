@@ -438,7 +438,7 @@ async fn powered_adapter(system: &Connection) -> Option<String> {
         .ok()?;
     let objects = logged(
         "/",
-        "org.freedesktop.DBus.ObjectManager",
+        crate::bluez::OBJECT_MANAGER,
         "GetManagedObjects",
         None,
         manager.get_managed_objects(),

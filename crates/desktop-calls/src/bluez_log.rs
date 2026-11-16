@@ -103,12 +103,63 @@ mod tests {
         let error = "org.freedesktop.DBus.Error.UnknownObject: no /org/bluez/hci0/dev_FC_41_16_00_00_01 for AA:BB:CC:DD:EE:FF, dialling +1 (555) 123-4567";
         let shown = Hidden(&error).to_string();
         assert!(
-            shown.starts_with("org.freedesktop.DBus.Error.UnknownObject: no /org/bluez/hci0/dev_dev-"),
+            shown.starts_with(
+                "org.freedesktop.DBus.Error.UnknownObject: no /org/bluez/hci0/dev_dev-"
+            ),
             "{shown}"
         );
         assert!(shown.ends_with("dialling <number>"), "{shown}");
         for private in ["FC_41", "AA:BB", "555"] {
             assert!(!shown.contains(private), "{private} in {shown}");
+        }
+    }
+
+    /// Each event's fields as `name=value `, kept for the test to read.
+    #[derive(Clone, Default)]
+    struct Fields(std::sync::Arc<std::sync::Mutex<String>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Fields {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _context: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut written = self.0.lock().expect("unpoisoned");
+            event.record(&mut Visitor(&mut written));
+        }
+    }
+
+    struct Visitor<'a>(&'a mut String);
+
+    impl tracing::field::Visit for Visitor<'_> {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+            use fmt::Write as _;
+            let _ = write!(self.0, "{}={value:?} ", field.name());
+        }
+    }
+
+    #[test]
+    fn a_logged_errors_detail_has_its_addresses_and_numbers_hidden() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+        let fields = Fields::default();
+        let subscriber = tracing_subscriber::registry().with(fields.clone());
+        let path = "/org/bluez/hci0/dev_FC_41_16_00_00_01";
+        let answer: Result<(), &str> = tracing::subscriber::with_default(subscriber, || {
+            zbus::block_on(logged(path, "org.bluez.Device1", "Connect", None, async {
+                Err(
+                    "org.bluez.Error.Failed: no /org/bluez/hci0/dev_FC_41_16_00_00_01 for FC:41:16:00:00:01, +1 (555) 123-4567",
+                )
+            }))
+        });
+        assert!(answer.is_err());
+        let written = fields.0.lock().expect("unpoisoned").clone();
+        assert!(
+            written.contains("detail=org.bluez.Error.Failed: no /org/bluez/hci0/dev_dev-"),
+            "{written}"
+        );
+        assert!(written.contains("<number>"), "{written}");
+        for private in ["FC_41", "FC:41", "555"] {
+            assert!(!written.contains(private), "{private} in {written}");
         }
     }
 

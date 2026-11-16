@@ -132,6 +132,10 @@ impl AppLog {
 /// sets it.
 pub const BLUEZ_METHODS_SWITCH: &str = "RUST_LOG=info,bluez_dbus=debug";
 
+/// The `tracing` target of the app's BlueZ method lines
+/// (`crates/desktop-calls/src/bluez_log.rs`).
+const BLUEZ_TARGET: &str = "bluez_dbus";
+
 /// Why the app on `session` doesn't log its BlueZ method calls, or `None`
 /// if it does: it does if its `RUST_LOG` turns on debug for them. Read from
 /// the environment it was started with, which only its own user can read.
@@ -192,14 +196,22 @@ pub fn step_lines(
 /// Whether a `RUST_LOG` of `filter` turns on the app's BlueZ method lines:
 /// debug or trace for everything, or for `bluez_dbus`.
 fn logs_bluez_methods(filter: Option<&str>) -> bool {
-    filter.is_some_and(|filter| {
-        filter.split(',').any(|directive| {
-            matches!(
-                directive.trim().to_ascii_lowercase().as_str(),
-                "debug" | "trace" | "bluez_dbus=debug" | "bluez_dbus=trace" | "bluez_dbus"
-            )
-        })
-    })
+    let Some(filter) = filter else {
+        return false;
+    };
+    let on = |level: &str| matches!(level.to_ascii_lowercase().as_str(), "debug" | "trace");
+    // EnvFilter: a target's own directive beats the default level; targets
+    // are case-sensitive, levels aren't; a bare target means every level.
+    let (mut default, mut own) = (None, None);
+    for directive in filter.split(',').map(str::trim) {
+        match directive.split_once('=') {
+            Some((BLUEZ_TARGET, level)) => own = Some(on(level)),
+            None if directive == BLUEZ_TARGET => own = Some(true),
+            None if !directive.is_empty() => default = Some(on(directive)),
+            Some(_) | None => {}
+        }
+    }
+    own.or(default).unwrap_or(false)
 }
 
 /// A `journalctl -o json` line: when the journal received it, and its
@@ -339,7 +351,14 @@ mod tests {
         ] {
             assert!(logs_bluez_methods(Some(on)), "{on}");
         }
-        for off in ["info", "desktop_calls=debug", "bluez_dbus=info", ""] {
+        for off in [
+            "info",
+            "desktop_calls=debug",
+            "bluez_dbus=info",
+            "",
+            "BLUEZ_DBUS=debug",
+            "debug,bluez_dbus=off",
+        ] {
             assert!(!logs_bluez_methods(Some(off)), "{off}");
         }
         assert!(!logs_bluez_methods(None));

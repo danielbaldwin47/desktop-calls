@@ -33,7 +33,7 @@ pub(crate) const SERVICE: &str = "org.bluez";
 const ROOT: &str = "/";
 const DEVICE: &str = "org.bluez.Device1";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
-const OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
+pub(crate) const OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
 
 /// The Hands-Free Audio Gateway profile: the Phone's side of hands-free.
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";

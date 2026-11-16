@@ -247,8 +247,8 @@ ci-rerun run issue:
 
 # Wait on one GitHub CI run (default: the latest for this branch). If it
 # passed, print one line. If not, print each failed test's panic and download
-# the scenario logs into target/ci/<run-id>/. Then names any of main's
-# latest runs past attempt 1 (#396). `just ci-wait --help`.
+# the scenario logs into target/ci/<run-id>/. Then names any run on main
+# from the last day past attempt 1 (#396). `just ci-wait --help`.
 # Wait on a CI run and say why it failed, and name reruns on main.
 [positional-arguments]
 [no-exit-message]

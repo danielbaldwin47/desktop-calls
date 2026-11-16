@@ -21,8 +21,8 @@ The latest run for the current branch is the one for the commit checked out
 here, if CI has one; right after a push this waits up to a minute for it to
 appear. Otherwise it is the newest run for the branch, and a line says so.
 
-Either way it then names any of main's latest runs that reached attempt 2
-or later (ticket #396): a rerun's pass proves nothing, and one on main nearly
+Either way it then names any run on main from the last day that reached
+attempt 2 or later (ticket #396): a rerun's pass proves nothing, and one on main nearly
 hid a lost Missed Call (#356).
 
 Exit status: 0 the run passed; 1 it failed or was cancelled; 2 no run, or gh
@@ -32,6 +32,7 @@ failed.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import re
@@ -54,8 +55,9 @@ RUN_APPEARS_SECONDS = 60
 POLL_SECONDS = 5
 # How a run that didn't pass ended, as gh names it, in words.
 VERDICTS = {"failure": "failed", "cancelled": "was cancelled", "timed_out": "timed out"}
-# How many of main's latest runs to look through for reruns.
-MAIN_RUNS_SEEN = 20
+# How far back to look for reruns on main, and through how many runs.
+MAIN_RERUNS_WITHIN = datetime.timedelta(days=1)
+MAIN_RUNS_SEEN = 50
 # How much of a failed step's log to show when no test failed in it.
 STEP_TAIL_LINES = 20
 
@@ -292,13 +294,16 @@ def download_logs(run_id: str, directory: pathlib.Path) -> str:
     return f"Downloaded {len(scenarios)} scenario {noun} into {directory}/"
 
 
-def main_reruns(runs: list[dict]) -> list[str]:
-    """A line for each of main's runs (`gh run list --json`) past attempt 1."""
+def main_reruns(runs: list[dict], now: datetime.datetime) -> list[str]:
+    """A line for each of main's runs (`gh run list --json`) past attempt 1
+    and started within MAIN_RERUNS_WITHIN of `now`."""
+    since = now - MAIN_RERUNS_WITHIN
     return [
         f"  run {found['databaseId']} on {found['headSha'][:7]}: attempt {found['attempt']}, "
         f"{found.get('conclusion') or 'not finished'}"
         for found in runs
         if found.get("attempt", 1) > 1
+        and datetime.datetime.fromisoformat(found["createdAt"].replace("Z", "+00:00")) >= since
     ]
 
 
@@ -308,15 +313,15 @@ def report_main_reruns() -> None:
     try:
         runs = json.loads(run(
             "gh", "run", "list", "--branch", "main", "--workflow", WORKFLOW, "--limit", str(MAIN_RUNS_SEEN),
-            "--json", "databaseId,attempt,headSha,conclusion",
+            "--json", "databaseId,attempt,headSha,conclusion,createdAt",
         ))
-    except (Failed, json.JSONDecodeError) as error:
+    except (Failed, json.JSONDecodeError, KeyError, ValueError) as error:
         print(f"Couldn't look for reruns on main: {error}", file=sys.stderr)
         return
-    lines = main_reruns(runs)
+    lines = main_reruns(runs, datetime.datetime.now(datetime.timezone.utc))
     if lines:
-        print(f"\nReruns on main, among its latest {MAIN_RUNS_SEEN} runs (ticket #396); "
-              "each needs its cause found by event order (`gh run view <run>`):")
+        print("\nReruns on main in the last day (ticket #396); each needs its cause found by event order "
+              "(`gh run view <run>`) and recorded (`just ci-rerun <run> <issue>`):")
         print("\n".join(lines))
 
 

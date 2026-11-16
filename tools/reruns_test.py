@@ -7,6 +7,7 @@ records what was posted. `just lint` runs them."""
 from __future__ import annotations
 
 import contextlib
+import datetime
 import io
 import json
 import sys
@@ -32,9 +33,22 @@ def comment(body: str, who: str = "OWNER", hidden: bool = False) -> dict:
     return {"body": body, "authorAssociation": who, "isMinimized": hidden}
 
 
+# The gh calls the tools make, by their leading arguments.
+CALLS = {
+    "issue": ("api", "repos/{owner}/{repo}/issues/378"),
+    "attempt": ("api", f"repos/{{owner}}/{{repo}}/actions/runs/{RUN}", "--jq", ".run_attempt"),
+    "comments": ("pr", "view", "42", "--json", "comments"),
+    "run": ("run", "view", RUN, "--json"),
+    "prs": ("pr", "list", "--head", "fix-the-thing", "--state", "open"),
+}
+# Calls that post, which answer nothing.
+POSTS = (("pr", "comment"), ("issue", "comment"), ("run", "rerun"))
+
+
 class FakeGh:
-    """Answers gh calls from `answers` (first argument words to output, or an
-    exception) and records each call."""
+    """Answers each gh call whose leading arguments are one of CALLS from
+    `answers` (output, or an exception to raise), records every call, and
+    fails the test on a call it doesn't know."""
 
     def __init__(self, **answers):
         self.answers = answers
@@ -43,11 +57,13 @@ class FakeGh:
     def __call__(self, *args: str) -> str:
         self.calls.append(args)
         for key, answer in self.answers.items():
-            if " ".join(args).startswith(key.replace("_", " ")) or key in args:
+            if args[: len(CALLS[key])] == CALLS[key]:
                 if isinstance(answer, Exception):
                     raise answer
                 return answer
-        return ""
+        if any(args[: len(post)] == post for post in POSTS):
+            return ""
+        raise AssertionError(f"unexpected gh call: {args}")
 
     def posted(self) -> list[tuple[str, ...]]:
         return [call for call in self.calls if call[1:2] == ("comment",) or call[:2] == ("run", "rerun")]
@@ -85,7 +101,7 @@ class Problem(unittest.TestCase):
 
 class MergeRefusesAnUnrecordedRerun(unittest.TestCase):
     def gate(self, attempt: int, comments: list[dict]) -> FakeGh:
-        gh = FakeGh(api=str(attempt), pr=json.dumps({"comments": comments}))
+        gh = FakeGh(attempt=str(attempt), comments=json.dumps({"comments": comments}))
         with mock.patch.object(merge, "checks", return_value=[SUMMARY]), mock.patch.object(merge, "gh", gh):
             merge.require_no_unrecorded_rerun(PR)
         return gh
@@ -132,24 +148,24 @@ class CiRerun(unittest.TestCase):
         return str(refused.exception)
 
     def test_an_issue_that_does_not_exist_is_refused(self):
-        self.assertIn("#378 is not an issue", self.refused(FakeGh(api=merge.Refused("404"), run=run_json())))
+        self.assertIn("#378 is not an issue", self.refused(FakeGh(issue=merge.Refused("404"))))
 
     def test_a_pull_request_number_is_refused(self):
-        gh = FakeGh(api=json.dumps({"number": 378, "pull_request": {}}), run=run_json())
+        gh = FakeGh(issue=json.dumps({"number": 378, "pull_request": {}}))
         self.assertIn("is a pull request", self.refused(gh))
 
     def test_an_unfinished_run_is_refused(self):
-        self.assertIn("in progress", self.refused(FakeGh(api=ISSUE, run=run_json(status="in_progress"))))
+        self.assertIn("in progress", self.refused(FakeGh(issue=ISSUE, run=run_json(status="in_progress"))))
 
     def test_a_first_attempt_that_passed_is_refused(self):
-        self.assertIn("nothing to rerun", self.refused(FakeGh(api=ISSUE, run=run_json(conclusion="success"))))
+        self.assertIn("nothing to rerun", self.refused(FakeGh(issue=ISSUE, run=run_json(conclusion="success"))))
 
     def test_a_run_for_a_head_the_pr_has_moved_past_is_refused(self):
-        gh = FakeGh(api=ISSUE, run=run_json(sha="b" * 40), pr=PRS)
+        gh = FakeGh(issue=ISSUE, run=run_json(sha="b" * 40), prs=PRS)
         self.assertIn("the newer head has its own run", self.refused(gh))
 
     def test_a_red_pr_run_is_recorded_on_the_pr_and_then_rerun(self):
-        gh = FakeGh(api=ISSUE, run_view=run_json(), pr_list=PRS)
+        gh = FakeGh(issue=ISSUE, run=run_json(), prs=PRS)
         self.rerun(gh)
         (record, rerun) = gh.posted()
         self.assertEqual(record[:3], ("pr", "comment", "42"))
@@ -157,13 +173,13 @@ class CiRerun(unittest.TestCase):
         self.assertEqual(rerun, ("run", "rerun", RUN, "--failed"))
 
     def test_a_pr_run_that_passed_on_a_later_attempt_is_recorded_and_not_rerun(self):
-        gh = FakeGh(api=ISSUE, run_view=run_json(conclusion="success", attempt=2), pr_list=PRS)
+        gh = FakeGh(issue=ISSUE, run=run_json(conclusion="success", attempt=2), prs=PRS)
         self.assertIn("nothing rerun", self.rerun(gh))
         (record,) = gh.posted()
         self.assertEqual(record[:3], ("pr", "comment", "42"))
 
     def test_a_red_run_on_main_is_recorded_on_the_issue(self):
-        gh = FakeGh(api=ISSUE, run_view=run_json(event="push"))
+        gh = FakeGh(issue=ISSUE, run=run_json(event="push"))
         self.rerun(gh)
         (record, _) = gh.posted()
         self.assertEqual(record[:3], ("issue", "comment", "378"))
@@ -171,16 +187,25 @@ class CiRerun(unittest.TestCase):
 
 
 class CiWaitNamesReruns(unittest.TestCase):
-    def test_only_runs_past_attempt_1_are_named(self):
+    NOW = datetime.datetime(2026, 11, 16, 12, tzinfo=datetime.timezone.utc)
+
+    def test_only_runs_past_attempt_1_from_the_last_day_are_named(self):
         runs = [
-            {"databaseId": 1, "attempt": 1, "headSha": HEAD, "conclusion": "success"},
-            {"databaseId": 2, "attempt": 2, "headSha": "b" * 40, "conclusion": "success"},
-            {"databaseId": 3, "attempt": 3, "headSha": "c" * 40, "conclusion": ""},
+            {"databaseId": 1, "attempt": 1, "headSha": HEAD, "conclusion": "success", "createdAt": "2026-11-16T11:00:00Z"},
+            {"databaseId": 2, "attempt": 2, "headSha": "b" * 40, "conclusion": "success", "createdAt": "2026-11-16T11:00:00Z"},
+            {"databaseId": 3, "attempt": 3, "headSha": "c" * 40, "conclusion": "", "createdAt": "2026-11-15T13:00:00Z"},
+            {"databaseId": 4, "attempt": 2, "headSha": "d" * 40, "conclusion": "success", "createdAt": "2026-11-15T11:00:00Z"},
         ]
-        self.assertEqual(ci_wait.main_reruns(runs), [
+        self.assertEqual(ci_wait.main_reruns(runs, self.NOW), [
             "  run 2 on bbbbbbb: attempt 2, success",
             "  run 3 on ccccccc: attempt 3, not finished",
         ])
+
+    def test_a_gh_failure_is_said_and_raises_nothing(self):
+        err = io.StringIO()
+        with mock.patch.object(ci_wait, "run", side_effect=ci_wait.Failed("offline")), contextlib.redirect_stderr(err):
+            ci_wait.report_main_reruns()
+        self.assertIn("Couldn't look for reruns on main: offline", err.getvalue())
 
 
 if __name__ == "__main__":

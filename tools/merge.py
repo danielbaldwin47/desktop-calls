@@ -552,6 +552,7 @@ def merge(number: int, wait_minutes: float, lane_held: bool = False) -> int:
     now = require_mergeable(now)
     require_no_step_waits_on_a_closed_ticket(now)
     require_reviewed(now)  # a FAIL may have been posted while CI ran
+    require_no_unrecorded_rerun(now)  # or the run rerun
 
     head, branch = now["headRefOid"], now["headRefName"]
     gh("pr", "merge", str(number), "--squash", "--match-head-commit", head)

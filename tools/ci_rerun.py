@@ -93,7 +93,7 @@ def rerun(gh: Gh, run_id: str, issue: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="just ci-rerun",
                                      description="Rerun a red CI run's failed jobs, with its cause's issue on record.")
-    parser.add_argument("run", help="the run id")
+    parser.add_argument("run", type=lambda text: str(int(text)), help="the run id (digits, not a URL)")
     parser.add_argument("issue", type=int, help="the issue holding the failure's cause, found by event order")
     arguments = parser.parse_args()
     try:

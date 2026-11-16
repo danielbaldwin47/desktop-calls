@@ -141,8 +141,9 @@ impl Devices {
     }
 
     /// What the device at `path` is now, as inputs: newly a paired Phone,
-    /// its presence if `connected` changed, or a nearby Phone found,
-    /// renamed or paired.
+    /// with hands-free or without, or one found without it whose services
+    /// now show hands-free; its presence if `connected` changed; or a
+    /// nearby Phone found, renamed or paired.
     fn follow(&mut self, path: &str, connected: Option<bool>) -> Vec<Input> {
         let Some(device) = self.properties.get(path) else {
             return Vec::new();

@@ -697,9 +697,11 @@ impl State {
     }
 
     /// Keeps `paired_phones` as BlueZ reports Phones paired and unpaired.
+    /// A Phone without hands-free is listed too, so the user can choose it
+    /// (ticket #375), though it isn't followed unless chosen.
     fn note_paired_phones(&mut self, input: &Input) {
         match input {
-            Input::PhonePaired(phone) => {
+            Input::PhonePaired(phone) | Input::PhonePairedWithoutHandsFree(phone) => {
                 match self
                     .paired_phones
                     .iter_mut()

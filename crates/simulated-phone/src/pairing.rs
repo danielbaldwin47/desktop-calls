@@ -89,9 +89,10 @@ pub struct Nearby {
     /// whose resolving of the Phone's services gets nowhere.
     #[arg(long)]
     paired_signal_held: bool,
-    /// The unpaired Phone's services are never resolved: its `UUIDs` stay
-    /// the ones it advertised, without the Hands-Free Audio Gateway, as
-    /// BlueZ keeps them until it has resolved its services.
+    /// The Phone's services are never resolved: its `UUIDs` stay the ones
+    /// it advertised, without the Hands-Free Audio Gateway, as BlueZ keeps
+    /// them until it has resolved its services. Unpaired, or paired
+    /// already.
     #[arg(long)]
     services_unresolved: bool,
 }
@@ -171,6 +172,9 @@ impl Pairing {
             }
             range.reachable = true;
             pairing.undiscovered.push((phone.clone(), interfaces));
+        } else if nearby.services_unresolved {
+            // Paired already, before BlueZ resolved its services.
+            tree.set(phone, bluez::DEVICE, "UUIDs", bluez::advertised_uuids()?);
         }
         if let Some(name) = &nearby.headphones {
             let path = bluez::device_path(HEADPHONES_ADDRESS)?;

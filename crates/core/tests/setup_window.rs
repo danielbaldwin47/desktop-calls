@@ -378,7 +378,8 @@ fn a_phone_refusing_hands_free_says_where_to_switch_phone_calls_on_and_tries_aga
 
 #[test]
 fn a_paired_phone_without_hands_free_is_followed_only_if_chosen() {
-    // Nobody chose it: not followed, and the window opens by itself.
+    // Nobody chose it: not followed; the window opens by itself and offers
+    // it as paired already, and choosing it follows it.
     let (state, _) = run(
         State::default(),
         [
@@ -387,7 +388,39 @@ fn a_paired_phone_without_hands_free_is_followed_only_if_chosen() {
         ],
     );
     assert_eq!(state.phone(), None);
-    assert!(state.surfaces().setup_window.is_some());
+    assert_eq!(
+        setup_step(&state),
+        Some(SetupStep::Choose {
+            phones: vec![pixel()]
+        })
+    );
+    let (state, _) = run(
+        state,
+        [Input::ChoosePhone {
+            address: PHONE.to_owned(),
+        }],
+    );
+    assert_eq!(state.phone(), Some(&pixel()));
+
+    // Being paired in the window: followed, as paired.
+    let (state, effects) = run(
+        choosing(),
+        [
+            Input::ChoosePhone {
+                address: PHONE.to_owned(),
+            },
+            Input::PairingCode {
+                phone: pixel(),
+                code: 48_213,
+            },
+            Input::ConfirmPairing,
+            Input::PhonePairedWithoutHandsFree(pixel()),
+        ],
+    );
+    assert_eq!(state.phone(), Some(&pixel()));
+    assert!(effects.contains(&Effect::TrustPhone {
+        address: PHONE.to_owned()
+    }));
 
     // Chosen last, in an earlier run: followed, as a paired Phone.
     let (state, _) = run(

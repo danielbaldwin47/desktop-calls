@@ -15,7 +15,7 @@
 //!       "evidence": ["Banner shown 0.21 s after the Call appeared (target 1 s)."],
 //!       "measurements": { "banner_latency_ms": 210, "codec": "msbc", "wideband": true },
 //!       "started_us": 1793889127000000, "ended_us": 1793889190000000,
-//!       "journal": [] }
+//!       "journal": [], "bus": "2.1-1793889127000000.txt" }
 //!   ],
 //!   "earlier": []
 //! }
@@ -32,7 +32,10 @@
 //! Phone did something the step did not anticipate, which its evidence
 //! lines starting `Unexpected: ` describe. `journal` holds the app's info,
 //! warning and error lines from the step, kept for failed and unexpected
-//! steps only. No phone number is ever written.
+//! steps only. No phone number is ever written. `bus` names the step's
+//! Bluetooth D-Bus capture, in the directory beside the file with its
+//! extension `.bus` (`bus_capture`); `null` for a step that didn't run or
+//! a capture that couldn't be written.
 
 use std::fs;
 use std::io;
@@ -122,6 +125,8 @@ pub struct StepRecord {
     pub started_us: u64,
     pub ended_us: u64,
     pub journal: Vec<String>,
+    /// The file name of the step's bus capture, if one was written.
+    pub bus: Option<String>,
 }
 
 impl StepRecord {
@@ -136,6 +141,7 @@ impl StepRecord {
             "started_us": self.started_us,
             "ended_us": self.ended_us,
             "journal": self.journal,
+            "bus": self.bus,
         })
     }
 
@@ -173,6 +179,7 @@ impl StepRecord {
             started_us: value["started_us"].as_u64().unwrap_or(0),
             ended_us: value["ended_us"].as_u64().unwrap_or(0),
             journal: lines("journal"),
+            bus: text("bus"),
         })
     }
 }

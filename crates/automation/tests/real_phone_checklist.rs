@@ -199,12 +199,12 @@ fn the_scorecard_reads_the_latest_real_phone_result_and_never_a_demo() {
     );
 
     // The same file, as if the real Phone had produced it.
+    // Beside it, the directory of its bus captures.
     let file = std::fs::read_dir(results.path())
         .expect("list the results")
-        .next()
-        .expect("a result file")
-        .expect("a result file")
-        .path();
+        .map(|entry| entry.expect("a result file").path())
+        .find(|path| path.is_file())
+        .expect("a result file");
     let mut result = result_file(results.path());
     result["mode"] = "real".into();
     std::fs::write(&file, result.to_string()).expect("rewrite the result file");

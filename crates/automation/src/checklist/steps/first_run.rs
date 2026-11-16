@@ -1,36 +1,43 @@
 //! Group 1's first run: forgetting the pairing and installing afresh (1.1),
-//! the Setup Window from pairing to the first Call, timed (1.2), and the
-//! Phone's Contacts prompt left to time out, then allowed (1.3). Each step
-//! follows the Setup Window through the `setup-window` surface it reports.
+//! the Setup Window from pairing to the first Call, timed (1.2), and
+//! Contacts not shared as the Pixel pairs, then turned on later on the
+//! Pixel (1.3). Each step follows the Setup Window through the
+//! `setup-window` surface it reports.
 //!
 //! On 2026-11-15 the real Pixel 9a, paired afresh through the Setup Window,
 //! shared Contacts as it paired: the window went from `contacts-warning`
 //! straight to `contacts-syncing`, with no prompt (#380). Its Pair dialog
 //! carries "Allow access to your contacts and call history", ticked, and
 //! forgetting the pairing forgets a Contacts switch turned off before it.
-//! So 1.2 leaves the box ticked and 1.3 has it unticked; whether the Pixel
-//! then asks, or refuses outright, is inferred until 1.3 is run.
+//! So 1.2 leaves the box ticked and 1.3 has it unticked. With it unticked,
+//! the Pixel refused Contacts at once, with no prompt (#392), so the
+//! prompt left to time out is the Simulated Phone's scenario only.
 
 use std::time::{Duration, Instant};
 
 use super::keyboard_and_look::{test_number_or_why_not, went_to};
 use super::{
-    ACT_DEADLINE, APP_DEADLINE, CALL_DEADLINE, Sitting, Stop, call_ends, millis, no_call_left,
-    seconds,
+    ACT_DEADLINE, APP_DEADLINE, CALL_DEADLINE, SYNC_DEADLINE, Seen, Sitting, Stop, call_ends,
+    millis, no_call_left, seconds,
 };
+use crate::checklist::results::unix_micros;
 use crate::checklist::watch::AppState;
 
 /// Spec #1's target: from a fresh install to the first Call in 3 minutes.
 const FIRST_CALL_TARGET: Duration = Duration::from_secs(180);
 /// How long `just install` may take to build, install and start the app.
 const INSTALL_DEADLINE: Duration = Duration::from_secs(600);
-/// How long reading Contacts and Call History may take.
-const SYNC_DEADLINE: Duration = Duration::from_secs(180);
 /// How long the Phone's prompt may last before it gives up: Android's is
 /// about 30 s (inferred).
 const PROMPT_DEADLINE: Duration = Duration::from_secs(90);
-/// How long the Phone may take to ask again after Try again.
-const ASK_AGAIN_DEADLINE: Duration = Duration::from_secs(30);
+/// How long Desktop Calls may take to pick up Contacts turned on later on
+/// the Pixel: it asks again every 10 s for about 10 minutes after the Pixel
+/// connects, then every 5 minutes (#394), and a sync takes moments.
+pub(super) const SHARED_LATER_DEADLINE: Duration = Duration::from_secs(330);
+/// When a wait for Contacts turned on later says it is still waiting.
+const STILL_WAITING_AFTER: Duration = Duration::from_secs(60);
+/// What the "Contacts not shared" Problem says to do, as the runner says it.
+pub(super) const SHARE_ON_THE_PIXEL: &str = "With the Pixel still connected, on the Pixel open Settings, then Connected devices, tap the settings icon next to this computer, and turn on Contacts and call history. Don't pair again. Then wait here: Desktop Calls notices by itself, usually within a minute.";
 
 const FORGET_ON_THE_PIXEL: &str = "Straight away, on the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and tap Forget.";
 const REMOVE_ON_THE_DESKTOP: &str = "On this computer: remove the Pixel in Bluetooth settings, or with `bluetoothctl remove` and its address.";
@@ -42,6 +49,8 @@ const DO_1_1_AGAIN: &str = "Press Enter to do step 1.1 again, or type skip or qu
 /// as against "…isn't sharing contacts yet." when nobody answered or the
 /// sync failed.
 const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts. ";
+/// What the finish page adds when Contacts aren't shared.
+const CALLS_STILL_WORK: &str = "Calls still work";
 /// The box on the Pixel's Pair dialog, as the Pixel words it (inferred).
 const CONTACTS_BOX: &str = "\"Allow access to your contacts and call history\"";
 
@@ -325,15 +334,18 @@ fn add_the_keybinding(sitting: &mut Sitting) -> Result<bool, Stop> {
     Ok(added_now)
 }
 
-/// 1.3: paired afresh with [`CONTACTS_BOX`] unticked, the Phone asks
-/// about Contacts once connected. The prompt is left to time out, Try
-/// again asks again, and Allow then syncs. A Pixel that shares or refuses
-/// Contacts without asking has no prompt to time out (#380).
-pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(), Stop> {
+/// 1.3: paired afresh with [`CONTACTS_BOX`] unticked, the Pixel doesn't
+/// share Contacts: the finish page says so and that Calls still work, and
+/// the app's log says the Pixel refused. Then the user does what the
+/// "Contacts not shared" Problem says, on the Pixel, and Desktop Calls
+/// syncs by itself, with no pairing again and the Pixel connected all
+/// along (#392). The prompt left to time out is the Simulated Phone's
+/// scenario only: the Pixel 9a refuses at once, with no prompt.
+pub(super) fn contacts_shared_later(sitting: &mut Sitting) -> Result<(), Stop> {
     no_call_left(sitting)?;
     sitting.say(
         &format!(
-            "The Pixel asks about Contacts only when {CONTACTS_BOX} is unticked as it pairs, so this step pairs it afresh. First forget the pairing on both sides:"
+            "This step pairs the Pixel again with {CONTACTS_BOX} unticked, then turns on Contacts afterwards. First forget the pairing on both sides:"
         ),
         &[],
     );
@@ -342,73 +354,47 @@ pub(super) fn prompt_times_out_then_allowed(sitting: &mut Sitting) -> Result<(),
         "Then open the Setup Window: run `desktop-calls connect`.",
         &["open-setup-window"],
     );
+    let paired_us = unix_micros();
     pair_through_the_window(sitting, ContactsBox::Unticked)?;
-    let asked = sitting.wait_for("the Pixel asking about contacts", ACT_DEADLINE, |state| {
-        at_step(state, "contacts-prompt") || at_step(state, "done")
+    let answered = sitting.wait_for("the Setup Window's finish page", SYNC_DEADLINE, |state| {
+        at_step(state, "done") || at_step(state, "contacts-prompt")
     })?;
-    if at_step(&asked.state, "done") {
-        return judge_without_a_prompt(sitting, &asked.state);
-    }
-    sitting.say(
-        "Don't answer the Pixel's prompt: let the countdown here reach zero.",
-        &[],
-    );
-    let timed_out =
-        sitting.wait_for("the Pixel's prompt timing out", PROMPT_DEADLINE, |state| {
-            at_step(state, "contacts-prompt-timed-out") || at_step(state, "done")
-        })?;
-    if at_step(&timed_out.state, "done") {
-        sitting.check(
-            false,
-            "The prompt was answered before it timed out.".to_owned(),
+    let finished = if at_step(&answered.state, "contacts-prompt") {
+        sitting.say(
+            "The Pixel is asking about contacts: tap Don't allow.",
+            &["deny-contacts"],
         );
-        return close_the_window(sitting);
-    }
-    let lasted = timed_out.at.saturating_duration_since(asked.at);
-    sitting.measure("prompt_lasted_ms", millis(lasted));
-    sitting.observed(format!(
-        "The Pixel's prompt timed out {} after it showed.",
-        seconds(lasted)
-    ));
-    let offers = window_field(&timed_out.state, "countdown") == Some("0")
-        && window_field(&timed_out.state, "buttons") == Some("Try again\nSkip");
-    sitting.check(
-        offers,
-        "The countdown reached 0, and the window offers Try again and Skip.".to_owned(),
-    );
-    sitting.say("Choose Try again.", &["enter"]);
-    let again = sitting.happens_within("the Pixel asking again", ASK_AGAIN_DEADLINE, |state| {
-        at_step(state, "contacts-prompt")
-    })?;
-    sitting.check(
-        again.is_some(),
-        if again.is_some() {
-            "After Try again, the Pixel asked again.".to_owned()
-        } else {
-            format!(
-                "After Try again, the Pixel didn't ask again within {}.",
-                seconds(ASK_AGAIN_DEADLINE)
-            )
-        },
-    );
-    if again.is_none() {
-        return Ok(());
-    }
-    sitting.say("Tap Allow on the Pixel.", &["allow-contacts"]);
-    let finished = sitting.wait_for("the Setup Window's finish page", SYNC_DEADLINE, |state| {
-        at_step(state, "done")
-    })?;
-    check_synced(sitting, &finished.state);
+        let finished =
+            sitting.wait_for("the Setup Window's finish page", PROMPT_DEADLINE, |state| {
+                at_step(state, "done") || at_step(state, "contacts-prompt-timed-out")
+            })?;
+        if at_step(&finished.state, "contacts-prompt-timed-out") {
+            sitting.check(
+                false,
+                "The Pixel's prompt timed out before Don't allow was tapped.".to_owned(),
+            );
+            return Ok(());
+        }
+        finished
+    } else {
+        answered
+    };
+    let not_shared = judge_not_shared(sitting, &finished.state, paired_us)?;
     sitting.wait_for("the finish page's buttons", ACT_DEADLINE, |state| {
         state.focused("setup-window") && window_field(state, "buttons").is_some()
     })?;
-    close_the_window(sitting)
+    close_the_window(sitting)?;
+    if not_shared {
+        shared_later(sitting)?;
+    }
+    Ok(())
 }
 
-/// 1.3 when the Setup Window finished with no prompt shown: the Pixel
-/// shared Contacts as it paired, or refused them. Either way it has no
-/// prompt to time out, which passes, unless the box was left ticked.
-fn judge_without_a_prompt(sitting: &mut Sitting, state: &AppState) -> Result<(), Stop> {
+/// 1.3's finish page: the Pixel didn't share Contacts, so it says that,
+/// and that Calls still work, and the app's log says the Pixel refused.
+/// Returns whether that is so, for the rest of the step: a Pixel that
+/// shared Contacts as it paired has nothing to turn on later.
+fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> Result<bool, Stop> {
     let summary = window_field(state, "summary")
         .unwrap_or_default()
         .to_owned();
@@ -420,30 +406,139 @@ fn judge_without_a_prompt(sitting: &mut Sitting, state: &AppState) -> Result<(),
             unticked,
             if unticked {
                 format!(
-                    "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so it never shows a prompt that could time out. The finish page says: {summary}"
+                    "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so there is nothing to turn on later. The finish page says: {summary}"
                 )
             } else {
                 format!(
-                    "{CONTACTS_BOX} was left ticked, so the Pixel shared Contacts as it paired and there was no prompt to time out. Run this step again and untick it."
+                    "{CONTACTS_BOX} was left ticked, so the Pixel shared Contacts as it paired. Run this step again and untick it."
                 )
             },
         );
-    } else if summary.starts_with(REFUSED_SUMMARY) {
-        sitting.observed(format!(
-            "This Pixel refuses Contacts when {CONTACTS_BOX} is unticked, rather than asking, so it never shows a prompt that could time out. The finish page says: {summary}"
-        ));
-        sitting.say(
-            "So that Calls show names for the rest of the checklist: on the Pixel, open Settings, then Connected devices, tap the settings icon next to this computer, and switch on Contacts and call history.",
-            &["contacts-access-on"],
-        );
-    } else {
-        // Not shared for another reason: the sync failed, or the Pixel left.
+        return Ok(false);
+    }
+    let refused = summary.starts_with(REFUSED_SUMMARY);
+    sitting.check(
+        refused && summary.contains(CALLS_STILL_WORK),
+        format!("The finish page says: {summary}"),
+    );
+    let logged = sitting
+        .log_since(paired_us)
+        .iter()
+        .any(|line| line.event_kind == "contacts-sync-ended" && line.message.ends_with(": denied"));
+    sitting.check(
+        logged,
+        if logged {
+            "The app's log says the Pixel refused Contacts.".to_owned()
+        } else {
+            "The app's log has no line saying the Pixel refused Contacts.".to_owned()
+        },
+    );
+    Ok(refused)
+}
+
+/// 1.3 once the Setup Window has closed: the "Contacts not shared" Problem
+/// shows; the user does what it says, on the Pixel; and Desktop Calls syncs
+/// by itself, with the Pixel connected all along and the app not restarted.
+fn shared_later(sitting: &mut Sitting) -> Result<(), Stop> {
+    let shown = sitting.wait_for(
+        "the \"Contacts not shared\" Problem",
+        APP_DEADLINE,
+        |state| contacts_problem(state).is_some(),
+    )?;
+    let sentence = contacts_problem(&shown.state)
+        .unwrap_or_default()
+        .to_owned();
+    // The runner's instruction below must be the one the app gives.
+    sitting.check(
+        sentence.contains("turn on Contacts and call history"),
+        format!("Desktop Calls shows the Contacts not shared Problem: {sentence}"),
+    );
+    let starts = shown.state.app_starts;
+    let mark = sitting.mark();
+    sitting.say(
+        &format!("Now do what it says. {SHARE_ON_THE_PIXEL}"),
+        &["contacts-access-on"],
+    );
+    let asked = Instant::now();
+    let Some(synced) = contacts_synced(sitting, starts)? else {
         sitting.check(
             false,
             format!(
-                "The Pixel neither asked nor said whether it shares Contacts. The finish page says: {summary} Run this step again."
+                "Desktop Calls didn't pick up the Contacts you turned on within {}, with the Pixel connected. That is a product bug: file it with this step's log.",
+                seconds(SHARED_LATER_DEADLINE)
             ),
         );
+        return Ok(());
+    };
+    if synced.state.connection_state != "connected" {
+        sitting.check(
+            false,
+            "The Pixel disconnected while Desktop Calls waited for Contacts. Reconnect it, and run this step again.".to_owned(),
+        );
+        return Ok(());
     }
-    close_the_window(sitting)
+    let took = synced.at.saturating_duration_since(asked);
+    sitting.measure("shared_later_synced_ms", millis(took));
+    sitting.observed(format!(
+        "Desktop Calls synced Contacts {} after you were asked to turn them on, without pairing again.",
+        seconds(took)
+    ));
+    let dropped = sitting
+        .seen_since(mark, |state| state.connection_state != "connected")
+        .is_some();
+    sitting.check(
+        !dropped && synced.state.app_starts == starts,
+        if dropped {
+            "The Pixel disconnected on the way, so the sync may have come from reconnecting."
+                .to_owned()
+        } else if synced.state.app_starts != starts {
+            "Desktop Calls restarted on the way, so the sync may have come from the restart."
+                .to_owned()
+        } else {
+            "The Pixel stayed connected and Desktop Calls didn't restart.".to_owned()
+        },
+    );
+    let gone = contacts_problem(&synced.state).is_none();
+    sitting.check(
+        gone,
+        if gone {
+            "The Contacts not shared Problem went away.".to_owned()
+        } else {
+            "The Contacts not shared Problem still shows, though Contacts synced.".to_owned()
+        },
+    );
+    Ok(())
+}
+
+/// Waits for Contacts turned on later on the Pixel to sync: the state
+/// that is synced, or that shows the Pixel disconnected or the app
+/// restarted, which end the wait too; `None` if neither happened within
+/// [`SHARED_LATER_DEADLINE`]. After a minute it says it is still waiting.
+pub(super) fn contacts_synced(sitting: &mut Sitting, starts: u32) -> Result<Option<Seen>, Stop> {
+    let ended = |state: &AppState| {
+        state.contacts_state == "ready"
+            || state.connection_state != "connected"
+            || state.app_starts != starts
+    };
+    if let Some(seen) = sitting.happens_within("Contacts synced", STILL_WAITING_AFTER, ended)? {
+        return Ok(Some(seen));
+    }
+    sitting.say(
+        "Still waiting. Desktop Calls checks every 10 seconds for 10 minutes after the Pixel connects, then every 5 minutes. Type skip to stop waiting.",
+        &[],
+    );
+    sitting.happens_within(
+        "Contacts synced",
+        SHARED_LATER_DEADLINE.saturating_sub(STILL_WAITING_AFTER),
+        ended,
+    )
+}
+
+/// The sentence of the "Contacts not shared" Problem, while it shows.
+fn contacts_problem(state: &AppState) -> Option<&str> {
+    state
+        .problems
+        .iter()
+        .find(|(kind, _)| kind == "contacts-denied")
+        .map(|(_, sentence)| sentence.as_str())
 }

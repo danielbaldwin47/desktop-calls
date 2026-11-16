@@ -49,6 +49,9 @@ pub enum Stop {
     /// The step can't go on until an earlier step of its group, this one,
     /// is done again, and the user chose to do it now (#380).
     BackTo(&'static str),
+    /// The step can't run until the user does something first, which this
+    /// says, so it isn't failed for it (#392).
+    NotReady(String),
 }
 
 /// A state the app published, and when.

@@ -18,7 +18,8 @@ class Warming(unittest.TestCase):
             ran.append((command, env.get(cache.VARIABLE)))
             return subprocess.CompletedProcess(command, status)
 
-        with mock.patch.object(cache.pathlib.Path, "mkdir"), contextlib.redirect_stderr(io.StringIO()):
+        with mock.patch.object(cache.pathlib.Path, "mkdir"), mock.patch.object(cache.free_space, "preflight"), \
+                contextlib.redirect_stderr(io.StringIO()):
             return cache.warm(environment, run=run), ran
 
     def test_unnamed_it_fills_the_shared_cache_first_and_gives_it_to_every_scenario(self):

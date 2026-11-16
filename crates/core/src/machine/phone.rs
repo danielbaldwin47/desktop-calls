@@ -88,11 +88,12 @@ fn held_contacts(state: &mut State, input: Input, effects: &mut Vec<Effect>) {
                 // the next connect syncs afresh, so nothing is forgotten.
                 return;
             }
-            let was = std::mem::replace(&mut state.contacts_sync, ContactsState::Denied);
-            if let ContactsState::PermissionNeeded { .. } = was {
-                contacts_again::said_no(state);
-            }
-            if was != ContactsState::Denied {
+            // A no on the Phone's prompt is asked again too: Android
+            // remembers it and refuses with no prompt, and a Phone that
+            // prompts again isn't asked after that (`prompt_shown`).
+            let already_denied = std::mem::replace(&mut state.contacts_sync, ContactsState::Denied)
+                == ContactsState::Denied;
+            if !already_denied {
                 // The person said no: keep nothing of theirs.
                 state.contacts_held = false;
                 state.contacts = Contacts::default();

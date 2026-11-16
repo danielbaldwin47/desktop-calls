@@ -262,7 +262,7 @@ fn an_interrupted_run_resumes_at_the_failed_step_and_keeps_what_passed() {
 }
 
 #[test]
-fn group_1_pairs_afresh_to_a_first_call_lets_the_contacts_prompt_time_out_and_reads_a_second_page_of_call_history()
+fn group_1_pairs_afresh_to_a_first_call_turns_contacts_on_after_pairing_and_reads_a_second_page_of_call_history()
  {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
@@ -289,12 +289,11 @@ fn group_1_pairs_afresh_to_a_first_call_lets_the_contacts_prompt_time_out_and_re
         first_call.as_u64().is_some_and(|ms| ms <= 180_000),
         "{result:#}"
     );
-    // The Phone's prompt, left unanswered, timed out on its own deadline.
-    let prompt = &step(&result, "1.3")["measurements"]["prompt_lasted_ms"];
+    // Refused as the Pixel pairs with the box unticked, then turned on: the
+    // app asks again every 10 s, so it syncs well inside one minute.
+    let shared_later = &step(&result, "1.3")["measurements"]["shared_later_synced_ms"];
     assert!(
-        prompt
-            .as_u64()
-            .is_some_and(|ms| (25_000..=40_000).contains(&ms)),
+        shared_later.as_u64().is_some_and(|ms| ms <= 30_000),
         "{result:#}"
     );
 }

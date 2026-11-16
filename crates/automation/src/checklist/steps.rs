@@ -29,7 +29,10 @@ use call_waiting::{
 };
 use calls_off_call::call_while_calls_off;
 use during_a_call::{call_pill, calls_off_during_a_call, keypad_tones, mute};
-use first_run::{forget_and_install, pair_to_first_call, prompt_times_out_then_allowed};
+use first_run::{
+    SHARE_ON_THE_PIXEL, contacts_shared_later, contacts_synced, forget_and_install,
+    pair_to_first_call,
+};
 use incoming::{
     answer_on_the_desktop, answer_on_the_pixel, decline_on_the_desktop, decline_on_the_pixel,
     do_not_disturb, keybinding,
@@ -87,6 +90,10 @@ const ACT_DEADLINE: Duration = Duration::from_secs(120);
 const TALK_DEADLINE: Duration = Duration::from_secs(300);
 /// How long the app may take to show what follows from the Phone's news.
 const APP_DEADLINE: Duration = Duration::from_secs(10);
+/// How long reading Contacts and Call History may take.
+const SYNC_DEADLINE: Duration = Duration::from_secs(180);
+/// Why 1.4 can't run while the Pixel doesn't share Contacts, and what to do.
+const NOT_SHARING: &str = "The Pixel isn't sharing Contacts and call history with this computer, so its Call History can't be read. On the Pixel: open Settings, then Connected devices, tap the settings icon next to this computer, and turn on Contacts and call history.";
 /// How long the audio must stay on the Phone after answering there.
 const STAYS_ON_PHONE: Duration = Duration::from_secs(3);
 
@@ -130,8 +137,8 @@ pub const GROUPS: &[Group] = &[
             Step {
                 id: "1.3",
                 needs: &[PIXEL_IN_HAND],
-                title: "Pair afresh with Contacts access unticked on the Pixel, let its prompt time out once, use Try again, then allow it",
-                script: Some(prompt_times_out_then_allowed),
+                title: "Pair afresh with Contacts access unticked on the Pixel, then turn Contacts on in its Bluetooth settings: Desktop Calls syncs them without pairing again",
+                script: Some(contacts_shared_later),
                 lands_with: &[],
             },
             Step {
@@ -586,6 +593,28 @@ fn stopped_ringing(state: &AppState, call: u32) -> bool {
 /// settles whether the Phone honours paging, as the Call History sync
 /// assumes (#9). The probe keeps only the shape of what it reads.
 fn call_history_paging(sitting: &mut Sitting) -> Result<(), Stop> {
+    // The probe reads Call History over the same PBAP link: while the Pixel
+    // doesn't share Contacts it can only fail, so the step says what to do
+    // instead of failing on it (#392), and waits while the user turns it on.
+    sitting.forget_the_past();
+    let settled = sitting.wait_for("Contacts finishing their sync", SYNC_DEADLINE, |state| {
+        state.contacts_state != "syncing"
+    })?;
+    if settled.state.contacts_state != "ready" {
+        sitting.say(
+            "The Pixel isn't sharing Contacts and call history with this computer, so its Call History can't be read.",
+            &[],
+        );
+        sitting.say(SHARE_ON_THE_PIXEL, &["contacts-access-on"]);
+        let synced = match contacts_synced(sitting, settled.state.app_starts) {
+            Ok(synced) => synced,
+            Err(Stop::Skipped) => None,
+            Err(stop) => return Err(stop),
+        };
+        if synced.is_none_or(|seen| seen.state.contacts_state != "ready") {
+            return Err(Stop::NotReady(NOT_SHARING.to_owned()));
+        }
+    }
     sitting.say(
         "Reading Contacts and Call History with `just pbap-probe`. If the Pixel asks to allow access to contacts and call history, allow it.",
         &[],

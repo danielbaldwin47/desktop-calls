@@ -67,6 +67,9 @@ jobs:
         with:
           # Both ends of the change, to compare them.
           fetch-depth: 0
+          # The PR's tools/changes.py runs here, and this job's token can
+          # write packages: keep the token out of .git/config.
+          persist-credentials: false
 
       # The rule is in tools/changes.py, which `just merge` uses too. A PR is
       # compared from where it left main; a push from the commit before it.

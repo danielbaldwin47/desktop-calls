@@ -72,7 +72,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
-import changes  # the docs-only rule that CI's "Code changed?" job and `just merge` share
+import changes  # the docs-only rule that CI's "Code changed? And CI's image" job and `just merge` share
 
 EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
 

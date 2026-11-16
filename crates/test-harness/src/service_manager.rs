@@ -244,6 +244,12 @@ impl ServiceManager {
         self.unit.running().history.clone()
     }
 
+    /// Sets `assignment`, `NAME=value`, in the manager's environment, as
+    /// `systemctl --user set-environment` does.
+    pub fn set_manager_environment(&self, assignment: &str) {
+        self.unit.manager_environment().push(assignment.to_owned());
+    }
+
     /// The manager's environment, as `NAME=value`.
     pub fn manager_environment(&self) -> Vec<String> {
         self.unit.manager_environment().clone()
@@ -642,6 +648,13 @@ impl crate::Harness {
     /// then restarts it as systemd would.
     pub fn kill_service(&self) {
         self.service_manager().crash();
+    }
+
+    /// Sets `assignment`, `NAME=value`, in the user manager's environment,
+    /// as `systemctl --user set-environment` does: for the service's next
+    /// start.
+    pub fn set_service_manager_environment(&self, assignment: &str) {
+        self.service_manager().set_manager_environment(assignment);
     }
 
     /// The user manager's environment, as `NAME=value`: what

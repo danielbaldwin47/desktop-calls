@@ -10,6 +10,7 @@
 )]
 
 use std::io::{Read as _, Write as _};
+use std::os::unix::fs::PermissionsExt as _;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -51,8 +52,18 @@ impl Runner {
             env!("CARGO_BIN_EXE_automation"),
             harness.directory().join("results").display()
         );
+        // A `journalctl` that finds nothing stands in for the journal, so the
+        // runner never reads the user's own.
+        let stand_ins = harness.directory().join("journal-stand-in");
+        std::fs::create_dir_all(&stand_ins).expect("a directory for the stand-in");
+        let journalctl = stand_ins.join("journalctl");
+        std::fs::write(&journalctl, "#!/bin/sh\nexit 0\n").expect("the stand-in");
+        std::fs::set_permissions(&journalctl, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in runs");
+        let path = std::env::var("PATH").unwrap_or_default();
         let mut child = harness
             .external_command("script")
+            .env("PATH", format!("{}:{path}", stand_ins.display()))
             .args(["--quiet", "--return", "--command", &runner, "/dev/null"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -173,6 +184,21 @@ fn on_yes_the_switch_is_on_for_the_sitting_and_off_again_on_quit() {
     runner.type_in("quit\n");
     let said = runner.finish();
     assert_switched_off(&harness, &said);
+}
+
+#[test]
+fn on_yes_an_earlier_rust_log_in_the_user_manager_is_put_back_on_quit() {
+    let harness = installed_service();
+    harness.set_service_manager_environment("RUST_LOG=warn");
+    let mut runner = turn_on(&harness);
+    runner.type_in("quit\n");
+    let said = runner.finish();
+    assert!(said.contains("lines are off again"), "{said}");
+    assert_eq!(
+        harness.service_manager_environment(),
+        ["RUST_LOG=warn"],
+        "the owner's own RUST_LOG is back"
+    );
 }
 
 #[test]

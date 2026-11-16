@@ -350,6 +350,8 @@ fn a_stale_pairing_that_cannot_be_removed_says_what_to_do() {
     wait_for_step(&harness, "done", CONNECT_DEADLINE);
 }
 
+/// With a Phone set up, each opens the window on the finish page for it,
+/// which says it is connected and looks for no Phone (#389).
 #[test]
 fn the_indicator_the_control_interface_and_the_command_line_each_open_the_window() {
     let harness = Harness::builder()
@@ -361,18 +363,23 @@ fn the_indicator_the_control_interface_and_the_command_line_each_open_the_window
     assert!(setup_window(&harness.app_state()).is_none());
 
     harness.tray().click("Phone setup…");
-    wait_for_step(&harness, "choose", DEADLINE);
+    let state = wait_for_step(&harness, "done", DEADLINE);
+    assert_eq!(
+        field(&state, "heading"),
+        Some(format!("{PHONE_NAME} is connected").as_str())
+    );
+    assert!(!adapter_discoverable(&harness), "nothing is looked for");
     harness.keyboard().press(Key::Escape);
     closed(&harness);
 
     harness.open_connect_window();
-    wait_for_step(&harness, "choose", DEADLINE);
+    wait_for_step(&harness, "done", DEADLINE);
     harness.keyboard().press(Key::Escape);
     closed(&harness);
 
     let output = harness.cli(&["connect"]);
     assert!(output.status.success(), "{output:?}");
-    wait_for_step(&harness, "choose", DEADLINE);
+    wait_for_step(&harness, "done", DEADLINE);
 }
 
 #[test]
@@ -393,6 +400,7 @@ fn pairing_a_second_phone_switches_to_it() {
 
     let output = harness.cli(&["connect"]);
     assert!(output.status.success(), "{output:?}");
+    harness.pair_another_phone();
     wait_for_phone_listed(&harness, DEADLINE);
     harness.keyboard().press(Key::Return);
     same_code_shown(&harness);
@@ -480,10 +488,13 @@ fn a_phone_paired_from_its_own_screen_goes_on_when_bluez_signals_only_bonded() {
     never_offered_again(&harness);
 }
 
-/// Opens the window again, and checks the Phone isn't offered in it.
+/// Opens the window again, on the finish page for the Phone, goes on to
+/// Pair another phone, and checks the Phone isn't offered there.
 fn never_offered_again(harness: &Harness) {
     harness.open_connect_window();
-    wait_for_step(harness, "choose", DEADLINE);
+    wait_for_step(harness, "done", DEADLINE);
+    harness.pair_another_phone();
+    wait_until_discoverable(harness);
     // Discovery lists a nearby Phone within a second or so: for longer
     // than that, the window never lists this one.
     let until = std::time::Instant::now() + Duration::from_secs(3);

@@ -3,7 +3,9 @@
 //! Turn on), Bluetooth blocked, Contacts support missing, audio not set up
 //! and BlueZ's own hands-free on (these three leave the step as it is,
 //! with a Phone listed). With them, calls being off: a neutral card in the
-//! same shape, with Turn calls on and its key.
+//! same shape, with Turn calls on and its key. And the finish page that
+//! "Phone setup…" opens on with a Phone set up (#389): its keybinding
+//! card, and Pair another phone to choose a different one.
 
 use std::time::Duration;
 
@@ -36,6 +38,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
                 state.calls_off == "off" && state.connection_state == "disconnected"
             });
             let _output = harness.cli(&["connect"]);
+            harness.pair_another_phone();
             harness.wait_for_app("the Setup Window says calls are off", DEADLINE, |state| {
                 setup_window_shows(state, "calls-off", "Calls are off")
                     && setup_window_shows(state, "focused", "true")
@@ -56,6 +59,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
             });
             harness.set_bluetooth_power("off");
             let _output = harness.cli(&["connect"]);
+            harness.pair_another_phone();
             harness.wait_for_app(
                 "the Setup Window says calls are off and Bluetooth is off",
                 DEADLINE,
@@ -106,6 +110,74 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         still: |_| true,
         prepare: |builder| fresh_install(builder).bluez_hands_free_on(),
         reach: |harness| wait_for_problem(harness, "bluez-hands-free", true),
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+];
+
+/// The Setup Window opened from "Phone setup…" with a Phone set up: the
+/// finish page for it, never choosing a Phone (#389).
+pub(super) const SETUP_OPENED_STATES: &[State] = &[
+    State {
+        name: "setup-window-opened-set-up",
+        title: "\"Phone setup…\" with a Phone set up: its finish page, with Add keybinding, Done, and Pair another phone last (#389)",
+        still: |_| true,
+        prepare: |builder| builder.config_under_home(),
+        reach: |harness| {
+            with_hyprland_config(harness);
+            sync(harness);
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app("the finish page offers the keybinding", DEADLINE, |state| {
+                setup_window_shows(state, "step", "done")
+                    && setup_window_shows(
+                        state,
+                        "buttons",
+                        "Add keybinding\nDone\nPair another phone",
+                    )
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-opened-keybinding-unreadable",
+        title: "\"Phone setup…\" with a Phone set up and bindings.lua unreadable: the finish page says so and what to bind instead (#389)",
+        still: |_| true,
+        prepare: |builder| builder.config_under_home().hyprland_bindings_unreadable(),
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app("the keybinding card says why", DEADLINE, |state| {
+                setup_window_shows(state, "step", "done")
+                    && state
+                        .surface("setup-window")
+                        .and_then(|window| window.get("keybinding"))
+                        .is_some_and(|card| card.contains("couldn't be read"))
+            });
+        },
+        shown: |screenshot, _| app_region(screenshot).is_some(),
+    },
+    State {
+        name: "setup-window-opened-calls-off-bluetooth-off",
+        title: "\"Phone setup…\" with a Phone set up, calls off and Bluetooth off: the finish page under both cards, Done keeping Enter since calls are off by choice (#389)",
+        still: |_| true,
+        prepare: as_is,
+        reach: |harness| {
+            sync(harness);
+            let _output = harness.cli(&["calls", "off", "--until-morning"]);
+            harness.wait_for_app("calls are off", DEADLINE, |state| {
+                state.calls_off == "off" && state.connection_state == "disconnected"
+            });
+            harness.set_bluetooth_power("off");
+            let _output = harness.cli(&["connect"]);
+            harness.wait_for_app(
+                "the finish page says calls are off and Bluetooth is off",
+                DEADLINE,
+                |state| {
+                    setup_window_shows(state, "step", "done")
+                        && setup_window_shows(state, "calls-off", "Calls are off")
+                        && shows_problem(state, "bluetooth-off")
+                },
+            );
+        },
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
 ];

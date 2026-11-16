@@ -46,7 +46,7 @@ use page::index_html;
 use quiet_hours_window::QUIET_HOURS_WINDOW_STATES;
 use refusals::REFUSAL_STATES;
 use render::render_all;
-use setup_window::{SETUP_CONTACTS_STATES, SETUP_PROBLEM_STATES};
+use setup_window::{SETUP_CONTACTS_STATES, SETUP_OPENED_STATES, SETUP_PROBLEM_STATES};
 pub use shard::Shard;
 use test_harness::{AppState, BAR_COLOUR, Builder, Harness, Key, OmarchyTheme, Region, Screenshot};
 
@@ -910,6 +910,7 @@ fn all_states() -> impl Iterator<Item = &'static State> {
         .chain(QUIET_HOURS_WINDOW_STATES)
         .chain(SETUP_PROBLEM_STATES)
         .chain(SETUP_CONTACTS_STATES)
+        .chain(SETUP_OPENED_STATES)
         .chain(REFUSAL_STATES)
 }
 

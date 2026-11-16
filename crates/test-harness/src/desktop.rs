@@ -123,6 +123,58 @@ impl Harness {
         Keyboard { harness: self }
     }
 
+    /// On the Setup Window's finish page, opened for the Phone already set
+    /// up, moves the keyboard to Pair another phone with Tab, as the
+    /// footer names it, presses Enter, and waits until the window is
+    /// choosing a Phone (#389).
+    ///
+    /// # Panics
+    ///
+    /// If the window doesn't offer Pair another phone, Tab never reaches
+    /// it, or the window doesn't go on to choosing a Phone.
+    pub fn pair_another_phone(&self) {
+        const DEADLINE: Duration = Duration::from_secs(5);
+        let field = |name: &str| {
+            self.app_state()
+                .surface("setup-window")
+                .and_then(|window| window.get(name).cloned())
+        };
+        self.wait_for_app(
+            "the Setup Window offers Pair another phone",
+            DEADLINE,
+            |state| {
+                state
+                    .surface("setup-window")
+                    .and_then(|window| window.get("buttons"))
+                    .is_some_and(|buttons| buttons.ends_with("Pair another phone"))
+            },
+        );
+        // Every button the window has, cards' included, is fewer than this.
+        for _ in 0..8 {
+            let keys = field("keys").unwrap_or_default();
+            if keys.starts_with("Enter Pair another phone") {
+                self.keyboard().press(Key::Return);
+                self.wait_for_app("the Setup Window is choosing a Phone", DEADLINE, |state| {
+                    state
+                        .surface("setup-window")
+                        .and_then(|window| window.get("step"))
+                        .is_some_and(|step| step == "choose")
+                });
+                return;
+            }
+            self.keyboard().press(Key::Tab);
+            // Until the footer names what took the keyboard, if it changes.
+            let until = Instant::now() + Duration::from_secs(1);
+            while field("keys").unwrap_or_default() == keys && Instant::now() < until {
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        panic!(
+            "Tab never reached Pair another phone: {:?}",
+            self.app_state()
+        );
+    }
+
     /// Puts `text` on the screen's clipboard, as copying it in another app
     /// does, and waits until a paste would get it.
     ///

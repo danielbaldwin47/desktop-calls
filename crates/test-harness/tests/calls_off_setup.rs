@@ -83,10 +83,16 @@ fn calls_off() -> Harness {
     harness
 }
 
-/// Opens the Setup Window, which says calls are off and has the keyboard
-/// on Turn calls on.
+/// Opens the Setup Window, on the finish page for the Phone set up, which
+/// says calls are off and leaves Enter to its own buttons (#389); then
+/// Pair another phone, where it has the keyboard on Turn calls on.
 fn opened_while_off(harness: &Harness) -> AppState {
     cli_ok(harness, &["connect"]);
+    let state = harness.wait_for_app("the finish page says calls are off", DEADLINE, |state| {
+        field(state, "step") == Some("done") && field(state, "calls-off").is_some()
+    });
+    assert_eq!(field(&state, "dimmed"), None, "{state:?}");
+    harness.pair_another_phone();
     harness.wait_for_app(
         "the Setup Window says calls are off, with keyboard focus",
         DEADLINE,

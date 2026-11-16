@@ -58,8 +58,10 @@ fn kinds(state: &State) -> Vec<ProblemKind> {
         .collect()
 }
 
+/// The Setup Window, at choosing a Phone: with a Phone set up it opens on
+/// the finish page, and Pair another phone goes on to choosing (#389).
 fn setup_open(state: State) -> State {
-    run(state, [Input::OpenSetupWindow])
+    run(state, [Input::OpenSetupWindow, Input::PairAnotherPhone])
 }
 
 /// A Phone nearby, for the window to list.

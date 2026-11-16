@@ -717,6 +717,21 @@ fn add_css() {
 }
 
 fn button_intents(step: &SetupStep) -> Vec<Input> {
+    let mut intents = step_intents(step);
+    if let SetupStep::Done {
+        pair_another: true,
+        keybinding,
+        ..
+    } = step
+        && !matches!(keybinding, KeybindingStage::Confirming(_))
+    {
+        intents.push(Input::PairAnotherPhone);
+    }
+    intents
+}
+
+/// What each of a step's own buttons asks for, before Pair another phone.
+fn step_intents(step: &SetupStep) -> Vec<Input> {
     match step {
         SetupStep::Confirm { .. } => vec![Input::ConfirmPairing, Input::RejectPairing],
         SetupStep::PhoneCallsOff { .. } | SetupStep::PhoneUnreachable { .. } => {

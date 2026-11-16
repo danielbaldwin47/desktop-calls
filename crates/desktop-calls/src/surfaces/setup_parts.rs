@@ -284,9 +284,12 @@ impl Card {
         let text = wrapping_label();
         text.add_css_class("setup-card-text");
         // Selectable with the pointer, to copy a command; Tab still moves
-        // only between the buttons.
+        // only between the buttons. Without `can-focus` off, a selectable
+        // label stops Shift+Tab at the button below it, so the Problems
+        // above can't be reached (#389).
         text.set_selectable(true);
         text.set_focusable(false);
+        text.set_can_focus(false);
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 2);
         widget.add_css_class("setup-card");
         widget.append(&title);
@@ -319,6 +322,7 @@ pub(super) fn line_label() -> gtk::Label {
     // the buttons.
     line.set_selectable(true);
     line.set_focusable(false);
+    line.set_can_focus(false);
     line
 }
 

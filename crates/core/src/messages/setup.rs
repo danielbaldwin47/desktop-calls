@@ -147,10 +147,12 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
             connected,
             contacts,
             keybinding,
+            ..
         } => done(
             &mut text, phone, *connected, *contacts, keybinding, &desktop, home,
         ),
     };
+    let buttons = with_pair_another(&view.step, &text, buttons);
     text.keys = keys(view, &buttons, text.calls_off.as_ref());
     // Escape does what a lone Cancel does: the footer says it in the
     // button's word, not a second word beside it.
@@ -165,6 +167,32 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
     text.instructions = instructions;
     text.buttons = buttons;
     text
+}
+
+/// The finish page's button back to choosing a Phone, when the window
+/// opened on it for the Phone already set up.
+pub const PAIR_ANOTHER: &str = "Pair another phone";
+
+/// `buttons`, and on the finish page the window opened on for the Phone
+/// set up, the way back to choosing a Phone, last, after Done, so never
+/// Enter's (#389). Not while the keybinding's line is confirmed: that page
+/// is about the line alone.
+fn with_pair_another(
+    step: &SetupStep,
+    text: &SetupWindowText,
+    mut buttons: Vec<&'static str>,
+) -> Vec<&'static str> {
+    if matches!(
+        step,
+        SetupStep::Done {
+            pair_another: true,
+            ..
+        }
+    ) && text.line.is_none()
+    {
+        buttons.push(PAIR_ANOTHER);
+    }
+    buttons
 }
 
 /// A page's heading, instructions and buttons, the default one first.
@@ -511,6 +539,11 @@ fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
         ),
         ContactsOutcome::NotShared => {
             "Your phone isn't sharing contacts yet. Calls still work, and show numbers instead of names."
+                .to_owned()
+        }
+        ContactsOutcome::Syncing => "Getting contacts and recent calls from your phone…".to_owned(),
+        ContactsOutcome::Asking => {
+            "Your phone is asking whether to share contacts. Tap Allow on it so calls show names."
                 .to_owned()
         }
     }

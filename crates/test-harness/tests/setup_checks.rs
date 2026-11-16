@@ -197,6 +197,43 @@ fn bluetooth_off_shows_turn_on_and_pressing_it_turns_bluetooth_on() {
     });
 }
 
+/// With a Phone set up, the window opens on the finish page for it, and
+/// Bluetooth off still takes Enter there, as it does while choosing a
+/// Phone (#389).
+#[test]
+fn with_a_phone_set_up_and_bluetooth_off_the_finish_page_turns_bluetooth_on_on_enter() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .bluetooth_off()
+        .start();
+    harness.wait_for_app("the Phone is followed", STARTUP, |state| {
+        state.phone.is_some() && kinds(state) == ["bluetooth-off"]
+    });
+
+    let output = harness.cli(&["connect"]);
+    assert!(output.status.success(), "{output:?}");
+
+    let state = harness.wait_for_app(
+        "the finish page, with Enter on Turn on",
+        DEADLINE,
+        |state| {
+            window_field(state, "step") == Some("done")
+                && window_field(state, "keys")
+                    == Some("Enter Turn on · Tab Next button · Esc Close")
+        },
+    );
+    assert_eq!(window_field(&state, "dimmed"), Some("true"));
+    assert_eq!(field(&state, "buttons"), Some("Turn on"));
+
+    harness.keyboard().press(Key::Return);
+
+    harness
+        .simulated_phone()
+        .wait_for_recorded("Bluetooth is turned on", DEADLINE, sets_powered);
+    no_problems_shown(&harness);
+}
+
 #[test]
 fn a_problem_is_said_once_on_screen_as_one_card_with_its_fix() {
     let harness = Harness::builder()
@@ -315,9 +352,29 @@ fn wait_for_phone_listed(harness: &Harness) -> AppState {
 }
 
 /// Moves keyboard focus back from the step to Set up audio, which takes
-/// none by itself, and presses it.
+/// none by itself, and presses it: one Shift+Tab from a Phone listed, and
+/// on the finish page one past each button left of the default, the cards
+/// between never stopping it (#389).
 fn press_set_up_audio(harness: &Harness) {
-    harness.keyboard().press_with_shift(Key::Tab);
+    let state = harness.wait_for_app("the Setup Window has the keyboard", DEADLINE, |state| {
+        window_field(state, "focused") == Some("true") && window_field(state, "keys").is_some()
+    });
+    let presses = match window_field(&state, "step") {
+        Some("done") => {
+            window_field(&state, "buttons").map_or(1, |buttons| buttons.lines().count())
+        }
+        _ => 1,
+    };
+    for press in 1..=presses {
+        let keys = window_field(&harness.app_state(), "keys").map(str::to_owned);
+        harness.keyboard().press_with_shift(Key::Tab);
+        if press < presses {
+            // The footer names the button left before the next press.
+            harness.wait_for_app("Shift+Tab moved to the button left", DEADLINE, |state| {
+                window_field(state, "keys").map(str::to_owned) != keys
+            });
+        }
+    }
     harness.wait_for_app("Set up audio has focus", DEADLINE, |state| {
         field(state, "focused") == Some("true")
     });

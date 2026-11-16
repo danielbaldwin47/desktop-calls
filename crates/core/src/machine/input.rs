@@ -302,6 +302,9 @@ pub enum Input {
     /// The Phone answered the Setup Window's ask for hands-free without the
     /// pairing: it no longer has the Desktop paired (ticket #377).
     HandsFreeUnpaired,
+    /// The user chose Pair another phone on the finish page the Setup
+    /// Window opened on for the Phone already set up: choose a Phone.
+    PairAnotherPhone,
     /// The user chose Pair again, for a Phone that no longer has the
     /// Desktop paired.
     PairAgain,

@@ -85,6 +85,12 @@ fn done_before(results: &Path, step: &str) {
         .expect("write the earlier run's results");
 }
 
+/// Each measurement group 1 takes, and the step whose work it times.
+const MEASURED_BY: [(&str, &str); 2] = [
+    ("pairing_to_first_call_ms", "1.2"),
+    ("shared_later_synced_ms", "1.3"),
+];
+
 /// Runs `step` of group 1 from `leftover`, answering every question yes,
 /// and stops as the next step starts.
 fn from_leftover(id: &'static str, leftover: &Leftover) {
@@ -101,6 +107,9 @@ fn from_leftover(id: &'static str, leftover: &Leftover) {
     let transcript = runner.transcript.join("\n");
     let context = format!("step {id} from {}:\n{transcript}", leftover.name);
 
+    // A demo action that panics is only reported: without this, a state
+    // never made would pass as a clean start.
+    assert!(!runner.printed("didn't work now"), "{context}");
     let started = runner.steps_started();
     assert!(runner.printed(&format!("Step {id}:")), "{context}");
     assert_eq!(started.first().map(String::as_str), Some(id), "{context}");
@@ -129,9 +138,25 @@ fn from_leftover(id: &'static str, leftover: &Leftover) {
                 "{other} has a result from this run but didn't run; {context}"
             );
             assert!(
-                record["result"] != "fail" || says(record, ""),
+                record["result"] != "fail" || says(record, "Failed: "),
                 "{other} failed without saying why; {context}"
             );
+            assert!(
+                record["result"] != "pass" || says(record, ""),
+                "{other} passed with nothing observed; {context}"
+            );
+            // A step's own work is recorded under it, not under a step
+            // that ran beside it (finding B1: the pairing and the first
+            // Call timed under 1.1).
+            if let Some(measured) = record["measurements"].as_object() {
+                for name in measured.keys() {
+                    let owner = MEASURED_BY.iter().find(|(key, _)| key == name);
+                    assert!(
+                        owner.is_none_or(|(_, owner)| *owner == other),
+                        "{name} is recorded under {other}; {context}"
+                    );
+                }
+            }
         } else {
             assert_eq!(record["result"], "pass", "{other}: {context}");
         }

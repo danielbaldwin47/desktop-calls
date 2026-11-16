@@ -31,6 +31,12 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Observed by: 1.3
 - Status: open
 
+## RPU-37: A Phone the Desktop alone forgot stays quiet
+- Assumed: a Pixel that kept its pairing after the Desktop removed it doesn't page the Desktop when back in range, so the app sees only a nearby Phone that isn't paired; a real bonded Phone may try to reconnect, and BlueZ then asks the pairing agent or refuses it.
+- Source: `crates/automation/src/checklist/sitting/demo.rs` (`desktop-removes-phone`); `crates/automation/tests/real_phone_checklist_leftover_state.rs`.
+- Observed by: no step yet (no step asks the owner to remove the Phone on the Desktop only)
+- Status: open
+
 ## RPU-4: `RemoveDevice` with hands-free up disconnects and succeeds
 - Assumed: real BlueZ takes a Phone with hands-free up down and removes it; the Simulated Phone fails it instead, and "Pair again" (#382) rests on the simulation.
 - Source: `crates/simulated-phone/src/pairing.rs` header; retro A5; `docs/research/2026-11-05-two-phones.md`.

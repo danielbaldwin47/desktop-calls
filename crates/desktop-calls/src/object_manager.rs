@@ -247,7 +247,7 @@ impl Lister<'_> {
         let listing = manager.get_managed_objects();
         // BlueZ's listing is one of the app's method calls to BlueZ, which
         // are logged at debug where nothing outside the app can see them.
-        let answer = if self.watched.service == "org.bluez" {
+        let answer = if self.watched.service == crate::bluez::SERVICE {
             let path = manager.inner().path().as_str();
             logged(path, OBJECT_MANAGER, "GetManagedObjects", None, listing).await
         } else {

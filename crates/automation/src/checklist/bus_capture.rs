@@ -69,17 +69,15 @@ pub struct BusCapture {
 impl BusCapture {
     /// Starts listening on `system` and `session`, each a connection of its
     /// own (the session one becomes a monitor), for files in `directory`.
-    /// A bus that can't be listened to, and `app_unheard`, why the app's
-    /// BlueZ method lines won't be there if they won't, are said on the
-    /// terminal now and at the top of each file.
+    /// A bus that can't be listened to is said on the terminal now and at
+    /// the top of each file.
     pub fn start(
         system: zbus::Result<Connection>,
         session: zbus::Result<Connection>,
         directory: PathBuf,
-        app_unheard: Option<String>,
     ) -> Self {
         let lines = Lines::default();
-        let mut unheard: Vec<String> = app_unheard.into_iter().collect();
+        let mut unheard = Vec::new();
         let system = match system {
             Ok(system) => match zbus::block_on(listen_to_bluez(&system)) {
                 Ok(stream) => {
@@ -132,7 +130,8 @@ impl BusCapture {
 
     /// Writes what was captured from `from_us` to `to_us` for step `id`,
     /// with `app`, the app's own lines of its BlueZ method calls in that
-    /// time, in time order and redacted, and forgets it. Returns the file's
+    /// time, in time order and redacted, and forgets it; `app_unheard` says
+    /// at the top why the app logged none, if it didn't. Returns the file's
     /// name in the directory. A file that can't be written is said on the
     /// terminal.
     pub fn write(
@@ -141,10 +140,11 @@ impl BusCapture {
         from_us: u64,
         to_us: u64,
         app: &[(u64, String)],
+        app_unheard: Option<&str>,
     ) -> Option<String> {
         let mut lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
         let mut text = String::new();
-        for line in &self.unheard {
+        for line in self.unheard.iter().map(String::as_str).chain(app_unheard) {
             let _ = writeln!(text, "Not captured: {line}");
         }
         let mut step: Vec<&(u64, String)> = lines

@@ -29,7 +29,7 @@ use crate::bluez_log::logged;
 use crate::logging::EventKind;
 use crate::object_manager::{self, ObjectEvent, WatchError, Watched};
 
-const SERVICE: &str = "org.bluez";
+pub(crate) const SERVICE: &str = "org.bluez";
 const ROOT: &str = "/";
 const DEVICE: &str = "org.bluez.Device1";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";

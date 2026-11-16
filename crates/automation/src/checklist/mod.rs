@@ -91,7 +91,7 @@ pub fn run(options: &Options) -> ExitCode {
             // installed service. `just run` stops the service for its run and
             // starts it again afterwards (ADR-0006).
             eprintln!(
-                "Desktop Calls isn't running, so the checklist can't observe it. Start the installed service with `systemctl --user start desktop-calls`, or, to try this checkout's app instead, run `just run` in another terminal (it stops the installed service for the run and starts it again afterwards). Then run this again."
+                "Desktop Calls isn't running, so the checklist can't observe it. In another terminal, run `just run`: it runs this checkout's app in place of the installed service, with the app's BlueZ method calls logged for each step's capture, and starts the service again afterwards. (`systemctl --user start desktop-calls` starts the installed service instead, without those lines.) Then run this again."
             );
             return ExitCode::FAILURE;
         }
@@ -137,16 +137,11 @@ pub fn run(options: &Options) -> ExitCode {
         "Bluetooth D-Bus captures, a file a step: {}",
         captures.display()
     );
-    // The demo's app logs everything at debug; the user's app logs its
-    // BlueZ method calls only if it was started with them on.
-    let app_unheard = (!options.demo)
-        .then(|| app_log::bluez_methods_unlogged(&world.bus))
-        .flatten();
+    app_log::warn_if_bluez_methods_unlogged(&sitting);
     sitting.capture = Some(bus_capture::BusCapture::start(
         system_bus,
         session_bus,
         captures,
-        app_unheard,
     ));
     println!("While the runner waits, type skip to skip a step, or quit to stop.");
     flush();
@@ -492,15 +487,17 @@ fn run_step_captured(
         Ok((Some(mut record), back_to, way_back)) => {
             capture.snapshot("end");
             let ended_us = results::unix_micros();
-            let app = sitting.log.bluez_methods(started_us, ended_us);
-            record.bus = capture.write(step.id, started_us, ended_us, &app);
+            let (app, unheard) = app_log::step_lines(sitting, started_us, ended_us);
+            record.bus = capture.write(step.id, started_us, ended_us, &app, unheard.as_deref());
             Ok((Some(record), back_to, way_back))
         }
         Err(Stop::Quit) => {
             capture.snapshot("end");
             let ended_us = results::unix_micros();
-            let app = sitting.log.bluez_methods(started_us, ended_us);
-            if let Some(name) = capture.write(step.id, started_us, ended_us, &app) {
+            let (app, unheard) = app_log::step_lines(sitting, started_us, ended_us);
+            if let Some(name) =
+                capture.write(step.id, started_us, ended_us, &app, unheard.as_deref())
+            {
                 println!(
                     "The Bluetooth D-Bus capture of step {}, to where you quit: {}",
                     step.id,

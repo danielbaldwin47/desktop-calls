@@ -108,11 +108,7 @@ impl AppLog {
                 };
                 String::from_utf8_lossy(&output.stdout)
                     .lines()
-                    .filter_map(|text| {
-                        let value: Value = serde_json::from_str(text).ok()?;
-                        let at_us = value["__REALTIME_TIMESTAMP"].as_str()?.parse().ok()?;
-                        Some((at_us, lower_case_keys(&value)))
-                    })
+                    .filter_map(journal_record)
                     .collect()
             }
             Self::File(path) => std::fs::read_to_string(path)
@@ -160,17 +156,58 @@ pub fn bluez_methods_unlogged(session: &zbus::Connection) -> Option<String> {
     })
 }
 
+/// Says before the first step if the user's app logs no BlueZ method calls,
+/// so they can start it with them then rather than find them missing after.
+pub fn warn_if_bluez_methods_unlogged(sitting: &super::sitting::Sitting) {
+    if let Some(why) = sitting.users_app().and_then(bluez_methods_unlogged) {
+        println!(
+            "\nNot captured: {why}.\nTo have them in each step's capture, type quit now, run `just run` in another terminal, and run this again.\n"
+        );
+    }
+}
+
+/// How long after a step ends the app's lines are still its own: the
+/// journal times a line when it receives it, a moment after the app logged
+/// it, so a reply at the step's end would otherwise fall between steps.
+const APP_LINE_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The app's BlueZ method lines for a step from `started_us` to
+/// `ended_us`, and, against the user's app, why there are none if it logs
+/// none now: it may have been started again since the last step.
+pub fn step_lines(
+    sitting: &super::sitting::Sitting,
+    started_us: u64,
+    ended_us: u64,
+) -> (Vec<(u64, String)>, Option<String>) {
+    std::thread::sleep(APP_LINE_GRACE);
+    let grace = u64::try_from(APP_LINE_GRACE.as_micros()).unwrap_or(u64::MAX);
+    (
+        sitting
+            .log
+            .bluez_methods(started_us, ended_us.saturating_add(grace)),
+        sitting.users_app().and_then(bluez_methods_unlogged),
+    )
+}
+
 /// Whether a `RUST_LOG` of `filter` turns on the app's BlueZ method lines:
 /// debug or trace for everything, or for `bluez_dbus`.
 fn logs_bluez_methods(filter: Option<&str>) -> bool {
     filter.is_some_and(|filter| {
-        filter.split(',').map(str::trim).any(|directive| {
+        filter.split(',').any(|directive| {
             matches!(
-                directive,
+                directive.trim().to_ascii_lowercase().as_str(),
                 "debug" | "trace" | "bluez_dbus=debug" | "bluez_dbus=trace" | "bluez_dbus"
             )
         })
     })
+}
+
+/// A `journalctl -o json` line: when the journal received it, and its
+/// fields under the names the app's log file uses.
+fn journal_record(text: &str) -> Option<(u64, Value)> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let at_us = value["__REALTIME_TIMESTAMP"].as_str()?.parse().ok()?;
+    Some((at_us, lower_case_keys(&value)))
 }
 
 /// A journal entry's fields under the names the app's log file uses.
@@ -294,6 +331,7 @@ mod tests {
     #[test]
     fn the_switch_is_on_for_debug_for_everything_or_for_bluez_dbus() {
         for on in [
+            "info,bluez_dbus=DEBUG",
             "info,bluez_dbus=debug",
             "debug",
             "warn, bluez_dbus",
@@ -305,6 +343,17 @@ mod tests {
             assert!(!logs_bluez_methods(Some(off)), "{off}");
         }
         assert!(!logs_bluez_methods(None));
+    }
+
+    #[test]
+    fn a_journal_line_reads_as_the_log_files_fields() {
+        let line = r#"{"__REALTIME_TIMESTAMP":"1794805679300037","PRIORITY":"7","SYSLOG_IDENTIFIER":"desktop-calls","EVENT_KIND":"bluez-method-called","OBJECT":"adapter","INTERFACE":"org.bluez.Adapter1","METHOD":"StartDiscovery","MESSAGE":"Called BlueZ"}"#;
+        let (at_us, value) = journal_record(line).expect("a record");
+        assert_eq!(at_us, 1_794_805_679_300_037);
+        assert_eq!(
+            bluez_method(&value).as_deref(),
+            Some("app: call org.bluez.Adapter1.StartDiscovery on adapter")
+        );
     }
 
     #[test]

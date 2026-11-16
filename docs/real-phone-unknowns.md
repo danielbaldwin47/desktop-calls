@@ -87,10 +87,9 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 
 ## RPU-12: `ConnectProfile` errors on a Phone with unresolved services
 - Assumed: hands-free `ConnectProfile` on the Pixel fails with a `br-connection-*` error, and `Connect` on a Phone with one profile down brings it up; the error for unresolved services is unknown.
-- Source: `docs/research/2026-11-05-handsfree-not-back.md`; #385; retro A5.
+- Source: `docs/research/2026-11-05-handsfree-not-back.md`; #385; retro A5. BlueZ's real error is in step 6.7's Bluetooth D-Bus capture when the app was started by `just run`: `app: error org.bluez.Device1.ConnectProfile from device: <error name>: <message>`, addresses and numbers hidden (`crates/desktop-calls/src/bluez_log.rs`).
 - Observed by: 6.7
 - Status: open
-- Seen through: with the app started by `just run`, each step's Bluetooth D-Bus capture holds the app's `app: error org.bluez.Device1.ConnectProfile from device: <error name>: <message>` line, BlueZ's real error, addresses and numbers hidden (`crates/desktop-calls/src/bluez_log.rs`).
 
 ## RPU-13: Calls off: reconnecting an unblocked Pixel
 - Assumed: after Calls Off, `Connect` on the unblocked Pixel reconnects in time, `br-connection-busy` is possible when the Pixel pages at the same moment, and WirePlumber brings hands-free back after every reconnect.

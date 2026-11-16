@@ -93,3 +93,36 @@ impl<E: fmt::Display> fmt::Display for Hidden<'_, E> {
         formatter.write_str(&hide_numbers(&text))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_errors_addresses_and_numbers_are_hidden() {
+        let error = "org.freedesktop.DBus.Error.UnknownObject: no /org/bluez/hci0/dev_FC_41_16_00_00_01 for AA:BB:CC:DD:EE:FF, dialling +1 (555) 123-4567";
+        let shown = Hidden(&error).to_string();
+        assert!(
+            shown.starts_with("org.freedesktop.DBus.Error.UnknownObject: no /org/bluez/hci0/dev_dev-"),
+            "{shown}"
+        );
+        assert!(shown.ends_with("dialling <number>"), "{shown}");
+        for private in ["FC_41", "AA:BB", "555"] {
+            assert!(!shown.contains(private), "{private} in {shown}");
+        }
+    }
+
+    #[test]
+    fn an_object_is_named_by_its_kind() {
+        for (path, kind) in [
+            ("/", "root"),
+            ("/org/bluez", "bluez"),
+            ("/org/bluez/hci0", "adapter"),
+            ("/org/bluez/hci0/dev_FC_41_16_00_00_01", "device"),
+            ("/org/bluez/hci0/dev_FC_41_16_00_00_01/fd0", "device-part"),
+            ("/io/github/danielbaldwin47/DesktopCalls/agent", "other"),
+        ] {
+            assert_eq!(object_kind(path), kind, "{path}");
+        }
+    }
+}

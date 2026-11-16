@@ -183,9 +183,23 @@ fn pair_through_the_window(sitting: &mut Sitting, contacts: ContactsBox) -> Resu
     Ok(())
 }
 
-/// Records what the finish page says Contacts came to: synced passes.
-fn check_synced(sitting: &mut Sitting, state: &AppState) {
+/// Records what the finish page says Contacts came to, with
+/// [`CONTACTS_BOX`] left ticked: synced passes. A Pixel that refused them,
+/// where the page says so and that Calls still work and the app's log
+/// since `paired_us` says the Pixel refused (not that the Desktop's own
+/// sync failed), did something 1.2 didn't expect, and the step carries on
+/// to the first Call.
+fn check_synced(sitting: &mut Sitting, state: &AppState, paired_us: u64) {
     let summary = window_field(state, "summary").unwrap_or_default();
+    if summary.starts_with(REFUSED_SUMMARY)
+        && summary.contains(CALLS_STILL_WORK)
+        && logged_refused(sitting, paired_us)
+    {
+        sitting.unexpected(&format!(
+            "The Pixel refused Contacts as it paired, though {CONTACTS_BOX} was to be left ticked, and the app's log says the Pixel refused. The finish page says: {summary}"
+        ));
+        return;
+    }
     sitting.check(
         summary.starts_with("Synced"),
         format!("The finish page says: {summary}"),
@@ -216,6 +230,7 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
         return Ok(());
     };
     let started = Instant::now();
+    let paired_us = unix_micros();
     pair_through_the_window(sitting, ContactsBox::Ticked)?;
     sitting.say(
         "If the Pixel asks to allow access to contacts and call history, tap Allow.",
@@ -231,7 +246,7 @@ pub(super) fn pair_to_first_call(sitting: &mut Sitting) -> Result<(), Stop> {
         );
         return Ok(());
     }
-    check_synced(sitting, &finished.state);
+    check_synced(sitting, &finished.state, paired_us);
     if !add_the_keybinding(sitting)? {
         return Ok(());
     }
@@ -393,7 +408,11 @@ pub(super) fn contacts_shared_later(sitting: &mut Sitting) -> Result<(), Stop> {
 /// 1.3's finish page: the Pixel didn't share Contacts, so it says that,
 /// and that Calls still work, and the app's log says the Pixel refused.
 /// Returns whether that is so, for the rest of the step: a Pixel that
-/// shared Contacts as it paired has nothing to turn on later.
+/// shared Contacts as it paired has nothing to turn on later. A Pixel that
+/// shared them with the box unticked did something 1.3 didn't expect:
+/// observed, unexpected, not failed. A page that says contacts aren't
+/// shared "yet" still fails: it follows the Desktop's own sync failing as
+/// well as the Pixel, and the step can't tell which.
 fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> Result<bool, Stop> {
     let summary = window_field(state, "summary")
         .unwrap_or_default()
@@ -402,18 +421,18 @@ fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> 
         let unticked = sitting.ask(&format!(
             "The Pixel shared Contacts as it paired. Did you untick {CONTACTS_BOX} on the Pixel before tapping Pair?"
         ))?;
-        sitting.check(
-            unticked,
-            if unticked {
-                format!(
-                    "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so there is nothing to turn on later. The finish page says: {summary}"
-                )
-            } else {
+        if unticked {
+            sitting.unexpected(&format!(
+                "This Pixel shares Contacts as it pairs even with {CONTACTS_BOX} unticked, so there is nothing to turn on later. The finish page says: {summary}"
+            ));
+        } else {
+            sitting.check(
+                false,
                 format!(
                     "{CONTACTS_BOX} was left ticked, so the Pixel shared Contacts as it paired. Run this step again and untick it."
-                )
-            },
-        );
+                ),
+            );
+        }
         return Ok(false);
     }
     let refused = summary.starts_with(REFUSED_SUMMARY);
@@ -421,10 +440,7 @@ fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> 
         refused && summary.contains(CALLS_STILL_WORK),
         format!("The finish page says: {summary}"),
     );
-    let logged = sitting
-        .log_since(paired_us)
-        .iter()
-        .any(|line| line.event_kind == "contacts-sync-ended" && line.message.ends_with(": denied"));
+    let logged = logged_refused(sitting, paired_us);
     sitting.check(
         logged,
         if logged {
@@ -434,6 +450,14 @@ fn judge_not_shared(sitting: &mut Sitting, state: &AppState, paired_us: u64) -> 
         },
     );
     Ok(refused)
+}
+
+/// Whether the app's log since `from_us` says the Pixel refused Contacts.
+fn logged_refused(sitting: &Sitting, from_us: u64) -> bool {
+    sitting
+        .log_since(from_us)
+        .iter()
+        .any(|line| line.event_kind == "contacts-sync-ended" && line.message.ends_with(": denied"))
 }
 
 /// 1.3 once the Setup Window has closed: the "Contacts not shared" Problem

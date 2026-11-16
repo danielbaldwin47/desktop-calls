@@ -296,7 +296,7 @@ fn choose_file(
             let ran_any = runnable.iter().any(|step| file.step(step.id).is_some());
             let unfinished = runnable.iter().any(|step| {
                 file.step(step.id)
-                    .is_none_or(|record| record.outcome != Outcome::Pass)
+                    .is_none_or(|record| !record.outcome.is_done())
             });
             ran_any && unfinished
         });
@@ -305,11 +305,18 @@ fn choose_file(
             let passed: Vec<String> = runnable
                 .iter()
                 .filter_map(|step| file.step(step.id))
-                .filter(|record| record.outcome == Outcome::Pass)
-                .map(|record| format!("{} ({})", record.id, which_run(record.run)))
+                .filter(|record| record.outcome.is_done())
+                .map(|record| {
+                    let unexpected = if record.outcome == Outcome::Unexpected {
+                        ", observed, unexpected"
+                    } else {
+                        ""
+                    };
+                    format!("{} ({}{unexpected})", record.id, which_run(record.run))
+                })
                 .collect();
             println!(
-                "Resuming the results started {}, as run {} of them. Passed already: {}. (--fresh starts over.)",
+                "Resuming the results started {}, as run {} of them. Done already: {}. (--fresh starts over.)",
                 file.started,
                 file.run() + 1,
                 if passed.is_empty() {
@@ -338,7 +345,7 @@ fn run_group(
         .filter(|step| step.script.is_some())
         .filter(|step| {
             file.step(step.id)
-                .is_none_or(|record| record.outcome != Outcome::Pass)
+                .is_none_or(|record| !record.outcome.is_done())
         })
         .collect();
     let waiting: Vec<&Step> = group
@@ -450,6 +457,9 @@ fn run_step(
     let mut not_ready = false;
     let outcome = match finished {
         Ok(()) if findings.failed => Outcome::Fail,
+        Ok(()) if findings.unexpected => {
+            unexpected_unless_the_app_erred(&sitting.log, &mut findings, started_us)
+        }
         Ok(()) => Outcome::Pass,
         // A step that failed before it offered to go back keeps its
         // failure; one that only found it couldn't start records nothing.
@@ -494,12 +504,12 @@ fn run_step(
         && match outcome {
             Outcome::Fail => true,
             Outcome::Skipped => not_ready,
-            Outcome::Pass => false,
+            Outcome::Pass | Outcome::Unexpected => false,
         };
     let ended_us = results::unix_micros();
-    // A failed step keeps the app's log from its time, for the agent who
-    // files it.
-    let journal = if outcome == Outcome::Fail {
+    // A failed or unexpected step keeps the app's log from its time, for
+    // the agent who files it.
+    let journal = if matches!(outcome, Outcome::Fail | Outcome::Unexpected) {
         sitting
             .log
             .lines(started_us, ended_us)
@@ -516,8 +526,15 @@ fn run_step(
             Outcome::Pass => "passed",
             Outcome::Fail => "failed",
             Outcome::Skipped => "skipped",
+            Outcome::Unexpected => "observed, unexpected",
         }
     );
+    if outcome == Outcome::Unexpected {
+        println!(
+            "  The Pixel did something this step didn't expect, and Desktop Calls logged no error. What was seen is kept in the results for an agent to read, and the run carries on. The Pixel is left {}.",
+            pixel_left(&sitting.now())
+        );
+    }
     if let Some(id) = back_to {
         println!("  Going back to step {id}.");
     }
@@ -553,7 +570,7 @@ fn say_how_to_go_on(
         .filter(|earlier| earlier.script.is_some())
         .filter(|earlier| {
             file.step(earlier.id)
-                .is_none_or(|record| record.outcome != Outcome::Pass)
+                .is_none_or(|record| !record.outcome.is_done())
         })
         .map(|earlier| earlier.id)
         .collect();
@@ -625,6 +642,7 @@ fn record(file: &mut ResultFile, order: &[&str], step: StepRecord) {
 fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: bool) {
     let run = file.run();
     let mut not_passed: Vec<&str> = Vec::new();
+    let mut unexpected: Vec<&str> = Vec::new();
     println!();
     println!("Summary:");
     for group in groups {
@@ -654,6 +672,14 @@ fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: b
                     not_passed.push(step.id);
                     println!("  {} skipped{when}: {}", step.id, record.evidence.join(" "));
                 }
+                Outcome::Unexpected => {
+                    unexpected.push(step.id);
+                    println!(
+                        "  {} observed, unexpected{when}: {}",
+                        step.id,
+                        what_was_unexpected(record)
+                    );
+                }
             }
         }
         if !waiting.is_empty() {
@@ -665,6 +691,12 @@ fn summarise(file: &ResultFile, groups: &[&Group], options: &Options, stopped: b
         }
     }
     println!("Results: {}", file.path.display());
+    if !unexpected.is_empty() {
+        println!(
+            "Observed, unexpected: {}. Not failures, and not run again; an agent reads what was seen before the next sitting.",
+            words_list(&unexpected)
+        );
+    }
     let command = resume_command(options);
     let next_group = options
         .group
@@ -701,6 +733,47 @@ fn why_failed(record: &StepRecord) -> String {
     } else {
         failures.join(" ")
     }
+}
+
+/// What `record`, observed and unexpected, saw that the step didn't expect.
+fn what_was_unexpected(record: &StepRecord) -> String {
+    let seen: Vec<&str> = record
+        .evidence
+        .iter()
+        .filter_map(|line| line.strip_prefix("Unexpected: "))
+        .collect();
+    seen.join(" ")
+}
+
+/// A step that ran to its end with the Phone doing something it didn't
+/// expect is "observed, unexpected", unless the app logged an error in the
+/// step's time: then the app may be at fault, and the step fails, with the
+/// errors in its evidence.
+fn unexpected_unless_the_app_erred(
+    log: &AppLog,
+    findings: &mut sitting::Findings,
+    started_us: u64,
+) -> Outcome {
+    let Some(lines) = log.read(started_us, results::unix_micros()) else {
+        let why = "The Pixel did something this step didn't expect, and Desktop Calls' log couldn't be read to check it logged no error";
+        println!("  Failed: {why}.");
+        findings.evidence.push(format!("Failed: {why}."));
+        return Outcome::Fail;
+    };
+    let errors: Vec<String> = lines
+        .iter()
+        .filter(|line| line.level == "error")
+        .map(app_log::LogLine::excerpt)
+        .collect();
+    if errors.is_empty() {
+        return Outcome::Unexpected;
+    }
+    let why = "Desktop Calls logged an error while the Pixel did something this step didn't expect";
+    println!("  Failed: {why}.");
+    findings
+        .evidence
+        .push(format!("Failed: {why}: {}", errors.join(" | ")));
+    Outcome::Fail
 }
 
 /// `1.1`, `1.1 and 1.3`, `1.1, 1.2 and 1.3`.
@@ -760,5 +833,68 @@ impl std::fmt::Display for Stop {
             Self::BackTo(id) => write!(formatter, "going back to step {id}"),
             Self::NotReady(why) => formatter.write_str(why),
         }
+    }
+}
+
+/// The rule that keeps "observed, unexpected" from hiding a fault of the
+/// app's own, at the runner's interface: the demo can't make the app log
+/// an error on cue, so these give it a log file directly.
+#[cfg(test)]
+mod tests {
+    use super::{AppLog, Outcome, results, sitting::Findings, unexpected_unless_the_app_erred};
+
+    /// A log file holding one line at `level`, logged now.
+    fn log_with(level: &str) -> (tempfile::TempDir, AppLog) {
+        let directory = tempfile::tempdir().expect("a directory");
+        let path = directory.path().join("desktop-calls.log");
+        let line = format!(
+            r#"{{"timestamp_us":{},"level":"{level}","event_kind":"phone-command-failed","message":"Hang up never confirmed"}}"#,
+            results::unix_micros()
+        );
+        std::fs::write(&path, line + "\n").expect("write the log");
+        (directory, AppLog::File(path))
+    }
+
+    #[test]
+    fn an_unexpected_step_fails_when_the_app_logged_an_error_in_its_time() {
+        let started = results::unix_micros() - 1_000_000;
+        let (_directory, log) = log_with("ERROR");
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, started);
+        assert_eq!(outcome, Outcome::Fail);
+        assert!(
+            findings.evidence.iter().any(|line| line
+                .starts_with("Failed: Desktop Calls logged an error")
+                && line.contains("Hang up never confirmed")),
+            "{:?}",
+            findings.evidence
+        );
+    }
+
+    #[test]
+    fn an_unexpected_step_stays_unexpected_when_the_app_logged_only_warnings() {
+        let started = results::unix_micros() - 1_000_000;
+        let (_directory, log) = log_with("WARN");
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, started);
+        assert_eq!(outcome, Outcome::Unexpected);
+        assert!(findings.evidence.is_empty(), "{:?}", findings.evidence);
+    }
+
+    #[test]
+    fn an_unexpected_step_fails_when_the_apps_log_cant_be_read() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let log = AppLog::File(directory.path().join("never-written.log"));
+        let mut findings = Findings::default();
+        let outcome = unexpected_unless_the_app_erred(&log, &mut findings, 0);
+        assert_eq!(outcome, Outcome::Fail);
+        assert!(
+            findings
+                .evidence
+                .iter()
+                .any(|line| line.contains("couldn't be read")),
+            "{:?}",
+            findings.evidence
+        );
     }
 }

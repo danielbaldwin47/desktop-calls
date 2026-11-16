@@ -250,7 +250,7 @@ fn checklist_steps() -> Vec<String> {
 /// passed, with `measurements` for the steps it names, and scores it
 /// beside every scenario passing.
 fn score_checklist(directory: &Path, ids: &[String], measurements: &[(&str, &str)]) -> String {
-    score_checklist_skipping(directory, ids, measurements, &[])
+    score_checklist_with_results(directory, ids, measurements, &[])
 }
 
 /// As [`score_checklist`], with the steps `skipped` skipped.
@@ -260,6 +260,18 @@ fn score_checklist_skipping(
     measurements: &[(&str, &str)],
     skipped: &[&str],
 ) -> String {
+    let results: Vec<(&str, &str)> = skipped.iter().map(|id| (*id, "skipped")).collect();
+    score_checklist_with_results(directory, ids, measurements, &results)
+}
+
+/// As [`score_checklist`], with each step `results` names recorded with
+/// the result it gives, such as `("1.3", "unexpected")`.
+fn score_checklist_with_results(
+    directory: &Path,
+    ids: &[String],
+    measurements: &[(&str, &str)],
+    results: &[(&str, &str)],
+) -> String {
     let report = junit(directory, &scenarios(), &[]);
     let steps: Vec<String> = ids
         .iter()
@@ -268,11 +280,10 @@ fn score_checklist_skipping(
                 .iter()
                 .find(|(named, _)| named == id)
                 .map_or("{}", |(_, measured)| measured);
-            let result = if skipped.contains(&id.as_str()) {
-                "skipped"
-            } else {
-                "pass"
-            };
+            let result = results
+                .iter()
+                .find(|(named, _)| named == id)
+                .map_or("pass", |(_, result)| *result);
             format!(
                 r#"{{ "id": "{id}", "title": "Step {id}", "result": "{result}", "evidence": [], "measurements": {measured}, "started_us": 0, "ended_us": 0, "journal": [] }}"#
             )
@@ -375,6 +386,21 @@ fn a_skipped_step_that_measured_nothing_leaves_item_1_manual() {
 }
 
 #[test]
+fn a_step_observed_unexpected_leaves_item_5_manual_and_is_counted() {
+    let directory = tempfile::tempdir().expect("a directory");
+
+    let text = score_checklist_with_results(
+        directory.path(),
+        &checklist_steps(),
+        &[],
+        &[("1.3", "unexpected")],
+    );
+
+    assert_eq!(status(&text, 5), "MANUAL", "{text}");
+    assert!(row(&text, 5).contains("1 observed unexpected"), "{text}");
+}
+
+#[test]
 fn a_codec_never_reported_fails_item_3() {
     let directory = tempfile::tempdir().expect("a directory");
 
@@ -461,7 +487,15 @@ fn a_directory_of_shard_reports_counts_every_shard() {
         junit(&shard, names, &[]);
     }
 
-    let text = scorecard(&["--scenarios", directory.path().to_str().unwrap()]);
+    // No Checklist run: not the user's own result files, which would make
+    // the test pass or fail by what is on this computer.
+    let results = directory.path().join("no-checklist-runs");
+    let text = scorecard(&[
+        "--scenarios",
+        directory.path().to_str().unwrap(),
+        "--results",
+        results.to_str().unwrap(),
+    ]);
 
     assert!(row(&text, 1).contains("2 reports under"), "{text}");
     for item in [1, 2, 5, 6] {

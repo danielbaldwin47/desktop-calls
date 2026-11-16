@@ -66,6 +66,9 @@ pub struct Findings {
     pub evidence: Vec<String>,
     pub measurements: Map<String, Value>,
     pub failed: bool,
+    /// The Phone did something the step did not anticipate (see
+    /// [`Sitting::unexpected`]).
+    pub unexpected: bool,
     /// Measurements the step set out to take and hasn't: each becomes
     /// `null` when the step ends, so the scorecard sees what never
     /// happened, however the step stopped.
@@ -137,6 +140,18 @@ impl Sitting {
             self.findings.evidence.push(format!("Failed: {text}"));
             self.findings.failed = true;
         }
+    }
+
+    /// Records that the Phone did something the step did not anticipate,
+    /// while the app behaved as it should: the step ends "observed,
+    /// unexpected" rather than failed, unless a check fails or the app
+    /// logs an error in its time. `text` says what the Phone did and what
+    /// the app showed for it.
+    pub fn unexpected(&mut self, text: &str) {
+        println!("  Unexpected: {text}");
+        flush();
+        self.findings.evidence.push(format!("Unexpected: {text}"));
+        self.findings.unexpected = true;
     }
 
     /// Records a measurement for the result file.

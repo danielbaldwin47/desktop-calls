@@ -146,7 +146,8 @@ def main() -> int:
     if not start:
         print("bound changes: no base to compare with (no origin/main); skipped.", file=sys.stderr)
         return 0
-    result = subprocess.run(["git", "-c", "safe.directory=*", "diff", "-U0", "--no-renames", start, "--", *PATHS],
+    result = subprocess.run(["git", "-c", "safe.directory=*", "diff", "-U0", "--no-renames", "--no-ext-diff",
+                             "--src-prefix=a/", "--dst-prefix=b/", start, "--", *PATHS],
                             capture_output=True, text=True)
     if result.returncode != 0:
         print(f"bound changes: `git diff {start}` failed: {result.stderr.strip()}", file=sys.stderr)

@@ -4,9 +4,15 @@ on diffs written out here, including #379's own. `just lint` runs them."""
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -79,6 +85,30 @@ class LetsThrough(unittest.TestCase):
     def test_a_deleted_file_is_not_read(self):
         text = f"diff --git a/{PATH} b/{PATH}\n--- a/{PATH}\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const CI_X: u8 = 1;\n"
         self.assertEqual(bound_changes.problems(text, read=lambda _: self.fail("read a deleted file")), [])
+
+
+class AgainstGit(unittest.TestCase):
+    def test_it_reads_a_real_diff_whatever_the_users_git_prefixes(self):
+        with tempfile.TemporaryDirectory() as repo:
+            git = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                            check=True, capture_output=True)
+            git("init", "-q")
+            git("config", "diff.mnemonicPrefix", "true")
+            path = os.path.join(repo, PATH)
+            os.makedirs(os.path.dirname(path))
+            open(path, "w").write("fn a() {}\n")
+            git("add", "-A")
+            git("commit", "-qm", "base")
+            open(path, "a").write(PR_379[0] + "\n")
+            here = os.getcwd()
+            os.chdir(repo)
+            try:
+                with mock.patch.dict(os.environ, {"BOUND_CHANGES_BASE": "HEAD"}), \
+                        contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(bound_changes.main(), 1)
+            finally:
+                os.chdir(here)
+        self.assertIn("CI_COLD_KEYSTROKE_DEADLINE", err.getvalue())
 
 
 class Values(unittest.TestCase):

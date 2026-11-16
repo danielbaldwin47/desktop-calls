@@ -191,9 +191,11 @@ fn a_phone_that_connects_by_itself_during_a_page_is_not_paged_again() {
 /// page it (ticket #212).
 #[test]
 fn a_phone_connected_unheard_between_pages_is_not_paged() {
-    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    let harness = Harness::builder()
+        .phone_name(PHONE_NAME)
+        .signal_held("Connected")
+        .start();
     let phone = harness.simulated_phone();
-    phone.enable_quirk("connected-unannounced");
     // The first page fails; the next is due 1 s later.
     harness.wait_for_app_log("br-connection-page-timeout", RECONNECT_DEADLINE);
     let paged = connects(&recorded(&harness));
@@ -218,9 +220,11 @@ fn a_phone_connected_unheard_between_pages_is_not_paged() {
 /// the Phone present, not as a failure to try again (ticket #212).
 #[test]
 fn a_page_answered_already_connected_counts_as_the_phone_present() {
-    let harness = Harness::builder().phone_name(PHONE_NAME).start();
+    let harness = Harness::builder()
+        .phone_name(PHONE_NAME)
+        .signal_held("Connected")
+        .start();
     let phone = harness.simulated_phone();
-    phone.enable_quirk("connected-unannounced");
     phone.wait_for_recorded(
         "the app pages the Phone before it is in range",
         DEADLINE,

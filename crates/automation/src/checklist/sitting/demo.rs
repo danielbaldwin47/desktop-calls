@@ -465,6 +465,8 @@ impl Demo {
             self.act_or_panic(action, call, waiting);
         }));
         if acted.is_err() {
+            // `real_phone_checklist_leftover_state.rs` fails a case on
+            // this line's "didn't work now": reword both together.
             println!("  demo: {action} didn't work now; see the message above.");
             flush();
         }

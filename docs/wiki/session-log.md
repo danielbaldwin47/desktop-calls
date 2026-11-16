@@ -23,7 +23,7 @@ This entry covers the owner's Real-Phone Checklist sitting of 2026-11-15 on a bu
   - #383 (`f1692f0`, 23:46:35Z, closes #380): the checklist runner keeps each run apart in one results file, sends the owner back to 1.1 while the Pixel is still paired, judges 1.3 from the journal, and ends every run with a summary.
   - #386 (`8aa9017`, 2026-11-16 00:08:36Z, closes #375): a paired device whose `Class` says Phone but whose services lack hands-free is followed if the user chose it, last time or in the Setup Window now. If nobody chose it, the window offers it as paired already. Cases 5 to 7 moved to #385.
 - **Why the Simulated Phone let these through** (each verified by the PR that closed the gap):
-  - It signalled `Paired` and `Bonded` together the moment a pairing was confirmed, so it couldn't hold back `Paired` as BlueZ 5.87 does. #374 added `--paired-signal-held`.
+  - It signalled `Paired` and `Bonded` together the moment a pairing was confirmed, so it couldn't hold back `Paired` as BlueZ 5.87 does. #374 added `--paired-signal-held` (now `--signal-held Paired`).
   - It always resolved services, so `UUIDs` always showed hands-free. #374 added `--services-unresolved` for an unpaired Phone; #386 extends it to a Phone found already paired.
   - Its `ForgetPairing` dropped the whole connection, as out of range, so the app only ever tried `Connect`. #376 added `ForgetPairingKeepingLink`.
   - It had no way to remove a connected device, or to fail a removal. #382 added both (`FailNextRemoveDevice`).

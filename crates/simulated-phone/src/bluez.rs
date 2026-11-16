@@ -16,6 +16,30 @@ use crate::objects::{
     Reply,
 };
 
+/// The `Device1` properties whose change signal is held back
+/// (`--signal-held`), set once at start.
+static HELD: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// The `Device1` properties `--signal-held` takes: each the app reads.
+pub const HOLDABLE: [&str; 3] = ["Paired", "Bonded", "Connected"];
+
+/// Holds back the change signal for each of `names` from now on.
+pub fn hold_signals(names: Vec<String>) {
+    // Set once, at start; a second call changes nothing.
+    let _ = HELD.set(names);
+}
+
+/// Whether a `Device1` change of `name` to `value` goes unsignalled, though
+/// a read says so: the property is held, and the value is true. A change
+/// to false is signalled, so only the read-true-signal-missing split is
+/// made (ticket #372).
+pub fn held(name: &str, value: &OwnedVariant) -> bool {
+    HELD.get()
+        .is_some_and(|held| held.iter().any(|one| one == name))
+        // `HOLDABLE` names booleans only, so any other value isn't held.
+        && bool::try_from(value).unwrap_or(false)
+}
+
 pub const SERVICE: &str = "org.bluez";
 pub const DEVICE: &str = "org.bluez.Device1";
 /// The Phone's battery level, which BlueZ reads over hands-free, so it goes

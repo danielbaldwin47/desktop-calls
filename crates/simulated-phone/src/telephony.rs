@@ -185,11 +185,6 @@ pub enum Quirk {
     /// put a fixed gap where a stall fell. The first Call is the one at the
     /// lowest path, the earliest still on the Phone.
     CallsGoApart,
-    /// BlueZ marks the Phone connected without sending the `Connected`
-    /// `PropertiesChanged`: the Desktop's last word on the Phone stays
-    /// "away" while BlueZ has it connected, as the real Desktop's was while
-    /// it paged a connected Phone every 45 s (ticket #212, cause unknown).
-    ConnectedUnannounced,
     /// The next `Device1.Connect` for the Phone is never answered, and
     /// changes nothing: as the real Desktop's app seemed to wait on one for
     /// good (ticket #216, inferred, RPU-11).
@@ -247,7 +242,6 @@ impl Quirk {
             "slow-service-level" => Some(Self::SlowServiceLevel),
             "calls-listed-late" => Some(Self::CallsListedLate),
             "calls-go-apart" => Some(Self::CallsGoApart),
-            "connected-unannounced" => Some(Self::ConnectedUnannounced),
             "connect-never-answers-once" => Some(Self::ConnectNeverAnswersOnce),
             "connect-busy-after-unblock" => Some(Self::ConnectBusyAfterUnblock),
             _ => None,
@@ -426,6 +420,35 @@ pub enum Signal {
     ModemRemoved { modem: OwnedObjectPath },
 }
 
+/// `PropertiesChanged` for `changed`, less the `Device1` changes held back
+/// (`--signal-held`); nothing if that leaves none.
+async fn properties_changed(
+    connection: &Connection,
+    path: &OwnedObjectPath,
+    interface: &str,
+    changed: &Properties,
+) -> zbus::Result<()> {
+    let changed: HashMap<&str, &OwnedVariant> = changed
+        .iter()
+        .filter(|(name, value)| {
+            interface != crate::bluez::DEVICE || !crate::bluez::held(name, value)
+        })
+        .map(|(name, value)| (name.as_str(), value))
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    connection
+        .emit_signal(
+            None::<&str>,
+            path.as_str(),
+            PROPERTIES,
+            "PropertiesChanged",
+            &(interface, changed, Vec::<String>::new()),
+        )
+        .await
+}
+
 impl Signal {
     /// Whether this is a `PropertiesChanged` that changes `name`.
     pub fn changes(&self, name: &str) -> bool {
@@ -438,21 +461,7 @@ impl Signal {
                 path,
                 interface,
                 changed,
-            } => {
-                let changed: HashMap<&str, &OwnedVariant> = changed
-                    .iter()
-                    .map(|(name, value)| (name.as_str(), value))
-                    .collect();
-                connection
-                    .emit_signal(
-                        None::<&str>,
-                        path.as_str(),
-                        PROPERTIES,
-                        "PropertiesChanged",
-                        &(*interface, changed, Vec::<String>::new()),
-                    )
-                    .await
-            }
+            } => properties_changed(connection, path, interface, changed).await,
             Self::VoiceCallPropertyChanged { path, name, value } => {
                 connection
                     .emit_signal(

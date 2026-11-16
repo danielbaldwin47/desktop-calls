@@ -61,7 +61,7 @@ pub fn quiet_hours_window(view: &QuietHoursWindowView) -> QuietHoursWindowText {
         } else {
             sentence(view.sentence)
         },
-        notice: view.refused.then_some("Start and end must differ"),
+        notice: view.refused.then_some("Start and end can't be the same"),
         keys: if view.on {
             vec![
                 (&["Tab"], "Next field"),
@@ -91,31 +91,29 @@ fn kept(sentence: QuietHoursSentence) -> String {
         QuietHoursSentence::Saved { start, end, .. }
         | QuietHoursSentence::OffNow { start, end }
         | QuietHoursSentence::Pending { start, end } => {
-            format!("Still {start}–{end}: nothing changed.")
+            format!("Not saved. Still {start}–{end}.")
         }
-        QuietHoursSentence::Off => "Nothing changed.".to_owned(),
+        QuietHoursSentence::Off => "Not saved.".to_owned(),
     }
 }
 
 fn sentence(sentence: QuietHoursSentence) -> String {
     match sentence {
-        QuietHoursSentence::Off => {
-            "Off. Calls stay on unless you turn them off from Desktop Calls in the bar.".to_owned()
-        }
+        QuietHoursSentence::Off => "Quiet hours are off.".to_owned(),
         QuietHoursSentence::Saved { start, end, day } => {
             let day = match day {
-                Some(QuietHoursDay::Today) => " today",
-                Some(QuietHoursDay::Tonight) => " tonight",
-                Some(QuietHoursDay::Tomorrow) => " tomorrow",
+                Some(QuietHoursDay::Today) => ", starting today",
+                Some(QuietHoursDay::Tonight) => ", starting tonight",
+                Some(QuietHoursDay::Tomorrow) => ", starting tomorrow",
                 None => "",
             };
-            format!("Saved. Calls go off{day} at {start} and come back at {end}, every day.")
+            format!("Saved. Calls are off from {start} to {end} every day{day}.")
         }
         QuietHoursSentence::OffNow { start, end } => {
-            format!("Saved. Calls are off until {end}, and every day from {start} to {end}.")
+            format!("Saved. Calls are off now until {end}, and from {start} to {end} every day.")
         }
-        QuietHoursSentence::Pending { start, end } => format!(
-            "Saved. Calls go off when this call ends, until {end}, and every day from {start} to {end}."
-        ),
+        QuietHoursSentence::Pending { start, end } => {
+            format!("Saved. Calls turn off after this call, and from {start} to {end} every day.")
+        }
     }
 }

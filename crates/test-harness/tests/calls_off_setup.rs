@@ -108,9 +108,9 @@ fn while_calls_are_off_the_setup_window_says_so_and_enter_turns_them_on() {
 
     assert_eq!(field(&state, "calls-off"), Some("Calls are off"));
     assert_eq!(field(&state, "calls-off-button"), Some("Turn calls on"));
-    assert!(
-        field(&state, "calls-off-text")
-            .is_some_and(|text| text.contains("until you turn calls on")),
+    assert_eq!(
+        field(&state, "calls-off-text"),
+        Some("Your phone stays disconnected. To pair or switch phones, turn calls on."),
         "{state:?}"
     );
     assert_eq!(field(&state, "dimmed"), Some("true"), "the step waits");

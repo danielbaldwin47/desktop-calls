@@ -23,7 +23,7 @@ pub(super) const PENDING: &str = "Calls off after this call";
 pub(super) const AGAIN: &str = PENDING;
 /// Calls turned off until a time that has already passed.
 pub(super) const UNTIL_PASSED: &str =
-    "That time has already passed, so calls stay on; choose a time ahead.";
+    "That time has already passed, so calls stay on. Choose a later time.";
 
 /// The Indicator's status while calls are off: until `until`, or until the
 /// user turns them on; for Quiet Hours, until they end. Each fits Omarchy's
@@ -50,13 +50,13 @@ pub struct SetupCallsOffText {
 /// the user turns them on; `quiet_hours` while Quiet Hours turned them off.
 #[must_use]
 pub fn setup_calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> SetupCallsOffText {
-    let waits = "Pairing and switching phones wait until calls are on.";
+    let waits = "To pair or switch phones, turn calls on.";
     let text = match (until, quiet_hours) {
         (Some(until), true) => {
             format!("Quiet hours keep your phone disconnected until {until}. {waits}")
         }
         (Some(until), false) => format!("Your phone stays disconnected until {until}. {waits}"),
-        (None, _) => format!("Your phone stays disconnected until you turn calls on. {waits}"),
+        (None, _) => format!("Your phone stays disconnected. {waits}"),
     };
     SetupCallsOffText {
         heading: "Calls are off",
@@ -69,7 +69,7 @@ pub fn setup_calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> SetupCall
 #[must_use]
 pub fn quiet_hours_set(hours: QuietHours) -> String {
     format!(
-        "Quiet hours are {} to {}: calls are off then every day, and on again after.",
+        "Quiet hours set: calls are off from {} to {} every day.",
         hours.start(),
         hours.end()
     )
@@ -85,7 +85,7 @@ pub fn quiet_hours_cleared() -> &'static str {
 #[must_use]
 pub fn quiet_hours_status(hours: QuietHours) -> String {
     format!(
-        "Quiet hours: calls are off every day from {} to {}.",
+        "Quiet hours: calls are off from {} to {} every day.",
         hours.start(),
         hours.end()
     )
@@ -94,7 +94,7 @@ pub fn quiet_hours_status(hours: QuietHours) -> String {
 /// Why `desktop-calls quiet-hours` or `SetQuietHours` refused the times.
 #[must_use]
 pub fn quiet_hours_unreadable() -> &'static str {
-    "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, with different start and end times, such as 22:00-07:00; or off to stop them."
+    "Give quiet hours as HH:MM-HH:MM on the 24-hour clock, such as 22:00-07:00, or off. The start and end can't be the same."
 }
 
 /// The choice under Turn calls off that turns them off for an hour, ending
@@ -117,9 +117,9 @@ pub(super) fn until_morning(until: TimeOfDay) -> String {
 pub fn calls_off_status(off: bool, until: Option<TimeOfDay>) -> Option<String> {
     off.then(|| match until {
         Some(until) => {
-            format!("Calls are off until {until}: your phone stays disconnected until then.")
+            format!("Calls are off until {until}. Your phone stays disconnected.")
         }
-        None => "Calls are off until you turn them on: your phone stays disconnected.".to_owned(),
+        None => "Calls are off until you turn them on. Your phone stays disconnected.".to_owned(),
     })
 }
 
@@ -129,7 +129,7 @@ pub fn calls_off_status(off: bool, until: Option<TimeOfDay>) -> Option<String> {
 pub fn calls_off_pending_status(until: Option<TimeOfDay>) -> String {
     match until {
         Some(until) => format!(
-            "Calls turn off when this call ends, until {until}; if the call lasts past {until}, they stay on."
+            "Calls turn off when this call ends, until {until}. If the call runs past {until}, they stay on."
         ),
         None => "Calls turn off when this call ends, until you turn them on.".to_owned(),
     }
@@ -157,11 +157,9 @@ pub fn calls_kept_on() -> &'static str {
 #[must_use]
 pub fn calls_turned(off: bool, until: Option<TimeOfDay>) -> String {
     match (off, until) {
-        (true, Some(until)) => format!(
-            "Calls are off until {until}: your phone stays disconnected, and connects again then."
-        ),
+        (true, Some(until)) => format!("Calls are off until {until}. Your phone reconnects then."),
         (true, None) => {
-            "Calls are off: your phone stays disconnected until you turn calls on.".to_owned()
+            "Calls are off. Your phone stays disconnected until you turn calls on.".to_owned()
         }
         (false, _) => "Calls are on: connecting your phone.".to_owned(),
     }
@@ -171,13 +169,13 @@ pub fn calls_turned(off: bool, until: Option<TimeOfDay>) -> String {
 /// than a day, which the time calls come back on couldn't say.
 #[must_use]
 pub fn calls_off_for_too_long() -> &'static str {
-    "Calls can be turned off for 1 minute to 24 hours, such as --for 90m or --for 2h; for longer, run desktop-calls calls off and turn them on yourself."
+    "Calls can be turned off for 1 minute to 24 hours, such as --for 90m or --for 2h. For longer, run desktop-calls calls off and turn them on yourself."
 }
 
 /// Why `desktop-calls calls off --until` refused its time.
 #[must_use]
 pub fn calls_off_until_unreadable() -> &'static str {
-    "Give the time calls come back on as HH:MM on the 24-hour clock, such as --until 21:30."
+    "Give the time as HH:MM on the 24-hour clock, such as --until 21:30."
 }
 
 /// What removing Desktop Calls says once it has unblocked the Phone it had
@@ -231,7 +229,9 @@ pub fn calls_turned_notice(notice: &CallsTurnedNotice) -> NotificationText {
                 || "Calls off after this call".to_owned(),
                 |until| format!("Calls off after this call (until {})", until.shown),
             ),
-            format!("{phone} stays connected until then. Keep calls on from the bar to cancel."),
+            format!(
+                "{phone} stays connected until then. To cancel, choose Keep calls on from the bar."
+            ),
         ),
         CallsTurned::On { reconnecting: true } => {
             ("Calls on".to_owned(), format!("{phone} will reconnect."))

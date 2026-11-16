@@ -1,6 +1,6 @@
 [package]
 name = "desktop-calls"
-description = "Take and place your Android Phone's cellular Calls on your Linux Desktop."
+description = "Take and place your Android phone's calls on your Linux desktop."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

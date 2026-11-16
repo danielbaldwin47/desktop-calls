@@ -118,7 +118,7 @@ fn hold_and_answer_names_who_waits_on_hold_and_end_and_answer_whose_call_ends() 
     );
     assert_eq!(
         consequence(&view, BannerChoice::HoldAndAnswer).as_deref(),
-        Some("Alice Smith waits on hold")
+        Some("Alice waits on hold")
     );
     assert_eq!(
         consequence(&view, BannerChoice::EndAndAnswer).as_deref(),
@@ -209,7 +209,7 @@ fn with_only_a_held_call_answer_says_that_call_stays_on_hold() {
     );
     assert_eq!(
         consequence(&view, BannerChoice::Answer).as_deref(),
-        Some("Alice Smith stays on hold")
+        Some("Alice stays on hold")
     );
 }
 

@@ -2,6 +2,40 @@
 
 Dated checkpoints so that a resumed or new session can pick up the hill climb. Read the newest entry first.
 
+## 2026-11-15 night: the owner's first Real-Phone sitting, what the Pixel showed, and #372 to #378 (checkpoint of `main` from `615bcc5` up to `8aa9017`; supersedes the entry below on the Real-Phone Checklist's state and on reruns)
+
+This entry covers the owner's Real-Phone Checklist sitting of 2026-11-15 on a build from `615bcc5`, and the issues and PRs that came from it: #372 to #378, #380 and #385. #387 (`8c8e107`, the owner's design answers) merged in the same range and is not covered here. Sources, read 2026-11-16 after 00:10Z: `gh issue view` and `gh pr view` for each, and `gh run view` for runs 43768035550 and 43769535599. The journal times in #372 and #373 are EST; every other time is UTC. Agents only read the Pixel's state; nothing ran on it. Phone addresses and names are left out, as the issues leave them out.
+
+- **What the real Phone showed** (from the journals quoted in #372 and #373; verified by those issues' authors):
+  - Step 1.1 into 1.2 (#373): the Pixel forgot the Desktop and dropped hands-free, while BlueZ kept it `Connected`. The app asked BlueZ for hands-free twice. Each `ConnectProfile` failed `br-connection-key-missing`, and each made BlueZ start a pairing that no agent could answer. The Pixel showed "Couldn't pair with <Desktop> because of an incorrect PIN or passkey."
+  - Step 1.2 (#372): three times, the Setup Window went choose → pairing → confirm → confirmed, then nothing, until the window was closed (inferred: by the owner). Afterwards BlueZ had the Pixel `Paired: yes`, `Bonded: yes`, `Trusted: no`, `Connected: yes`, with the hands-free UUID. The app reported `not-set-up`. When the window was reopened it listed the Pixel as nearby; choosing it sat at "pairing" for good.
+  - Step 1.3 (#380): the journal shows the Pixel shared Contacts as it paired, with no `contacts-prompt`, so the old step could not see a prompt. Inferred by #383, not checked on the Pixel: the box "Allow access to your contacts and call history" in the Pixel's Pair dialog was ticked. The results file mixed several runs and recorded the step 1.2 pairing under 1.3.
+- **Causes, verified against inferred:**
+  - #372, verified in BlueZ 5.87's `src/device.c`: when a pairing completes before the Phone's services are resolved, BlueZ signals `Bonded` at once but holds back the `Paired` signal until service discovery finishes. A property read already says `Paired: yes`. The app listened only for the `Paired` signal. Also verified, in the code: a Phone paired but unknown to the app stayed in the nearby list, and `Pair` answered `AlreadyExists`, which the app treated as success without moving the window. Inferred: that the held signal came from the reverse service discovery of a pairing the Pixel started.
+  - #373, verified from both journals: as above. Verified in the code: `key-missing` from `Device1.Connect` already meant pairing lost, but the same error from `ConnectProfile` counted as a failed command and was tried again.
+  - #375 and #377 were found by #374's and #376's reviews, not on the Pixel. Both causes are verified on the Simulated Phone by scenarios that failed first. Whether the real Pixel ever reaches either state is inferred.
+  - #378, verified: #326's tile border needs a GTK renderer program that the Dialer's idle first-frame preparation didn't cover, so a cold first keystroke compiled it on screen (about 280 ms on CI). Inferred: Mesa's software renderer still does some first-draw work on screen that preparation can't reach.
+- **Merged** (2026-11-15 to 2026-11-16, UTC):
+  - #374 (`db8c6e3`, 22:23:16Z, closes #372): a Phone BlueZ reports as `Bonded` counts as paired. `Pair` returning, or failing `AlreadyExists`, moves the Setup Window on to connecting. New info-level log lines: `pairing-code-asked`, `pairing-code-answered`, `paired`, `pairing-cancelled`, `setup-closed`, and `phone-paired` raised to info.
+  - #376 (`6283a2a`, 22:38:52Z, closes #373): `key-missing` or an authentication error from `ConnectProfile` is pairing lost. The app stops asking, and the pairing-lost Problem shows. Checklist step 1.1 now removes the Pixel on the Desktop first (below).
+  - #379 (`00f3411`, 23:15:13Z, closes #378): the idle preparation also draws a clipped border. A new cold-shader-cache scenario bounds every keystroke at 100 ms on GitHub's CI and 50 ms elsewhere; the warm scenario keeps its 50 ms bound. The justfile's warm-up runs twice.
+  - #382 (`cd68b35`, 23:39:38Z, closes #377): in the Setup Window, a Phone that forgot the pairing gets a "Pair again" page. Clicking it removes the stale pairing with `RemoveDevice`, never without the click, and goes straight into pairing that Phone. The chief of staff decided this first; the owner then kept it (comment on #377, 23:40:37Z).
+  - #383 (`f1692f0`, 23:46:35Z, closes #380): the checklist runner keeps each run apart in one results file, sends the owner back to 1.1 while the Pixel is still paired, judges 1.3 from the journal, and ends every run with a summary.
+  - #386 (`8aa9017`, 2026-11-16 00:08:36Z, closes #375): a paired device whose `Class` says Phone but whose services lack hands-free is followed if the user chose it, last time or in the Setup Window now. If nobody chose it, the window offers it as paired already. Cases 5 to 7 moved to #385.
+- **Why the Simulated Phone let these through** (each verified by the PR that closed the gap):
+  - It signalled `Paired` and `Bonded` together the moment a pairing was confirmed, so it couldn't hold back `Paired` as BlueZ 5.87 does. #374 added `--paired-signal-held`.
+  - It always resolved services, so `UUIDs` always showed hands-free. #374 added `--services-unresolved` for an unpaired Phone; #386 extends it to a Phone found already paired.
+  - Its `ForgetPairing` dropped the whole connection, as out of range, so the app only ever tried `Connect`. #376 added `ForgetPairingKeepingLink`.
+  - It had no way to remove a connected device, or to fail a removal. #382 added both (`FailNextRemoveDevice`).
+  - The rule in [testing](testing.md) ("Stand-ins must be as strict as the real service") applies; each gap above is one more case of it.
+- **The no-rerun rule was broken twice.** Run 43768035550 (PR #374, `b47c787`) and run 43769535599 (PR #376, `832f7ae`) each failed the 5000-contact Dialer timing scenario (292.6 ms and 274.7 ms against 50 ms), and each was rerun to green: both show `attempt=2`. Neither PR touched the Dialer. The cause was then found without a rerun and fixed in #379 (above). Every PR in this entry after #376 merged without a rerun; #379's own first CI run was red and was read, not rerun.
+- **Open:**
+  - #375's cases 5 to 7 (#385): what the window should say when `ConnectProfile` fails for a Phone with unresolved services needs the real BlueZ error.
+  - #381: three presence findings moved off #377.
+  - #384: gallery part 3 failed on CI (not read for this entry).
+  - #382 left open: no "still looking" deadline on the Pair again page. To watch at the next sitting: a pairing that BlueZ starts on `key-missing` may be turned down while the window is at pairing lost.
+  - The owner needs `just install` for the fixes in #374, #376, #379, #382 and #386; checklist step 1.1 asks for it.
+
 ## 2026-11-15 evening: the screenshot review's fixes, a red run traced by event order, #104 closed, and the design questions for the user (checkpoint of `main` from `d71a7f4` up to `fc72ab3`; supersedes the entry below on #104, #139, #262, #313 to #326's state and the open list)
 
 This entry covers the merges after `2846987`, from PR #357 (`d71a7f4`, already noted in the entry below) to PR #370 (`fc72ab3`, merged 13:53:51Z). Sources, read 2026-11-15 after 13:35Z: `gh pr list --state merged`, the bodies of PRs #357 and #359 to #370, `gh issue view` for #104, #139, #262, #362, #369 and every issue under "Open for the user", and `gh run list --branch main` with `gh run view 43713287809`. Times are UTC. Nothing ran on the Pixel. Issues #362, #366 and #369 are issues, not PRs; #358 is the wiki's own checkpoint (`b8468bb`, 12:07:33Z).

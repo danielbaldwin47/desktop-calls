@@ -174,7 +174,7 @@ fn after_the_lost_call_window_closes_with_the_phone_in_range_a_call_says_it_is_r
     assert_eq!(
         status(&harness),
         format!(
-            "{PHONE_NAME} ({address}) is in range, but not connected for calls: connecting it again."
+            "{PHONE_NAME} ({address}) is in range but not connected for calls yet. Reconnecting."
         )
     );
     assert_eq!(dial_refused(&harness, "phone-reconnecting"), RECONNECTING);

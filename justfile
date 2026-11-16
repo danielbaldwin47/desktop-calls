@@ -112,8 +112,8 @@ ci-scenarios *args:
 # on a Desktop that has run the app before, where Mesa keeps its compiled
 # programs between runs (#282). Without it, each scenario's cache is new and
 # empty, and on a machine with no GPU each first frame mostly waits for
-# Mesa's software renderer to compile programs. The same frames with a
-# cold cache are printed first, and not judged.
+# Mesa's software renderer to compile programs. Until #410 a cold-cache pass
+# printed the same frames first, judged by nothing: 10 s of CI's slowest job.
 # Run the first-frame timing scenarios, one at a time.
 ci-first-frame-timings:
     #!/usr/bin/env bash
@@ -122,12 +122,6 @@ ci-first-frame-timings:
     rm -rf "$cache"
     mkdir -p "$cache"
     files=(dialer_surface incoming_call_surfaces)
-    echo "First frames with a cold Mesa shader cache (reported, not judged):"
-    for file in "${files[@]}"; do
-        # Set but empty: each scenario's own empty cache (#298).
-        SCENARIO_SHADER_CACHE= just test-file "$file" --ignored --test-threads=1 --nocapture 2>&1 \
-            | grep -E "first frame|first Banner|the app took" || true
-    done
     echo "Warming the shared Mesa shader cache in $cache (not judged)"
     # Twice: Mesa keeps some of what a run compiles only from the run after,
     # so after one warm-up the Dialer's first keystroke still took 33 to 37

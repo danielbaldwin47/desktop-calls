@@ -4,7 +4,9 @@
 //! other states on its way to "added"), and where the owner's sitting of
 //! 2026-11-15 went wrong (#380): runs blended in one file, a resumed run
 //! failing 1.2 and pairing under 1.3, and 1.3 failing a Pixel that shares
-//! Contacts as it pairs.
+//! Contacts as it pairs; and where the next sitting went wrong (#392): 1.3
+//! waiting for a prompt the Pixel never shows, 1.4 failing on a Pixel that
+//! doesn't share Contacts, and a failed step not saying how to go on.
 
 // Clippy exempts `#[test]` functions but not their helpers. Like a test, a
 // helper whose step fails must fail the test at once with its message.
@@ -155,20 +157,90 @@ fn step_1_3_passes_a_pixel_that_shares_contacts_as_it_pairs_with_the_box_unticke
 }
 
 #[test]
-fn step_1_3_passes_a_pixel_that_refuses_contacts_with_the_box_unticked_and_says_how_to_share_them_again()
- {
+fn step_1_3_follows_the_contacts_not_shared_problem_and_the_app_syncs_without_pairing_again() {
     let results = tempfile::tempdir().expect("a results directory");
     let mut runner = Runner::start(&["1"], results.path());
-    runner.slips = vec![("contacts-access-off", "contacts-refused")];
     runner.quit_at = Some("1.4");
     let questions = runner.play(|_| "y".to_owned());
     assert!(questions.is_empty(), "{questions:?}");
     let result = result_file(results.path());
-    let prompt = step(&result, "1.3");
-    assert_eq!(prompt["result"], "pass", "{prompt:#}");
-    assert!(says(prompt, "refuses Contacts"), "{prompt:#}");
+    let later = step(&result, "1.3");
+    assert_eq!(later["result"], "pass", "{later:#}");
+    for said in [
+        "Calls still work",
+        "The app's log says the Pixel refused Contacts.",
+        "Desktop Calls shows the Contacts not shared Problem: Your phone isn't sharing contacts",
+        "without pairing again",
+        "The Pixel stayed connected and Desktop Calls didn't restart.",
+        "The Contacts not shared Problem went away.",
+    ] {
+        assert!(says(later, said), "{said:?} missing from {later:#}");
+    }
     assert!(
-        runner.printed("switch on Contacts and call history"),
+        runner.printed("turn on Contacts and call history"),
+        "{}",
+        runner.transcript.join("\n")
+    );
+}
+
+#[test]
+fn step_1_3_has_a_phone_that_asks_told_no_then_follows_the_problem() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    runner.slips = vec![("contacts-access-off", "contacts-prompt")];
+    runner.quit_at = Some("1.4");
+    runner.play(|_| "y".to_owned());
+    assert!(
+        runner.printed("tap Don't allow"),
+        "{}",
+        runner.transcript.join("\n")
+    );
+    let result = result_file(results.path());
+    let later = step(&result, "1.3");
+    assert_eq!(later["result"], "pass", "{later:#}");
+    assert!(says(later, "without pairing again"), "{later:#}");
+}
+
+#[test]
+fn step_1_4_has_contacts_turned_on_when_the_pixel_doesnt_share_them_then_reads_the_second_page() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    // The user stops 1.3 before turning Contacts on; 1.4 asks again.
+    runner.slips = vec![("contacts-access-on", "skip")];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+    let paging = step(&result, "1.4");
+    assert_eq!(paging["result"], "pass", "{paging:#}");
+    assert!(
+        runner.printed("so its Call History can't be read"),
+        "{}",
+        runner.transcript.join("\n")
+    );
+}
+
+#[test]
+fn step_1_4_doesnt_run_while_the_pixel_doesnt_share_contacts_and_says_what_to_do() {
+    let results = tempfile::tempdir().expect("a results directory");
+    let mut runner = Runner::start(&["1"], results.path());
+    // The user stops 1.3 before turning Contacts on, and 1.4's wait too.
+    runner.slips = vec![("contacts-access-on", "skip"), ("contacts-access-on", "skip")];
+    runner.play(|_| "y".to_owned());
+    let result = result_file(results.path());
+    let paging = step(&result, "1.4");
+    assert_eq!(paging["result"], "skipped", "{paging:#}");
+    assert!(
+        says(paging, "turn on Contacts and call history"),
+        "{paging:#}"
+    );
+    assert!(
+        !runner.printed("Reading Contacts and Call History with `just pbap-probe`"),
+        "{}",
+        runner.transcript.join("\n")
+    );
+    assert!(
+        runner.printed(
+            "The Pixel is left paired, connected and not sharing Contacts. To run 1.4 again: `just real-phone-checklist --demo 1`, which runs 1.3 first."
+        ),
         "{}",
         runner.transcript.join("\n")
     );
@@ -188,6 +260,14 @@ fn step_1_3_fails_when_the_box_was_left_ticked_and_the_summary_says_why_and_what
     });
     let result = result_file(results.path());
     assert_eq!(step(&result, "1.3")["result"], "fail", "{result:#}");
+    // Where the failure leaves the Pixel, and the way back, said at once.
+    assert!(
+        runner.printed(
+            "The Pixel is left paired, connected and sharing Contacts. To run 1.3 again: `just real-phone-checklist --demo 1`."
+        ),
+        "{}",
+        runner.transcript.join("\n")
+    );
     let summary = summary(&runner);
     assert!(
         summary

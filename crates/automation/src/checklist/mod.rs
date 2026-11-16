@@ -135,7 +135,7 @@ pub fn run(options: &Options) -> ExitCode {
 
     let order = steps::order();
     for group in &groups {
-        match run_group(&mut sitting, &mut file, group, &order) {
+        match run_group(&mut sitting, &mut file, group, &order, options.demo) {
             Ok(()) => {}
             Err(Stop::Quit) => {
                 println!();
@@ -330,6 +330,7 @@ fn run_group(
     file: &mut ResultFile,
     group: &Group,
     order: &[&str],
+    demo: bool,
 ) -> Result<(), Stop> {
     let to_run: Vec<&Step> = group
         .steps
@@ -398,9 +399,12 @@ fn run_group(
     }
     let mut queue: VecDeque<&Step> = to_run.into();
     while let Some(step) = queue.pop_front() {
-        let (record_of_step, back_to) = run_step(sitting, step)?;
+        let (record_of_step, back_to, way_back) = run_step(sitting, step)?;
         if let Some(record_of_step) = record_of_step {
             record(file, order, record_of_step);
+        }
+        if way_back {
+            say_how_to_go_on(&sitting.now(), file, group, step, demo);
         }
         // Going back runs the earlier step and every runnable one after it
         // up to this one again, then carries on as before.
@@ -426,12 +430,13 @@ fn which_run(run: u32) -> String {
     }
 }
 
-/// Runs one step's script and returns its record, if it has one, and the
-/// step to go back to, if the user chose to.
+/// Runs one step's script and returns its record, if it has one; the step
+/// to go back to, if the user chose to; and whether the user needs the way
+/// back to it spelled out: it failed, or couldn't run yet (#392).
 fn run_step(
     sitting: &mut Sitting,
     step: &Step,
-) -> Result<(Option<StepRecord>, Option<&'static str>), Stop> {
+) -> Result<(Option<StepRecord>, Option<&'static str>, bool), Stop> {
     println!();
     println!("Step {}: {}", step.id, step.title);
     flush();
@@ -442,6 +447,7 @@ fn run_step(
     };
     let mut findings = sitting.take_findings();
     let mut back_to = None;
+    let mut not_ready = false;
     let outcome = match finished {
         Ok(()) if findings.failed => Outcome::Fail,
         Ok(()) => Outcome::Pass,
@@ -454,7 +460,7 @@ fn run_step(
         Err(Stop::BackTo(id)) => {
             println!("  Going back to step {id}.");
             flush();
-            return Ok((None, Some(id)));
+            return Ok((None, Some(id), false));
         }
         // A check that failed before the skip keeps the step failed.
         Err(Stop::Skipped) if findings.failed => {
@@ -470,8 +476,26 @@ fn run_step(
             findings.evidence.push(format!("Failed: {what}."));
             Outcome::Fail
         }
+        Err(Stop::NotReady(why)) if findings.failed => {
+            findings.evidence.push(why);
+            Outcome::Fail
+        }
+        Err(Stop::NotReady(why)) => {
+            not_ready = true;
+            println!("  {why}");
+            findings.evidence.push(why);
+            Outcome::Skipped
+        }
         Err(Stop::Quit) => return Err(Stop::Quit),
     };
+    // A step the user skipped needs no way back spelled out, nor one the
+    // runner is going back from.
+    let way_back = back_to.is_none()
+        && match outcome {
+            Outcome::Fail => true,
+            Outcome::Skipped => not_ready,
+            Outcome::Pass => false,
+        };
     let ended_us = results::unix_micros();
     // A failed step keeps the app's log from its time, for the agent who
     // files it.
@@ -509,7 +533,68 @@ fn run_step(
         ended_us,
         journal,
     };
-    Ok((Some(record_of_step), back_to))
+    Ok((Some(record_of_step), back_to, way_back))
+}
+
+/// For `step`, which failed or couldn't run yet: how the Pixel is left, and
+/// the command that runs it again, with the earlier steps of `group` that
+/// command runs first, since it runs every one not yet passed (#392).
+fn say_how_to_go_on(
+    state: &watch::AppState,
+    file: &ResultFile,
+    group: &Group,
+    step: &Step,
+    demo: bool,
+) {
+    let first: Vec<&str> = group
+        .steps
+        .iter()
+        .take_while(|earlier| earlier.id != step.id)
+        .filter(|earlier| earlier.script.is_some())
+        .filter(|earlier| {
+            file.step(earlier.id)
+                .is_none_or(|record| record.outcome != Outcome::Pass)
+        })
+        .map(|earlier| earlier.id)
+        .collect();
+    let command = resume_command(&Options {
+        group: Some(group.number),
+        demo,
+        headless: false,
+        results: None,
+        fresh: false,
+    });
+    let first = if first.is_empty() {
+        String::new()
+    } else {
+        format!(", which runs {} first", words_list(&first))
+    };
+    println!(
+        "  The Pixel is left {}. To run {} again: `{command}`{first}.",
+        pixel_left(state),
+        step.id
+    );
+    flush();
+}
+
+/// How the Pixel stands with Desktop Calls, as "paired, connected and
+/// sharing Contacts", for a step that stops short.
+fn pixel_left(state: &watch::AppState) -> String {
+    if state.phone_name.is_empty() {
+        return "not paired with this computer".to_owned();
+    }
+    let connected = if state.connection_state == "connected" {
+        "connected"
+    } else {
+        "not connected"
+    };
+    let contacts = match state.contacts_state.as_str() {
+        "ready" => "sharing Contacts",
+        "syncing" => "syncing Contacts",
+        "permission-needed" => "asking whether to share Contacts",
+        _ => "not sharing Contacts",
+    };
+    format!("paired, {connected} and {contacts}")
 }
 
 /// A record of `step` as skipped, with why.
@@ -673,6 +758,7 @@ impl std::fmt::Display for Stop {
             Self::Quit => formatter.write_str("stopped"),
             Self::TimedOut(what) => formatter.write_str(what),
             Self::BackTo(id) => write!(formatter, "going back to step {id}"),
+            Self::NotReady(why) => formatter.write_str(why),
         }
     }
 }

@@ -7,6 +7,7 @@
 //! owner's next login. The running app keeps logging the lines until it
 //! next starts, since restarting it on the way out could end a Call.
 
+use std::io::Write as _;
 use std::time::{Duration, Instant};
 
 use zbus::Connection;
@@ -17,7 +18,7 @@ use super::sitting::{Sitting, Stop, flush};
 
 const UNIT: &str = "desktop-calls.service";
 /// The switch, as the user manager's environment holds it.
-const SWITCH: &str = "RUST_LOG=info,bluez_dbus=debug";
+const SWITCH: &str = app_log::BLUEZ_METHODS_SWITCH;
 /// How long the restarted app has to be back with its lines on.
 const BACK_DEADLINE: Duration = Duration::from_secs(30);
 const TICK: Duration = Duration::from_millis(100);
@@ -50,6 +51,8 @@ trait Unit {
 pub struct SwitchedOn {
     bus: Connection,
     before: Option<String>,
+    /// Whether the app came back with the lines on.
+    on: bool,
 }
 
 impl Drop for SwitchedOn {
@@ -61,15 +64,15 @@ impl Drop for SwitchedOn {
                 None => manager.unset_environment(&["RUST_LOG"]).await,
             }
         });
-        match put_back {
-            Ok(()) => println!(
-                "The app's BlueZ method lines are off again from Desktop Calls' next start; the running app keeps logging them until then, so nothing restarts it under you."
-            ),
-            Err(error) => println!(
-                "Couldn't turn the app's BlueZ method lines off again ({error}). Run `systemctl --user unset-environment RUST_LOG`; they are off anyway after your next login."
-            ),
-        }
-        flush();
+        // Never a panic here: the terminal may be gone (SIGHUP).
+        let said = match (put_back, self.on) {
+            (Ok(()), true) => "The app's BlueZ method lines are off again from Desktop Calls' next start; the running app keeps logging them until then, so nothing restarts it under you.".to_owned(),
+            (Ok(()), false) => "The app's BlueZ method switch is out of the user manager's environment again.".to_owned(),
+            (Err(error), _) => format!("Couldn't turn the app's BlueZ method lines off again ({error}). Run `systemctl --user unset-environment RUST_LOG`; they are off anyway after your next login."),
+        };
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "{said}");
+        let _ = out.flush();
     }
 }
 
@@ -86,7 +89,7 @@ pub fn offer(sitting: &mut Sitting) -> Result<Option<SwitchedOn>, Stop> {
     println!("\nNot captured: {why}.");
     if !installed_service_runs(&bus) {
         println!(
-            "To have them in each step's capture, type quit now, run `just run` in another terminal, and run this again.\n"
+            "To have them in each step's capture, type quit now, run `just run` in another terminal with `RUST_LOG` unset, and run this again.\n"
         );
         return Ok(None);
     }
@@ -99,6 +102,10 @@ pub fn offer(sitting: &mut Sitting) -> Result<Option<SwitchedOn>, Stop> {
         return Ok(None);
     }
     asked?;
+    if !sitting.now().calls.is_empty() {
+        println!("There's a Call now, which a restart would end; carrying on without them.\n");
+        return Ok(None);
+    }
     let before = zbus::block_on(async {
         let manager = ManagerProxy::new(&bus).await?;
         let before = manager.environment().await?;
@@ -114,7 +121,11 @@ pub fn offer(sitting: &mut Sitting) -> Result<Option<SwitchedOn>, Stop> {
             return Ok(None);
         }
     };
-    let switched = SwitchedOn { bus, before };
+    let mut switched = SwitchedOn {
+        bus,
+        before,
+        on: false,
+    };
     let restarted = zbus::block_on(async {
         ManagerProxy::new(&switched.bus)
             .await?
@@ -122,8 +133,8 @@ pub fn offer(sitting: &mut Sitting) -> Result<Option<SwitchedOn>, Stop> {
             .await
     });
     if let Err(error) = restarted {
-        println!("Couldn't restart Desktop Calls ({error}); carrying on without them.\n");
-        return Ok(Some(switched));
+        println!("Couldn't restart Desktop Calls ({error}); carrying on without them.");
+        return Ok(None);
     }
     let started = Instant::now();
     while app_log::bluez_methods_unlogged(&switched.bus).is_some() {
@@ -139,6 +150,7 @@ pub fn offer(sitting: &mut Sitting) -> Result<Option<SwitchedOn>, Stop> {
         }
         std::thread::sleep(TICK);
     }
+    switched.on = true;
     println!("On: Desktop Calls restarted with its BlueZ method calls logged.\n");
     flush();
     Ok(Some(switched))

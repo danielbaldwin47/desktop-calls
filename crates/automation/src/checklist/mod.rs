@@ -26,6 +26,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+
 use test_harness::Harness;
 use zbus::Connection;
 
@@ -65,15 +67,9 @@ pub fn run(options: &Options) -> ExitCode {
     let Some(directory) = results_directory(options) else {
         return ExitCode::FAILURE;
     };
-    let interrupted = Arc::new(AtomicBool::new(false));
-    // Ctrl-C stops the run between waits, so the results are kept and, under
-    // the Simulated Phone, every process is stopped.
-    if let Err(error) =
-        signal_hook::flag::register(signal_hook::consts::SIGINT, interrupted.clone())
-    {
-        eprintln!("Can't handle Ctrl-C: {error}");
+    let Some(interrupted) = stop_on_signals() else {
         return ExitCode::FAILURE;
-    }
+    };
 
     let world = if options.demo {
         World::demo(options.headless)
@@ -169,6 +165,21 @@ pub fn run(options: &Options) -> ExitCode {
     }
     summarise(&file, &groups, options, false);
     ExitCode::SUCCESS
+}
+
+/// The flag that Ctrl-C, a closed terminal or SIGTERM sets: the run stops
+/// between waits, so the results are kept, a switch turned on for the
+/// sitting goes off, and, under the Simulated Phone, every process is
+/// stopped. `None`, having said why, if the signals can't be handled.
+fn stop_on_signals() -> Option<Arc<AtomicBool>> {
+    let interrupted = Arc::new(AtomicBool::new(false));
+    for signal in [SIGINT, SIGHUP, SIGTERM] {
+        if let Err(error) = signal_hook::flag::register(signal, interrupted.clone()) {
+            eprintln!("Can't handle Ctrl-C: {error}");
+            return None;
+        }
+    }
+    Some(interrupted)
 }
 
 /// The groups asked for, or `None`, having said why, if the run can't start.

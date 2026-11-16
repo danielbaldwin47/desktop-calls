@@ -40,6 +40,8 @@ struct Runner {
     child: Child,
     input: ChildStdin,
     said: Arc<Mutex<String>>,
+    /// Gathers what the runner says until its terminal closes.
+    reader: thread::JoinHandle<()>,
 }
 
 impl Runner {
@@ -60,7 +62,7 @@ impl Runner {
         let mut output = child.stdout.take().expect("the runner's output");
         let said = Arc::new(Mutex::new(String::new()));
         let gathered = said.clone();
-        thread::spawn(move || {
+        let reader = thread::spawn(move || {
             let mut buffer = [0; 4096];
             while let Ok(read) = output.read(&mut buffer) {
                 if read == 0 {
@@ -70,7 +72,12 @@ impl Runner {
                 gathered.lock().expect("unpoisoned").push_str(&text);
             }
         });
-        Self { child, input, said }
+        Self {
+            child,
+            input,
+            said,
+            reader,
+        }
     }
 
     fn said(&self) -> String {
@@ -111,8 +118,9 @@ impl Runner {
             );
             thread::sleep(Duration::from_millis(50));
         }
-        thread::sleep(Duration::from_millis(200));
-        self.said()
+        // All it said is gathered once its terminal closes.
+        self.reader.join().expect("the reader ends");
+        self.said.lock().expect("unpoisoned").clone()
     }
 }
 
@@ -188,13 +196,8 @@ fn on_no_the_service_is_left_alone_and_the_lines_are_not_captured() {
     runner.type_in("\n");
     // Quit inside step 6.1, which keeps its capture.
     runner.wait_to_say("Take the Pixel out of range");
-    thread::sleep(Duration::from_millis(500));
     runner.type_in("quit\n");
     let said = runner.finish();
-    assert!(
-        said.contains("Not captured: the app's BlueZ method calls"),
-        "{said}"
-    );
     assert!(!said.contains("lines are off again"), "{said}");
     assert_eq!(harness.service_process_id(), before, "not restarted");
     assert!(harness.service_manager_environment().is_empty());

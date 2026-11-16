@@ -123,9 +123,9 @@ const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
 
 /// What the footer says when `bindings.lua` couldn't be read: one short,
 /// calm line on a ringing Banner, that the keybinding is unknown, rather than
-/// a guess that none is set (#366), and the Indicator's entry whose last
-/// page names the file and what to bind (the owner's decision, 2026-11-15).
-const KEYBINDING_UNREADABLE: &str = "Keybinding unknown. Phone setup… explains.";
+/// a guess that none is set (#366), and the Indicator's entry, which opens
+/// on the finish page that names the file and what to bind (#389).
+const KEYBINDING_UNREADABLE: &str = "Couldn't read your keybindings. See Phone setup…";
 
 /// The footer as one line of text, as the control interface reports it: a
 /// comma sits against the key before it.

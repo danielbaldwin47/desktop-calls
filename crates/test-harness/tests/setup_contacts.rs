@@ -456,6 +456,27 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
     assert_eq!(state.contacts.state, "denied");
 }
 
+/// The Pixel paired with "Allow access to your contacts and call history"
+/// unticked never asks: it closes the PBAP connection at once (ticket
+/// #392). The finish page says so, and how to allow it later, as for a
+/// refusal on the prompt.
+#[test]
+fn refused_at_once_the_finish_page_says_how_to_allow_it_later() {
+    let harness = fresh_install();
+    harness.simulated_phone().set_contacts_prompt("refuse");
+    pair_through_the_window(&harness);
+    wait_for_step(&harness, "contacts-warning", CONNECT_DEADLINE);
+
+    let state = wait_for_step(&harness, "done", PROMPT_DEADLINE);
+    let summary = field(&state, "summary").unwrap_or_default();
+    assert!(summary.contains("Calls still work"), "{summary}");
+    assert!(
+        summary.contains("turn on Contacts and call history"),
+        "how to allow it later: {summary}"
+    );
+    assert_eq!(state.contacts.state, "denied");
+}
+
 #[test]
 fn the_keybinding_is_written_exactly_as_shown_once_confirmed_and_not_at_all_when_declined() {
     let harness = fresh_install();

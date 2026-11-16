@@ -22,7 +22,7 @@ pub(super) fn problem(problem: ProblemKind) -> Option<Message> {
             Some(NextAction::Command("sudo pacman -S --needed bluez-obex")),
         ),
         ProblemKind::AudioNotSetUp => (
-            "This computer's audio isn't set up for phone calls yet. Setting it up restarts the audio.",
+            "This computer's audio isn't set up for phone calls yet. Once it is, this computer connects to your phone for calls by itself. A call's audio stays on your phone until you move it here. Setting it up restarts the audio.",
             None,
         ),
         ProblemKind::BluezHandsFree => (

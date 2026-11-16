@@ -16,6 +16,7 @@ mod calls;
 mod calls_off;
 mod calls_turned;
 mod collapse;
+mod contacts_again;
 mod desktop;
 mod dialling;
 mod input;
@@ -336,6 +337,7 @@ pub struct State {
     waiting_notices: u32,
     focus: Focus,
     contacts_sync: ContactsState,
+    asking_again: contacts_again::AskingAgain,
     /// Contacts have been read for this Phone: from the cache, or by a sync
     /// that finished.
     contacts_held: bool,
@@ -888,6 +890,7 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         Input::DoNotDisturbChanged(on) => state.do_not_disturb = on,
         input @ (Input::PairedPhonesListed
         | Input::OpenSetupWindow
+        | Input::PairAnotherPhone
         | Input::CloseSetupWindow
         | Input::SetupReady { .. }
         | Input::SetupUnavailable

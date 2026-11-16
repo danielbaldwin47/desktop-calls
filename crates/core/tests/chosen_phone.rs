@@ -297,6 +297,7 @@ fn paired_phones_are_offered_only_while_none_is_followed() {
             Input::PhonePaired(pixel()),
             Input::PairedPhonesListed,
             Input::OpenSetupWindow,
+            Input::PairAnotherPhone,
         ],
     );
     assert_eq!(state.phone(), Some(&old()));

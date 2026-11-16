@@ -46,12 +46,14 @@ pub enum SetupStep {
     /// connected again, to carry on.
     ContactsPhoneAway { phone: Phone, back: bool },
     /// Finished: what became of Contacts, and the keybinding. `connected`
-    /// while the Phone is.
+    /// while the Phone is. `pair_another` when the window opened here for
+    /// the Phone already set up, and offers to pair another.
     Done {
         phone: Phone,
         connected: bool,
         contacts: ContactsOutcome,
         keybinding: KeybindingStage,
+        pair_another: bool,
     },
 }
 

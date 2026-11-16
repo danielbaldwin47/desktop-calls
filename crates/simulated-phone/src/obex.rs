@@ -13,7 +13,11 @@
 //!   Android does. Granted, it opens `/org/bluez/obex/client/sessionN`, with
 //!   `Session1` and `PhonebookAccess1`, announced by `InterfacesAdded` on
 //!   `/`; the session's `Introspect` reply is captured from the real obexd.
-//!   Denied, it fails with `org.bluez.obex.Error.Forbidden`. Ignored, it
+//!   Denied, it fails with `org.bluez.obex.Error.Forbidden`. Refused, as
+//!   the real Pixel 9a does with Contacts sharing off for this Desktop, it
+//!   fails at once with `org.bluez.obex.Error.Failed` `Transport got
+//!   disconnected`, with no prompt (journal of 2026-11-15, ticket #392).
+//!   Ignored, it
 //!   fails after obexd's 10 s OBEX timeout with `org.bluez.obex.Error.Failed`
 //!   `Timed out waiting for response`, as the real one did on 2026-11-04.
 //! - Asked, the Phone shows its prompt for 30 s, as Android does, and waits
@@ -116,6 +120,9 @@ pub enum Prompt {
     #[default]
     Grant,
     Deny,
+    /// Contacts sharing is off for this Desktop: the Phone closes the PBAP
+    /// connection at once, without asking, as the Pixel 9a does.
+    Refuse,
     Ignore,
     /// The Phone shows its prompt, and the test answers it.
     Ask,
@@ -126,6 +133,7 @@ impl Prompt {
         match name {
             "grant" => Some(Self::Grant),
             "deny" => Some(Self::Deny),
+            "refuse" => Some(Self::Refuse),
             "ignore" => Some(Self::Ignore),
             "ask" => Some(Self::Ask),
             _ => None,
@@ -143,6 +151,11 @@ pub struct ShownPrompt {
     /// `Some(true)` granted, `Some(false)` denied.
     answer: Option<bool>,
 }
+
+/// What `CreateSession` fails with at once when the Phone's Contacts
+/// sharing is off for this Desktop: the real Pixel 9a's refusal, as obexd
+/// relayed it on 2026-11-15.
+const SHARING_OFF: &str = "Transport got disconnected";
 
 /// What a `CreateSession` waiting on a dropped link fails with.
 const LINK_LOST: &str = "Connection reset by peer";
@@ -447,6 +460,9 @@ fn create_session(obex: &mut Obex, phone_address: &str, message: &Message) -> An
         Prompt::Grant => {}
         Prompt::Deny => {
             return Reply::Error(ERROR_FORBIDDEN, "Forbidden".to_owned()).into();
+        }
+        Prompt::Refuse => {
+            return Reply::Error(ERROR_FAILED, SHARING_OFF.to_owned()).into();
         }
         Prompt::Ignore => {
             obex.session_opened();

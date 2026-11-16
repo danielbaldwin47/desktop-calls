@@ -247,7 +247,73 @@ fn with_bindings_lua_unreadable_the_banner_says_so_rather_than_no_keybinding() {
     harness.wait_for_app(
         "the footer says bindings.lua couldn't be read",
         DEADLINE,
-        |state| banner_footer(state) == Some("Keybinding unknown. Phone setup… explains."),
+        |state| banner_footer(state) == Some("Couldn't read your keybindings. See Phone setup…"),
+    );
+}
+
+/// The Setup Window's keybinding card, once the window shows it.
+fn setup_keybinding_card(harness: &Harness) -> String {
+    let state = harness.wait_for_app(
+        "the Setup Window shows its keybinding card",
+        DEADLINE,
+        |state| {
+            state.surface("setup-window").is_some_and(|window| {
+                window.get("step").map(String::as_str) == Some("done")
+                    && window.contains_key("keybinding")
+                    && !window
+                        .get("keybinding")
+                        .is_some_and(|card| card.contains("Checking"))
+            })
+        },
+    );
+    state
+        .surface("setup-window")
+        .and_then(|window| window.get("keybinding"))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// With a Phone set up, the Banner's footer sends the user to "Phone
+/// setup…", which opens on the finish page: its keybinding card says
+/// `bindings.lua` couldn't be read and what to bind instead (#389).
+#[test]
+fn with_a_phone_set_up_phone_setup_explains_the_unreadable_bindings_lua() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .omarchy_bar()
+        .hyprland_bindings_unreadable()
+        .start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+
+    harness.tray().click("Phone setup…");
+
+    let card = setup_keybinding_card(&harness);
+    assert!(card.contains("couldn't be read"), "{card}");
+    let _ = harness.screenshot("setup-window-keybinding-unreadable");
+}
+
+/// The same with no keybinding set: the finish page offers to add one, as
+/// the Banner's footer says (#389).
+#[test]
+fn with_a_phone_set_up_and_no_keybinding_phone_setup_offers_to_add_one() {
+    let (harness, _client) = connected_with_a_focused_window();
+    write_bindings(&harness, "-- Nothing bound yet.\n");
+
+    harness.tray().click("Phone setup…");
+
+    let card = setup_keybinding_card(&harness);
+    assert!(card.contains("Add keybinding binds Super+Alt+C"), "{card}");
+    let state = harness.app_state();
+    let window = state.surface("setup-window");
+    assert_eq!(
+        window
+            .and_then(|window| window.get("buttons"))
+            .map(String::as_str),
+        Some("Add keybinding\nDone\nPair another phone"),
+        "{state:?}"
     );
 }
 

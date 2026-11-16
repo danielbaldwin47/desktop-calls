@@ -492,7 +492,7 @@ fn run_step_captured(
             capture.snapshot("end");
             if let Some(name) = capture.write(step.id, started_us, results::unix_micros()) {
                 println!(
-                    "Step {}'s Bluetooth D-Bus capture, to where you quit: {}",
+                    "The Bluetooth D-Bus capture of step {}, to where you quit: {}",
                     step.id,
                     capture.path(&name).display()
                 );

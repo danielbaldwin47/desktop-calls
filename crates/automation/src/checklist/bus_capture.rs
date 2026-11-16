@@ -146,7 +146,7 @@ impl BusCapture {
             .and_then(|()| std::fs::write(self.path(&name), text));
         if let Err(error) = written {
             println!(
-                "Step {id}'s Bluetooth D-Bus capture couldn't be written to {}: {error}",
+                "The Bluetooth D-Bus capture of step {id} couldn't be written to {}: {error}",
                 self.directory.display()
             );
             return None;

@@ -20,6 +20,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "The Incoming Call Banner, ringing: a Contact, Decline left and Answer right, and the keybinding in the footer",
         still: names_the_keybinding,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             sync(harness);
             ring(harness);
@@ -32,6 +33,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "The Incoming Call Banner given the keyboard by the keybinding: an accent border, keycaps on the buttons, and Escape in the footer",
         still: has_the_keyboard,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             sync(harness);
             ring(harness);
@@ -48,6 +50,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "The Incoming Call Banner for a number not in Contacts: a # tile and the number in monospace",
         still: names_the_keybinding,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             connect(harness);
             ring(harness);
@@ -60,6 +63,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "The Incoming Call Banner on a Desktop with no keybinding set: the footer says where to add one",
         still: |state| footer(state).is_some_and(|footer| footer.starts_with("No keybinding")),
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             ring(harness);
@@ -74,6 +78,7 @@ pub(super) const BANNER_STATES: &[State] = &[
             footer(state).is_some_and(|footer| footer.starts_with("Couldn't read your keybindings"))
         },
         prepare: |builder| builder.hyprland_bindings_unreadable(),
+        moment: None,
         reach: |harness| {
             sync(harness);
             ring(harness);
@@ -84,8 +89,8 @@ pub(super) const BANNER_STATES: &[State] = &[
     State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
-        // The Banner identifies the caller for only 2 s: `reach` stops the
-        // app within them, and `render` doesn't ask it again.
+        // The Banner identifies the caller for only 2 s: the screen is
+        // grabbed within them, and `render` doesn't ask the app again.
         still: identifying,
         prepare: with_keybinding,
         reach: |harness| {
@@ -100,9 +105,11 @@ pub(super) const BANNER_STATES: &[State] = &[
             harness.wait_for_app("the first Banner has gone", DEADLINE, |state| {
                 state.calls.is_empty() && state.surface("banner").is_none()
             });
-            // A withheld number: the Banner identifies the caller for as long
-            // as the Phone may still report one, longer than the
-            // `late-line-identification` quirk's number takes.
+        },
+        // A withheld number: the Banner identifies the caller for as long as
+        // the Phone may still report one, longer than the
+        // `late-line-identification` quirk's number takes.
+        moment: Some(|harness| {
             let rang = Instant::now();
             let _path = harness.simulated_phone().ring("");
             harness.wait_for_app(
@@ -110,12 +117,8 @@ pub(super) const BANNER_STATES: &[State] = &[
                 DEADLINE,
                 identifying,
             );
-            // For only 2 s, so the app is stopped for the capture (#248).
-            harness.freeze_app_before(
-                rang + Duration::from_millis(NUMBER_LATE_MS.into()),
-                "the Banner identifying the caller",
-            );
-        },
+            rang + Duration::from_millis(NUMBER_LATE_MS.into())
+        }),
         shown: |screenshot, look| shows(screenshot, look.green()) && shows(screenshot, look.red()),
     },
     State {
@@ -126,6 +129,7 @@ pub(super) const BANNER_STATES: &[State] = &[
                 && names_the_keybinding(state)
         },
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             connect(harness);
             let _path = harness.simulated_phone().ring("");
@@ -146,6 +150,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "A Waiting Call that can be held: Hold & answer says who waits on hold, End & answer whose Call ends; the Banner top right, the Call Window bottom right",
         still: expanded,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             sync(harness);
             on_a_call(harness);
@@ -159,6 +164,7 @@ pub(super) const BANNER_STATES: &[State] = &[
         title: "A Waiting Call's Banner given the keyboard: H, E and D on its buttons",
         still: has_the_keyboard,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             sync(harness);
             on_a_call(harness);
@@ -181,6 +187,7 @@ pub(super) const BANNER_STATES: &[State] = &[
                 .is_some_and(|options| options == "End & answer, Decline")
         },
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             sync(harness);
             dial(harness);

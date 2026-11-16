@@ -259,6 +259,18 @@ impl Harness {
         self.spawn_test_client(&["--slow-redraw"])
     }
 
+    /// Starts the harness's test client as something that keeps moving on
+    /// screen, a frame each time the compositor shows the last, so the
+    /// screen never holds still. See `src/bin/test-client.rs`.
+    ///
+    /// # Panics
+    ///
+    /// If the scenario has no screen, or the client can't be started.
+    #[must_use]
+    pub fn start_busy_test_client(&self) -> TestClient {
+        self.spawn_test_client(&["--busy"])
+    }
+
     pub(super) fn spawn_test_client(&self, arguments: &[&str]) -> TestClient {
         self.screen();
         let child = self

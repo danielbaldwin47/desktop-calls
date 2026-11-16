@@ -56,6 +56,10 @@ static BEFORE_KEYPAD_CAPTURES: AtomicUsize = AtomicUsize::new(0);
 /// How long the app may take to reach a state.
 const DEADLINE: Duration = Duration::from_secs(10);
 
+/// How long the Simulated Phone takes to open the audio link once asked,
+/// for the audio tile's "Moving…".
+const PHONE_OPENS_LINK: Duration = Duration::from_millis(2_500);
+
 /// Whether the Call Window's audio tile says `label`.
 fn handoff_shows(state: &AppState, label: &str) -> bool {
     state
@@ -74,12 +78,20 @@ struct State {
     /// only a capture taken while it does is kept, and if none is, the run
     /// fails rather than show the next state under this caption.
     still: fn(&AppState) -> bool,
-    /// Brings the scenario into the state.
+    /// Brings the scenario into the state, or, for a state that lasts only
+    /// a moment, to just before it.
     reach: fn(&Harness),
-    /// Whether a capture under `look` shows the state yet.
+    /// Whether a capture under `look` shows the state yet. For a state that
+    /// lasts only a moment, it must also tell the state from the screen
+    /// just before it, which the capture checks.
     shown: fn(&Screenshot, Look) -> bool,
     /// Sets the scenario up before it starts.
     prepare: fn(Builder) -> Builder,
+    /// For a state the app shows only for a moment by design, after
+    /// `reach`: brings the app into it, and returns the instant before which
+    /// it can't end. The screen is grabbed while it lasts, and the first
+    /// frame that shows it is the capture (#248, #384).
+    moment: Option<fn(&Harness) -> Instant>,
 }
 
 /// The Simulated Phone's name, for the Setup Window's states.
@@ -103,6 +115,7 @@ const STATES: &[State] = &[
         title: "The bare output, with the Phone connected and no surface shown",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: connect,
         shown: |_, _| true,
     },
@@ -111,6 +124,7 @@ const STATES: &[State] = &[
         title: "The Call Window, answered here: who and the timer, the state line with HD, three tiles and Hang up",
         still: expanded,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().set_codec(2);
@@ -135,6 +149,7 @@ const STATES: &[State] = &[
         title: "The Call Window, muted: the Mute tile, the state line and the border take the warning colour, and nothing moves",
         still: expanded,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             live_here(harness);
             harness
@@ -166,6 +181,7 @@ const STATES: &[State] = &[
             })
         },
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             live_here(harness);
             // Click the window, to give it the keyboard, then show the
@@ -201,6 +217,7 @@ const STATES: &[State] = &[
         title: "The Call Window, answered on the phone: Mute disabled, the state line says where to mute, and Move here is the one accent tile",
         still: expanded,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             let path = harness.simulated_phone().ring(NUMBER);
@@ -248,7 +265,11 @@ const STATES: &[State] = &[
             // takes seconds, which is what the bar is for.
             harness
                 .simulated_phone()
-                .set_activate_delay(Duration::from_millis(2_500));
+                .set_activate_delay(PHONE_OPENS_LINK);
+        },
+        // The audio arrives once the Phone opens the link, before the app's
+        // own 3 s limit, so the screen is grabbed until then (#248, #384).
+        moment: Some(|harness| {
             let asked = Instant::now();
             harness
                 .move_audio("desktop")
@@ -256,21 +277,20 @@ const STATES: &[State] = &[
             harness.wait_for_app("the audio tile says it moves", DEADLINE, |state| {
                 handoff_shows(state, "Moving…")
             });
-            // The audio arrives 2.5 s on, which a slow runner's capture can
-            // miss, so the app is stopped for it, as for the other short
-            // states (#248).
-            harness.freeze_app_before(
-                asked + Duration::from_millis(2_000),
-                "the audio tile moving the audio",
-            );
+            asked + PHONE_OPENS_LINK
+        }),
+        // The audio tile is the accent tile until the audio moves; moving,
+        // only its thin bar is in the accent.
+        shown: |screenshot, look| {
+            shows(screenshot, look.red()) && only_a_bar_in(screenshot, look.accent())
         },
-        shown: |screenshot, look| shows(screenshot, look.red()) && shows(screenshot, look.accent()),
     },
     State {
         name: "call-window-held",
         title: "The Call Window with two Calls: the answered one live, the first on hold in the row above it",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: held,
         shown: |screenshot, look| shows(screenshot, look.red()) && !shows(screenshot, look.green()),
     },
@@ -279,6 +299,7 @@ const STATES: &[State] = &[
         title: "Three Calls: one live and one on hold, Swap gone and Hang up dimmed until the Waiting Call is answered or declined, and a Waiting Call's Banner with End & answer, Decline and the keybinding",
         still: |_| true,
         prepare: with_keybinding,
+        moment: None,
         reach: |harness| {
             held(harness);
             let _path = harness.simulated_phone().ring(THIRD_NUMBER);
@@ -304,6 +325,7 @@ const STATES: &[State] = &[
         title: "The Call Window, placing a Call, before the other end rings: who, the state line and Hang up, nothing disabled",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             dial(harness);
@@ -315,6 +337,7 @@ const STATES: &[State] = &[
         title: "The Call Window, placing a Call, ringing at the other end: who, the state line and Hang up",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             dial(harness);
@@ -328,6 +351,7 @@ const STATES: &[State] = &[
         title: "The Call Window, after the Phone couldn't place the Call: who, and why, as a notice",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             connect(harness);
             harness.simulated_phone().refuse_next_dial("cme:30");
@@ -350,6 +374,7 @@ const STATES: &[State] = &[
         title: "The Setup Window on a fresh install, listing the Phone nearby",
         still: |_| true,
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             setup_window_at(harness, "choose");
             harness.wait_for_app("the Phone is listed", DEADLINE, |state| {
@@ -366,6 +391,7 @@ const STATES: &[State] = &[
         title: "The Setup Window, showing the code to check against the Phone's",
         still: |_| true,
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             setup_window_at(harness, "choose");
             harness.wait_for_app("the Phone is listed", DEADLINE, |state| {
@@ -381,6 +407,7 @@ const STATES: &[State] = &[
         title: "The Setup Window, after the Phone refused hands-free: where to switch Phone calls on",
         still: |_| true,
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             harness.simulated_phone().set_hands_free("refused");
             pair_through_setup_window(harness);
@@ -393,6 +420,7 @@ const STATES: &[State] = &[
         title: "The Setup Window, counting down while the Phone asks whether to share Contacts",
         still: |state| setup_window_shows(state, "step", "contacts-prompt"),
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             harness.simulated_phone().set_contacts_prompt("ask");
             pair_through_setup_window(harness);
@@ -412,6 +440,7 @@ const STATES: &[State] = &[
                 .is_some_and(|progress| progress.contains(" s left"))
         },
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             let phone = harness.simulated_phone();
             phone.set_pbap_folder("pb", &vcards::contacts(312, 0));
@@ -433,6 +462,7 @@ const STATES: &[State] = &[
         title: "The Setup Window's finish page: what was synced, the first Call and the keybinding, with the config file named from `~`",
         still: |_| true,
         prepare: |builder| fresh_install(builder).config_under_home(),
+        moment: None,
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -449,6 +479,7 @@ const STATES: &[State] = &[
         title: "The Setup Window, showing the exact keybinding line before writing it, the path wrapping only after a `/`",
         still: |_| true,
         prepare: |builder| fresh_install(builder).config_under_home(),
+        moment: None,
         reach: |harness| {
             with_hyprland_config(harness);
             with_contacts(harness);
@@ -681,6 +712,33 @@ fn app_region(screenshot: &Screenshot) -> Option<Region> {
 /// Whether a surface is on screen with no red: no Hang up, or a dimmed one.
 fn without_controls(screenshot: &Screenshot, look: Look) -> bool {
     app_region(screenshot).is_some() && !shows(screenshot, look.red())
+}
+
+/// Whether the only `colour` inside the surface on screen, short of its
+/// edges, is a bar a few pixels tall, such as the audio tile's progress
+/// bar: not a tile filled with it, nor none at all.
+fn only_a_bar_in(screenshot: &Screenshot, colour: [u8; 3]) -> bool {
+    /// Further in than the surface's border and its rounded corners.
+    const INSET: f64 = 10.0;
+    /// Taller than the 3 px bar, and far shorter than a tile.
+    const BAR_AT_MOST: f64 = 8.0;
+    let Some(surface) = app_region(screenshot) else {
+        return false;
+    };
+    let inside = Region {
+        left: surface.left + INSET,
+        top: surface.top + INSET,
+        right: surface.right - INSET,
+        bottom: surface.bottom - INSET,
+    };
+    screenshot
+        .region_within(inside, |pixel| {
+            pixel
+                .iter()
+                .zip(colour)
+                .all(|(channel, wanted)| channel.abs_diff(wanted) <= 16)
+        })
+        .is_some_and(|bar| bar.bottom - bar.top <= BAR_AT_MOST)
 }
 
 /// Whether `colour`, give or take antialiasing, is on screen.

@@ -31,6 +31,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window while calls are off until 07:00: a neutral card with Turn calls on and its key, the steps dimmed, and no Phone to list",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             let _output = harness.cli(&["calls", "off", "--until-morning"]);
@@ -51,6 +52,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window while calls are off and Bluetooth is off: both cards, Turn calls on with its key, and a phone to choose once both are on (#369)",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             let _output = harness.cli(&["calls", "off", "--until-morning"]);
@@ -77,6 +79,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window with Bluetooth off: one card with Turn on and its key, the steps dimmed, and no Phone to list",
         still: |_| true,
         prepare: |builder| fresh_install(builder).bluetooth_off(),
+        moment: None,
         reach: |harness| wait_for_problem(harness, "bluetooth-off", false),
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -85,6 +88,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window with Bluetooth blocked: one card with the command to copy",
         still: |_| true,
         prepare: |builder| fresh_install(builder).bluetooth_blocked(),
+        moment: None,
         reach: |harness| wait_for_problem(harness, "bluetooth-blocked", false),
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -93,6 +97,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window without Contacts support: the card with the install command, the Phone listed and Enter still pairing",
         still: |_| true,
         prepare: |builder| fresh_install(builder).without_contacts_support(),
+        moment: None,
         reach: |harness| wait_for_problem(harness, "contacts-support-missing", true),
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -101,6 +106,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window with audio not set up for Calls: the card with Set up audio, the Phone listed and Enter still pairing",
         still: |_| true,
         prepare: audio_not_set_up,
+        moment: None,
         reach: |harness| wait_for_problem(harness, "audio-not-set-up", true),
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -109,6 +115,7 @@ pub(super) const SETUP_PROBLEM_STATES: &[State] = &[
         title: "The Setup Window with BlueZ's own calling on: the card with its Fix, the Phone listed and Enter still pairing",
         still: |_| true,
         prepare: |builder| fresh_install(builder).bluez_hands_free_on(),
+        moment: None,
         reach: |harness| wait_for_problem(harness, "bluez-hands-free", true),
         shown: |screenshot, _| app_region(screenshot).is_some(),
     },
@@ -193,6 +200,7 @@ pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
         title: "The Setup Window after nobody answered the Phone's contacts prompt: Try again, with its key, and Skip",
         still: |_| true,
         prepare: fresh_install,
+        moment: None,
         reach: |harness| {
             harness.simulated_phone().set_contacts_prompt("ask");
             pair_through_setup_window(harness);
@@ -209,6 +217,7 @@ pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
         title: "The Setup Window's finish page after the Phone refused Contacts: Calls still work, and where to allow it later",
         still: |_| true,
         prepare: |builder| fresh_install(builder).config_under_home(),
+        moment: None,
         reach: |harness| {
             with_hyprland_config(harness);
             harness.simulated_phone().set_contacts_prompt("deny");

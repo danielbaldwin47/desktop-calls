@@ -72,7 +72,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
-import changes  # the docs-only rule that CI's "Code changed?" job and `just merge` share
+import changes  # the docs-only rule that CI's "Code changed? And CI's image" job and `just merge` share
 
 EXIT_PASSED, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
 
@@ -113,7 +113,7 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 #              harness's scenarios, in one job rather than
 #              five (the gallery in one run rather than three shards)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
-#              five shards
+#              six shards
 #   timings    the rest of CI job "scenarios": the first-frame timings one at
 #              a time, so that no other scenario's app slows a first paint
 JOBS: dict[str, str] = {

@@ -100,7 +100,8 @@ impl Region {
 
 impl Screenshot {
     /// The smallest region holding every pixel whose RGB colour satisfies
-    /// `matches`, or `None` if no pixel does.
+    /// `matches`, or `None` if no pixel does. `matches` is asked once a run
+    /// of same-coloured pixels, so it must answer by the colour alone.
     ///
     /// # Panics
     ///
@@ -127,34 +128,30 @@ impl Screenshot {
     #[must_use]
     pub fn region_within(&self, area: Region, matches: impl Fn([u8; 3]) -> bool) -> Option<Region> {
         let pixels = Pixels::read(&self.path);
-        let (mut left, mut top, mut right, mut bottom) = (usize::MAX, usize::MAX, 0, 0);
-        for (row, line) in pixels.data.chunks_exact(pixels.line_size).enumerate() {
-            let y = to_layout(row);
-            if y < area.top || y >= area.bottom {
-                continue;
-            }
-            for column in 0..pixels.width {
-                let x = to_layout(column);
-                if x < area.left || x >= area.right {
-                    continue;
-                }
-                let pixel = &line[column * pixels.channels..column * pixels.channels + 3];
-                if matches([pixel[0], pixel[1], pixel[2]]) {
-                    left = left.min(column);
-                    right = right.max(column + 1);
-                    top = top.min(row);
-                    bottom = bottom.max(row + 1);
-                }
-            }
-        }
-        if left == usize::MAX {
-            return None;
-        }
+        let image = screen_pixels::Image {
+            data: &pixels.data,
+            width: pixels.width,
+            channels: pixels.channels,
+            line_size: pixels.line_size,
+        };
+        // The pixels whose layout coordinates fall in `area`.
+        let first_at = |layout: f64, count: usize| {
+            (0..count)
+                .find(|&pixel| to_layout(pixel) >= layout)
+                .unwrap_or(count)
+        };
+        let within = screen_pixels::Bounds {
+            left: first_at(area.left, image.width),
+            top: first_at(area.top, image.height()),
+            right: first_at(area.right, image.width),
+            bottom: first_at(area.bottom, image.height()),
+        };
+        let found = screen_pixels::bounds_where(&image, within, &matches)?;
         Some(Region {
-            left: to_layout(left),
-            top: to_layout(top),
-            right: to_layout(right),
-            bottom: to_layout(bottom),
+            left: to_layout(found.left),
+            top: to_layout(found.top),
+            right: to_layout(found.right),
+            bottom: to_layout(found.bottom),
         })
     }
 

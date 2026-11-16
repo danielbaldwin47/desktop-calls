@@ -52,9 +52,12 @@ use crate::checklist::watch::AppState;
 ///   `just install` restarts it), `open-setup-window` (`desktop-calls
 ///   connect`), `pair-through-setup-window` (`desktop-calls connect`, then
 ///   the Phone chosen and its code confirmed, waited for), `contacts-access-off`
-///   (the Phone asks before it shares Contacts), `contacts-refused` (it
-///   refuses them without asking), `contacts-access-on` (it shares them
-///   without asking again), `allow-contacts` (Allow on the Phone's prompt),
+///   (the Phone refuses Contacts at once, with no prompt, as the Pixel 9a
+///   does), `contacts-prompt` (it asks before it shares them),
+///   `contacts-refused` (it answers that it refuses them, without asking),
+///   `contacts-access-on` (it shares them without asking again),
+///   `allow-contacts` and `deny-contacts` (Allow or Don't allow on the
+///   Phone's prompt),
 ///   `bind-super-alt-c-elsewhere` (the user's Hyprland config already uses
 ///   those keys for another program), `cancel-then-confirm` (on the
 ///   keybinding's line: Cancel, then Add keybinding and Confirm after all);
@@ -410,6 +413,14 @@ impl Demo {
         }
     }
 
+    /// Answers the Phone's Contacts prompt with `answer`, "grant" or "deny".
+    /// Android remembers the answer for the Desktop.
+    fn answer_contacts_prompt(&self, answer: &str) {
+        let phone = self.harness.simulated_phone();
+        phone.answer_contacts_prompt(answer);
+        phone.set_contacts_prompt(answer);
+    }
+
     fn act_or_panic(&mut self, action: &str, call: Option<u32>, waiting: Option<u32>) {
         match action {
             "call" => {
@@ -431,17 +442,14 @@ impl Demo {
             "restart-app" => self.harness.restart_app(),
             "open-setup-window" => drop(self.harness.cli(&["connect"])),
             "pair-through-setup-window" => self.pair_through_setup_window(),
-            "contacts-access-off" => self.harness.simulated_phone().set_contacts_prompt("ask"),
+            "contacts-access-off" => self.harness.simulated_phone().set_contacts_prompt("refuse"),
+            "contacts-prompt" => self.harness.simulated_phone().set_contacts_prompt("ask"),
             "contacts-refused" => self.harness.simulated_phone().set_contacts_prompt("deny"),
             "contacts-access-on" => self.harness.simulated_phone().set_contacts_prompt("grant"),
-            // Android remembers the answer for the Desktop.
             "bind-super-alt-c-elsewhere" => self.bind_super_alt_c_elsewhere(),
             "cancel-then-confirm" => self.cancel_then_confirm(),
-            "allow-contacts" => {
-                let phone = self.harness.simulated_phone();
-                phone.answer_contacts_prompt("grant");
-                phone.set_contacts_prompt("grant");
-            }
+            "allow-contacts" => self.answer_contacts_prompt("grant"),
+            "deny-contacts" => self.answer_contacts_prompt("deny"),
             "click-notification" => self.click_notification(),
             "enter" => self.harness.keyboard().press(Key::Return),
             "phone-dials" => self.phone_dials(),
@@ -620,7 +628,7 @@ impl Demo {
                      decline-waiting, call-third, mute, unmute, keybinding, escape, pill-click, expand, wait-for-call-pill, a, d, \
                      click-notification, enter, phone-dials, forget-pairing, restart-app, \
                      open-setup-window, pair-through-setup-window, contacts-access-off, \
-                     contacts-refused, contacts-access-on, allow-contacts, \
+                     contacts-prompt, contacts-refused, contacts-access-on, allow-contacts, deny-contacts, \
                      bind-super-alt-c-elsewhere, cancel-then-confirm, indicator-click, indicator-mute, \
                      indicator-hang-up, do-not-disturb-on, do-not-disturb-off, type-test-number, type-test-number-national, \
                      type-test-number-trunk-zero, type-wrong-number, type-wrong-first-digit, type-wrong-country, ctrl-h, callee-answers, \

@@ -149,8 +149,10 @@ fn a_phone_that_prompts_when_asked_again_isnt_asked_again_while_connected() {
     assert!(waits(&effects).is_empty(), "{effects:?}");
 }
 
+/// Android remembers a no and refuses with no prompt, so asking again
+/// shows nothing; a Phone that does prompt again stops it (above).
 #[test]
-fn a_person_who_said_no_on_the_prompt_isnt_asked_again_while_connected() {
+fn a_no_on_the_prompt_is_asked_again_in_case_sharing_is_turned_on_later() {
     let (state, effects) = run(
         connected(),
         [
@@ -162,7 +164,7 @@ fn a_person_who_said_no_on_the_prompt_isnt_asked_again_while_connected() {
     );
 
     assert_eq!(state.contacts_state(), ContactsState::Denied);
-    assert!(waits(&effects).is_empty(), "{effects:?}");
+    assert_eq!(waits(&effects).len(), 1, "{effects:?}");
 }
 
 #[test]

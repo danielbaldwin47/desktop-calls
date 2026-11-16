@@ -6,9 +6,10 @@
 //! the Desktop is never told. So it asks again: 60 times 10 s apart (about
 //! the first 10 minutes after the Phone connected), then every 5 minutes. A
 //! Phone that refuses outright, as the Pixel 9a does, shows nothing each
-//! time. One that shows its prompt when asked again, or whose prompt the
-//! person answered no, isn't asked again until it next connects, so the
-//! prompt doesn't come back every few seconds.
+//! time, and so does an Android Phone whose prompt the person answered no:
+//! it remembers the answer. One that shows its prompt when asked again
+//! isn't asked again until it next connects, so the prompt doesn't come
+//! back every few seconds.
 
 use super::State;
 use super::input::{Effect, Timer};
@@ -56,12 +57,6 @@ pub(super) fn prompt_shown(state: &mut State) {
     if state.asking_again.under_way {
         state.asking_again.prompted = true;
     }
-}
-
-/// The person said no on the Phone's prompt: it isn't asked again while it
-/// stays connected, so they aren't shown the prompt again.
-pub(super) fn said_no(state: &mut State) {
-    state.asking_again.prompted = true;
 }
 
 /// The Phone refused, or asking it again failed some other way: waits,

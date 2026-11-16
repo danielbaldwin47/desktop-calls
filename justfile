@@ -13,7 +13,7 @@ check: lint
 # CI runs this rather than `just check`: its test jobs build every target
 # between them, and building them again cost a minute (#118).
 # `just check` without the build: formatting, lints, dependencies, file lengths, personal data.
-lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets
+lint: && _core-is-pure _dbus-set-is-signed _real-phone-tools-use-system-python _rust-files-fit _no-personal-data _tools-pass-their-tests _checklist-waits-on-open-tickets _bound-changes-are-measured
     cargo fmt --all --check
     # The harness's scenario files reach the compiler only through
     # build.rs's generated `#[path]` modules and `include!`, which cargo fmt
@@ -326,6 +326,13 @@ _core-is-pure:
         echo "$found" | sort -u >&2
         exit 1
     fi
+
+# A timing bound in the harness raised, or chosen on whether this is CI,
+# names the measurement behind it in a `bound-change:` comment (#398).
+[private]
+[no-exit-message]
+_bound-changes-are-measured:
+    @python3 tools/bound_changes.py
 
 # The repo's Python tools pass their own tests, tools/*_test.py.
 [private]

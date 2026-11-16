@@ -108,6 +108,21 @@ class SameAsCI(unittest.TestCase):
         self.assertIsNotNone(matrix)
         self.assertEqual(set(matrix.group(1).replace(",", " ").split()), set(listed.group(1).split()))
 
+    def test_ci_runs_every_ci_tests_part(self):
+        # A part dropped from the matrix would pass CI with its tests unrun,
+        # and a name in ci_tests_part_2 that isn't a test file would run in
+        # neither part's place.
+        matrix = re.search(r"(?m)^        part: \[([^\]]*)\]$", WORKFLOW)
+        self.assertIsNotNone(matrix)
+        self.assertEqual(matrix.group(1).replace(" ", ""), "1,2")
+        self.assertIn("run: just ci-tests ${{ matrix.part }}/2", WORKFLOW)
+        for part in ("1/2)", "2/2)"):
+            self.assertIn(part, JUSTFILE)
+        names = re.search(r'(?m)^ci_tests_part_2 := "([^"]*)"$', JUSTFILE)
+        self.assertIsNotNone(names)
+        for name in names.group(1).split():
+            self.assertTrue((REPOSITORY / f"crates/automation/tests/{name}.rs").is_file(), name)
+
     def test_the_image_has_the_packages_ci_has(self):
         # CI's image (.github/ci-image/Containerfile) and ci-local's.
         ci = re.search(r"pacman -Syu --noconfirm --needed \\\n((?:\s+[^\n&]+\\\n)+)", CONTAINERFILE)

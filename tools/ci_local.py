@@ -110,8 +110,8 @@ STALE_TEST_FOLDER = "desktop-calls-test-*"
 #
 #   lint       CI job "lint"
 #   test       CI jobs "tests", "checklist" and "gallery": the tests but the
-#              harness's scenarios, in one job rather than
-#              five (the gallery in one run rather than three shards)
+#              harness's scenarios, in one job rather than seven (both
+#              ci-tests parts, and the gallery in one run rather than three)
 #   scenarios  CI job "scenarios": every scenario, in one run rather than
 #              six shards
 #   timings    the rest of CI job "scenarios": the first-frame timings one at

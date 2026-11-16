@@ -338,6 +338,35 @@ fn just_run_runs_the_dev_build_in_place_of_the_installed_service_until_stopped()
     never_two_apps(&harness);
 }
 
+/// `just run` turns on the app's debug lines of each method call it makes
+/// to BlueZ, for the Real-Phone Checklist's per-step capture; the installed
+/// service, started as a user's is, without `RUST_LOG`, logs none.
+#[test]
+fn just_run_logs_each_bluez_method_call_and_the_installed_service_does_not() {
+    let harness = Harness::builder()
+        .phone_connected()
+        .installed()
+        .log_filter(None)
+        .start();
+    harness.start_service();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    let service = harness.service_process_id();
+    let before = harness.app_log();
+    assert!(!before.contains("bluez-method-"), "{before}");
+
+    let mut run = start_run(&harness);
+    dev_run_on_bus(&harness, service);
+    harness.wait_for_app_log_after(
+        before.len(),
+        r#""event_kind":"bluez-method-called""#,
+        DEADLINE,
+    );
+    send(&harness, &run, "-INT");
+    wait_for_exit(&harness, &mut run, "run.py");
+}
+
 #[test]
 fn a_killed_just_run_still_starts_the_installed_service_again() {
     let harness = service_running();

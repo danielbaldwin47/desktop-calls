@@ -137,10 +137,16 @@ pub fn run(options: &Options) -> ExitCode {
         "Bluetooth D-Bus captures, a file a step: {}",
         captures.display()
     );
+    // The demo's app logs everything at debug; the user's app logs its
+    // BlueZ method calls only if it was started with them on.
+    let app_unheard = (!options.demo)
+        .then(|| app_log::bluez_methods_unlogged(&world.bus))
+        .flatten();
     sitting.capture = Some(bus_capture::BusCapture::start(
         system_bus,
         session_bus,
         captures,
+        app_unheard,
     ));
     println!("While the runner waits, type skip to skip a step, or quit to stop.");
     flush();
@@ -485,12 +491,16 @@ fn run_step_captured(
     match ran {
         Ok((Some(mut record), back_to, way_back)) => {
             capture.snapshot("end");
-            record.bus = capture.write(step.id, started_us, results::unix_micros());
+            let ended_us = results::unix_micros();
+            let app = sitting.log.bluez_methods(started_us, ended_us);
+            record.bus = capture.write(step.id, started_us, ended_us, &app);
             Ok((Some(record), back_to, way_back))
         }
         Err(Stop::Quit) => {
             capture.snapshot("end");
-            if let Some(name) = capture.write(step.id, started_us, results::unix_micros()) {
+            let ended_us = results::unix_micros();
+            let app = sitting.log.bluez_methods(started_us, ended_us);
+            if let Some(name) = capture.write(step.id, started_us, ended_us, &app) {
                 println!(
                     "The Bluetooth D-Bus capture of step {}, to where you quit: {}",
                     step.id,

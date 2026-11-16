@@ -90,6 +90,7 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Source: `docs/research/2026-11-05-handsfree-not-back.md`; #385; retro A5.
 - Observed by: 6.7
 - Status: open
+- Seen through: with the app started by `just run`, each step's Bluetooth D-Bus capture holds the app's `app: error org.bluez.Device1.ConnectProfile from device: <error name>: <message>` line, BlueZ's real error, addresses and numbers hidden (`crates/desktop-calls/src/bluez_log.rs`).
 
 ## RPU-13: Calls off: reconnecting an unblocked Pixel
 - Assumed: after Calls Off, `Connect` on the unblocked Pixel reconnects in time, `br-connection-busy` is possible when the Pixel pages at the same moment, and WirePlumber brings hands-free back after every reconnect.
@@ -227,6 +228,12 @@ Each entry: `## RPU-<n>: <title>`, then `- Assumed:`, `- Source:`, `- Observed b
 - Assumed: after a WirePlumber restart the old service's audio link drops, the new one announces its Calls with `InterfacesAdded` without listing them first, owner changes and signals arrive in an order the 2 s grace absorbs, and a Hang up in the gap fails `ServiceUnknown` or `NoReply`.
 - Source: `crates/simulated-phone/src/telephony/phone.rs` (`restart`); `docs/research/2026-11-05-vanished-call-settled-by-listing.md`; `docs/research/2026-11-05-hang-up-lost-in-a-restart.md`.
 - Observed by: 6.3
+- Status: open
+
+## RPU-38: BlueZ's error messages name no person
+- Assumed: the message of an error BlueZ answers the app's method call with names no person or device (`br-connection-page-timeout`, `Does Not Exist`), so the app's `bluez-method-failed` line, and the capture's `app: error` line, keep it with only its addresses and numbers hidden.
+- Source: `crates/desktop-calls/src/bluez_log.rs`; the errors the app already handles (`connect_failure` in `bluez.rs`, `pair` in `pairing.rs`), not BlueZ's source.
+- Observed by: no step yet (any step's capture where BlueZ answers an error shows it)
 - Status: open
 
 ## RPU-35: Hands-free dropped by the Pixel mid-Call

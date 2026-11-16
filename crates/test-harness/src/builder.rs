@@ -74,6 +74,8 @@ pub struct Builder {
     screenshot_directory: Option<PathBuf>,
     omarchy_bar: bool,
     time_zone: Option<String>,
+    /// The app's `RUST_LOG`, if not `debug`.
+    log_filter: LogFilter,
     phone_connected: bool,
     phone_name: Option<String>,
     omarchy_theme: Option<OmarchyTheme>,
@@ -91,6 +93,16 @@ pub struct Builder {
     hyprland_bindings: Option<HyprlandBindings>,
     config_home: ConfigHome,
     shader_cache: ShaderCache,
+}
+
+/// The app's `RUST_LOG`.
+#[derive(Default)]
+enum LogFilter {
+    /// `debug`, as every scenario's.
+    #[default]
+    Debug,
+    /// This, or unset.
+    Set(Option<String>),
 }
 
 /// Which Mesa shader cache the app gets.
@@ -305,6 +317,13 @@ impl Builder {
     /// app reads `/etc/localtime`.
     pub fn time_zone(mut self, time_zone: &str) -> Self {
         self.time_zone = Some(time_zone.to_owned());
+        self
+    }
+
+    /// Starts the app with `RUST_LOG` set to `filter`, or unset as a
+    /// user's run has it, in place of the scenarios' `debug`.
+    pub fn log_filter(mut self, filter: Option<&str>) -> Self {
+        self.log_filter = LogFilter::Set(filter.map(str::to_owned));
         self
     }
 
@@ -599,6 +618,10 @@ impl Builder {
         desktop_settings(&directory.join("config"), self.motion);
         if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
+        }
+        if let LogFilter::Set(filter) = std::mem::take(&mut self.log_filter) {
+            environment.retain(|(name, _)| *name != "RUST_LOG");
+            environment.extend(filter.map(|filter| ("RUST_LOG", filter)));
         }
         let hyprland = self
             .hyprland

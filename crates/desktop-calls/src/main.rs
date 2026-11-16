@@ -1,6 +1,7 @@
 //! `desktop-calls`: the long-running per-user process and its CLI.
 
 mod bluez;
+mod bluez_log;
 mod calls_off;
 mod chosen_phone;
 mod cli;

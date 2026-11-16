@@ -32,6 +32,7 @@ use zbus::fdo::{ObjectManagerProxy, PropertiesProxy};
 use zbus::{Connection, DBusError, ObjectPath, OwnedObjectPath, OwnedVariant, Variant, interface};
 
 use crate::bluez;
+use crate::bluez_log::logged;
 use crate::logging::EventKind;
 
 const SERVICE: &str = "org.bluez";
@@ -262,10 +263,8 @@ async fn pair(system: &Connection, address: &str) -> Result<(), PairingFailure> 
             "no such device",
         ));
     };
-    match system
-        .call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Pair", &())
-        .await
-    {
+    let pair = system.call_method(Some(SERVICE), device.as_str(), Some(DEVICE), "Pair", &());
+    match logged(&device, DEVICE, "Pair", None, pair).await {
         Ok(_) => {
             paired_by_bluez(address, "Pair returned");
             Ok(())
@@ -375,16 +374,14 @@ async fn connect_hands_free(system: &Connection, address: &str) -> HandsFree {
     let Ok(Some(device)) = bluez::find_device(system, address).await else {
         return HandsFree::Unreachable;
     };
-    match system
-        .call_method(
-            Some(SERVICE),
-            device.as_str(),
-            Some(DEVICE),
-            "ConnectProfile",
-            &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
-        )
-        .await
-    {
+    let connect = system.call_method(
+        Some(SERVICE),
+        device.as_str(),
+        Some(DEVICE),
+        "ConnectProfile",
+        &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
+    );
+    match logged(&device, DEVICE, "ConnectProfile", None, connect).await {
         Ok(_) => HandsFree::Up,
         Err(zbus::Error::MethodError(name, _, _))
             if matches!(
@@ -433,15 +430,21 @@ async fn connect_hands_free(system: &Connection, address: &str) -> HandsFree {
 
 /// The first adapter BlueZ has that is powered.
 async fn powered_adapter(system: &Connection) -> Option<String> {
-    let objects = ObjectManagerProxy::builder(system)
+    let manager = ObjectManagerProxy::builder(system)
         .destination(SERVICE)
         .path("/")
         .build()
         .await
-        .ok()?
-        .get_managed_objects()
-        .await
         .ok()?;
+    let objects = logged(
+        "/",
+        "org.freedesktop.DBus.ObjectManager",
+        "GetManagedObjects",
+        None,
+        manager.get_managed_objects(),
+    )
+    .await
+    .ok()?;
     objects.into_iter().find_map(|(path, interfaces)| {
         let adapter = interfaces
             .into_iter()
@@ -467,7 +470,7 @@ async fn adapter_alias(system: &Connection, adapter: &str) -> String {
             .await
             .map_err(zbus::Error::from)
     };
-    alias
+    logged(adapter, PROPERTIES, "Get", Some("Alias"), alias)
         .await
         .ok()
         .and_then(|alias| String::try_from(alias).ok())
@@ -478,14 +481,14 @@ async fn call<B>(system: &Connection, interface: &str, member: &str, body: &B) -
 where
     B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
 {
-    system
-        .call_method(
-            Some(SERVICE),
-            AGENT_MANAGER_PATH,
-            Some(interface),
-            member,
-            body,
-        )
+    let call = system.call_method(
+        Some(SERVICE),
+        AGENT_MANAGER_PATH,
+        Some(interface),
+        member,
+        body,
+    );
+    logged(AGENT_MANAGER_PATH, interface, member, None, call)
         .await
         .map(drop)
 }
@@ -499,10 +502,8 @@ async fn adapter_call<B>(
 where
     B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
 {
-    system
-        .call_method(Some(SERVICE), adapter, Some(ADAPTER), member, body)
-        .await
-        .map(drop)
+    let call = system.call_method(Some(SERVICE), adapter, Some(ADAPTER), member, body);
+    logged(adapter, ADAPTER, member, None, call).await.map(drop)
 }
 
 /// Sets one boolean property on BlueZ's object at `path`.
@@ -513,14 +514,9 @@ async fn set(
     name: &str,
     value: bool,
 ) -> zbus::Result<()> {
-    system
-        .call_method(
-            Some(SERVICE),
-            path,
-            Some(PROPERTIES),
-            "Set",
-            &(interface, name, Variant::from(value)),
-        )
+    let body = (interface, name, Variant::from(value));
+    let set = system.call_method(Some(SERVICE), path, Some(PROPERTIES), "Set", &body);
+    logged(path, PROPERTIES, "Set", Some(name), set)
         .await
         .map(drop)
 }
@@ -669,7 +665,7 @@ impl Agent {
 
 /// The Phone at BlueZ's `device`: its name and address.
 async fn phone_at(system: &Connection, device: &str) -> Phone {
-    let properties: HashMap<String, OwnedVariant> = async {
+    let get_all = async {
         PropertiesProxy::builder(system)
             .destination(SERVICE)
             .path(device.to_owned())
@@ -678,9 +674,11 @@ async fn phone_at(system: &Connection, device: &str) -> Phone {
             .get_all(DEVICE.try_into()?)
             .await
             .map_err(zbus::Error::from)
-    }
-    .await
-    .unwrap_or_default();
+    };
+    let properties: HashMap<String, OwnedVariant> =
+        logged(device, PROPERTIES, "GetAll", None, get_all)
+            .await
+            .unwrap_or_default();
     let text = |name: &str| {
         properties
             .get(name)

@@ -25,12 +25,15 @@ use futures_util::future::{Either, select};
 use zbus::fdo::ObjectManagerProxy;
 use zbus::{Connection, OwnedVariant};
 
+use crate::bluez_log::logged;
 use crate::logging::EventKind;
 use crate::object_manager::{self, ObjectEvent, WatchError, Watched};
 
 const SERVICE: &str = "org.bluez";
 const ROOT: &str = "/";
 const DEVICE: &str = "org.bluez.Device1";
+const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
+const OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
 
 /// The Hands-Free Audio Gateway profile: the Phone's side of hands-free.
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
@@ -327,15 +330,14 @@ pub async fn connect_phone(
         phone_address = %address,
         "Asking BlueZ to connect the Phone"
     );
-    let failure = match within_deadline(system.call_method(
+    let connect = within_deadline(system.call_method(
         Some(SERVICE),
         device.as_str(),
         Some(DEVICE),
         "Connect",
         &(),
-    ))
-    .await
-    {
+    ));
+    let failure = match logged(&device, DEVICE, "Connect", None, connect).await {
         Ok(_) => return Ok(Connected::AsAsked),
         Err(zbus::Error::MethodError(name, message, _)) => {
             match connect_failure(name.as_str(), message.as_deref().unwrap_or_default()) {
@@ -431,16 +433,14 @@ impl BounceError {
 pub async fn bounce_hands_free(system: &Connection, address: &str) -> Result<(), BounceError> {
     let device = device_path(system, address).await?;
     let profile = (HANDS_FREE_AUDIO_GATEWAY_UUID,);
-    if let Err(error) = system
-        .call_method(
-            Some(SERVICE),
-            device.as_str(),
-            Some(DEVICE),
-            "DisconnectProfile",
-            &profile,
-        )
-        .await
-    {
+    let disconnect = system.call_method(
+        Some(SERVICE),
+        device.as_str(),
+        Some(DEVICE),
+        "DisconnectProfile",
+        &profile,
+    );
+    if let Err(error) = logged(&device, DEVICE, "DisconnectProfile", None, disconnect).await {
         return Err(bounce_failed(BounceError::NotDropped, &error));
     }
     connect_profile(system, &device)
@@ -483,15 +483,14 @@ pub async fn connect_hands_free(system: &Connection, address: &str) -> Result<()
 /// `device`. `AlreadyConnected` and `InProgress` count as connected: the
 /// Phone connected hands-free itself, first.
 async fn connect_profile(system: &Connection, device: &str) -> zbus::Result<()> {
-    match within_deadline(system.call_method(
+    let connect = within_deadline(system.call_method(
         Some(SERVICE),
         device,
         Some(DEVICE),
         "ConnectProfile",
         &(HANDS_FREE_AUDIO_GATEWAY_UUID,),
-    ))
-    .await
-    {
+    ));
+    match logged(device, DEVICE, "ConnectProfile", None, connect).await {
         Ok(_) => Ok(()),
         Err(zbus::Error::MethodError(name, _, _))
             if matches!(
@@ -568,14 +567,15 @@ pub async fn set_blocked(
     let Some(device) = find_device(system, address).await.map_err(refused)? else {
         return Err(BlockError::PhoneNotFound);
     };
-    system
-        .call_method(
-            Some(SERVICE),
-            device.as_str(),
-            Some("org.freedesktop.DBus.Properties"),
-            "Set",
-            &(DEVICE, "Blocked", zbus::Variant::from(blocked)),
-        )
+    let body = (DEVICE, "Blocked", zbus::Variant::from(blocked));
+    let set = system.call_method(
+        Some(SERVICE),
+        device.as_str(),
+        Some(PROPERTIES),
+        "Set",
+        &body,
+    );
+    logged(&device, PROPERTIES, "Set", Some("Blocked"), set)
         .await
         .map(drop)
         .map_err(refused)
@@ -592,13 +592,19 @@ pub(crate) async fn find_device(
 /// The object path of BlueZ's device with `address`, if it has one, and
 /// whether BlueZ has it connected now.
 async fn find_phone(system: &Connection, address: &str) -> zbus::Result<Option<(String, bool)>> {
-    let objects = ObjectManagerProxy::builder(system)
+    let manager = ObjectManagerProxy::builder(system)
         .destination(SERVICE)
         .path(ROOT)
         .build()
-        .await?
-        .get_managed_objects()
         .await?;
+    let objects = logged(
+        ROOT,
+        OBJECT_MANAGER,
+        "GetManagedObjects",
+        None,
+        manager.get_managed_objects(),
+    )
+    .await?;
     Ok(objects.into_iter().find_map(|(path, interfaces)| {
         let (_, device) = interfaces
             .into_iter()

@@ -19,6 +19,7 @@ pub mod matching;
 pub mod messages;
 mod missed;
 mod number;
+pub mod redaction;
 
 pub use call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,

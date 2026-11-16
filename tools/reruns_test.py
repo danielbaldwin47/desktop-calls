@@ -191,10 +191,10 @@ class CiWaitNamesReruns(unittest.TestCase):
 
     def test_only_runs_past_attempt_1_from_the_last_day_are_named(self):
         runs = [
-            {"databaseId": 1, "attempt": 1, "headSha": HEAD, "conclusion": "success", "createdAt": "2026-11-16T11:00:00Z"},
-            {"databaseId": 2, "attempt": 2, "headSha": "b" * 40, "conclusion": "success", "createdAt": "2026-11-16T11:00:00Z"},
-            {"databaseId": 3, "attempt": 3, "headSha": "c" * 40, "conclusion": "", "createdAt": "2026-11-15T13:00:00Z"},
-            {"databaseId": 4, "attempt": 2, "headSha": "d" * 40, "conclusion": "success", "createdAt": "2026-11-15T11:00:00Z"},
+            {"databaseId": 1, "attempt": 1, "headSha": HEAD, "conclusion": "success", "updatedAt": "2026-11-16T11:00:00Z"},
+            {"databaseId": 2, "attempt": 2, "headSha": "b" * 40, "conclusion": "success", "updatedAt": "2026-11-16T11:00:00Z"},
+            {"databaseId": 3, "attempt": 3, "headSha": "c" * 40, "conclusion": "", "updatedAt": "2026-11-15T13:00:00Z"},
+            {"databaseId": 4, "attempt": 2, "headSha": "d" * 40, "conclusion": "success", "updatedAt": "2026-11-15T11:00:00Z"},
         ]
         self.assertEqual(ci_wait.main_reruns(runs, self.NOW), [
             "  run 2 on bbbbbbb: attempt 2, success",
@@ -206,6 +206,13 @@ class CiWaitNamesReruns(unittest.TestCase):
         with mock.patch.object(ci_wait, "run", side_effect=ci_wait.Failed("offline")), contextlib.redirect_stderr(err):
             ci_wait.report_main_reruns()
         self.assertIn("Couldn't look for reruns on main: offline", err.getvalue())
+
+    def test_a_run_gh_describes_unexpectedly_is_said_and_raises_nothing(self):
+        err = io.StringIO()
+        with mock.patch.object(ci_wait, "run", return_value='[{"databaseId": 1, "attempt": 2}]'), \
+                contextlib.redirect_stderr(err):
+            ci_wait.report_main_reruns()
+        self.assertIn("Couldn't look for reruns on main", err.getvalue())
 
 
 if __name__ == "__main__":

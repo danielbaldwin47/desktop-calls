@@ -296,14 +296,14 @@ def download_logs(run_id: str, directory: pathlib.Path) -> str:
 
 def main_reruns(runs: list[dict], now: datetime.datetime) -> list[str]:
     """A line for each of main's runs (`gh run list --json`) past attempt 1
-    and started within MAIN_RERUNS_WITHIN of `now`."""
+    and last updated (a rerun updates it) within MAIN_RERUNS_WITHIN of `now`."""
     since = now - MAIN_RERUNS_WITHIN
     return [
         f"  run {found['databaseId']} on {found['headSha'][:7]}: attempt {found['attempt']}, "
         f"{found.get('conclusion') or 'not finished'}"
         for found in runs
         if found.get("attempt", 1) > 1
-        and datetime.datetime.fromisoformat(found["createdAt"].replace("Z", "+00:00")) >= since
+        and datetime.datetime.fromisoformat(found["updatedAt"].replace("Z", "+00:00")) >= since
     ]
 
 
@@ -313,12 +313,12 @@ def report_main_reruns() -> None:
     try:
         runs = json.loads(run(
             "gh", "run", "list", "--branch", "main", "--workflow", WORKFLOW, "--limit", str(MAIN_RUNS_SEEN),
-            "--json", "databaseId,attempt,headSha,conclusion,createdAt",
+            "--json", "databaseId,attempt,headSha,conclusion,updatedAt",
         ))
+        lines = main_reruns(runs, datetime.datetime.now(datetime.timezone.utc))
     except (Failed, json.JSONDecodeError, KeyError, ValueError) as error:
         print(f"Couldn't look for reruns on main: {error}", file=sys.stderr)
         return
-    lines = main_reruns(runs, datetime.datetime.now(datetime.timezone.utc))
     if lines:
         print("\nReruns on main in the last day (ticket #396); each needs its cause found by event order "
               "(`gh run view <run>`) and recorded (`just ci-rerun <run> <issue>`):")

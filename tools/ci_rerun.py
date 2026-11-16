@@ -90,10 +90,17 @@ def rerun(gh: Gh, run_id: str, issue: int) -> int:
     return 0
 
 
+def run_id(text: str) -> str:
+    """A run id as the record names it: digits only, not a URL."""
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(f"{text!r} is not a run id: give its digits, as in `just ci-rerun 43768035550 378`")
+    return text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="just ci-rerun",
                                      description="Rerun a red CI run's failed jobs, with its cause's issue on record.")
-    parser.add_argument("run", type=lambda text: str(int(text)), help="the run id (digits, not a URL)")
+    parser.add_argument("run", type=run_id, help="the run id (digits, not a URL)")
     parser.add_argument("issue", type=int, help="the issue holding the failure's cause, found by event order")
     arguments = parser.parse_args()
     try:

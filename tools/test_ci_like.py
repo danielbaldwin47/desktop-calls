@@ -52,6 +52,7 @@ import sys
 import tempfile
 import time
 
+import free_space
 import scenario_shader_cache
 
 # The calibrated limits: see the module's documentation. TEST_CI_LIKE_CPU_QUOTA
@@ -204,6 +205,11 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     unit = f"desktop-calls-test-ci-like-{os.getpid()}"
     try:
+        free_space.preflight()  # before the build, not after it (#397)
+    except free_space.Refused as refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+    try:
         build(arguments)
         lock = take_lock()
         temporary = pathlib.Path(tempfile.mkdtemp(prefix="dc-ci-like-", dir="/tmp"))
@@ -224,7 +230,7 @@ def main() -> int:
                 )
             except KeyboardInterrupt:
                 status = 130
-            except scenario_shader_cache.WarmUpFailed as failure:
+            except (scenario_shader_cache.WarmUpFailed, free_space.Refused) as failure:
                 print(f"just test-ci-like: {failure}", file=sys.stderr)
                 status = 1
             kept = keep_failed(temporary)

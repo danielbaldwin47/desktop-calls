@@ -31,6 +31,7 @@ import pathlib
 import subprocess
 import sys
 
+import free_space
 import scenario_shader_cache
 
 BINARY = ["-p", "test-harness", "--test", "scenarios"]
@@ -93,7 +94,7 @@ def main() -> int:
         return subprocess.run(command).returncode
     try:
         environment = scenario_shader_cache.warm(dict(os.environ))
-    except scenario_shader_cache.WarmUpFailed as failure:
+    except (scenario_shader_cache.WarmUpFailed, free_space.Refused) as failure:
         print(failure, file=sys.stderr)
         return 1
     return subprocess.run(["cargo", "test", "--locked", *test_arguments], env=environment).returncode

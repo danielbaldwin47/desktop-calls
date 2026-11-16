@@ -54,6 +54,7 @@ import time
 
 import changes
 import ci_local
+import free_space
 import merge
 
 EXIT_MERGED, EXIT_REFUSED, EXIT_BRANCH_REMAINS = merge.EXIT_MERGED, merge.EXIT_REFUSED, merge.EXIT_BRANCH_REMAINS
@@ -311,6 +312,7 @@ def land(number: int, keep_target: bool) -> int:
     merge.require_open(pr)
     require_here(pr)
     ci_local.require_clean_head()
+    free_space.preflight()  # a landing merges, pushes and waits: not on a full disk (#397)
     merge.require_reviewed(pr)  # before waiting for the lock: refuse at once
     ci_local.stop_on_sigterm()
     lane = merge.take_landing_turn()
@@ -338,7 +340,7 @@ def main() -> int:
         if arguments.plan:
             return plan(arguments.pr, arguments.keep_target)
         return land(arguments.pr, arguments.keep_target)
-    except (merge.Refused, ci_local.Refused) as refusal:
+    except (merge.Refused, ci_local.Refused, free_space.Refused) as refusal:
         print(f"Not merged: {refusal}", file=sys.stderr)
         return EXIT_REFUSED
     except KeyboardInterrupt:

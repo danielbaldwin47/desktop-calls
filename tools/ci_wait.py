@@ -42,6 +42,8 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+import free_space
+
 EXIT_PASSED, EXIT_FAILED, EXIT_NO_RUN = 0, 1, 2
 
 # The workflow in .github/workflows/ci.yml.
@@ -333,6 +335,12 @@ def main() -> int:
     )
     parser.add_argument("run_id", nargs="?", help="the run (default: the current branch's latest)")
     arguments = parser.parse_args()
+    try:
+        # It only downloads scenario logs into target/ci/, so a nearly full
+        # disk is worth a word, not a refusal (#397).
+        free_space.preflight()
+    except free_space.Refused as refusal:
+        print(f"Warning: {refusal}", file=sys.stderr)
     try:
         run_id = arguments.run_id or latest_run()
         # The live view goes nowhere: the verdict below is all anyone reads.

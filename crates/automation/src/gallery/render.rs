@@ -44,12 +44,16 @@ fn render(state: &State, look: Look, output: &Path, late: Option<Duration>) {
         .screenshot_directory(output.to_owned())
         .start();
     (state.reach)(&harness);
+    // A state that lasts a moment is grabbed while it lasts and judged once
+    // it could have ended (#248, #384), so it is captured however slow the
+    // runner, and however late a capture would come.
     if let Some(moment) = state.moment {
-        harness.freeze_app_once_shown(
-            state.name,
+        let _ = harness.capture_moment(
+            &file_stem(state, look),
             |screenshot| (state.shown)(screenshot, look),
             || moment(&harness),
         );
+        return;
     }
     if let Some(late) = late {
         thread::sleep(late);
@@ -61,14 +65,7 @@ fn render(state: &State, look: Look, output: &Path, late: Option<Duration>) {
     // lower one. Only that scheduling order, not any proof in the
     // code, makes a frame judged while the app still reports the
     // state show that state.
-    //
-    // A state that lasts a moment had the app stopped in it, on the first
-    // frame that showed it (#248, #384). Stopped, the app can't answer, and
-    // can't have left the state: `freeze_app_once_shown` proved it stopped
-    // before the state's timer could fire.
-    let frozen = harness.app_is_frozen();
     let _ = harness.screenshot_when(&file_stem(state, look), DEADLINE, |screenshot| {
-        (state.shown)(screenshot, look) && (frozen || (state.still)(&harness.app_state()))
+        (state.shown)(screenshot, look) && (state.still)(&harness.app_state())
     });
-    harness.thaw_app();
 }

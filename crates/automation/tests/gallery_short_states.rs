@@ -1,9 +1,11 @@
 //! The gallery's states that the app shows for only 2 s by design are
-//! captured however slow the runner (#248): the Banner's "Identifying
+//! captured however slow the runner (#248, #384): the Banner's "Identifying
 //! caller…" and the Call Pill's "Call ended". On a loaded CI runner, frames
-//! came about 2 s apart and missed them. `--late` waits longer than that
-//! between reaching each state and capturing it, so a capture can't fall
-//! inside the state by luck.
+//! came about 2 s apart and missed them. The screen is grabbed while each
+//! lasts and judged afterwards; `--late` waits longer than either lasts
+//! before a capture would be taken, which a grabbed state ignores. The looks
+//! render one at a time: four at once on CI's two CPUs left no CPU to spare
+//! for this job's other tests (PR #391).
 
 #![expect(
     clippy::expect_used,
@@ -23,7 +25,15 @@ fn render_late(state: &str) {
         std::process::id()
     ));
     let rendered = Command::new(binary)
-        .args(["screenshot", "--only", state, "--late", LATE_MS])
+        .args([
+            "screenshot",
+            "--only",
+            state,
+            "--late",
+            LATE_MS,
+            "--workers",
+            "1",
+        ])
         .arg("--output")
         .arg(&output)
         .output()

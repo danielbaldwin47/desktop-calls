@@ -655,7 +655,6 @@ impl Builder {
             published,
             processes,
             timeline,
-            frozen: Mutex::default(),
             group,
         };
 

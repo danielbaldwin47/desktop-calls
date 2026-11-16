@@ -362,7 +362,7 @@ pub(super) const CALL_PILL_STATES: &[State] = &[
             harness.answer(call);
             wait_until_collapsed(harness);
         },
-        // For only 2 s, so the app is stopped for the capture (#248, #384).
+        // For only 2 s, so the screen is grabbed within them (#248, #384).
         moment: Some(|harness| {
             let call = harness
                 .app_state()

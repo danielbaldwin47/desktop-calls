@@ -87,8 +87,8 @@ pub(super) const BANNER_STATES: &[State] = &[
     State {
         name: "incoming-call-banner-identifying",
         title: "The Incoming Call Banner, ringing with no number yet, which may still come",
-        // The Banner identifies the caller for only 2 s: the app is stopped
-        // within them, and `render` doesn't ask it again.
+        // The Banner identifies the caller for only 2 s: the screen is
+        // grabbed within them, and `render` doesn't ask the app again.
         still: identifying,
         prepare: with_keybinding,
         reach: |harness| {

@@ -83,14 +83,14 @@ struct State {
     reach: fn(&Harness),
     /// Whether a capture under `look` shows the state yet. For a state that
     /// lasts only a moment, it must also tell the state from the screen
-    /// just before it, which the freeze checks.
+    /// just before it, which the capture checks.
     shown: fn(&Screenshot, Look) -> bool,
     /// Sets the scenario up before it starts.
     prepare: fn(Builder) -> Builder,
     /// For a state the app shows only for a moment by design, after
     /// `reach`: brings the app into it, and returns the instant before which
-    /// it can't end. The app is stopped on the first frame that shows it,
-    /// for the capture (#248, #384).
+    /// it can't end. The screen is grabbed while it lasts, and the first
+    /// frame that shows it is the capture (#248, #384).
     moment: Option<fn(&Harness) -> Instant>,
 }
 
@@ -268,7 +268,7 @@ const STATES: &[State] = &[
                 .set_activate_delay(PHONE_OPENS_LINK);
         },
         // The audio arrives once the Phone opens the link, before the app's
-        // own 3 s limit, so the app is stopped for it (#248, #384).
+        // own 3 s limit, so the screen is grabbed until then (#248, #384).
         moment: Some(|harness| {
             let asked = Instant::now();
             harness

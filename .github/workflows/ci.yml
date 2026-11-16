@@ -41,23 +41,27 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# `changes` decides whether the change touches code, and `image` makes sure
-# CI's image exists. If code changed, the suite runs in parallel, on several
-# runners: `just lint`; the tests outside the harness; the Real-Phone
-# Checklist's group 6 runs; the gallery, in parts; and the harness's
-# scenarios, in shards. On main, the polish scorecard follows the shards.
-# If only docs that no code reads changed, they are all skipped.
+# `setup` decides whether the change touches code, and makes sure CI's image
+# exists. If code changed, the suite runs in parallel, on several runners:
+# `just lint`; the tests outside the harness; the Real-Phone Checklist's
+# group 6 runs (on main); the gallery, in parts; the harness's scenarios, in
+# shards; and the first-frame timings. On main, the polish scorecard follows
+# the shards. If only docs that no code reads changed, they are all skipped.
 # "CI passed" needs every job, so it appears only once they have all
 # finished. The slowest job sets the time from push to "CI passed": on a PR,
-# a scenario shard (run 43680311355: "CI passed" 3 min 49 s after the first
-# job's start); on main, the checklist's group 6, which waits out real minutes.
+# a scenario shard; on main, the checklist's group 6, which waits out real
+# minutes.
 jobs:
-  changes:
-    name: Code changed?
+  setup:
+    name: Code changed? And CI's image
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     outputs:
       code: ${{ steps.decide.outputs.code }}
+      image: ${{ steps.name.outputs.name }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -73,24 +77,8 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 tools/changes.py "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
 
-  # Built only when .github/ci-image/Containerfile or rust-toolchain.toml
-  # changes, since the tag is their hash; otherwise this finds it and ends.
-  image:
-    name: CI image
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      name: ${{ steps.name.outputs.name }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            .github/ci-image
-            rust-toolchain.toml
-          sparse-checkout-cone-mode: false
+      # Built only when .github/ci-image/Containerfile or rust-toolchain.toml
+      # changes, since the tag is their hash; otherwise this finds it.
       - name: Name the image
         id: name
         env:
@@ -118,13 +106,13 @@ jobs:
   # ran (#118).
   lint:
     name: just lint (just check but its build, which the test jobs do)
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Green in about a minute.
     timeout-minutes: 15
     container: &container
-      image: ${{ needs.image.outputs.name }}
+      image: ${{ needs.setup.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ github.token }}
@@ -141,8 +129,7 @@ jobs:
       # cache was never saved again. Its hash goes in the key. Only runs on
       # main save: a PR restores main's cache, and caches saved by PRs would
       # evict it from the repository's 10 GB.
-      - &cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -156,14 +143,23 @@ jobs:
   # one job (run 43648375459: 402 s of gallery, 219 s of checklist).
   tests:
     name: just ci-tests, all but the scenarios, the gallery and checklist group 6
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
     steps:
       - *checkout
-      - *cache
+      # The jobs that build and test share one cache of the dependencies they
+      # build, which this job, building every dependency but the harness's
+      # scenarios', saves on main. One cache, not one per job, so a new job
+      # starts warm and the repository's 10 GB holds fewer copies.
+      - &build-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build
+          key: ${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.job == 'tests' }} # EXPERIMENT: PR saves, to measure warm; revert before landing
       # The container runs as root, and the checkout belongs to the runner's
       # user, so git refuses the repository as of dubious ownership. The
       # scorecard reads git object ids for item 8, and its tests do too.
@@ -197,8 +193,8 @@ jobs:
   # tests don't need (#286, 2026-11-15).
   checklist:
     name: just ci-checklist-group-6 ${{ matrix.names }}
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    needs: setup
+    if: needs.setup.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container: *container
@@ -208,7 +204,7 @@ jobs:
         names: [group_6_times, step_6_2_]
     steps:
       - *checkout
-      - *cache
+      - *build-cache
       - name: just ci-checklist-group-6 ${{ matrix.names }}
         run: just ci-checklist-group-6 ${{ matrix.names }}
       - *scenario-logs
@@ -219,8 +215,8 @@ jobs:
   # main renders every look, light and dark, stock and under Omarchy.
   gallery:
     name: just ci-gallery (part ${{ matrix.shard }} of ${{ strategy.job-total }})
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     # A part takes about 2.5 minutes. Without a limit, a hung gallery held a
     # job for GitHub's 6 h default (#282).
@@ -232,7 +228,7 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - *checkout
-      - *cache
+      - *build-cache
       - name: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }}
         run: just ci-gallery ${{ matrix.shard }}/${{ strategy.job-total }} ${{ github.event_name == 'pull_request' && 'light' || '' }}
       - name: Keep the gallery
@@ -251,11 +247,13 @@ jobs:
   # listing it. N is the matrix's size, so adding or dropping a shard keeps
   # every scenario in one; "CI passed" checks that the shards' counts add up.
   # In run 42034428129, one runner took 326 s under `cargo test` and 231 s
-  # under nextest, with two at a time either way (#118).
+  # under nextest, with two at a time either way (#118). Seven shards, not
+  # five: each shard's scenarios took 93 s at most of five (run 43721020495),
+  # and spread over seven, about 70 s; the slowest scenario, 48 s, is the floor.
   scenarios:
     name: just test, the harness's scenarios (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-    needs: [changes, image]
-    if: needs.changes.outputs.code == 'true'
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
     runs-on: ubuntu-latest
     container: *container
     # A hung scenario fails after nextest's terminate-after (.config/nextest.toml),
@@ -265,10 +263,10 @@ jobs:
       # Every shard reports, so one failure doesn't hide another's.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     steps:
       - *checkout
-      - *cache
+      - *build-cache
 
       # Records whether unprivileged user and mount namespaces work here. The
       # harness uses them only to hide a reachable systemd journal from the
@@ -316,14 +314,6 @@ jobs:
           path: target/nextest/default/junit.xml
           if-no-files-found: ignore
 
-      # First-frame timings, judged one scenario at a time as on the Desktop,
-      # which runs one app (issue #47). In the whole run above, every
-      # scenario's app at once slows each first paint past its target. Only
-      # the first shard runs them.
-      - name: just ci-first-frame-timings
-        if: matrix.shard == 1
-        run: just ci-first-frame-timings
-
       # Every screenshot a screen scenario took.
       - name: Keep the screenshots
         if: always()
@@ -335,20 +325,38 @@ jobs:
 
       - *scenario-logs
 
+  # First-frame timings, judged one scenario at a time as on the Desktop,
+  # which runs one app (issue #47). In a shard, every scenario's app at once
+  # slows each first paint past its target. A job of their own, since they
+  # added 20 s to the shard that ran them, the slowest of the run.
+  first-frames:
+    name: just ci-first-frame-timings
+    needs: setup
+    if: needs.setup.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    container: *container
+    timeout-minutes: 20
+    steps:
+      - *checkout
+      - *build-cache
+      - name: just ci-first-frame-timings
+        run: just ci-first-frame-timings
+      - *scenario-logs
+
   # The polish scorecard (#27), from the scenario shards' results: a report,
   # not a gate, so only the run on main makes it and "CI passed" doesn't
   # wait for it. It runs after the shards, whether or not they passed, so a
   # failing scenario shows as its item's FAIL.
   scorecard:
     name: just scorecard, from the scenarios' results
-    needs: [changes, image, scenarios]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.changes.outputs.code == 'true' }}
+    needs: [setup, scenarios]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.setup.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container: *container
     steps:
       - *checkout
-      - *cache
+      - *build-cache
       - *git-trusts-checkout
       - name: Fetch the shards' results
         uses: actions/download-artifact@v4
@@ -371,30 +379,30 @@ jobs:
           if-no-files-found: ignore
 
   # The one check that says CI passed, and the context branch protection
-  # requires, pinned to GitHub Actions. It fails unless `changes` succeeded
-  # and every other job succeeded, or was skipped because `changes` found only
+  # requires, pinned to GitHub Actions. It fails unless `setup` succeeded
+  # and every other job succeeded, or was skipped because `setup` found only
   # docs, or, for the checklist, because the run is a PR's. `just merge` and
   # `just land` wait for it.
   ci-passed:
     name: ${{ github.event_name == 'workflow_dispatch' && 'CI passed (dispatched run)' || 'CI passed' }}
     if: ${{ !cancelled() }}
-    needs: [changes, image, lint, tests, checklist, gallery, scenarios]
+    needs: [setup, lint, tests, checklist, gallery, scenarios, first-frames]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every job passed, or was skipped for a docs-only change
         env:
-          CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-          IMAGE: ${{ needs.image.result }}
+          SETUP: ${{ needs.setup.result }}
+          CODE: ${{ needs.setup.outputs.code }}
           JOBS: >-
             ${{ needs.lint.result }} ${{ needs.tests.result }}
             ${{ needs.gallery.result }} ${{ needs.scenarios.result }}
+            ${{ needs.first-frames.result }}
           CHECKLIST: ${{ needs.checklist.result }}
           PR: ${{ github.event_name == 'pull_request' }}
         run: |
-          echo "changes: $CHANGES, code changed: $CODE, image: $IMAGE, jobs: $JOBS, checklist: $CHECKLIST"
-          [ "$CHANGES" = success ] || exit 1
+          echo "setup: $SETUP, code changed: $CODE, jobs: $JOBS, checklist: $CHECKLIST"
+          [ "$SETUP" = success ] || exit 1
           for result in $JOBS; do
             if [ "$CODE" = true ]; then
               [ "$result" = success ] || exit 1
@@ -407,12 +415,11 @@ jobs:
           else
             [ "$CHECKLIST" = skipped ] || exit 1
           fi
-          if [ "$CODE" = true ]; then [ "$IMAGE" = success ] || exit 1; fi
 
       # A shard that didn't run, or a partition that left scenarios out, would
       # otherwise pass by running fewer.
       - name: Fetch the shards' counts
-        if: needs.changes.outputs.code == 'true'
+        if: needs.setup.outputs.code == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: shard-count-*
@@ -420,7 +427,7 @@ jobs:
           path: shard-counts
 
       - name: The shards ran every scenario
-        if: needs.changes.outputs.code == 'true'
+        if: needs.setup.outputs.code == 'true'
         run: |
           every=$(cat shard-counts/every-scenario)
           ran=$(cat shard-counts/shard-* | awk '{ sum += $1 } END { print sum + 0 }')

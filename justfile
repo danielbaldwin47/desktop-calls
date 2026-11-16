@@ -39,14 +39,20 @@ gallery_test := "the_gallery_shows_every_state_in_light_and_dark_stock_and_under
 # minutes (calls off for 60 s, Quiet Hours from the next minute for one).
 checklist_group_6_tests := "group_6_times step_6_2_"
 
+# Under cargo-nextest, which pools every test binary's tests, as many at once
+# as cargo test runs within one binary: cargo test ran the binaries one after
+# another, 101 s with the Real-Phone Checklist's alone 64 s (run
+# 43721020495). The doc tests, which nextest doesn't run, run after.
 # Run every test outside the harness's scenarios but the gallery and the checklist's group 6 runs.
 ci-tests:
     #!/usr/bin/env bash
     set -euo pipefail
     skips=()
-    for name in {{gallery_test}} {{checklist_group_6_tests}}; do skips+=(--skip "$name"); done
+    for name in {{gallery_test}} {{checklist_group_6_tests}}; do skips+=("test($name)"); done
     cargo build --workspace --bins --locked
-    cargo test --workspace --exclude test-harness --locked -- "${skips[@]}"
+    cargo nextest run --workspace --exclude test-harness --locked --no-fail-fast \
+        -E "not ($(IFS='|'; echo "${skips[*]}"))"
+    cargo test --workspace --exclude test-harness --locked --doc
 
 # CI passes one of the names above, to run its tests on a runner of their
 # own: all on one runner, they took 217 s, the slowest job of a run (#286).

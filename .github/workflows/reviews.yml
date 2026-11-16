@@ -23,21 +23,28 @@ permissions:
   # To post the check run on the PR's head.
   checks: write
 
-# One verdict at a time per PR, in order, none cancelled: the last to run
-# reads the latest comments and head.
-concurrency:
-  group: reviews-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   verdict:
     name: Judge the review records
-    # A comment counts only on a PR, and only a record or a deletion can
-    # change the verdict.
+    # A comment counts only on a PR, and only a record, a record edited away,
+    # or a deletion can change the verdict. A fork's pull_request run has a
+    # read-only token and could not post, so a fork PR gets its verdict from
+    # its first review record. Hiding a comment fires no event: the check
+    # keeps its verdict until the next one, and `just merge` reads hidden
+    # comments itself.
     if: >-
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event.issue.pull_request &&
-       (github.event.action == 'deleted' || startsWith(github.event.comment.body, 'Review:')))
+       (github.event.action == 'deleted' ||
+        startsWith(github.event.comment.body, 'Review:') ||
+        startsWith(github.event.changes.body.from, 'Review:')))
+    # One verdict at a time per PR, in order, none cancelled: the last to run
+    # reads the latest comments and head. Set on the job, so a skipped run
+    # (an ordinary comment) never holds the group.
+    concurrency:
+      group: reviews-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

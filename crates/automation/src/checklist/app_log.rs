@@ -58,20 +58,26 @@ impl AppLog {
     /// (microseconds since the Unix epoch), oldest first. A log that can't
     /// be read gives no lines.
     pub fn lines(&self, from_us: u64, to_us: u64) -> Vec<LogLine> {
+        self.read(from_us, to_us).unwrap_or_default()
+    }
+
+    /// As [`AppLog::lines`], or `None` if the log couldn't be read at all,
+    /// for a check that must not read "no lines" as "nothing logged".
+    pub fn read(&self, from_us: u64, to_us: u64) -> Option<Vec<LogLine>> {
         let mut lines: Vec<LogLine> = match self {
-            Self::Journal => journal(from_us, to_us),
+            Self::Journal => journal(from_us, to_us)?,
             Self::File(path) => std::fs::read_to_string(path)
-                .unwrap_or_default()
+                .ok()?
                 .lines()
                 .filter_map(file_line)
                 .collect(),
         };
         lines.retain(|line| (from_us..=to_us).contains(&line.at_us));
-        lines
+        Some(lines)
     }
 }
 
-fn journal(from_us: u64, to_us: u64) -> Vec<LogLine> {
+fn journal(from_us: u64, to_us: u64) -> Option<Vec<LogLine>> {
     let since = format!(
         "--since=@{}.{:06}",
         from_us / 1_000_000,
@@ -83,12 +89,17 @@ fn journal(from_us: u64, to_us: u64) -> Vec<LogLine> {
         .args(["--priority=info", &since, &until])
         .output()
     else {
-        return Vec::new();
+        return None;
     };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(journal_line)
-        .collect()
+    if !output.status.success() {
+        return None;
+    }
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(journal_line)
+            .collect(),
+    )
 }
 
 fn journal_line(text: &str) -> Option<LogLine> {

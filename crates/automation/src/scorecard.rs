@@ -375,15 +375,17 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
             .filter(|step| step.outcome == outcome)
             .count()
     };
-    let (passed, failed, skipped) = (
+    let (passed, failed, skipped, unexpected) = (
         count(Outcome::Pass),
         count(Outcome::Fail),
         count(Outcome::Skipped),
+        count(Outcome::Unexpected),
     );
     let not_run = groups_not_run(checklist);
+    // An unexpected observation is not a pass until an agent has read it.
     let status = if failed > 0 {
         Status::Fail
-    } else if skipped > 0 || !not_run.is_empty() {
+    } else if skipped > 0 || unexpected > 0 || !not_run.is_empty() {
         Status::Manual
     } else {
         Status::Pass
@@ -393,10 +395,16 @@ fn scenarios_and_checklist(evidence: &Evidence) -> Score {
     } else {
         format!(", not run: group {}", not_run.join(", "))
     };
+    // Named only when there are some, as the scorecard read before.
+    let unexpected = if unexpected == 0 {
+        String::new()
+    } else {
+        format!(", {unexpected} observed unexpected")
+    };
     Score::new(
         status,
         format!(
-            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped{not_run}, {}",
+            "{simulated}; Real-Phone Checklist {}: {passed} pass, {failed} fail, {skipped} skipped{unexpected}{not_run}, {}",
             checklist.started,
             checklist.path.display()
         ),

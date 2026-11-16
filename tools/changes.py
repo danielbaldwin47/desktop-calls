@@ -11,7 +11,7 @@ with this one rule:
   and the conformance test reads the D-Bus snapshot under docs/research/.
   Comments count too, which can only run CI that wasn't needed.
 
-Usage (CI's `changes` job):
+Usage (CI's `setup` job):
   python3 tools/changes.py BASE HEAD
 
 Prints `code=true` or `code=false` on standard output, for $GITHUB_OUTPUT,

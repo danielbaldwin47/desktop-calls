@@ -22,6 +22,12 @@
 //! commits one at a time. So the first frame that shows the state is the
 //! picture, and the state's whole time is the margin.
 //!
+//! Judging a frame of the whole screen takes time, more than the state's
+//! whole time with four renders on CI's two CPUs. So the app is stopped as
+//! each frame arrives, before it is judged, and started again if the frame
+//! doesn't show the state: the app can't leave the state while its frame
+//! is judged, and the stop is as near the frame as the signal allows.
+//!
 //! A frame shows the state only by what the caller's check sees in it, so
 //! the check must tell the state from the screen before it. The freeze
 //! proves that it does, on the screen as it was just before the state, and
@@ -76,25 +82,16 @@ impl Harness {
             "the screen already passed the check for {what} before the app was in it, so the \
              check can't tell when the screen shows it"
         );
-        let before = reach();
-        // Asked before the recording, so no time passes between the frame
-        // and the stop but the stop's own.
         let pid = self
             .app_process_id()
             .expect("the app owns its name on the session bus");
-        let first = self.first_frame_shown(what, before, &shown);
-        signal(pid, "-STOP");
-        *self
-            .frozen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pid);
-        let stopped = wait_until_stopped(pid);
+        let before = reach();
+        let (stopped, passed_over) = self.stop_on_first_frame_shown(what, pid, before, &shown);
         self.timeline.record(
             "harness",
             format!(
-                "stopped the app (pid {pid}) to capture {what}, {:?} after the screen first \
-                 showed it",
-                stopped.saturating_duration_since(first)
+                "stopped the app (pid {pid}) on the first frame that showed {what}, after \
+                 {passed_over} that didn't"
             ),
         );
         if let Some(late) = stopped.checked_duration_since(before) {
@@ -107,14 +104,17 @@ impl Harness {
         }
     }
 
-    /// When the screen's first frame that satisfies `shown` had been judged,
-    /// recording it from now until `before`.
-    fn first_frame_shown(
+    /// Records the screen from now until `before`, stopping the app `pid`
+    /// as each frame arrives and starting it again if the frame doesn't
+    /// satisfy `shown`. Returns when the app was stopped for the first frame
+    /// that does, and how many frames came before it.
+    fn stop_on_first_frame_shown(
         &self,
         what: &str,
+        pid: u32,
         before: Instant,
         shown: &impl Fn(&Screenshot) -> bool,
-    ) -> Instant {
+    ) -> (Instant, usize) {
         let captures = self.directory.join("captures");
         let never_shown = |detail: String| -> ! {
             panic!(
@@ -140,34 +140,56 @@ impl Harness {
                     stopper.stop();
                 }
             });
+            let mut passed_over = 0;
             let first = loop {
-                let frame = recorder
-                    .next_frame(&path)
-                    .map(|(width, height)| Screenshot {
-                        path: path.clone(),
-                        width,
-                        height,
-                    });
-                let Ok(frame) = frame else {
+                let Ok((width, height)) = recorder.next_frame(&path) else {
                     let _ = fs::remove_file(&path);
                     break None;
                 };
-                let showing = shown(&frame);
-                let _ = fs::remove_file(&frame.path);
+                // Judging a frame of the whole screen took longer than the
+                // state lasts with four renders on CI's two CPUs (PR #391's
+                // first run), so the app is stopped before the frame is
+                // judged: the state can't end while it is.
+                let stopped_at = self.stop_app(pid);
+                let showing = shown(&Screenshot {
+                    path: path.clone(),
+                    width,
+                    height,
+                });
+                let _ = fs::remove_file(&path);
                 if showing {
-                    break Some(Instant::now());
+                    break Some(stopped_at);
                 }
+                self.resume_app(pid);
+                passed_over += 1;
             };
             drop(judged);
             first.map_or_else(
                 || never_shown(String::new()),
-                |first| {
-                    self.timeline
-                        .record("harness", format!("the screen showed {what}"));
-                    first
-                },
+                |stopped| (stopped, passed_over),
             )
         })
+    }
+
+    /// Stops the app `pid` until [`Harness::thaw_app`], or the end of the
+    /// scenario, and returns when it was seen stopped.
+    fn stop_app(&self, pid: u32) -> Instant {
+        signal(pid, "-STOP");
+        *self
+            .frozen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pid);
+        wait_until_stopped(pid)
+    }
+
+    /// Starts the app `pid` again after [`Harness::stop_app`], quietly: a
+    /// frame that didn't show the state.
+    fn resume_app(&self, pid: u32) {
+        self.frozen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        signal(pid, "-CONT");
     }
 
     /// Starts the app again after [`Harness::freeze_app_once_shown`]: its timers

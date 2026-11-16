@@ -148,6 +148,12 @@ impl Recorder {
     /// now), and writes it to `path` as a binary PPM. Returns its width and
     /// height.
     pub fn next_frame(&mut self, path: &Path) -> Result<(u32, u32), String> {
+        self.next_raw_frame()?.write_ppm(path)
+    }
+
+    /// As [`Recorder::next_frame`], keeping the frame in memory as the
+    /// compositor sent it, which costs a copy and nothing more.
+    pub fn next_raw_frame(&mut self) -> Result<RawFrame, String> {
         if self.requests[self.current].is_none() {
             self.request(self.current, false);
         }
@@ -175,7 +181,7 @@ impl Recorder {
                     if let Some(request) = self.requests[slot].take() {
                         request.frame.destroy();
                     }
-                    return self.write_ppm(slot, path);
+                    return self.read_frame(slot);
                 }
             }
         }
@@ -259,11 +265,38 @@ impl Recorder {
         })
     }
 
-    fn write_ppm(&self, slot: Slot, path: &Path) -> Result<(u32, u32), String> {
+    fn read_frame(&self, slot: Slot) -> Result<RawFrame, String> {
         let Some(buffer) = &self.buffers[slot] else {
             return Err("the compositor finished a frame it had no buffer for".to_owned());
         };
         let (format, width, height, stride) = buffer.shape;
+        let usize = |value: u32| usize::try_from(value).map_err(|error| error.to_string());
+        let mut pixels = vec![0; usize(stride)? * usize(height)?];
+        buffer
+            .file
+            .read_exact_at(&mut pixels, 0)
+            .map_err(|error| error.to_string())?;
+        Ok(RawFrame {
+            pixels,
+            shape: (format, width, height, stride),
+            inverted: self.state.progress[slot].inverted,
+        })
+    }
+}
+
+/// One frame of the screen as the compositor sent it: its pixels in the
+/// compositor's format, and that format, width, height and stride.
+pub(crate) struct RawFrame {
+    pixels: Vec<u8>,
+    shape: (wl_shm::Format, u32, u32, u32),
+    inverted: bool,
+}
+
+impl RawFrame {
+    /// Writes the frame to `path` as a binary PPM. Returns its width and
+    /// height.
+    pub fn write_ppm(&self, path: &Path) -> Result<(u32, u32), String> {
+        let (format, width, height, stride) = self.shape;
         // Byte offsets of red, green and blue in one little-endian pixel.
         let (red, green, blue) = match format {
             wl_shm::Format::Xrgb8888 | wl_shm::Format::Argb8888 => (2, 1, 0),
@@ -276,20 +309,15 @@ impl Recorder {
         };
         let usize = |value: u32| usize::try_from(value).map_err(|error| error.to_string());
         let (columns, rows, stride) = (usize(width)?, usize(height)?, usize(stride)?);
-        let mut pixels = vec![0; stride * rows];
-        buffer
-            .file
-            .read_exact_at(&mut pixels, 0)
-            .map_err(|error| error.to_string())?;
+        let pixels = &self.pixels;
         // Converted into place, pixel by pixel through zipped iterators,
         // which stays fast at the harness's opt-level 1: pushing each pixel
         // onto a Vec took 160 ms a frame there, and the recorder hands the
         // compositor its next buffer only once this frame is written, so it
         // missed a window shown for 200 ms (ticket #55).
-        let inverted = self.state.progress[slot].inverted;
         let mut rgb = vec![0; columns * rows * 3];
         for (row, converted) in rgb.chunks_exact_mut(columns * 3).enumerate() {
-            let row = if inverted { rows - 1 - row } else { row };
+            let row = if self.inverted { rows - 1 - row } else { row };
             let line = &pixels[row * stride..row * stride + columns * 4];
             for (converted, pixel) in converted
                 .as_chunks_mut::<3>()

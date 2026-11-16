@@ -14,6 +14,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer, before typing: the Call History, newest first, the selected Missed Call in red at 4.5:1, and the footer of keys with the Phone connected",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "");
@@ -25,6 +26,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer opened after a Missed Call: the Missed Calls since it was last opened at the top, each with a red dot at its right",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             missed_call(harness);
@@ -40,6 +42,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer, searching for smith, the second match selected as Omarchy's cursor row",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "smith");
@@ -55,6 +58,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer after typing what matches nothing: the rows the Call History showed go, and it says so",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "");
@@ -70,6 +74,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer, after Enter with the Phone out of range: the notice as a strip under the search row, and the footer says Out of range",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             harness.simulated_phone().disconnect();
@@ -91,6 +96,7 @@ pub(super) const DIALER_STATES: &[State] = &[
         title: "The Dialer while calls are off until 07:00: the strip says Enter calls anyway, and the footer's Enter reads Call anyway",
         still: |_| true,
         prepare: as_is,
+        moment: None,
         reach: |harness| {
             sync(harness);
             let _output = harness.cli(&["calls", "off", "--until-morning"]);

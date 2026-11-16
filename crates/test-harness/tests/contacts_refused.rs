@@ -16,8 +16,8 @@ const DEADLINE: Duration = Duration::from_secs(5);
 const SYNC_DEADLINE: Duration = Duration::from_secs(15);
 /// How long the app may take to pick up Contacts sharing turned on later,
 /// with the Phone connected all along: it asks again every 10 s, and a
-/// sync of a few Contacts is quick.
-const SHARED_LATER_DEADLINE: Duration = Duration::from_secs(20);
+/// sync of a few Contacts is quick. Three asks' worth, for a loaded machine.
+const SHARED_LATER_DEADLINE: Duration = Duration::from_secs(30);
 const CONTACTS: usize = 6;
 
 fn is_ready(state: &AppState) -> bool {

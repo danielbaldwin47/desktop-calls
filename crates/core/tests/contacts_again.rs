@@ -5,7 +5,7 @@
 
 use desktop_calls_core::{
     CallHistory, CallId, CallState, Caller, Contacts, ContactsState, Effect, Input, Phone,
-    PhoneCommand, State, SyncFailure, Timer, Timestamp, step,
+    PhoneCommand, State, SyncFailure, SyncProgress, Timer, Timestamp, Unavailable, step,
 };
 
 const ADDRESS: &str = "AA:BB:CC:DD:EE:FF";
@@ -147,6 +147,76 @@ fn a_phone_that_prompts_when_asked_again_isnt_asked_again_while_connected() {
 
     assert_eq!(state.contacts_state(), ContactsState::Denied);
     assert!(waits(&effects).is_empty(), "{effects:?}");
+}
+
+#[test]
+fn a_person_who_said_no_on_the_prompt_isnt_asked_again_while_connected() {
+    let (state, effects) = run(
+        connected(),
+        [
+            Input::ContactsPermissionNeeded {
+                deadline: Timestamp(30_000),
+            },
+            Input::ContactsSyncFailed(SyncFailure::Denied),
+        ],
+    );
+
+    assert_eq!(state.contacts_state(), ContactsState::Denied);
+    assert!(waits(&effects).is_empty(), "{effects:?}");
+}
+
+#[test]
+fn a_sync_that_fails_after_the_phone_shared_is_unavailable_and_not_asked_again() {
+    let (state, wait) = refused();
+    let (state, _) = run(state, [Input::TimerFired(wait)]);
+
+    let (state, effects) = run(
+        state,
+        [
+            Input::ContactsSyncProgress(SyncProgress::Shared),
+            Input::ContactsSyncFailed(SyncFailure::Unavailable(Unavailable::Failed)),
+        ],
+    );
+
+    assert_eq!(
+        state.contacts_state(),
+        ContactsState::Unavailable(Unavailable::Failed)
+    );
+    assert!(state.problems().is_empty(), "{:?}", state.problems());
+    assert!(waits(&effects).is_empty(), "{effects:?}");
+}
+
+#[test]
+fn still_refused_the_contacts_already_forgotten_arent_forgotten_again() {
+    let (state, wait) = refused();
+    let (state, _) = run(state, [Input::TimerFired(wait)]);
+
+    let (_, effects) = run(state, [Input::ContactsSyncFailed(SyncFailure::Denied)]);
+
+    assert!(!effects.contains(&Effect::ForgetContacts), "{effects:?}");
+}
+
+#[test]
+fn the_link_closing_after_the_phone_left_doesnt_forget_its_contacts() {
+    let (state, _) = run(
+        connected(),
+        [Input::ContactsSynced {
+            contacts: Contacts::default(),
+            call_history: CallHistory::default(),
+        }],
+    );
+    let (state, effects) = run(
+        state,
+        [
+            Input::PhoneDisconnected {
+                address: ADDRESS.to_owned(),
+            },
+            Input::ContactsSyncFailed(SyncFailure::Denied),
+        ],
+    );
+
+    assert!(!effects.contains(&Effect::ForgetContacts), "{effects:?}");
+    assert_ne!(state.contacts_state(), ContactsState::Denied);
 }
 
 #[test]

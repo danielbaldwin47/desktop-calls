@@ -10,11 +10,13 @@
 //! the app's control interface.
 //!
 //! Bluetooth addresses become `dev-` and a short hash, the same within a
-//! file; names, aliases and caller lines become `…`; runs of seven digits
-//! or more become `<number>`. On the session bus, where the app's calls,
-//! contacts and windows go by, every string in a body becomes `…` but
-//! keys, object paths, D-Bus names and the values in [`STATE_KEYS`]. Lines are timed in microseconds since the
-//! Unix epoch, as the record's `started_us` and `ended_us` are.
+//! file; names, aliases and caller lines become `…`; seven digits or more,
+//! however grouped or punctuated, become `<number>`, but in a UUID. On the
+//! session bus, where the app's calls, contacts and windows go by, every
+//! string in a body becomes `…` but keys, object paths, D-Bus names, the
+//! values in [`STATE_KEYS`] and an error's message. Lines are timed in
+//! microseconds since the Unix epoch, as the record's `started_us` and
+//! `ended_us` are.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -335,16 +337,18 @@ fn redact(line: &str, addresses: &mut HashMap<String, String>) -> String {
     let line = if line.starts_with("session: ") {
         hide_session_strings(&line)
     } else {
-        hide_private_values(&line)
+        line
     };
-    hide_numbers(&line)
+    hide_numbers(&hide_private_values(&line))
 }
 
 /// Each string in `line` as `…`, but a key, an object path, a D-Bus name,
 /// any string inside the value of one of [`STATE_KEYS`], and an error's.
 fn hide_session_strings(line: &str) -> String {
-    // An error's message is what an agent filing the step needs, and
-    // carries no person: obexd's and PipeWire's are fixed texts.
+    // An error's message is what an agent filing the step needs. It can
+    // echo only what it was sent, and the app sends obexd and PipeWire no
+    // contact name: addresses, folders, file paths, a number to dial and
+    // tones. Addresses and numbers are hidden on every line (#423).
     let error = line.starts_with("session: error ");
     let mut out = String::with_capacity(line.len());
     let mut characters = line.chars().peekable();
@@ -470,26 +474,79 @@ fn hide_private_values(line: &str) -> String {
     out
 }
 
-/// Each run of seven digits or more as `<number>`.
+/// Each phone number in `line` as `<number>` (see [`number_at`]), but
+/// none inside a UUID, such as a Bluetooth profile's
+/// `0000111f-0000-1000-8000-00805f9b34fb`.
 fn hide_numbers(line: &str) -> String {
+    let characters: Vec<char> = line.chars().collect();
     let mut out = String::with_capacity(line.len());
-    let mut digits = String::new();
-    for character in line.chars().chain(std::iter::once('\0')) {
-        if character.is_ascii_digit() {
-            digits.push(character);
-            continue;
-        }
-        if digits.len() >= 7 {
+    let mut at = 0;
+    while at < characters.len() {
+        if is_uuid(&characters[at..]) {
+            out.extend(&characters[at..at + UUID_SHAPE.len()]);
+            at += UUID_SHAPE.len();
+        } else if let Some(length) = number_at(&characters[at..]) {
             out.push_str("<number>");
+            at += length;
         } else {
-            out.push_str(&digits);
-        }
-        digits.clear();
-        if character != '\0' {
-            out.push(character);
+            out.push(characters[at]);
+            at += 1;
         }
     }
     out
+}
+
+/// How long the phone number `text` starts with is, if it starts with
+/// one: seven digits or more, however grouped or punctuated, as in
+/// `+44 7700 900123`, `(555) 123-4567` or `555.123.4567`. A `+` or `(`
+/// before the first digit, and a `)` after the last, are part of it.
+/// Redacting a date or a long count too is the price of never missing a
+/// number.
+fn number_at(text: &[char]) -> Option<usize> {
+    let mut at = 0;
+    while at < text.len() && "+(".contains(text[at]) && at < 2 {
+        at += 1;
+    }
+    if !text.get(at).is_some_and(char::is_ascii_digit) {
+        return None;
+    }
+    let (mut digits, mut end, mut gap) = (0, at, 0);
+    while let Some(&character) = text.get(at) {
+        if character.is_ascii_digit() {
+            digits += 1;
+            end = at + 1;
+            gap = 0;
+        } else if NUMBER_SEPARATORS.contains(character) && gap < 4 {
+            gap += 1;
+        } else {
+            break;
+        }
+        at += 1;
+    }
+    if text.get(end) == Some(&')') {
+        end += 1;
+    }
+    (digits >= 7).then_some(end)
+}
+
+/// What may sit between a phone number's digits, at most four together
+/// (`) - `): ASCII punctuation, and the no-break space, en dash and
+/// no-break hyphen a copied number can carry.
+const NUMBER_SEPARATORS: &str = " -.()/_\u{a0}\u{2013}\u{2011}";
+
+/// A UUID's shape: `h` a hex digit.
+const UUID_SHAPE: &str = "hhhhhhhh-hhhh-hhhh-hhhh-hhhhhhhhhhhh";
+
+/// Whether `text` starts with a UUID.
+fn is_uuid(text: &[char]) -> bool {
+    text.len() >= UUID_SHAPE.len()
+        && UUID_SHAPE
+            .chars()
+            .zip(text)
+            .all(|(shape, character)| match shape {
+                'h' => character.is_ascii_hexdigit(),
+                _ => *character == shape,
+            })
 }
 
 #[cfg(test)]
@@ -516,6 +573,50 @@ mod tests {
         assert_eq!(
             hide_numbers("call 5551234 at 12:30"),
             "call <number> at 12:30"
+        );
+    }
+
+    #[test]
+    fn a_number_is_hidden_however_it_is_written() {
+        for number in [
+            "+15551234567",
+            "+1 555 123 4567",
+            "+1-555-123-4567",
+            "+1 (555) 123-4567",
+            "(555) 123-4567",
+            "555.123.4567",
+            "+44 7700 900123",
+            "07700 900 123",
+            "+33 6 12 34 56 78",
+            "555 1234",
+            "+1 - 555 - 123 - 4567",
+            "(555) - 123-4567",
+            "555_123_4567",
+            "+44\u{a0}7700\u{a0}900123",
+            "555\u{2013}123\u{2013}4567",
+        ] {
+            let line = format!(
+                r#"session: error :1.4 -> :1.10 - -.- ("Invalid number {number}: rejected",)"#
+            );
+            let redacted = redact(&line, &mut HashMap::new());
+            assert!(
+                redacted.contains("Invalid number <number>: rejected"),
+                "{number}: {redacted}"
+            );
+            let digits = |text: &str| text.chars().filter(char::is_ascii_digit).count();
+            assert_eq!(
+                digits(&redacted),
+                digits(&line.replace(number, "")),
+                "{number}: {redacted}"
+            );
+        }
+        // A profile's UUID stays whole.
+        let uuids = r#"UUIDs: ["0000111f-0000-1000-8000-00805f9b34fb", "0000112f-0000-1000-8000-00805F9B34FB"]"#;
+        assert_eq!(hide_numbers(uuids), uuids);
+        // Short counts and versions stay.
+        assert_eq!(
+            hide_numbers("uint32 180, BlueZ 5.87, page 12 of 40"),
+            "uint32 180, BlueZ 5.87, page 12 of 40"
         );
     }
 

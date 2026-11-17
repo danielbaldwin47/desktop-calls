@@ -32,7 +32,7 @@ use crate::indicator::Indicator;
 use crate::logging::{self, EventKind};
 use crate::notifications::Notifier;
 use crate::phone_link::Command;
-use crate::ringer::Ringer;
+use crate::ringer::{Ringer, RingerSettings};
 use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
@@ -217,7 +217,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             publisher,
             surfaces,
             indicator,
-            ringer: Ringer::default(),
+            ringer: Ringer::new(RingerSettings::default()),
             notifier,
             stall_watch: StallWatch::default(),
         },

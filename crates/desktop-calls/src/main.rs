@@ -105,6 +105,10 @@ enum Command {
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
     Service,
+    /// Ring as an incoming call does, until Ctrl-C, to hear the ringer
+    /// without a call.
+    #[command(hide = true)]
+    Ring,
 }
 
 /// What `desktop-calls calls` does.
@@ -182,6 +186,7 @@ fn main() -> ExitCode {
         Some(Command::QuietHours { hours: Some(hours) }) => cli::quiet_hours(&hours),
         Some(Command::QuietHours { hours: None }) => cli::quiet_hours_window(),
         Some(Command::Service) => service::run(),
+        Some(Command::Ring) => ringer::ring_until_interrupted(),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.
         None => cli::activate(),

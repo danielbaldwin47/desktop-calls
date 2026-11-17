@@ -55,6 +55,7 @@ mod input;
 mod moment;
 mod notification_card;
 mod omarchy_quiet;
+mod player;
 mod process_group;
 mod prune;
 mod redraw;
@@ -79,6 +80,7 @@ pub use control::{AppEvent, PendingDial, RunningCli};
 pub use desktop::{Clipboard, Keyboard, Notifications, Pointer, Tray};
 pub use input::Key;
 pub use notification_card::{CardColours, draw_notification_card};
+pub use player::Play;
 pub use screen::{LAYOUT_SIZE, Region, SCREEN_SIZE, Screenshot};
 pub use simulated_phone::{ContactsPrompt, PhoneIdentity, RecordedMethodCall, SimulatedPhone};
 pub use stand_ins::{

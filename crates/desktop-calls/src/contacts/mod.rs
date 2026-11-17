@@ -32,7 +32,7 @@
 //! Reading files, parsing and indexing run on a thread of their own, so the
 //! main loop, and so the Banner, never waits for them.
 
-mod cache;
+pub mod cache;
 mod obex;
 mod vcard;
 

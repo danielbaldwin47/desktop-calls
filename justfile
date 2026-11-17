@@ -211,6 +211,13 @@ demo scenario="crates/simulated-phone/scenarios/demo.scenario":
     @cargo build --quiet --workspace --bins --locked
     @target/debug/automation demo {{scenario}}
 
+# Ring as an incoming Call does, on this computer's speakers, until Ctrl-C:
+# to hear the Ringer without a Call. Needs no Phone and touches no service.
+[no-exit-message]
+ring:
+    @cargo build --quiet --locked -p desktop-calls
+    @target/debug/desktop-calls ring
+
 # Place one real Call to the Test Number, run HOOK during it, always hang up.
 # Stops the installed desktop-calls.service for the run and starts it again
 # afterwards, so HOOK may start a dev run of the app (ADR-0006).

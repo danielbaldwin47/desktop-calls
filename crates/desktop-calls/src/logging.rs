@@ -121,6 +121,16 @@ pub enum EventKind {
     RingingStarted,
     RingingStopped,
     RingingFailed,
+    /// The user's own file couldn't be played; the Chime rang instead.
+    RingSoundUnplayable,
+    /// The Ringer Window played a Ring Sound once, or stopped it.
+    PreviewStarted,
+    PreviewStopped,
+    RingerLoaded,
+    RingerSet,
+    /// The Ringer's config file, or a line of it, couldn't be read or
+    /// written.
+    RingerFailed,
     ErrorReported,
     SurfacesUnavailable,
     ContactsLoaded,
@@ -264,6 +274,12 @@ impl EventKind {
             Self::RingingStarted => "ringing-started",
             Self::RingingStopped => "ringing-stopped",
             Self::RingingFailed => "ringing-failed",
+            Self::RingSoundUnplayable => "ring-sound-unplayable",
+            Self::PreviewStarted => "preview-started",
+            Self::PreviewStopped => "preview-stopped",
+            Self::RingerLoaded => "ringer-loaded",
+            Self::RingerSet => "ringer-set",
+            Self::RingerFailed => "ringer-failed",
             Self::ErrorReported => "error-reported",
             Self::SurfacesUnavailable => "surfaces-unavailable",
             Self::ContactsLoaded => "contacts-loaded",

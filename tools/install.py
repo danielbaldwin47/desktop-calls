@@ -22,6 +22,7 @@ It installs, in the user's own directories:
   $XDG_DATA_HOME/systemd/user/desktop-calls.service           the systemd user unit
   $XDG_DATA_HOME/dbus-1/services/<bus name>.service           D-Bus activation
   $XDG_DATA_HOME/applications/<app id>.desktop                launcher entry, tel: links
+  $XDG_DATA_HOME/doc/desktop-calls/android-ringtones/         the Android ringtones' NOTICE and LICENSE
 
 XDG_DATA_HOME defaults to ~/.local/share. Each file that names the binary
 names it by its installed path. With DESTDIR set, the files go under DESTDIR
@@ -139,6 +140,14 @@ def installed_files() -> dict[Path, Path | None]:
             REPOSITORY / "data/dbus-1" / f"{APP_ID}.service.in"
         ),
         data_home / "applications" / f"{APP_ID}.desktop": REPOSITORY / "data" / f"{APP_ID}.desktop",
+        # The Apache-2.0 notice and licence of the Android ringtones the
+        # binary carries (#432).
+        **{
+            data_home / "doc/desktop-calls/android-ringtones" / name: (
+                REPOSITORY / "data/ringtones/android" / name
+            )
+            for name in ("NOTICE", "LICENSE")
+        },
     }
 
 

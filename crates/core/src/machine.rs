@@ -25,6 +25,7 @@ mod phone;
 mod presence;
 mod quiet_hours;
 mod quiet_hours_window;
+mod ringer_window;
 mod setup;
 mod setup_calls_off;
 mod view;
@@ -45,17 +46,19 @@ pub use calls_turned::{CallsTurned, CallsTurnedNotice};
 use collapse::{CallWindowForm, follow_call_window, form_input};
 use desktop::DesktopChecks;
 pub use desktop::{BluetoothPower, DesktopCheck, DesktopFix, FixFailure, SetupProblemsView};
-use dialling::{cancel_dial, dial, dial_failed, dialer_input, phone_unpaired, refusal_failure};
+use dialling::{cancel_dial, dial, dial_failed, dialer_input, refusal_failure};
 pub use input::{
     ConnectFailure, DialProgress, Effect, Input, PairingFailure, PhoneCommand, PhoneRefusal, Timer,
 };
 use missed_calls::{keep_cue, missed_call_input};
 use phone::{command_done, command_failed, contacts_sync, phone_paired, pick_up_earlier_run};
-use presence::{Presence, forget_phone, hang_up_undelivered, presence_input};
+pub(super) use presence::forget_phone_keeping_desktop;
+use presence::{Presence, hang_up_undelivered, presence_input, unpair};
 use quiet_hours_window::QuietHoursWindows;
 pub use quiet_hours_window::{
     QuietHoursDay, QuietHoursField, QuietHoursSentence, QuietHoursWindowView,
 };
+pub use ringer_window::RingerWindowView;
 pub(crate) use setup::CONTACT_READ_MS;
 use setup::{ChosenPhone, Setup};
 pub use setup::{
@@ -393,6 +396,8 @@ pub struct State {
     kept_on_until: Option<Deadline>,
     /// The open Quiet Hours Window.
     quiet_hours_windows: QuietHoursWindows,
+    /// The Ringer's settings and the open Ringer Window.
+    ringer: ringer_window::Ringer,
 }
 
 /// Something wrong that the user can put right, shown until it is.
@@ -759,6 +764,7 @@ pub fn step(state: State, input: Input) -> (State, Vec<Effect>) {
         (true, false) => effects.insert(0, Effect::StopRinging),
         _ => {}
     }
+    ringer_window::follow(&mut state, &mut effects);
     // Mute is the Desktop's microphone. Once the audio leaves the Desktop,
     // or the Call ends, the Phone's microphone must not stay silenced.
     if state.audio_location() == Some(AudioLocation::Desktop) {
@@ -944,6 +950,19 @@ fn decide(mut state: State, input: Input) -> (State, Vec<Effect>) {
         | Input::QuietHoursFieldLeft(_)) => {
             quiet_hours_window::quiet_hours_window_input(&mut state, &input, &mut effects);
         }
+        input @ (Input::RingerKept(_)
+        | Input::OpenRingerWindow
+        | Input::CloseRingerWindow
+        | Input::RingerWindowEscape
+        | Input::ChooseRingSound(_)
+        | Input::ChooseRingerFile(_)
+        | Input::SetRingerVolume(_)
+        | Input::PreviewRingSound
+        | Input::StopPreview
+        | Input::PreviewEnded
+        | Input::RingSoundUnplayable { .. }) => {
+            ringer_window::ringer_input(&mut state, input, &mut effects);
+        }
         Input::PhonePaired(_)
         | Input::PhonePairedWithoutHandsFree(_)
         | Input::PhoneUnpaired { .. }
@@ -957,36 +976,5 @@ fn codec_changed(state: &mut State, codec: Option<Codec>) {
     state.reported_codec = codec;
     if codec.is_some() && state.transport.is_up() {
         state.codec = codec;
-    }
-}
-
-/// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps
-/// its own settings, whether it is asleep, and the Setup Window.
-fn unpair(state: &State) -> (State, Vec<Effect>) {
-    let mut effects = vec![Effect::DetachPhone];
-    phone_unpaired(state, &mut effects);
-    calls_off::phone_forgotten(state, &mut effects);
-    (forget_phone_keeping_desktop(state), effects)
-}
-
-/// The state once the Desktop stops following its Phone: nothing of the
-/// Phone is left, and the Desktop's own settings, whether it is asleep and
-/// the Setup Window stay.
-fn forget_phone_keeping_desktop(state: &State) -> State {
-    State {
-        do_not_disturb: state.do_not_disturb,
-        setup: state.setup.clone(),
-        setup_offered: state.setup_offered,
-        setup_openings: state.setup_openings,
-        chosen_phone: state.chosen_phone.clone(),
-        paired_phones: state.paired_phones.clone(),
-        nearby_phones: state.nearby_phones.clone(),
-        desktop: state.desktop.clone(),
-        clock: state.clock,
-        quiet_hours: state.quiet_hours,
-        kept_on_until: state.kept_on_until,
-        quiet_hours_windows: state.quiet_hours_windows.clone(),
-        keybinding: state.keybinding.clone(),
-        ..forget_phone(state)
     }
 }

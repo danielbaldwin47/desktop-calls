@@ -148,6 +148,7 @@ fn idle_the_menu_offers_the_status_and_the_dialer() {
             "New call…",
             "Turn calls off",
             "Quiet hours…",
+            "Ringer…",
             "---",
             "Phone setup…"
         ]
@@ -169,6 +170,7 @@ fn during_a_call_the_menu_mutes_and_hangs_up_as_the_call_window_does() {
             "Hang up",
             "Turn calls off",
             "Quiet hours…",
+            "Ringer…",
             "---",
             "Phone setup…"
         ]

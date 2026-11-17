@@ -246,6 +246,7 @@ fn assert_lost_menu(menu: &[MenuEntry], status: &str) {
             HANG_UP_ON_PHONE,
             "Turn calls off",
             "Quiet hours…",
+            "Ringer…",
             "---",
             "Phone setup…"
         ]
@@ -347,6 +348,7 @@ fn with_hands_free_lost_the_indicator_says_what_the_call_window_says() {
             "New call…",
             "Turn calls off",
             "Quiet hours…",
+            "Ringer…",
             "---",
             "Phone setup…"
         ]

@@ -192,6 +192,7 @@ fn during_a_call_the_menu_asks_for_what_the_call_window_buttons_do() {
             Some(Input::HangUp(CALL)),
             None,
             Some(Input::OpenQuietHoursWindow),
+            Some(Input::OpenRingerWindow),
             None,
             Some(Input::OpenSetupWindow),
         ]
@@ -237,7 +238,7 @@ fn with_quiet_hours(state: State) -> State {
 
 /// Where an entry belongs in the menu's one order: the status line, the
 /// Missed Calls' line, the main action, the Call's actions, calls on or
-/// off, Quiet Hours, the separator, setup, then Problems.
+/// off, Quiet Hours, the Ringer, the separator, setup, then Problems.
 fn place(entry: &IndicatorEntry) -> u8 {
     match entry {
         IndicatorEntry::Status => 0,
@@ -250,9 +251,10 @@ fn place(entry: &IndicatorEntry) -> u8 {
         | IndicatorEntry::TurnCallsOn
         | IndicatorEntry::KeepCallsOn => 6,
         IndicatorEntry::QuietHours(_) => 7,
-        IndicatorEntry::Separator => 8,
-        IndicatorEntry::ConnectPhone => 9,
-        IndicatorEntry::Problem(_) => 10,
+        IndicatorEntry::Ringer => 8,
+        IndicatorEntry::Separator => 9,
+        IndicatorEntry::ConnectPhone => 10,
+        IndicatorEntry::Problem(_) => 11,
         IndicatorEntry::CallsOffUntilTurnedOn
         | IndicatorEntry::CallsOffForAnHour(_)
         | IndicatorEntry::CallsOffUntilMorning(_) => u8::MAX,
@@ -330,7 +332,7 @@ fn the_menu_keeps_one_order_in_every_state() {
     places.dedup();
     places.sort_unstable();
     places.dedup();
-    assert_eq!(places, (0..=10).collect::<Vec<u8>>());
+    assert_eq!(places, (0..=11).collect::<Vec<u8>>());
     for entry in [
         IndicatorEntry::HangUpOnPhone,
         IndicatorEntry::TurnCallsOn,
@@ -349,6 +351,7 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
             "New call…",
             "Turn calls off",
             "Quiet hours…  22:00–07:00",
+            "Ringer…",
             "",
             "Phone setup…",
         ]
@@ -360,6 +363,7 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
             "New call…",
             "Turn calls on",
             "Quiet hours…",
+            "Ringer…",
             "",
             "Phone setup…",
             "Contacts not shared",
@@ -378,6 +382,7 @@ fn the_menu_reads_the_same_way_round_whatever_the_state() {
             "Hang up",
             "Keep calls on",
             "Quiet hours…",
+            "Ringer…",
             "",
             "Phone setup…",
         ]

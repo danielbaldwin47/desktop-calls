@@ -23,6 +23,7 @@ mod pairing;
 mod phone_link;
 mod quiet_hours;
 mod ringer;
+mod ringer_settings;
 mod service;
 mod setup_checks;
 mod stall_watch;
@@ -101,6 +102,13 @@ enum Command {
         /// HH:MM-HH:MM on the 24-hour clock, or off.
         #[arg(value_name = "HH:MM-HH:MM|off")]
         hours: Option<String>,
+    },
+    /// Choose the sound calls ring with, from a file of your own. With no
+    /// argument, open the ringer window.
+    Ringer {
+        /// A sound file, such as an .ogg or .wav.
+        #[arg(value_name = "FILE")]
+        file: Option<String>,
     },
     /// Run the long-running process. The systemd user unit runs this.
     #[command(hide = true)]
@@ -186,7 +194,9 @@ fn main() -> ExitCode {
         Some(Command::QuietHours { hours: Some(hours) }) => cli::quiet_hours(&hours),
         Some(Command::QuietHours { hours: None }) => cli::quiet_hours_window(),
         Some(Command::Service) => service::run(),
-        Some(Command::Ring) => ringer::ring_until_interrupted(),
+        Some(Command::Ringer { file: Some(file) }) => cli::ringer_file(&file),
+        Some(Command::Ringer { file: None }) => cli::ringer_window(),
+        Some(Command::Ring) => ringer::ring_until_interrupted(&ringer_settings::load()),
         None if let Some(link) = arguments.link => cli::dial(&link),
         // What the Desktop Calls keybinding runs.
         None => cli::activate(),

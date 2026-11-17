@@ -8,10 +8,10 @@
 //! puts there unless a scenario asks for none.
 //!
 //! It takes the options of `pw-play` the app may pass, and refuses any
-//! other, as `pw-play` does. It plays only 16-bit PCM WAV files: it reads
-//! the file's length from its header and takes as long as the real player
-//! would, then exits 0. A file it can't read fails it at once, with exit
-//! status 1.
+//! other, as `pw-play` does. It plays 16-bit PCM WAV files and Ogg Vorbis
+//! files: it reads the file's length from its headers and takes as long as
+//! the real player would, then exits 0. A file it can't read fails it at
+//! once, with exit status 1.
 //!
 //! Each play is recorded as JSON lines appended to
 //! `$XDG_RUNTIME_DIR/pw-play-stand-in.jsonl`, where the real player would
@@ -51,7 +51,10 @@ fn main() -> ExitCode {
         eprintln!("pw-play: can't connect: Host is down");
         return ExitCode::FAILURE;
     }
-    let Some(length) = wav_length(&play.file) else {
+    let Some(length) = fs::read(&play.file)
+        .ok()
+        .and_then(|bytes| wav_length(&bytes).or_else(|| ogg_length(&bytes)))
+    else {
         eprintln!("pw-play: can't open {}", play.file.display());
         return ExitCode::FAILURE;
     };
@@ -110,9 +113,38 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Option<Play> {
     })
 }
 
-/// How long the 16-bit PCM WAV file at `path` plays for.
-fn wav_length(path: &Path) -> Option<Duration> {
-    let bytes = fs::read(path).ok()?;
+/// How long the Ogg Vorbis file in `bytes` plays for: its last page's
+/// granule position, in samples, at the sample rate its identification
+/// header gives.
+fn ogg_length(bytes: &[u8]) -> Option<Duration> {
+    if bytes.get(0..4)? != b"OggS" {
+        return None;
+    }
+    let identification = find(bytes, b"\x01vorbis")?;
+    let rate = u32::from_le_bytes(
+        bytes
+            .get(identification + 12..identification + 16)?
+            .try_into()
+            .ok()?,
+    );
+    let last_page = bytes.windows(4).rposition(|window| window == b"OggS")?;
+    let granule = u64::from_le_bytes(bytes.get(last_page + 6..last_page + 14)?.try_into().ok()?);
+    if rate == 0 {
+        return None;
+    }
+    #[expect(clippy::cast_precision_loss, reason = "a few seconds of samples")]
+    let seconds = granule as f64 / f64::from(rate);
+    Some(Duration::from_secs_f64(seconds))
+}
+
+fn find(bytes: &[u8], needle: &[u8]) -> Option<usize> {
+    bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// How long the 16-bit PCM WAV file in `bytes` plays for.
+fn wav_length(bytes: &[u8]) -> Option<Duration> {
     if bytes.get(0..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
         return None;
     }

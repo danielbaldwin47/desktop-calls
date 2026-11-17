@@ -3,8 +3,9 @@
 //! a soft Ring Sound the app makes itself, at 60 % of full stream volume,
 //! faded in over its first repeat, with a pause of about 2 s between
 //! repeats; and stopping it stops the player at once and leaves nothing
-//! behind (issue #432).
+//! behind (issue #432). A cache it can't write to doesn't silence it.
 
+use std::fs;
 use std::time::Duration;
 
 use test_harness::{Harness, Play};
@@ -108,5 +109,64 @@ fn a_ring_stopped_mid_sound_stops_the_player_and_reaps_it_once() {
         harness.plays().len(),
         plays.len(),
         "no repeat after the stop"
+    );
+}
+
+#[test]
+fn answering_on_the_desktop_stops_the_ring_at_once() {
+    let harness = ringing();
+    harness.wait_for_plays(1, TWO_REPEATS);
+    let call = harness
+        .wait_for_app("one Call", ROUND_TRIP, |state| state.calls.len() == 1)
+        .calls[0]
+        .id;
+
+    harness.answer(call);
+    harness.wait_for_app("the Desktop stops ringing", ROUND_TRIP, |state| {
+        !state.ringing
+    });
+
+    let plays = harness.wait_until_nothing_plays(STOP_DEADLINE);
+    assert!(plays[0].finished.is_none(), "stopped mid-sound: {plays:?}");
+    harness.app_holds("the Call goes on", HOLD, |state| state.calls.len() == 1);
+    assert_eq!(
+        harness.plays().len(),
+        plays.len(),
+        "no repeat once answered"
+    );
+}
+
+#[test]
+fn a_cache_it_cant_write_to_still_rings_from_the_runtime_folder() {
+    let harness = Harness::start();
+    // A file where the Ringer's folder in the cache would be, so nothing
+    // can be written there, whoever runs the scenario.
+    let cache = harness.directory().join("cache/desktop-calls");
+    fs::create_dir_all(&cache)
+        .unwrap_or_else(|error| panic!("create the app's cache folder: {error}"));
+    fs::write(cache.join("ringer"), "")
+        .unwrap_or_else(|error| panic!("put a file in the Ringer's way: {error}"));
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", PHONE_DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
+    let _call = harness.simulated_phone().ring(NUMBER);
+    harness.wait_for_app("the Desktop rings", ROUND_TRIP, |state| state.ringing);
+
+    let plays = harness.wait_for_plays(1, TWO_REPEATS);
+    let runtime = harness.directory().join("runtime/desktop-calls-ringer");
+    assert!(
+        plays[0].file.starts_with(&runtime),
+        "the Ring Sound, written to the runtime folder: {plays:?}"
+    );
+    let leftovers: Vec<_> = fs::read_dir(&runtime)
+        .unwrap_or_else(|error| panic!("read the runtime folder: {error}"))
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().contains(".wav."))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "no half-written file left: {leftovers:?}"
     );
 }

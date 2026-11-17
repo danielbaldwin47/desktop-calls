@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use desktop_calls_core::{
     AudioLocation, CallsTurnedNotice, ConnectionState, DialProgress, Effect, Input,
-    MissedCallNotice, State, messages, step,
+    MissedCallNotice, State, Timer, messages, step,
 };
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
@@ -32,13 +32,13 @@ use crate::indicator::Indicator;
 use crate::logging::{self, EventKind};
 use crate::notifications::Notifier;
 use crate::phone_link::Command;
-use crate::ringer::{Ringer, RingerSettings};
+use crate::ringer::Ringer;
 use crate::setup_checks::SetupChecks;
 use crate::stall_watch::{self, StallWatch};
 use crate::surfaces::Surfaces;
 use crate::{
     bluez, calls_off, chosen_phone, clock, contacts, earlier_run, keybinding, logind, missed_calls,
-    pairing, phone_link, quiet_hours,
+    pairing, phone_link, quiet_hours, ringer_settings,
 };
 
 /// Why the service could not run.
@@ -160,6 +160,8 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         clock::now(),
         quiet_hours,
     )));
+    let ringer = ringer_settings::load();
+    let _ = input_sender.unbounded_send(Input::RingerKept(ringer.clone()));
     if let Some(count) = missed_calls::load() {
         let _ = input_sender.unbounded_send(Input::MissedCallsKept(count));
     }
@@ -203,6 +205,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
         input_sender.clone(),
     ));
     context.spawn_local(publish_surfaces(reports, publisher.clone()));
+    let ringer = Ringer::new(ringer, input_sender.clone());
     context.spawn_local(decide(
         inputs,
         dials,
@@ -217,7 +220,7 @@ async fn serve(runtime: GlibRuntime, has_display: bool) -> Result<(), Failure> {
             publisher,
             surfaces,
             indicator,
-            ringer: Ringer::new(RingerSettings::default()),
+            ringer,
             notifier,
             stall_watch: StallWatch::default(),
         },
@@ -404,15 +407,12 @@ impl Shell {
                     announcements.push(Announcement::CallsTurned(notice));
                 }
                 Effect::Phone(command) => phone_commands.push(command),
-                Effect::StartRinging => self.ringer.start(),
-                Effect::StopRinging => self.ringer.stop(),
-                Effect::StartTimer { timer, after_ms } => {
-                    let inputs = self.inputs.clone();
-                    MainContext::default().spawn_local(async move {
-                        glib::timeout_future(Duration::from_millis(u64::from(after_ms))).await;
-                        let _ = inputs.unbounded_send(Input::TimerFired(timer));
-                    });
-                }
+                effect @ (Effect::StartRinging
+                | Effect::StopRinging
+                | Effect::KeepRinger(_)
+                | Effect::PreviewRingSound(_)
+                | Effect::StopPreview) => self.ringer_effect(effect),
+                Effect::StartTimer { timer, after_ms } => self.start_timer(timer, after_ms),
                 effect @ (Effect::StartSetup
                 | Effect::StopSetup
                 | Effect::PairPhone { .. }
@@ -492,6 +492,32 @@ impl Shell {
             Effect::BlockPhone { address, blocked } => {
                 calls_off::block(self.system.clone(), self.inputs.clone(), address, blocked);
             }
+            // `carry_out` passes on only the effects above.
+            _ => {}
+        }
+    }
+
+    /// Says `timer` fired once `after_ms` milliseconds have passed.
+    fn start_timer(&self, timer: Timer, after_ms: u32) {
+        let inputs = self.inputs.clone();
+        MainContext::default().spawn_local(async move {
+            glib::timeout_future(Duration::from_millis(u64::from(after_ms))).await;
+            let _ = inputs.unbounded_send(Input::TimerFired(timer));
+        });
+    }
+
+    /// Carries out an effect of the Ringer: ringing, its settings kept, and
+    /// the Ringer Window's preview.
+    fn ringer_effect(&mut self, effect: Effect) {
+        match effect {
+            Effect::StartRinging => self.ringer.start(),
+            Effect::StopRinging => self.ringer.stop(),
+            Effect::KeepRinger(settings) => {
+                ringer_settings::save(&settings);
+                self.ringer.keep(settings);
+            }
+            Effect::PreviewRingSound(settings) => self.ringer.preview(settings),
+            Effect::StopPreview => self.ringer.stop_preview(),
             // `carry_out` passes on only the effects above.
             _ => {}
         }

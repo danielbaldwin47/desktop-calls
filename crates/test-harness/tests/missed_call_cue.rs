@@ -93,20 +93,22 @@ fn menu_reads(harness: &Harness, labels: &[&str]) {
         });
 }
 
-const CUE_MENU: [&str; 7] = [
+const CUE_MENU: [&str; 8] = [
     "My Pixel connected",
     "1 missed call…",
     "New call…",
     "Turn calls off",
     "Quiet hours…",
+    "Ringer…",
     "---",
     "Phone setup…",
 ];
-const PLAIN_MENU: [&str; 6] = [
+const PLAIN_MENU: [&str; 7] = [
     "My Pixel connected",
     "New call…",
     "Turn calls off",
     "Quiet hours…",
+    "Ringer…",
     "---",
     "Phone setup…",
 ];

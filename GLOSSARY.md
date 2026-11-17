@@ -77,7 +77,7 @@ The sound the Desktop plays while a Call rings here: a Ring Sound, repeated with
 _Avoid_: alert sound, ringing sound
 
 **Ring Sound**:
-One sound the Ringer can play. The default is a soft chime Desktop Calls makes itself.
+One sound the Ringer can play: one Desktop Calls makes itself ("Built in": Chime, the default, Bells, Glass, Harp, Purr, Drops), one of six Android ringtones bundled with it ("Android"), or a file of the user's own ("Your file"). A file that is missing or can't be played rings the Chime instead.
 _Avoid_: ringtone (that is the Phone's), tone
 
 **Dialer**:
@@ -111,6 +111,10 @@ _Avoid_: first-run wizard, onboarding, "Connect your phone" window
 **Quiet Hours Window**:
 The small window, opened from the Indicator's menu, with Alt+Q in the Dialer, or by `desktop-calls quiet-hours`, where the user turns Quiet Hours on or off and sets their start and end.
 _Avoid_: settings window, preferences, schedule dialog
+
+**Ringer Window**:
+The small window, opened from the Indicator's menu, with Alt+R in the Dialer, or by `desktop-calls ringer`, where the user chooses the Ring Sound and the Ringer's volume. Each choice is saved at once and plays once.
+_Avoid_: settings window, preferences, sound settings
 
 **Problem**:
 Something wrong on the Desktop or Phone that keeps Calls, Contacts or Call History from working, which the user can put right; shown in the Setup Window, the Indicator's menu and `Problems`.

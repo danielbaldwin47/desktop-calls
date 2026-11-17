@@ -2,6 +2,7 @@
 
 use super::desktop::SetupProblemsView;
 use super::quiet_hours_window::QuietHoursWindowView;
+use super::ringer_window::RingerWindowView;
 use super::setup::SetupWindowView;
 use super::{BoundKeys, Focus, State};
 use crate::call::{AudioLocation, Call, CallId, CallState, Caller, Codec, Timestamp};
@@ -20,6 +21,7 @@ pub struct Surfaces {
     /// The Desktop's Problems, shown at the top of the open Setup Window.
     pub setup_problems: Option<SetupProblemsView>,
     pub quiet_hours_window: Option<QuietHoursWindowView>,
+    pub ringer_window: Option<RingerWindowView>,
 }
 
 /// The Dialer's content. While open it has keyboard focus.
@@ -612,6 +614,7 @@ impl State {
             setup_window: self.setup_window_view(),
             setup_problems: self.setup_problems_view(),
             quiet_hours_window: self.quiet_hours_window_view(),
+            ringer_window: self.ringer_window_view(),
         }
     }
 

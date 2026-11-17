@@ -20,6 +20,7 @@ pub mod messages;
 mod missed;
 mod number;
 pub mod redaction;
+mod ringer;
 
 pub use call::{
     AudioLocation, Call, CallId, CallState, Caller, Codec, Direction, Timestamp, Transport,
@@ -39,10 +40,11 @@ pub use machine::{
     ConnectFailure, ContactsOutcome, DesktopCheck, DesktopFix, DialProgress, DialerCallsOff,
     DialerKey, DialerView, Effect, FixFailure, HeldCall, Input, KeybindingStage, Mute,
     NUMBER_LATE_MS, OtherCall, PairingFailure, PhoneCommand, PhoneRefusal, Problem, QuietHoursDay,
-    QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts, RingingCaller,
-    SetupCallsOff, SetupFocus, SetupNotice, SetupProblemsView, SetupStep, SetupWindowView, State,
-    StateLine, Surfaces, Timer, WaitingOptions, keypad_tones, step,
+    QuietHoursField, QuietHoursSentence, QuietHoursWindowView, ReadingContacts, RingerWindowView,
+    RingingCaller, SetupCallsOff, SetupFocus, SetupNotice, SetupProblemsView, SetupStep,
+    SetupWindowView, State, StateLine, Surfaces, Timer, WaitingOptions, keypad_tones, step,
 };
 pub use matching::{ContactMatch, Directory};
 pub use missed::MissedCallNotice;
 pub use number::locale_region;
+pub use ringer::{DEFAULT_VOLUME, LEAST_VOLUME, RingSound, RingerSettings, RingerSettingsProblem};

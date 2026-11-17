@@ -144,11 +144,17 @@ class Install(unittest.TestCase):
         self.assertEqual(binary.read_bytes(), self.binary.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
         files = list(installed.rglob("*"))
+        notices = installed / ".local/share/doc/desktop-calls/android-ringtones"
+        for name in ("NOTICE", "LICENSE"):
+            self.assertEqual(
+                (notices / name).read_bytes(),
+                (REPOSITORY / "data/ringtones/android" / name).read_bytes(),
+            )
         for path in files:
-            if path.is_file() and path != binary:
+            if path.is_file() and path != binary and path.parent != notices:
                 self.assertIn(str(home / ".local/bin/desktop-calls"), path.read_text())
                 self.assertNotIn(str(stage), path.read_text())
-        self.assertEqual(sum(path.is_file() for path in files), 4)
+        self.assertEqual(sum(path.is_file() for path in files), 6)
         self.assertFalse(home.exists())
         subprocess.run(command + ["--uninstall"], env=environment, check=True, capture_output=True)
         self.assertFalse(any(path.is_file() for path in installed.rglob("*")))

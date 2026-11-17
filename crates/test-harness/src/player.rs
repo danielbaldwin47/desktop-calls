@@ -100,6 +100,55 @@ impl Play {
     pub fn peak(&self) -> f64 {
         self.peak_within(Duration::from_secs(3_600))
     }
+
+    /// How loud the file sounds while it sounds, in dB of full scale: its
+    /// mean power over the 400 ms blocks that aren't near silence, gated
+    /// as EBU R 128 gates them (blocks under -70 dB, then those 10 dB under
+    /// the rest), but without its K-weighting. Near the integrated loudness
+    /// `ffmpeg`'s `ebur128` gives, for sounds in the middle of the range of
+    /// hearing.
+    ///
+    /// # Panics
+    ///
+    /// If the file isn't a 16-bit PCM WAV file.
+    #[must_use]
+    pub fn loudness(&self) -> f64 {
+        let (rate, channels, samples) = read_wav(&self.file);
+        let block = usize::try_from(rate / 10 * 4).unwrap_or(1) * usize::from(channels);
+        let powers: Vec<f64> = samples
+            .chunks(block)
+            .filter(|chunk| chunk.len() == block)
+            .map(|chunk| {
+                let sum: f64 = chunk
+                    .iter()
+                    .map(|sample| (f64::from(*sample) / 32_768.0).powi(2))
+                    .sum();
+                #[expect(clippy::cast_precision_loss, reason = "a block of samples")]
+                let mean = sum / chunk.len() as f64;
+                mean
+            })
+            .collect();
+        let gated = |powers: &[f64], gate: f64| -> Vec<f64> {
+            powers
+                .iter()
+                .copied()
+                .filter(|power| decibels(*power) > gate)
+                .collect()
+        };
+        let audible = gated(&powers, -70.0);
+        let relative = decibels(mean(&audible)) - 10.0;
+        decibels(mean(&gated(&audible, relative)))
+    }
+}
+
+fn mean(values: &[f64]) -> f64 {
+    #[expect(clippy::cast_precision_loss, reason = "a few blocks")]
+    let count = values.len().max(1) as f64;
+    values.iter().sum::<f64>() / count
+}
+
+fn decibels(power: f64) -> f64 {
+    10.0 * power.max(1e-12).log10()
 }
 
 impl Harness {

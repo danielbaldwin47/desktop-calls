@@ -383,6 +383,19 @@ impl ControlInterface {
         let _ = self.intents.unbounded_send(Input::OpenQuietHoursWindow);
     }
 
+    /// Opens the Ringer Window, or raises it, as the Indicator's "Ringer…"
+    /// does.
+    fn open_ringer_window(&self) {
+        let _ = self.intents.unbounded_send(Input::OpenRingerWindow);
+    }
+
+    /// Calls ring with the sound file at this absolute path, kept for the
+    /// next run. A file that is missing or can't be played rings the Chime
+    /// instead.
+    fn choose_ringer_file(&self, path: String) {
+        let _ = self.intents.unbounded_send(Input::ChooseRingerFile(path));
+    }
+
     /// Opens the Setup Window, to pair a Phone, pair it again or switch to
     /// another, as the Indicator's "Phone setup…" does.
     fn open_connect_window(&self) {

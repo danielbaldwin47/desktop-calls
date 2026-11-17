@@ -165,6 +165,27 @@ pub fn quiet_hours_window() -> ExitCode {
     call_app("OpenQuietHoursWindow", &())
 }
 
+/// `desktop-calls ringer`: opens the Ringer Window.
+pub fn ringer_window() -> ExitCode {
+    call_app("OpenRingerWindow", &())
+}
+
+/// `desktop-calls ringer FILE`: calls ring with the user's own file, by
+/// its absolute path, so it plays wherever the app runs from.
+pub fn ringer_file(file: &str) -> ExitCode {
+    let Ok(path) = std::path::absolute(file) else {
+        eprintln!("{}", messages::ringer_file_missing());
+        return ExitCode::FAILURE;
+    };
+    let Some(path) = path.to_str().filter(|_| path.is_file()) else {
+        eprintln!("{}", messages::ringer_file_missing());
+        return ExitCode::FAILURE;
+    };
+    turn_calls("ChooseRingerFile", &(path,), |_| {
+        messages::ringer_file_set(path)
+    })
+}
+
 /// `desktop-calls quiet-hours HH:MM-HH:MM | off`: sets Quiet Hours, or
 /// turns them off.
 pub fn quiet_hours(hours: &str) -> ExitCode {

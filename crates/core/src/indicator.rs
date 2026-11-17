@@ -24,8 +24,8 @@ pub struct IndicatorView {
     pub missed_calls: u32,
     /// The menu's entries, in one order in every state: the status line,
     /// the Missed Calls' line while the cue counts any, the main action,
-    /// during a Call the Call's actions, calls on or off, Quiet Hours, a
-    /// separator, then setup and Problems.
+    /// during a Call the Call's actions, calls on or off, Quiet Hours, the
+    /// Ringer, a separator, then setup and Problems.
     pub menu: Vec<IndicatorEntry>,
 }
 
@@ -180,6 +180,8 @@ pub enum IndicatorEntry {
     /// Opens the Quiet Hours Window, or raises it. Always in the menu,
     /// with the Quiet Hours set, if any, as a hint.
     QuietHours(Option<QuietHours>),
+    /// Opens the Ringer Window, or raises it. Always in the menu.
+    Ringer,
 }
 
 impl IndicatorEntry {
@@ -215,6 +217,7 @@ impl IndicatorEntry {
             Self::TurnCallsOn => Some(Input::TurnCallsOn),
             Self::KeepCallsOn => Some(Input::KeepCallsOn),
             Self::QuietHours(_) => Some(Input::OpenQuietHoursWindow),
+            Self::Ringer => Some(Input::OpenRingerWindow),
             Self::Status
             | Self::Separator
             | Self::HangUpOnPhone
@@ -400,6 +403,7 @@ impl State {
         }
         menu.extend(self.calls_off_entry(has_phone));
         menu.push(IndicatorEntry::QuietHours(self.quiet_hours()));
+        menu.push(IndicatorEntry::Ringer);
         menu.push(IndicatorEntry::Separator);
         menu.push(IndicatorEntry::ConnectPhone);
         menu.extend(problems.iter().copied().map(IndicatorEntry::Problem));

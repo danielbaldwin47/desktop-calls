@@ -10,8 +10,9 @@
 //! shows it: a keycap, the footer's keys, or the button that has focus.
 //!
 //! Each case is a journey through one surface, so the suite starts the app
-//! eight times rather than once an action; the Setup Window's cases are in
-//! `keyboard_only_setup.rs`, and the Dialer's in `keyboard_only_dialer.rs`.
+//! nine times rather than once an action; the Setup Window's cases are in
+//! `keyboard_only_setup.rs`, and the Dialer's and the Ringer Window's in
+//! `keyboard_only_dialer.rs`.
 //! [`ACTIONS`] names every action and the case that performs it; a case
 //! fails unless it performed exactly its actions, and `every_action_is_performed_by_a_case_or_names_its_ticket`
 //! fails if an action is left with neither a case nor a ticket. [`UNSHOWN`]
@@ -125,6 +126,20 @@ const ACTIONS: &[(&str, KeyPath)] = &[
     ("Erase a digit typed in a time: Backspace", Case(DIALER)),
     ("Switch Quiet Hours off: Shift+Tab, Space", Case(DIALER)),
     ("Close the Quiet Hours Window: Escape", Case(DIALER)),
+    // The Ringer Window.
+    ("Open the Ringer Window: Alt+R", Case(RINGER)),
+    ("Choose a Ring Sound: Tab, Space", Case(RINGER)),
+    ("Stop the Ring Sound playing: Escape", Case(RINGER)),
+    (
+        "Play the Ring Sound again: Shift+Tab, Space on Play",
+        Case(RINGER),
+    ),
+    ("Set the Ringer's volume: Shift+Tab, Left", Case(RINGER)),
+    ("Close the Ringer Window: Escape", Case(RINGER)),
+    (
+        "Choose a file of your own to ring with",
+        Elsewhere("GTK's file chooser owns its keys; Tab, Enter on Choose a file… opens it"),
+    ),
     // Calls Off.
     (
         "Call a typed number while calls are off: Enter calls anyway",
@@ -208,6 +223,14 @@ const UNSHOWN: &[(&str, &str)] = &[
         "Erase a digit typed in a time: Backspace",
         "the convention for erasing what was typed",
     ),
+    (
+        "Open the Ringer Window: Alt+R",
+        "decided for the owner on #432: the Dialer's footer stays as it was, and the Indicator's Ringer… opens it too",
+    ),
+    (
+        "Set the Ringer's volume: Shift+Tab, Left",
+        "a slider's convention; the percentage beside it shows each step",
+    ),
 ];
 
 const BANNER: &str = "the_banner_by_keys_alone";
@@ -215,6 +238,7 @@ const CALL_WINDOW: &str = "the_call_window_and_the_call_pill_by_keys_alone";
 const CALL_WAITING: &str = "call_waiting_by_keys_alone";
 pub(super) const DIALER: &str = "the_dialer_and_the_quiet_hours_window_by_keys_alone";
 pub(super) const CALLS_OFF: &str = "while_calls_are_off_the_dialer_calls_anyway_by_keys_alone";
+pub(super) const RINGER: &str = "the_ringer_window_by_keys_alone";
 pub(super) const FIRST_RUN: &str =
     "keyboard_only_setup::first_run_in_the_setup_window_by_keys_alone";
 pub(super) const SETUP_REFUSED: &str =
@@ -225,12 +249,13 @@ pub(super) const SETUP_COPY: &str =
 /// The tests that perform actions. A name here is not checked against the
 /// tests that exist: deleting a test leaves its actions listed and passing
 /// here, so a case is deleted with its entries in [`ACTIONS`].
-const CASES: [&str; 8] = [
+const CASES: [&str; 9] = [
     BANNER,
     CALL_WINDOW,
     CALL_WAITING,
     DIALER,
     CALLS_OFF,
+    RINGER,
     FIRST_RUN,
     SETUP_REFUSED,
     SETUP_COPY,

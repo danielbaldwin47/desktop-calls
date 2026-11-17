@@ -561,3 +561,35 @@ pub(super) fn connect_again_at_once(state: &mut State, effects: &mut Vec<Effect>
     state.presence.reconnect.failures = 0;
     connect_now(state, effects);
 }
+
+/// The Phone was unpaired: the Desktop forgets it and its Calls, and keeps
+/// its own settings, whether it is asleep, and the Setup Window.
+pub(super) fn unpair(state: &State) -> (State, Vec<Effect>) {
+    let mut effects = vec![Effect::DetachPhone];
+    super::dialling::phone_unpaired(state, &mut effects);
+    super::calls_off::phone_forgotten(state, &mut effects);
+    (forget_phone_keeping_desktop(state), effects)
+}
+
+/// The state once the Desktop stops following its Phone: nothing of the
+/// Phone is left, and the Desktop's own settings, whether it is asleep and
+/// the Setup Window stay.
+pub(crate) fn forget_phone_keeping_desktop(state: &State) -> State {
+    State {
+        do_not_disturb: state.do_not_disturb,
+        setup: state.setup.clone(),
+        setup_offered: state.setup_offered,
+        setup_openings: state.setup_openings,
+        chosen_phone: state.chosen_phone.clone(),
+        paired_phones: state.paired_phones.clone(),
+        nearby_phones: state.nearby_phones.clone(),
+        desktop: state.desktop.clone(),
+        clock: state.clock,
+        quiet_hours: state.quiet_hours,
+        kept_on_until: state.kept_on_until,
+        quiet_hours_windows: state.quiet_hours_windows.clone(),
+        ringer: state.ringer.clone(),
+        keybinding: state.keybinding.clone(),
+        ..forget_phone(state)
+    }
+}

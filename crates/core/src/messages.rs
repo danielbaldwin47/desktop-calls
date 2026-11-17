@@ -20,6 +20,7 @@ mod checks;
 mod dialer;
 mod problems;
 mod quiet_hours;
+mod ringer;
 mod setup;
 mod setup_parts;
 mod when;
@@ -46,6 +47,10 @@ pub use dialer::{
 };
 pub use problems::{ProblemKind, problem, problem_heading};
 pub use quiet_hours::{QuietHoursWindowText, quiet_hours_window};
+pub use ringer::{
+    RingerWindowText, ring_sound_name, ringer_file_missing, ringer_file_set, ringer_volume,
+    ringer_window,
+};
 pub use setup::{Keys as FooterKeys, SetupWindowText, setup_window, shown_path, unbreakable_runs};
 pub use setup_parts::{
     Instruction, InstructionGroup, Place, SETUP_STAGES, SetupCard, StageMark, SyncRow, SyncText,
@@ -384,6 +389,7 @@ pub fn indicator_entry(entry: &IndicatorEntry, view: &IndicatorView) -> String {
         IndicatorEntry::TurnCallsOn => calls_off::TURN_CALLS_ON.to_owned(),
         IndicatorEntry::KeepCallsOn => calls_off::KEEP_CALLS_ON.to_owned(),
         IndicatorEntry::QuietHours(hours) => quiet_hours::menu_entry(*hours),
+        IndicatorEntry::Ringer => ringer::MENU_ENTRY.to_owned(),
         IndicatorEntry::HangUp(_) => label(Label::HangUp).to_owned(),
         IndicatorEntry::HangUpOnPhone => label(Label::HangUpOnPhone).to_owned(),
         IndicatorEntry::Mute(_) => label(Label::Mute).to_owned(),

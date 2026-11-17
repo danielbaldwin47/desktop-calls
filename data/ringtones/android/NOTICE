@@ -1,0 +1,41 @@
+Android ringtones bundled with Desktop Calls
+============================================
+
+Atria.ogg, Ganymede.ogg, Luna.ogg, Oberon.ogg, Triton.ogg and Umbriel.ogg in
+this folder are Android's ringtones of those names, from the Android Open
+Source Project, unchanged. Desktop Calls builds them into its binary and
+offers them in its Ringer Window, under "Android".
+
+Copyright The Android Open Source Project.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use these files except in compliance with the License. A copy of the License
+is in LICENSE, beside this file, and at
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+
+Where they come from
+--------------------
+
+Repository: https://android.googlesource.com/platform/frameworks/base
+Commit:     1cdfff555f4a21f71ccc978290e2e212e2f8b168
+Folder:     data/sounds/ringtones/ogg/
+Licence:    Android-Apache-2.0, as data/sounds/Android.bp at that commit
+            declares (default_applicable_licenses), and the repository's
+            MODULE_LICENSE_APACHE2.
+
+Each file's git blob id at that commit, which `git hash-object` reproduces:
+
+  5cbb8893d6a4dba9ae5326b31a0f7a7711465c8b  Atria.ogg
+  01ff573aef5453508046c87c280cef0dee619dae  Ganymede.ogg
+  87a2463902ea0b7cc8709d57e0fcb359284ad4dd  Luna.ogg
+  124af10019d903e723c97de3b2fa3bb9d138428d  Oberon.ogg
+  542ae1624e00bdd6184149331fe9994fa0035cdc  Triton.ogg
+  b21a12e0778a834e492afc8c20b18654a36e5998  Umbriel.ogg
+
+Fetched 2026-11-16 for issue #432.

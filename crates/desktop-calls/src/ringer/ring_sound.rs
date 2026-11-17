@@ -1,218 +1,103 @@
-//! Ring Sounds the app makes itself: synthesised here, so no sound file is
-//! bundled and no licence applies but the app's own, and written as WAV
-//! files for `pw-play` to play.
-//!
-//! Each is written twice: as it repeats, and faded in, for the first
-//! repeat of a ring.
+//! What each Ring Sound plays from, written out for `pw-play`: the sounds
+//! the app makes as WAV files, twice (as each repeat plays, and faded in,
+//! for a ring's first repeat); Android's ringtones as the Ogg files built
+//! in; the user's own file where it is.
 
-use std::f32::consts::{PI, TAU};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-const SAMPLE_RATE: u32 = 48_000;
-const CHANNELS: u16 = 2;
+use desktop_calls_core::{RingSound, RingerSettings};
 
-/// One sound the Ringer can play.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RingSound {
-    /// The default: a soft four-note chime, low and round like a marimba,
-    /// with no bright overtones.
-    Chime,
+use super::{Failure, android, directory, tones, wav};
+
+/// A Ring Sound, ready to play.
+pub(super) struct Playable {
+    /// The first repeat of a ring: faded in, for the sounds the app makes.
+    pub(super) first: PathBuf,
+    /// Every repeat after it, and a preview.
+    pub(super) repeat: PathBuf,
+    /// The stream volume that brings it to the others' loudness.
+    pub(super) gain: f64,
+    /// The silence after each repeat of a ring: none for a sound made to
+    /// loop, as Android's ringtones are.
+    pub(super) pause: Duration,
+    /// The user's own file, which may yet fail to play.
+    pub(super) own_file: Option<String>,
+    /// The least time a play of it takes: one that ends sooner had next to
+    /// no sound in it.
+    pub(super) shortest: Duration,
 }
 
-/// A Ring Sound written out, ready to play.
-pub struct Written {
-    /// The first repeat, faded in.
-    pub first: PathBuf,
-    /// Every repeat after it.
-    pub repeat: PathBuf,
-}
+/// The silence after each repeat of a sound the app makes, or the user's
+/// own.
+const PAUSE: Duration = Duration::from_secs(2);
 
-impl RingSound {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Chime => "chime",
+/// The least time the user's own file plays for: a file that decodes to
+/// nothing, or to a click, isn't a ring.
+const SHORTEST: Duration = Duration::from_millis(500);
+
+/// Why the user's own file can't play.
+pub(super) struct Missing(pub(super) String);
+
+/// The Ring Sound `settings` name, ready to play; for the user's own file,
+/// [`Missing`] if it isn't a readable file.
+pub(super) fn playable(settings: &RingerSettings) -> Result<Result<Playable, Missing>, Failure> {
+    let sound = settings.sound();
+    if let (RingSound::File, Some(file)) = (sound, settings.file()) {
+        let path = Path::new(file);
+        if !path.is_file() || std::fs::File::open(path).is_err() {
+            return Ok(Err(Missing(file.to_owned())));
         }
+        return Ok(Ok(Playable {
+            first: path.to_owned(),
+            repeat: path.to_owned(),
+            gain: 1.0,
+            pause: PAUSE,
+            own_file: Some(file.to_owned()),
+            shortest: SHORTEST,
+        }));
     }
-
-    /// One repeat: samples from -1 to 1, mono, at [`SAMPLE_RATE`].
-    fn samples(self) -> Vec<f32> {
-        match self {
-            Self::Chime => chime(),
-        }
-    }
-
-    /// Writes the sound into `directory`, replacing any earlier copy.
-    pub fn write(self, directory: &Path) -> io::Result<Written> {
-        fs::create_dir_all(directory)?;
-        let repeat = self.samples();
-        let first = fade_in(&repeat);
-        let written = Written {
-            first: directory.join(format!("{}-first.wav", self.name())),
-            repeat: directory.join(format!("{}.wav", self.name())),
-        };
-        write_wav(&written.first, &first)?;
-        write_wav(&written.repeat, &repeat)?;
-        Ok(written)
-    }
+    built_in(sound).map(Ok)
 }
 
-/// A note of the chime: when it starts, its pitch and how loud it is.
-struct Note {
-    start: f32,
-    frequency: f32,
-    level: f32,
-}
-
-/// F major, rising and falling back, around middle C: F4, A4, C5, A4.
-const CHIME: [Note; 4] = [
-    Note {
-        start: 0.0,
-        frequency: 349.23,
-        level: 1.0,
-    },
-    Note {
-        start: 0.16,
-        frequency: 440.0,
-        level: 0.9,
-    },
-    Note {
-        start: 0.32,
-        frequency: 523.25,
-        level: 0.85,
-    },
-    Note {
-        start: 0.56,
-        frequency: 440.0,
-        level: 0.8,
-    },
-];
-/// The length of one repeat, in seconds, with the last note's tail.
-const CHIME_LENGTH: f32 = 1.8;
-/// How long the tail takes to fade to silence, at the end of a repeat.
-const TAIL_FADE: f32 = 0.3;
-/// Each note's attack: soft, but quick enough to sound struck.
-const ATTACK: f32 = 0.012;
-/// How fast each note dies away: to about a third every this many seconds.
-const DECAY: f32 = 0.38;
-/// The loudest sample of a repeat, from 0 to 1 of full scale: -9 dBFS.
-/// That puts a repeat at about -17.6 LUFS in the file, and -22 LUFS as
-/// played at the default volume of 60 % (measured with `ffmpeg`'s
-/// `ebur128`); the old ring, the sound theme's, played at -6.8 LUFS.
-const PEAK: f32 = 0.36;
-
-fn chime() -> Vec<f32> {
-    let length = seconds_to_samples(CHIME_LENGTH);
-    let mut samples = vec![0.0; length];
-    for note in &CHIME {
-        let start = seconds_to_samples(note.start);
-        for (index, sample) in samples.iter_mut().enumerate().skip(start) {
-            let time = samples_to_seconds(index - start);
-            *sample += note.level * struck(note.frequency, time);
-        }
+/// One of the Ring Sounds built into the app, written out; the Chime for
+/// the user's own file.
+pub(super) fn built_in(sound: RingSound) -> Result<Playable, Failure> {
+    let unwritten = |error: std::io::Error| Failure::new("ring-sound-unwritten", error.to_string());
+    if let Some(ringtone) = android::ringtone(sound) {
+        let name = format!("{}.ogg", sound.key());
+        let directory = directory::write_all(&[(&name, ringtone.ogg)]).map_err(unwritten)?;
+        let path = directory.join(name);
+        return Ok(Playable {
+            first: path.clone(),
+            repeat: path,
+            gain: ringtone.gain,
+            pause: Duration::ZERO,
+            own_file: None,
+            shortest: Duration::ZERO,
+        });
     }
-    let tail = seconds_to_samples(TAIL_FADE);
-    for (index, sample) in samples.iter_mut().rev().take(tail).enumerate() {
-        *sample *= raised_cosine(samples_to_seconds(index) / TAIL_FADE);
-    }
-    let loudest = samples.iter().copied().map(f32::abs).fold(0.0, f32::max);
-    if loudest > 0.0 {
-        for sample in &mut samples {
-            *sample *= PEAK / loudest;
-        }
-    }
-    samples
-}
-
-/// One struck note `time` seconds in: a pure tone, with a little of its
-/// octave and of a marimba bar's fourth partial for the strike, both dying
-/// away faster than the tone, so it rings round rather than bright.
-fn struck(frequency: f32, time: f32) -> f32 {
-    let attack = if time < ATTACK {
-        raised_cosine(time / ATTACK)
-    } else {
-        1.0
+    let (sound, repeat) = match tones::samples(sound) {
+        Some(samples) => (sound, samples),
+        None => (
+            RingSound::Chime,
+            tones::samples(RingSound::Chime).unwrap_or_default(),
+        ),
     };
-    let tone = (TAU * frequency * time).sin();
-    let octave = 0.15 * (TAU * 2.0 * frequency * time).sin() * (-time / 0.12).exp();
-    let strike = 0.05 * (TAU * 3.93 * frequency * time).sin() * (-time / 0.03).exp();
-    attack * (-time / DECAY).exp() * (tone + octave + strike)
-}
-
-/// How long the first repeat of a ring takes to fade in, in seconds.
-const FADE_IN: f32 = 1.0;
-/// The level the first repeat fades in from: a fifth of its own.
-const FADE_FROM: f32 = 0.2;
-
-/// The first repeat of a ring, rising from [`FADE_FROM`] of its level to
-/// all of it over its first [`FADE_IN`] seconds.
-fn fade_in(samples: &[f32]) -> Vec<f32> {
-    samples
-        .iter()
-        .enumerate()
-        .map(|(index, sample)| {
-            let progress = (samples_to_seconds(index) / FADE_IN).min(1.0);
-            sample * (FADE_FROM + (1.0 - FADE_FROM) * raised_cosine(progress))
-        })
-        .collect()
-}
-
-/// From 0 at `progress` 0 to 1 at 1, smoothly.
-fn raised_cosine(progress: f32) -> f32 {
-    0.5 - 0.5 * (PI * progress).cos()
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    reason = "a few seconds at 48 kHz: well within f32 and usize, never negative"
-)]
-fn seconds_to_samples(seconds: f32) -> usize {
-    (seconds * SAMPLE_RATE as f32).round() as usize
-}
-
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "a few seconds of samples, exact in f32"
-)]
-fn samples_to_seconds(samples: usize) -> f32 {
-    samples as f32 / SAMPLE_RATE as f32
-}
-
-/// Writes `samples` to `path` as a 16-bit PCM WAV file, the same on both
-/// channels: first beside it, then into place, so a player never reads
-/// half a file.
-fn write_wav(path: &Path, samples: &[f32]) -> io::Result<()> {
-    let too_long = || io::Error::other("the sound is too long for a WAV file");
-    let data_size =
-        u32::try_from(samples.len() * usize::from(CHANNELS) * 2).map_err(|_| too_long())?;
-    let block = CHANNELS * 2;
-    let mut bytes = Vec::with_capacity(44 + data_size as usize);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + data_size).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16_u32.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&CHANNELS.to_le_bytes());
-    bytes.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
-    bytes.extend_from_slice(&(SAMPLE_RATE * u32::from(block)).to_le_bytes());
-    bytes.extend_from_slice(&block.to_le_bytes());
-    bytes.extend_from_slice(&16_u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&data_size.to_le_bytes());
-    for sample in samples {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "clamped to the range of i16 first"
-        )]
-        let value = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)).round() as i16;
-        for _ in 0..CHANNELS {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    let partial = path.with_extension(format!("wav.{}", std::process::id()));
-    fs::write(&partial, bytes)?;
-    fs::rename(partial, path)
+    let first = wav::encode(&tones::fade_in(&repeat)).map_err(unwritten)?;
+    let repeat = wav::encode(&repeat).map_err(unwritten)?;
+    let (first_name, repeat_name) = (
+        format!("{}-first.wav", sound.key()),
+        format!("{}.wav", sound.key()),
+    );
+    let directory = directory::write_all(&[(&first_name, &first), (&repeat_name, &repeat)])
+        .map_err(unwritten)?;
+    Ok(Playable {
+        first: directory.join(first_name),
+        repeat: directory.join(repeat_name),
+        gain: 1.0,
+        pause: PAUSE,
+        own_file: None,
+        shortest: Duration::ZERO,
+    })
 }

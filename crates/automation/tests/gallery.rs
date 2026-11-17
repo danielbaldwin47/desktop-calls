@@ -57,6 +57,9 @@ const STATES: &[&str] = &[
     "quiet-hours-window-on",
     "quiet-hours-window-on-switch-focused",
     "quiet-hours-window-refused",
+    "ringer-window",
+    "ringer-window-playing",
+    "ringer-window-file-unplayable",
     "setup-window-choose",
     "setup-window-confirm",
     "setup-window-phone-calls-off",
@@ -255,16 +258,17 @@ fn missed_call_notifications_are_drawn(output: &Path, index: &str) {
 /// below, 30 for each row and 11 for each separator.
 fn indicator_menus_are_drawn(output: &Path, index: &str) {
     for (state, rows, separators) in [
-        // Status, New call…, Turn calls off, Quiet hours…, then setup.
-        ("menu-calls-on", 5, 1),
+        // Status, New call…, Turn calls off, Quiet hours…, Ringer…, then
+        // setup.
+        ("menu-calls-on", 6, 1),
         // As calls on, with the Missed Calls' line under the status.
-        ("menu-missed-calls", 6, 1),
+        ("menu-missed-calls", 7, 1),
         // The header, its line, and the three choices.
         ("menu-turn-off-choices", 4, 1),
         // As calls on, with Turn calls on, then the Problem.
-        ("menu-off-problem", 6, 1),
+        ("menu-off-problem", 7, 1),
         // With Mute, Move audio and Hang up, and Keep calls on.
-        ("menu-calls-off-pending", 8, 1),
+        ("menu-calls-off-pending", 9, 1),
     ] {
         let height: u32 = 2 * (8 + 30 * rows + 11 * separators + 8);
         for look in ["omarchy-light", "omarchy-dark"] {

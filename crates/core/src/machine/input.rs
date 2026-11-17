@@ -14,6 +14,7 @@ use crate::earlier_run::EarlierRun;
 use crate::messages::Failure;
 use crate::messages::ProblemKind;
 use crate::missed::MissedCallNotice;
+use crate::ringer::{RingSound, RingerSettings};
 
 use crate::keybinding::HyprlandConfig;
 
@@ -262,6 +263,30 @@ pub enum Input {
     /// Keyboard focus left one of the Quiet Hours Window's times, or Enter
     /// was pressed in it: what was typed there is read.
     QuietHoursFieldLeft(QuietHoursField),
+    /// The Ringer's settings, as the config file kept them, at startup.
+    RingerKept(RingerSettings),
+    /// Open the Ringer Window, or raise it.
+    OpenRingerWindow,
+    /// The user closed the Ringer Window.
+    CloseRingerWindow,
+    /// Escape in the Ringer Window: stops the sound playing, or with none,
+    /// closes the window.
+    RingerWindowEscape,
+    /// The user chose this Ring Sound; [`RingSound::File`] for the file
+    /// chosen last.
+    ChooseRingSound(RingSound),
+    /// The user chose this audio file to ring with, by its path.
+    ChooseRingerFile(String),
+    /// The user let go of the Ringer's volume at this percent.
+    SetRingerVolume(u8),
+    /// The user asked to hear the Ring Sound chosen once more.
+    PreviewRingSound,
+    /// The user stopped the sound the Ringer Window plays.
+    StopPreview,
+    /// The sound the Ringer Window asked for has played to its end.
+    PreviewEnded,
+    /// The user's own file couldn't be played: the Chime played instead.
+    RingSoundUnplayable { file: String },
     /// BlueZ blocked (`blocked`) or unblocked the Phone with this address,
     /// as [`Effect::BlockPhone`] asked.
     PhoneBlocked { address: String, blocked: bool },
@@ -517,6 +542,14 @@ pub enum Effect {
     StartRinging,
     /// Stop the Desktop ringtone.
     StopRinging,
+    /// Keep the Ringer's settings for the next run, and ring with them from
+    /// the next ring on.
+    KeepRinger(RingerSettings),
+    /// Play the Ring Sound these settings name once, at their volume, for
+    /// the Ringer Window. Answered by [`Input::PreviewEnded`].
+    PreviewRingSound(RingerSettings),
+    /// Stop the sound [`Effect::PreviewRingSound`] plays.
+    StopPreview,
     /// Report [`Input::TimerFired`] with `timer` after `after_ms`.
     StartTimer { timer: Timer, after_ms: u32 },
     /// Tell the user something went wrong.

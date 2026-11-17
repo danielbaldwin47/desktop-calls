@@ -178,8 +178,8 @@ impl Dialer {
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let pressed = intents.clone();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
-            if is_alt_q(key, modifiers) {
-                let _ = pressed.unbounded_send(Input::OpenQuietHoursWindow);
+            if let Some(window) = alt_window(key, modifiers) {
+                let _ = pressed.unbounded_send(window);
                 return glib::Propagation::Stop;
             }
             if has_command_modifier(modifiers) {
@@ -533,13 +533,20 @@ fn section_headers(
     }
 }
 
-/// Alt+Q, which opens the Quiet Hours Window, with no other command
-/// modifier and whatever the Caps Lock.
-fn is_alt_q(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+/// The window Alt with `key` opens: Alt+Q the Quiet Hours Window, Alt+R
+/// the Ringer Window. No other command modifier, whatever the Caps Lock.
+fn alt_window(key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> Option<Input> {
     use gtk::gdk::ModifierType;
     let held = modifiers
         & (ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK);
-    held == ModifierType::ALT_MASK && key.to_lower() == gtk::gdk::Key::q
+    if held != ModifierType::ALT_MASK {
+        return None;
+    }
+    match key.to_lower() {
+        gtk::gdk::Key::q => Some(Input::OpenQuietHoursWindow),
+        gtk::gdk::Key::r => Some(Input::OpenRingerWindow),
+        _ => None,
+    }
 }
 
 /// The notice strip, hidden: an icon beside the notice's words.

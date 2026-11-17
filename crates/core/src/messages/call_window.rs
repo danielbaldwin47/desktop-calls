@@ -46,7 +46,7 @@ fn first_name(caller: &Caller, contact: Option<&ContactMatch>) -> String {
 #[must_use]
 pub fn contact_lost(notice: Failure) -> (&'static str, &'static str) {
     let next = match notice {
-        Failure::ConnectionLost => "The call continues on your phone.",
+        Failure::ConnectionLost => "To hang up, use your phone.",
         other => failure(other).text,
     };
     (label(Label::ConnectionToPhoneLost), next)

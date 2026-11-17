@@ -34,11 +34,11 @@ const BOB: &str = "+447700900123";
 /// Alice, who calls while the user is on with Bob.
 const ALICE: &str = "+447700900456";
 
-const LOST: &str = "Connection to phone lost: the call continues on your phone.";
+const LOST: &str = "Connection lost: the call is on your phone.";
 /// The Call Window's notice while contact is lost: its heading, and what
 /// to do.
 const LOST_HEADING: &str = "Connection to phone lost";
-const LOST_NOTICE: &str = "The call continues on your phone.";
+const LOST_NOTICE: &str = "To hang up, use your phone.";
 const HANG_UP_ON_PHONE: &str = "Hang up on your phone";
 /// What the Indicator says while the Call Window says [`LOST_NOTICE`] about Bob's
 /// Call.

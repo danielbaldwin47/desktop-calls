@@ -45,7 +45,7 @@ fn status_with_contact_lost_says_so_in_the_call_windows_words() {
                 hands_free_lost,
                 true
             ),
-            "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the call continues on your phone."
+            "Connection to My Pixel (AA:BB:CC:DD:EE:FF) lost: the call is on your phone."
         );
     }
     // Hands-free back while the lost Call is awaited, or the pairing gone:
@@ -120,10 +120,7 @@ fn the_call_windows_state_line_names_a_contact_by_first_name_and_an_ended_calls_
 fn losing_contact_with_a_call_says_where_to_hang_up() {
     assert_eq!(
         messages::contact_lost(Failure::ConnectionLost),
-        (
-            "Connection to phone lost",
-            "The call continues on your phone."
-        )
+        ("Connection to phone lost", "To hang up, use your phone.")
     );
 }
 

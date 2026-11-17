@@ -208,7 +208,7 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
 
     let state = wait_for_step(&harness, "contacts-prompt", PROMPT_DEADLINE);
     // The countdown says what it counts.
-    assert_eq!(field(&state, "countdown-label"), Some("left to tap Allow"));
+    assert_eq!(field(&state, "countdown-label"), Some("left to answer"));
     let countdown: u64 = field(&state, "countdown")
         .and_then(|countdown| countdown.parse().ok())
         .unwrap_or_else(|| panic!("no countdown: {state:?}"));

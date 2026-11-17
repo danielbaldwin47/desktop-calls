@@ -21,9 +21,9 @@ const BOB: &str = "+447700900123";
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
 
 /// The Call Window's notice while contact is lost.
-const LOST_NOTICE: &str = "The call continues on your phone.";
+const LOST_NOTICE: &str = "To hang up, use your phone.";
 /// What a Call asked for while contact is lost says.
-const LOST: &str = "Connection to phone lost: the call continues on your phone.";
+const LOST: &str = "Connection lost: the call is on your phone.";
 /// What a Call asked for while the Phone is in range without hands-free
 /// says.
 const RECONNECTING: &str = "Phone reconnecting. Try again in a moment.";
@@ -131,7 +131,7 @@ fn assert_status_says_lost(harness: &Harness) {
     let address = harness.phone().address.clone();
     assert_eq!(
         status(harness),
-        format!("Connection to {PHONE_NAME} ({address}) lost: the call continues on your phone.")
+        format!("Connection to {PHONE_NAME} ({address}) lost: the call is on your phone.")
     );
 }
 
@@ -173,9 +173,7 @@ fn after_the_lost_call_window_closes_with_the_phone_in_range_a_call_says_it_is_r
     let address = harness.phone().address.clone();
     assert_eq!(
         status(&harness),
-        format!(
-            "{PHONE_NAME} ({address}) is in range but not connected for calls yet. Reconnecting."
-        )
+        format!("{PHONE_NAME} ({address}) is reconnecting.")
     );
     assert_eq!(dial_refused(&harness, "phone-reconnecting"), RECONNECTING);
 }

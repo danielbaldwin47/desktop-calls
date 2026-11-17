@@ -9,10 +9,7 @@ use crate::messages::ProblemKind;
 /// `None` for a Problem of the Phone's.
 pub(super) fn problem(problem: ProblemKind) -> Option<Message> {
     let (text, next_action) = match problem {
-        ProblemKind::BluetoothOff => (
-            "Your phone can't connect until this computer's Bluetooth is on.",
-            None,
-        ),
+        ProblemKind::BluetoothOff => ("Your phone can't connect.", None),
         ProblemKind::BluetoothBlocked => (
             "Turn airplane mode off, or run this command in a terminal.",
             Some(NextAction::Command("rfkill unblock bluetooth")),
@@ -77,12 +74,10 @@ pub fn fixing(fix: DesktopFix) -> &'static str {
 pub fn fix_failed(failure: FixFailure, settings_folder: &str) -> String {
     let text = match failure {
         FixFailure::BluetoothNotTurnedOn => {
-            "Bluetooth didn't turn on; try again, or turn it on in your Bluetooth settings."
+            "Bluetooth didn't turn on. Try your Bluetooth settings."
         }
         FixFailure::AudioNotSaved => {
-            return format!(
-                "The audio setting couldn't be saved; check that you can write to {settings_folder}, then try again."
-            );
+            return format!("Couldn't save the audio setting in {settings_folder}.");
         }
         FixFailure::AudioNotRestarted => {
             "Saved, but the audio didn't restart. Log out and back in."

@@ -460,7 +460,7 @@ fn with_bluetooth_off_or_blocked_and_calls_off_the_setup_window_asks_for_both() 
         assert_eq!(text(&state).empty_list, None, "{power:?}");
         assert_eq!(
             here(&state),
-            ["Once Bluetooth and calls are on, choose your phone below."],
+            ["Once both are on, choose your phone below."],
             "{power:?}"
         );
     }

@@ -117,5 +117,5 @@ pub fn ringer_file_set(path: &str) -> String {
 /// What `desktop-calls ringer FILE` says when there is no such file.
 #[must_use]
 pub fn ringer_file_missing() -> &'static str {
-    "There's no file there. Check the path and try again."
+    "No file there. Check the path."
 }

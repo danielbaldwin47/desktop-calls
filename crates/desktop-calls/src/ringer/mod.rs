@@ -20,6 +20,7 @@ mod wav;
 
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
+use std::time::{Duration, Instant};
 
 use desktop_calls_core::{Input, RingSound, RingerSettings};
 use futures_channel::mpsc::UnboundedSender;
@@ -202,7 +203,7 @@ async fn ring(
             &playable.repeat
         };
         let volume = f64::from(settings.volume()) / 100.0 * playable.gain;
-        match play(sound, volume, &mut stopped).await {
+        match play(sound, volume, playable.shortest, &mut stopped).await {
             Ok(Ended::Finished) => {}
             Ok(Ended::Stopped) => return Ok(()),
             Err(failure) => {
@@ -212,7 +213,7 @@ async fn ring(
                     return Err(failure);
                 };
                 playable = ring_sound::built_in(RingSound::Chime)?;
-                match play(&playable.first, volume, &mut stopped).await {
+                match play(&playable.first, volume, playable.shortest, &mut stopped).await {
                     Err(failure) => return Err(failure),
                     Ok(ended) => {
                         unplayable(&file, &failure.detail, inputs);
@@ -240,13 +241,13 @@ async fn preview(
 ) -> Result<Ended, Failure> {
     let playable = ready(settings, Some(inputs))?;
     let volume = f64::from(settings.volume()) / 100.0 * playable.gain;
-    match play(&playable.repeat, volume, &mut stopped).await {
+    match play(&playable.repeat, volume, playable.shortest, &mut stopped).await {
         Err(failure) => {
             let Some(file) = playable.own_file else {
                 return Err(failure);
             };
             let chime = ring_sound::built_in(RingSound::Chime)?;
-            let ended = play(&chime.repeat, volume, &mut stopped).await?;
+            let ended = play(&chime.repeat, volume, chime.shortest, &mut stopped).await?;
             unplayable(&file, &failure.detail, Some(inputs));
             Ok(ended)
         }
@@ -255,13 +256,17 @@ async fn preview(
 }
 
 /// Plays `sound` once at `volume` (from 0 to 1, under the output's own),
-/// until it ends or is `stopped`.
+/// until it ends or is `stopped`. A play that ends sooner than `shortest`
+/// failed: a file with no sound in it "plays" silently, and would leave a
+/// Call silent.
 async fn play(
     sound: &Path,
     volume: f64,
+    shortest: Duration,
     stopped: &mut oneshot::Receiver<()>,
 ) -> Result<Ended, Failure> {
     let volume = format!("{:.3}", volume.clamp(0.0, 1.0));
+    let started = Instant::now();
     let mut player = Command::new(PLAYER)
         .args(["--volume", &volume, "--media-role", MEDIA_ROLE])
         .args(["-P", STREAM_PROPERTIES])
@@ -277,6 +282,13 @@ async fn play(
     };
     let exited = glib::child_watch_future(glib::Pid(pid));
     match select(exited, stopped).await {
+        Either::Left(((_, 0), _)) if started.elapsed() < shortest => Err(Failure::new(
+            "playback-too-short",
+            format!(
+                "{PLAYER} finished in {} ms, so the file has next to no sound in it",
+                started.elapsed().as_millis()
+            ),
+        )),
         Either::Left(((_, 0), _)) => Ok(Ended::Finished),
         // `pw-play` fails at once when no audio server is reachable, or
         // when it can't read the file.

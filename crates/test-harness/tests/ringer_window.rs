@@ -3,10 +3,12 @@
 //! with synthetic keys. Choosing a Ring Sound saves it and plays it once
 //! through the player stand-in (`pw-play`); the volume plays it again once
 //! set. Each change is kept across a restart, and the next Call rings with
-//! it. A file of the user's own that is gone, or that `pw-play` can't play,
-//! rings the Chime instead, with a notice in the window and a line in the
-//! log; so does a config file that doesn't read. A Call is never silent
-//! because of the Ringer's settings.
+//! it. A file of the user's own that is gone, that `pw-play` can't play, or
+//! that has no sound in it, rings the Chime instead, with a notice in the
+//! window and a line in the log; so does a config file that doesn't read,
+//! and a volume out of range in it is brought into range. A Call is never
+//! silent because of the Ringer's settings. Calls off and Quiet Hours
+//! don't stop a preview: it is the user asking to hear it.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -141,6 +143,36 @@ fn own_file(harness: &Harness, name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/ringtones/android/Luna.ogg");
     fs::copy(&source, &path).unwrap_or_else(|error| panic!("copy {}: {error}", source.display()));
     path
+}
+
+/// Writes the Ringer's config file by hand, and restarts the app to read it.
+fn hand_edit(harness: &mut Harness, contents: &str) {
+    let path = config(harness);
+    fs::create_dir_all(path.parent().unwrap_or_else(|| panic!("a folder")))
+        .unwrap_or_else(|error| panic!("create the config folder: {error}"));
+    fs::write(&path, contents).unwrap_or_else(|error| panic!("write the config file: {error}"));
+    harness.restart_app();
+    wait_connected(harness);
+}
+
+/// A 16-bit mono WAV file of `frames` frames of silence at 48 kHz.
+fn wav(frames: u32) -> Vec<u8> {
+    let data = frames * 2;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u16.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data.to_le_bytes());
+    bytes.resize(bytes.len() + data as usize, 0);
+    bytes
 }
 
 fn choose_file(harness: &Harness, path: &Path) -> String {
@@ -419,13 +451,118 @@ fn a_file_pw_play_cant_play_rings_the_chime_instead() {
 }
 
 #[test]
+fn a_file_with_no_sound_in_it_rings_the_chime_instead_with_the_notice() {
+    let harness = connected();
+    let music = harness.directory().join("home/Music");
+    fs::create_dir_all(&music).unwrap_or_else(|error| panic!("create a music folder: {error}"));
+    // One with no frames at all, and one a few milliseconds long: each
+    // "plays" in next to no time, and would leave a Call silent.
+    for (name, frames) in [("empty.wav", 0), ("click.wav", 240)] {
+        let path = music.join(name);
+        fs::write(&path, wav(frames)).unwrap_or_else(|error| panic!("write {name}: {error}"));
+        choose_file(&harness, &path);
+        harness.wait_for_app_log("\"ringer-set\"", DEADLINE);
+
+        let before = harness.plays().len();
+        let call = ring(&harness);
+        let plays = harness.wait_for_plays(before + 2, PLAY_DEADLINE);
+        assert_eq!(plays[before].file, path, "tried first: {plays:?}");
+        assert_eq!(
+            file_name(&plays[before + 1]),
+            "chime-first.wav",
+            "the Chime at once: {plays:?}"
+        );
+        decline(&harness, call);
+    }
+    harness.wait_for_app_log("next to no sound in it", DEADLINE);
+
+    // The window says so too, once a preview finds it.
+    open(&harness);
+    wait_for_window(
+        &harness,
+        &[("sound", "file"), ("file", "click.wav"), ("focus", "file")],
+    );
+    harness.keyboard().type_text(" ");
+    let state = harness.wait_for_app("the notice shows", DEADLINE, |state| {
+        field(state, "notice").is_some()
+    });
+    assert_eq!(
+        field(&state, "notice"),
+        Some("Can't play this file\nChime rings instead")
+    );
+    let plays = harness.wait_until_nothing_plays(PREVIEW_ENDS);
+    assert_eq!(file_name(&plays[plays.len() - 1]), "chime.wav", "{plays:?}");
+}
+
+#[test]
+fn a_preview_plays_while_calls_are_off_and_during_quiet_hours() {
+    let harness = Harness::builder()
+        .headless_screen()
+        .phone_name(PHONE_NAME)
+        .time_zone("UTC0")
+        .start();
+    harness.simulated_phone().connect();
+    wait_connected(&harness);
+
+    let output = harness.cli(&["calls", "off"]);
+    assert!(output.status.success(), "{output:?}");
+    harness.wait_for_app("calls are off", DEADLINE, |state| state.calls_off == "off");
+    open(&harness);
+    wait_for_window(&harness, &[("focus", "chime")]);
+    tab_to(&harness, 1, "bells");
+    harness.keyboard().type_text(" ");
+    let plays = harness.wait_for_plays(1, PLAY_DEADLINE);
+    assert_eq!(file_name(&plays[0]), "bells.wav", "{plays:?}");
+    harness.wait_until_nothing_plays(PREVIEW_ENDS);
+
+    // Quiet Hours from an hour ago to an hour from now.
+    let output = harness.cli(&["calls", "on"]);
+    assert!(output.status.success(), "{output:?}");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|error| panic!("the clock is before 1970: {error}"))
+        .as_secs()
+        / 60
+        % 1_440;
+    let clock = |minutes: u64| format!("{:02}:{:02}", minutes / 60 % 24, minutes % 60);
+    let hours = format!("{}-{}", clock(now + 1_380), clock(now + 60));
+    let output = harness.cli(&["quiet-hours", &hours]);
+    assert!(output.status.success(), "{output:?}");
+    harness.wait_for_app("Quiet Hours turn calls off", DEADLINE, |state| {
+        state.calls_off != "on"
+    });
+    tab_to(&harness, 1, "glass");
+    harness.keyboard().type_text(" ");
+    let plays = harness.wait_for_plays(2, PLAY_DEADLINE);
+    assert_eq!(file_name(&plays[1]), "glass.wav", "{plays:?}");
+}
+
+#[test]
+fn a_hand_edited_volume_out_of_range_is_brought_into_range() {
+    let mut harness = connected();
+    for (written, shown, played) in [("250", "100 %", 1.0), ("3", "10 %", 0.1)] {
+        hand_edit(
+            &mut harness,
+            &format!("sound = chime\nvolume = {written}\n"),
+        );
+        open(&harness);
+        wait_for_window(&harness, &[("volume", shown)]);
+        let before = harness.plays().len();
+        let call = ring(&harness);
+        let plays = harness.wait_for_plays(before + 1, PLAY_DEADLINE);
+        assert_eq!(plays[before].volume, Some(played), "{written}: {plays:?}");
+        decline(&harness, call);
+    }
+}
+
+#[test]
 fn the_command_line_refuses_a_file_that_isnt_there() {
     let harness = connected();
     let output = harness.cli(&["ringer", "/nowhere/ring.ogg"]);
     assert!(!output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stderr).trim(),
-        "There's no file there. Check the path and try again."
+        "No file there. Check the path."
     );
     assert!(!config(&harness).exists(), "nothing saved");
 }
@@ -433,13 +570,7 @@ fn the_command_line_refuses_a_file_that_isnt_there() {
 #[test]
 fn a_config_file_that_doesnt_read_rings_the_chime_at_60_percent_and_is_logged() {
     let mut harness = connected();
-    let path = config(&harness);
-    fs::create_dir_all(path.parent().unwrap_or_else(|| panic!("a folder")))
-        .unwrap_or_else(|error| panic!("create the config folder: {error}"));
-    fs::write(&path, "sound = kazoo\nvolume = loud\n")
-        .unwrap_or_else(|error| panic!("write the config file: {error}"));
-    harness.restart_app();
-    wait_connected(&harness);
+    hand_edit(&mut harness, "sound = kazoo\nvolume = loud\n");
     let failed = harness.wait_for_app_log("\"ringer-failed\"", DEADLINE);
     assert!(failed.contains("ringer-unknown-sound"), "{failed}");
 

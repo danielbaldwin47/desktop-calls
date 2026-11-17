@@ -23,11 +23,18 @@ pub(super) struct Playable {
     pub(super) pause: Duration,
     /// The user's own file, which may yet fail to play.
     pub(super) own_file: Option<String>,
+    /// The least time a play of it takes: one that ends sooner had next to
+    /// no sound in it.
+    pub(super) shortest: Duration,
 }
 
 /// The silence after each repeat of a sound the app makes, or the user's
 /// own.
 const PAUSE: Duration = Duration::from_secs(2);
+
+/// The least time the user's own file plays for: a file that decodes to
+/// nothing, or to a click, isn't a ring.
+const SHORTEST: Duration = Duration::from_millis(500);
 
 /// Why the user's own file can't play.
 pub(super) struct Missing(pub(super) String);
@@ -47,6 +54,7 @@ pub(super) fn playable(settings: &RingerSettings) -> Result<Result<Playable, Mis
             gain: 1.0,
             pause: PAUSE,
             own_file: Some(file.to_owned()),
+            shortest: SHORTEST,
         }));
     }
     built_in(sound).map(Ok)
@@ -66,6 +74,7 @@ pub(super) fn built_in(sound: RingSound) -> Result<Playable, Failure> {
             gain: ringtone.gain,
             pause: Duration::ZERO,
             own_file: None,
+            shortest: Duration::ZERO,
         });
     }
     let (sound, repeat) = match tones::samples(sound) {
@@ -89,5 +98,6 @@ pub(super) fn built_in(sound: RingSound) -> Result<Playable, Failure> {
         gain: 1.0,
         pause: PAUSE,
         own_file: None,
+        shortest: Duration::ZERO,
     })
 }

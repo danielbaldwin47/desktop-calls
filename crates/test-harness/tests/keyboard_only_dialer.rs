@@ -1,5 +1,5 @@
-//! The keyboard-only suite's cases for the Dialer, the Quiet Hours Window
-//! and calling anyway while calls are off. [`ACTIONS`](super::keyboard_only)
+//! The keyboard-only suite's cases for the Dialer, the Quiet Hours Window,
+//! calling anyway while calls are off, and the Ringer Window. [`ACTIONS`](super::keyboard_only)
 //! and the rest of the cases are in `keyboard_only.rs`.
 
 use test_harness::vcards::{self, CallKind};
@@ -328,5 +328,103 @@ fn while_calls_are_off_the_dialer_calls_anyway_by_keys_alone() {
             asked(recorded, "Dial") == 1
         });
     performed.did("Hang up a Call placed before the Phone connects: Ctrl+H");
+    performed.all_done();
+}
+
+/// Waits until the Ringer Window has the keyboard and shows each of
+/// `fields`.
+fn wait_for_ringer(harness: &Harness, what: &str, fields: &[(&str, &str)]) -> AppState {
+    harness.wait_for_app(what, DEADLINE, |state| {
+        focused(state, "ringer-window")
+            && fields
+                .iter()
+                .all(|(name, value)| shown(state, "ringer-window", name) == Some(*value))
+    })
+}
+
+#[test]
+fn the_ringer_window_by_keys_alone() {
+    let mut performed = Performed::by(RINGER);
+    let (harness, _window) = connected();
+    open_the_dialer(&harness);
+    harness.keyboard().press_with_alt('r');
+    let state = wait_for_ringer(
+        &harness,
+        "Alt+R opens the Ringer Window with the Chime focused",
+        &[("focus", "chime"), ("keys", "Space Choose\nEsc Close")],
+    );
+    assert!(state.surface("dialer").is_none(), "the Dialer closed");
+    performed.did("Open the Ringer Window: Alt+R");
+
+    harness.keyboard().press(Key::Tab);
+    wait_for_ringer(&harness, "Tab focuses Bells", &[("focus", "bells")]);
+    harness.keyboard().type_text(" ");
+    wait_for_ringer(
+        &harness,
+        "Space chooses Bells and plays it, and Esc now stops it",
+        &[
+            ("sound", "bells"),
+            ("play", "Stop"),
+            ("keys", "Space Choose\nEsc Stop"),
+        ],
+    );
+    harness.wait_for_plays(1, DEADLINE);
+    performed.did("Choose a Ring Sound: Tab, Space");
+    harness.keyboard().press(Key::Escape);
+    harness.wait_until_nothing_plays(DEADLINE);
+    wait_for_ringer(
+        &harness,
+        "Escape stops it and leaves the window open",
+        &[("play", "Play"), ("keys", "Space Choose\nEsc Close")],
+    );
+    performed.did("Stop the Ring Sound playing: Escape");
+
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_ringer(
+        &harness,
+        "Shift+Tab focuses the Chime",
+        &[("focus", "chime")],
+    );
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_ringer(
+        &harness,
+        "Shift+Tab focuses Play",
+        &[("focus", "play"), ("play", "Play")],
+    );
+    harness.keyboard().type_text(" ");
+    wait_for_ringer(&harness, "Space on Play plays Bells", &[("play", "Stop")]);
+    harness.wait_for_plays(2, DEADLINE);
+    performed.did("Play the Ring Sound again: Shift+Tab, Space on Play");
+    harness.keyboard().press(Key::Escape);
+    harness.wait_until_nothing_plays(DEADLINE);
+
+    harness.keyboard().press_with_shift(Key::Tab);
+    wait_for_ringer(
+        &harness,
+        "Shift+Tab goes round to the volume",
+        &[("focus", "volume"), ("volume", "60 %")],
+    );
+    harness.keyboard().press(Key::Left);
+    wait_for_ringer(
+        &harness,
+        "Left takes the volume down a step, and plays Bells at it",
+        &[("volume", "55 %"), ("play", "Stop")],
+    );
+    let plays = harness.wait_for_plays(3, DEADLINE);
+    assert_eq!(plays[2].volume, Some(0.55), "{plays:?}");
+    performed.did("Set the Ringer's volume: Shift+Tab, Left");
+    harness.keyboard().press(Key::Escape);
+    harness.wait_until_nothing_plays(DEADLINE);
+    wait_for_ringer(
+        &harness,
+        "nothing plays",
+        &[("keys", "Space Choose\nEsc Close")],
+    );
+
+    harness.keyboard().press(Key::Escape);
+    harness.wait_for_app("Escape closes the Ringer Window", DEADLINE, |state| {
+        state.surface("ringer-window").is_none()
+    });
+    performed.did("Close the Ringer Window: Escape");
     performed.all_done();
 }

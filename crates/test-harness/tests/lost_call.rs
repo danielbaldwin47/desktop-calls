@@ -38,14 +38,13 @@ const LOST: &str = "Connection to phone lost: the call continues on your phone."
 /// The Call Window's notice while contact is lost: its heading, and what
 /// to do.
 const LOST_HEADING: &str = "Connection to phone lost";
-const LOST_NOTICE: &str = "The call continues on your phone. Hang up there.";
+const LOST_NOTICE: &str = "The call continues on your phone.";
 const HANG_UP_ON_PHONE: &str = "Hang up on your phone";
 /// What the Indicator says while the Call Window says [`LOST_NOTICE`] about Bob's
 /// Call.
-const INDICATOR_LOST_BOB: &str =
-    "Connection to phone lost: the call with +44 7700 900123 continues on your phone";
+const INDICATOR_LOST_BOB: &str = "Connection lost: call with +44 7700 900123 is on your phone";
 /// The state line while the audio is on the Phone, where Mute is.
-const ON_PHONE: &str = "On your phone. Mute there, or move the audio here";
+const ON_PHONE: &str = "On your phone";
 
 /// The app on a screen of its own, so its surfaces show, with the Phone
 /// connected.

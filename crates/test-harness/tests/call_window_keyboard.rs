@@ -34,7 +34,7 @@ const ROW_GAP: f64 = 12.0;
 const TILE_HEIGHT: f64 = 58.0;
 
 /// What the state line says while the audio is on the Phone.
-const ON_PHONE: &str = "On your phone. Mute there, or move the audio here";
+const ON_PHONE: &str = "On your phone";
 
 fn connected() -> Harness {
     let harness = Harness::builder().headless_screen().omarchy_bar().start();

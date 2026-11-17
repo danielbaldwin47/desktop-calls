@@ -53,15 +53,15 @@ pub fn problem(problem: ProblemKind) -> Message {
     }
     let (text, next_action) = match problem {
         ProblemKind::ContactsDenied => (
-            "Your phone isn't sharing contacts, so calls show numbers instead of names. To allow it, open Bluetooth settings on your phone, tap the settings icon next to this computer's name and turn on Contacts and call history.",
+            "Calls show numbers, not names. On your phone, open Bluetooth settings, tap the settings icon next to this computer's name and turn on Contacts and call history.",
             None,
         ),
         ProblemKind::ContactsPromptUnanswered => (
-            "Your phone asked to share contacts and got no answer, so calls show numbers instead of names. To be asked again, turn your phone's Bluetooth off and on.",
+            "Calls show numbers, not names. To be asked again, turn your phone's Bluetooth off and on.",
             None,
         ),
         ProblemKind::PairingLost => (
-            "Your phone has forgotten this computer, so calls can't reach it. Choose Pair again.",
+            "Your phone forgot this computer. Choose Pair again.",
             Some(NextAction::Command("desktop-calls connect")),
         ),
         ProblemKind::BluetoothOff

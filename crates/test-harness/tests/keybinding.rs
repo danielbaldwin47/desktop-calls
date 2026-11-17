@@ -31,7 +31,7 @@ const HOLD: Duration = Duration::from_millis(300);
 const NUMBER: &str = "+447700900123";
 
 /// The Banner's footer on a Desktop with no Desktop Calls keybinding.
-const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
+const NO_KEYBINDING: &str = "No keybinding. Add one in Phone setup…";
 
 /// The Answer button's green.
 const GREEN: [u8; 3] = [0x20, 0x86, 0x57];
@@ -291,7 +291,7 @@ fn with_a_phone_set_up_phone_setup_explains_the_unreadable_bindings_lua() {
     harness.tray().click("Phone setup…");
 
     let card = setup_keybinding_card(&harness);
-    assert!(card.contains("couldn't be read"), "{card}");
+    assert!(card.contains("Couldn't read"), "{card}");
     let _ = harness.screenshot("setup-window-keybinding-unreadable");
 }
 
@@ -334,8 +334,7 @@ fn escape_gives_focus_back_and_the_call_keeps_ringing() {
         |state| {
             state.surface("banner").is_some_and(|banner| {
                 banner.get("keycaps").map(String::as_str) == Some("A, D")
-                    && banner.get("footer").map(String::as_str)
-                        == Some("Esc gives the keyboard back; the call keeps ringing")
+                    && banner.get("footer").map(String::as_str) == Some("Esc Let it ring")
             })
         },
     );

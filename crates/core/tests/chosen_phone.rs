@@ -141,9 +141,7 @@ fn when_the_chosen_phone_is_not_paired_the_setup_window_opens_and_no_other_phone
         messages::setup_window(&window, Timestamp(0), None)
             .notice
             .as_deref(),
-        Some(
-            "My Pixel isn't paired with this computer any more; pair it again, or choose another phone."
-        )
+        Some("My Pixel is no longer paired. Pair it again, or choose another phone.")
     );
 }
 

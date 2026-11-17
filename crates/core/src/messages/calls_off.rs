@@ -22,8 +22,7 @@ pub(super) const PENDING: &str = "Calls off after this call";
 /// menu, and what happens next is the same as for [`PENDING`].
 pub(super) const AGAIN: &str = PENDING;
 /// Calls turned off until a time that has already passed.
-pub(super) const UNTIL_PASSED: &str =
-    "That time has already passed, so calls stay on. Choose a later time.";
+pub(super) const UNTIL_PASSED: &str = "That time has passed. Choose a later one.";
 
 /// The Indicator's status while calls are off: until `until`, or until the
 /// user turns them on; for Quiet Hours, until they end. Each fits Omarchy's
@@ -53,10 +52,10 @@ pub fn setup_calls_off(until: Option<TimeOfDay>, quiet_hours: bool) -> SetupCall
     let waits = "To pair or switch phones, turn calls on.";
     let text = match (until, quiet_hours) {
         (Some(until), true) => {
-            format!("Quiet hours keep your phone disconnected until {until}. {waits}")
+            format!("Quiet hours end at {until}. {waits}")
         }
-        (Some(until), false) => format!("Your phone stays disconnected until {until}. {waits}"),
-        (None, _) => format!("Your phone stays disconnected. {waits}"),
+        (Some(until), false) => format!("Back on at {until}. {waits}"),
+        (None, _) => waits.to_owned(),
     };
     SetupCallsOffText {
         heading: "Calls are off",
@@ -206,32 +205,27 @@ pub fn calls_turned_notice(notice: &CallsTurnedNotice) -> NotificationText {
         CallsTurned::Off {
             until: None,
             for_an_hour: _,
-        } => (
-            "Calls off".to_owned(),
-            format!("{phone} is disconnected. Turn calls on from the bar."),
-        ),
+        } => ("Calls off".to_owned(), format!("{phone} is disconnected.")),
         CallsTurned::Off {
             until: Some(until),
             for_an_hour: true,
         } => (
             format!("Calls off for 1 hour (until {})", until.shown),
-            format!("{phone} is disconnected. Turn calls on from the bar."),
+            format!("{phone} is disconnected."),
         ),
         CallsTurned::Off {
             until: Some(until),
             for_an_hour: false,
         } => (
             format!("Calls off until {}", until.shown),
-            format!("{phone} is disconnected. Turn calls on from the bar."),
+            format!("{phone} is disconnected."),
         ),
         CallsTurned::OffAfterCall { until } => (
             until.map_or_else(
                 || "Calls off after this call".to_owned(),
                 |until| format!("Calls off after this call (until {})", until.shown),
             ),
-            format!(
-                "{phone} stays connected until then. To cancel, choose Keep calls on from the bar."
-            ),
+            format!("{phone} stays connected until then."),
         ),
         CallsTurned::On { reconnecting: true } => {
             ("Calls on".to_owned(), format!("{phone} will reconnect."))

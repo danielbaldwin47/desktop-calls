@@ -375,7 +375,7 @@ fn an_undialable_number_is_flagged_before_enter() {
     assert_eq!(shown(&state, "rows"), Some("0"));
     assert_eq!(
         shown(&state, "notice"),
-        Some("That isn't a number your phone can dial; use digits, spaces and + * # only.")
+        Some("Not a phone number. Use digits, spaces and + * #.")
     );
     harness.keyboard().press(Key::Return);
     never_dialled(&harness);
@@ -420,7 +420,7 @@ fn with_the_phone_disconnected_the_dialer_searches_cached_contacts_and_enter_say
     });
     assert_eq!(
         shown(&state, "notice"),
-        Some("Phone not connected: it's out of range or has Bluetooth off.")
+        Some("Phone out of range, or its Bluetooth is off.")
     );
     assert!(
         state.surface("call-window").is_none(),

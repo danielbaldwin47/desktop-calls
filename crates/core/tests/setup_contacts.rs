@@ -405,10 +405,7 @@ fn granted_the_window_shows_the_call_history_done_first_then_the_contacts_being_
     let sync = text.sync.expect("the sync shows");
     let lines: Vec<String> = sync.rows.iter().map(messages::SyncRow::line).collect();
     assert_eq!(lines, ["✓ Recent calls", "Contacts · 312 · about 8 s left"]);
-    assert_eq!(
-        sync.note,
-        "Calls already work. Names appear as contacts arrive."
-    );
+    assert_eq!(sync.note, "Calls already work.");
     // Recent Calls are in, and Contacts part read: the bar is under way,
     // and not full.
     assert!((100..980).contains(&sync.bar), "{}", sync.bar);
@@ -601,7 +598,7 @@ fn denied_the_finish_page_says_calls_still_work_and_how_to_allow_access_later() 
     let summary = messages::setup_window(&view, Timestamp(0), None)
         .summary
         .unwrap_or_default();
-    assert!(summary.contains("Calls still work"), "{summary}");
+    assert!(summary.contains("so calls show numbers"), "{summary}");
     assert!(
         summary.contains("turn on Contacts and call history"),
         "{summary}"
@@ -617,7 +614,7 @@ fn the_finish_page_names_the_config_file_with_a_tilde_and_shows_the_line_as_writ
     let card = text.keybinding.expect("the keybinding's card");
     assert!(
         card.text
-            .contains("in ~/.config/hypr/bindings.lua, which doesn't use those keys yet."),
+            .contains("in ~/.config/hypr/bindings.lua. You'll see the line first."),
         "{card:?}"
     );
 
@@ -633,9 +630,7 @@ fn the_finish_page_names_the_config_file_with_a_tilde_and_shows_the_line_as_writ
         .collect();
     assert_eq!(
         lines,
-        [
-            "Choose Confirm to add this line to the end of ~/.config/hypr/bindings.lua, or Cancel to leave the file as it is:"
-        ]
+        ["Confirm adds this line to the end of ~/.config/hypr/bindings.lua:"]
     );
     // While the line is confirmed, the page is about the line alone.
     assert_eq!((text.keybinding, text.tip), (None, None));

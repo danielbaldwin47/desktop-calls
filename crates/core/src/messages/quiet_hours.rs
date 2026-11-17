@@ -100,20 +100,18 @@ fn kept(sentence: QuietHoursSentence) -> String {
 fn sentence(sentence: QuietHoursSentence) -> String {
     match sentence {
         QuietHoursSentence::Off => "Quiet hours are off.".to_owned(),
-        QuietHoursSentence::Saved { start, end, day } => {
+        QuietHoursSentence::Saved { day, .. } => {
             let day = match day {
                 Some(QuietHoursDay::Today) => ", starting today",
                 Some(QuietHoursDay::Tonight) => ", starting tonight",
                 Some(QuietHoursDay::Tomorrow) => ", starting tomorrow",
                 None => "",
             };
-            format!("Saved. Calls are off from {start} to {end} every day{day}.")
+            format!("Saved. Every day{day}.")
         }
-        QuietHoursSentence::OffNow { start, end } => {
-            format!("Saved. Calls are off now until {end}, and from {start} to {end} every day.")
+        QuietHoursSentence::OffNow { end, .. } => {
+            format!("Saved. Calls are off now, until {end}.")
         }
-        QuietHoursSentence::Pending { start, end } => {
-            format!("Saved. Calls turn off after this call, and from {start} to {end} every day.")
-        }
+        QuietHoursSentence::Pending { .. } => "Saved. Calls turn off after this call.".to_owned(),
     }
 }

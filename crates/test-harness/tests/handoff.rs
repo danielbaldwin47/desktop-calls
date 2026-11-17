@@ -492,10 +492,7 @@ fn a_phone_that_keeps_the_audio_gets_a_plain_message_and_the_call_stays_live() {
         "{calls:#?}"
     );
     let notice = shown(&state, "notice").unwrap_or_default();
-    assert!(
-        notice.contains("tap the audio button on your phone's call screen"),
-        "{notice}"
-    );
+    assert!(notice.contains("Tap the audio button on"), "{notice}");
     assert_eq!(state.audio_location, "phone");
     assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     let error = harness.wait_for_app_error(DEADLINE);
@@ -567,8 +564,7 @@ fn wait_for_audio_on_phone(harness: &Harness, before: &AppCall) -> AppState {
         DEADLINE,
         |state| {
             state.audio_location == "phone"
-                && shown(state, "state").as_deref()
-                    == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "state").as_deref() == Some("On your phone")
                 && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
@@ -828,9 +824,7 @@ fn a_handoff_to_the_phone_bluez_refuses_says_how_to_do_it_on_the_phone() {
     );
     assert_eq!(
         shown(&state, "notice").as_deref(),
-        Some(
-            "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen."
-        )
+        Some("The audio stayed here. Tap the audio button on your phone's call screen.")
     );
     assert_eq!(
         shown(&state, "notice-heading").as_deref(),

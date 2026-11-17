@@ -179,10 +179,7 @@ fn with_the_audio_on_the_phone_set_muted_returns_a_plain_error() {
         .set_muted(true)
         .expect_err("SetMuted(true) is refused");
 
-    assert_eq!(
-        refused.message,
-        "Mute works only while the call's audio is on this computer; mute on your phone instead."
-    );
+    assert_eq!(refused.message, "The audio is on your phone. Mute there.");
     assert!(!harness.app_state().muted);
     no_microphone_volume_is_set(&harness);
 }
@@ -216,7 +213,7 @@ fn desktop_calls_mute_with_the_audio_on_the_phone_says_why_not() {
     assert!(!printed.status.success());
     assert_eq!(
         String::from_utf8_lossy(&printed.stderr).trim(),
-        "Mute works only while the call's audio is on this computer; mute on your phone instead."
+        "The audio is on your phone. Mute there."
     );
 }
 

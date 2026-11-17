@@ -110,10 +110,7 @@ fn a_phone_that_refuses_to_hold_fails_4_1_with_what_the_call_window_said_and_end
         "{held:#}"
     );
     assert!(
-        says(
-            held,
-            "the Call Window says: Your phone didn't put your call on hold"
-        ),
+        says(held, "the Call Window says: Couldn't hold your call"),
         "{held:#}"
     );
     assert!(

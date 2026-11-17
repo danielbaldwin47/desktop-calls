@@ -425,8 +425,7 @@ fn focus_the_banner_showing(harness: &Harness, key: &str) {
 /// Waits until the focused Banner's footer says what Escape does.
 fn banner_shows_escape(harness: &Harness) {
     harness.wait_for_app("the Banner's footer shows Esc", DEADLINE, |state| {
-        shown(state, "banner", "footer")
-            .is_some_and(|footer| footer.starts_with("Esc gives the keyboard back"))
+        shown(state, "banner", "footer").is_some_and(|footer| footer.starts_with("Esc Let it ring"))
     });
 }
 

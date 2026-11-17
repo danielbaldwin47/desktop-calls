@@ -21,12 +21,12 @@ const BOB: &str = "+447700900123";
 const HANDS_FREE_AUDIO_GATEWAY_UUID: &str = "0000111f-0000-1000-8000-00805f9b34fb";
 
 /// The Call Window's notice while contact is lost.
-const LOST_NOTICE: &str = "The call continues on your phone. Hang up there.";
+const LOST_NOTICE: &str = "The call continues on your phone.";
 /// What a Call asked for while contact is lost says.
 const LOST: &str = "Connection to phone lost: the call continues on your phone.";
 /// What a Call asked for while the Phone is in range without hands-free
 /// says.
-const RECONNECTING: &str = "Phone not connected: it's reconnecting.";
+const RECONNECTING: &str = "Phone reconnecting. Try again in a moment.";
 
 /// The app on a screen of its own, so the Call Window shows, with the
 /// Phone connected.

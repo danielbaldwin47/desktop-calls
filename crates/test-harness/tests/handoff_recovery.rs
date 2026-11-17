@@ -30,7 +30,7 @@ const NUMBER: &str = "+447700900123";
 const DEVICE: &str = "org.bluez.Device1";
 const LOST: &str = "Connection to phone lost: the call continues on your phone.";
 /// What the Call Window's notice says while contact is lost.
-const LOST_NOTICE: &str = "The call continues on your phone. Hang up there.";
+const LOST_NOTICE: &str = "The call continues on your phone.";
 
 /// The app on a screen of its own, so its surfaces show, with the Phone
 /// connected.
@@ -136,8 +136,7 @@ fn with_connect_profile_failing_once_the_call_is_picked_back_up_when_hands_free_
             state.connection_state == "connected"
                 && state.calls.len() == 1
                 && shown(state, "notice").is_none()
-                && shown(state, "state").as_deref()
-                    == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "state").as_deref() == Some("On your phone")
                 && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );
@@ -250,8 +249,7 @@ fn with_the_calls_listed_late_after_hands_free_returns_the_call_keeps_its_id_and
             watch(state);
             state.connection_state == "connected"
                 && state.calls.len() == 1
-                && shown(state, "state").as_deref()
-                    == Some("On your phone. Mute there, or move the audio here")
+                && shown(state, "state").as_deref() == Some("On your phone")
                 && shown(state, "handoff").as_deref() == Some("Move here")
         },
     );

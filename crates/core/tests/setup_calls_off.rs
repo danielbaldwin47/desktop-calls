@@ -144,10 +144,7 @@ fn while_calls_are_off_the_setup_window_says_so_and_offers_turn_calls_on() {
     let card = text.calls_off.expect("the window has the card");
     assert_eq!(card.heading, "Calls are off");
     assert_eq!(card.button, "Turn calls on");
-    assert_eq!(
-        card.text,
-        "Your phone stays disconnected. To pair or switch phones, turn calls on."
-    );
+    assert_eq!(card.text, "To pair or switch phones, turn calls on.");
 }
 
 #[test]
@@ -156,11 +153,11 @@ fn the_card_names_the_time_calls_come_back_and_whether_quiet_hours_turned_them_o
 
     assert_eq!(
         messages::setup_calls_off(until, false).text,
-        "Your phone stays disconnected until 07:00. To pair or switch phones, turn calls on."
+        "Back on at 07:00. To pair or switch phones, turn calls on."
     );
     assert_eq!(
         messages::setup_calls_off(until, true).text,
-        "Quiet hours keep your phone disconnected until 07:00. To pair or switch phones, turn calls on."
+        "Quiet hours end at 07:00. To pair or switch phones, turn calls on."
     );
 }
 

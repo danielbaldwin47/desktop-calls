@@ -450,7 +450,7 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
             state
                 .surface("call-window")
                 .and_then(|window| window.get("notice"))
-                .is_some_and(|notice| notice == "The call continues on your phone. Hang up there.")
+                .is_some_and(|notice| notice == "The call continues on your phone.")
         },
     );
     assert_eq!(state.connection_state, "disconnected");

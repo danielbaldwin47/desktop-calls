@@ -118,9 +118,7 @@ fn the_finish_page_opened_mid_sync_says_contacts_are_being_read() {
     );
     assert_eq!(
         summary(&state).as_deref(),
-        Some(
-            "Your phone is asking whether to share contacts. Tap Allow on it so calls show names."
-        )
+        Some("Your phone is asking to share contacts. Tap Allow.")
     );
 }
 
@@ -168,7 +166,7 @@ fn the_finish_page_opened_with_the_phone_away_says_contacts_come_when_it_connect
     assert_eq!(text.heading, "My Pixel is set up");
     assert_eq!(
         text.summary.as_deref(),
-        Some("Contacts and recent calls come over from your phone when it connects.")
+        Some("Contacts and recent calls sync when your phone connects.")
     );
 }
 

@@ -16,6 +16,7 @@ use zbus::fdo::DBusProxy;
 use super::app::{collect_app_errors, collect_missed_calls, collect_published};
 use super::simulated_phone::PhoneIdentity;
 use super::{Harness, JOURNAL_SOCKET};
+use crate::player::{self, AudioServer};
 use crate::process_group::ProcessGroup;
 use crate::prune::prune_older_than;
 use crate::screen::{Screen, ScreenKind};
@@ -93,6 +94,7 @@ pub struct Builder {
     hyprland_bindings: Option<HyprlandBindings>,
     config_home: ConfigHome,
     shader_cache: ShaderCache,
+    audio_server: AudioServer,
 }
 
 /// The app's `RUST_LOG`.
@@ -509,6 +511,13 @@ impl Builder {
         self
     }
 
+    /// Runs the scenario with no audio server, so `pw-play` (the player
+    /// stand-in) fails at once, as on a Desktop without PipeWire.
+    pub fn without_audio_server(mut self) -> Self {
+        self.audio_server = AudioServer::Absent;
+        self
+    }
+
     /// Leaves out Omarchy's notification state, as on a Desktop without
     /// Omarchy. By default it is there as Omarchy 4.5's shell prepares it at
     /// startup, with Do Not Disturb never yet turned on.
@@ -615,6 +624,7 @@ impl Builder {
             self.config_home,
             self.shader_cache,
         );
+        player::put_on_path(&bin_directory, self.audio_server, &mut environment);
         desktop_settings(&directory.join("config"), self.motion);
         if let Some(time_zone) = self.time_zone.take() {
             environment.push(("TZ", time_zone));
@@ -718,7 +728,12 @@ pub(super) fn bin_directory() -> PathBuf {
     if directory.ends_with("deps") {
         directory.pop();
     }
-    for binary in ["desktop-calls", "simulated-phone", "test-client"] {
+    for binary in [
+        "desktop-calls",
+        "simulated-phone",
+        "test-client",
+        player::BINARY,
+    ] {
         assert!(
             directory.join(binary).exists(),
             "{binary} isn't built in {}; run `just test`, which builds it first",

@@ -72,6 +72,14 @@ _Avoid_: call log, recents
 The transient on-screen notice for a ringing Call, with Answer and Decline. For a Waiting Call it offers Hold & Answer, End & Answer or Answer, whichever the Phone can do, and Decline.
 _Avoid_: popup, toast, notification
 
+**Ringer**:
+The sound the Desktop plays while a Call rings here: a Ring Sound, repeated with a pause between repeats, at its own volume under the Desktop's. It is silent under Do Not Disturb and while another Call is live. The Phone's own ringtone, sent over the Call's audio link, is not the Ringer.
+_Avoid_: alert sound, ringing sound
+
+**Ring Sound**:
+One sound the Ringer can play. The default is a soft chime Desktop Calls makes itself.
+_Avoid_: ringtone (that is the Phone's), tone
+
 **Dialer**:
 The search-as-you-type window for starting a Call from a name or number.
 _Avoid_: launcher, call picker

@@ -46,11 +46,11 @@ const GO_BACK_TO_1_1: &str = "Press Enter to go back to step 1.1, which forgets 
 const PAIRED_AT_INSTALL: &str = "Desktop Calls found the Pixel still paired when it started again, so this computer kept the pairing through the install.";
 const DO_1_1_AGAIN: &str = "Press Enter to do step 1.1 again, or type skip or quit.";
 /// How the finish page's summary starts when the Phone refused Contacts,
-/// as against "…isn't sharing contacts yet." when nobody answered or the
+/// as against "…isn't sharing contacts yet," when nobody answered or the
 /// sync failed.
-const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts. ";
-/// What the finish page adds when Contacts aren't shared.
-const CALLS_STILL_WORK: &str = "Calls still work";
+const REFUSED_SUMMARY: &str = "Your phone isn't sharing contacts, ";
+/// What the finish page adds when Contacts aren't shared: Calls still work.
+const CALLS_STILL_WORK: &str = "so calls show numbers";
 /// The box on the Pixel's Pair dialog, as the Pixel words it (inferred,
 /// RPU-15).
 const CONTACTS_BOX: &str = "\"Allow access to your contacts and call history\"";

@@ -373,10 +373,7 @@ fn turning_calls_off_from_the_indicator_and_on_from_the_cli_each_send_one_transi
 
     wait_off(&harness);
     let off = confirmation(&harness, "Calls off");
-    assert_eq!(
-        off.body,
-        "My Pixel is disconnected. Turn calls on from the bar."
-    );
+    assert_eq!(off.body, "My Pixel is disconnected.");
 
     cli_ok(&harness, &["calls", "on"]);
 
@@ -427,10 +424,7 @@ fn turning_calls_off_for_an_hour_gives_the_end_time_the_menu_showed() {
 
     wait_off(&harness);
     let notification = confirmation(&harness, &format!("Calls off for 1 hour (until {until})"));
-    assert_eq!(
-        notification.body,
-        "My Pixel is disconnected. Turn calls on from the bar."
-    );
+    assert_eq!(notification.body, "My Pixel is disconnected.");
 }
 
 #[test]

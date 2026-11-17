@@ -56,7 +56,7 @@ fn status_with_contact_lost_says_so_in_the_call_windows_words() {
     );
     assert_eq!(
         messages::status(&ConnectionState::PairingLost, Some(&pixel()), false, true),
-        "My Pixel (AA:BB:CC:DD:EE:FF) has forgotten this computer. Pair it again."
+        "My Pixel (AA:BB:CC:DD:EE:FF) forgot this computer. Pair it again."
     );
 }
 
@@ -107,10 +107,7 @@ fn the_call_windows_state_line_names_a_contact_by_first_name_and_an_ended_calls_
         messages::state_line(StateLine::Muted, &alices_number(), None),
         "Muted. They can't hear you"
     );
-    assert_eq!(
-        line(StateLine::OnYourPhone),
-        "On your phone. Mute there, or move the audio here"
-    );
+    assert_eq!(line(StateLine::OnYourPhone), "On your phone");
     assert_eq!(line(StateLine::Calling), "Calling…");
     assert_eq!(
         line(StateLine::Ended { lasted: Some(971) }),
@@ -125,7 +122,7 @@ fn losing_contact_with_a_call_says_where_to_hang_up() {
         messages::contact_lost(Failure::ConnectionLost),
         (
             "Connection to phone lost",
-            "The call continues on your phone. Hang up there."
+            "The call continues on your phone."
         )
     );
 }

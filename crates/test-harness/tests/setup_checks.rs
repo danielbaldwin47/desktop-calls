@@ -502,11 +502,7 @@ fn audio_not_set_up_writes_one_drop_in_only_after_consent_and_restarts_wireplumb
     // What setting it up does, in plain words, before the user asks.
     assert_eq!(
         field(&state, "messages"),
-        Some(
-            "This computer's audio isn't set up for phone calls yet. Once it is, this computer \
-             connects to your phone for calls by itself. A call's audio stays on your phone until \
-             you move it here. Setting it up restarts the audio."
-        )
+        Some("Your phone's calls won't show here until it is. Setting it up restarts the audio.")
     );
     let before = BTreeMap::from([(
         "51-music.conf".to_owned(),

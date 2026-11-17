@@ -484,7 +484,7 @@ fn when_the_phone_refuses_to_hold_the_user_is_told_and_both_calls_stay_as_they_w
 
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "hold-and-answer-failed");
-    let sentence = "Your phone didn't put your call on hold, so nothing changed. Answer on your phone instead.";
+    let sentence = "Couldn't hold your call. Answer on your phone.";
     assert_eq!(error.message, sentence);
     let state = harness.wait_for_app("the Call Window says why", DEADLINE, |state| {
         call_window(state, "notice").as_deref() == Some(sentence)
@@ -672,8 +672,7 @@ fn when_the_phone_refuses_end_and_answer_the_user_is_told_and_the_banner_comes_b
 
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "end-and-answer-failed");
-    let sentence =
-        "Your phone didn't end your call, so nothing changed. End it on your phone instead.";
+    let sentence = "Couldn't end your call. Answer on your phone.";
     assert_eq!(error.message, sentence);
     let state = harness.wait_for_app(
         "the Call Window says why and the Banner is back",

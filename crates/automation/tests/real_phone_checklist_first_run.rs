@@ -195,9 +195,9 @@ fn step_1_3_follows_the_contacts_not_shared_problem_and_the_app_syncs_without_pa
     let later = step(&result, "1.3");
     assert_eq!(later["result"], "pass", "{later:#}");
     for said in [
-        "Calls still work",
+        "so calls show numbers",
         "The app's log says the Pixel refused Contacts.",
-        "Desktop Calls shows the Contacts not shared Problem: Your phone isn't sharing contacts",
+        "Desktop Calls shows the Contacts not shared Problem: Calls show numbers, not names",
         "without pairing again",
         "The Pixel stayed connected and Desktop Calls didn't restart.",
         "The Contacts not shared Problem went away.",
@@ -352,7 +352,7 @@ fn step_1_2_is_observed_unexpected_when_the_pixel_refuses_contacts_with_the_box_
         says(
             pairing,
             "Unexpected: The Pixel refused Contacts as it paired"
-        ) && says(pairing, "Calls still work"),
+        ) && says(pairing, "so calls show numbers"),
         "{pairing:#}"
     );
     assert!(
@@ -405,8 +405,7 @@ fn step_1_2_fails_when_the_finish_page_offers_no_keybinding() {
     let pairing = step(&result, "1.2");
     assert_eq!(pairing["result"], "fail", "{pairing:#}");
     assert!(
-        says(pairing, "offered no keybinding to add")
-            && says(pairing, "Super+Alt+C is already used"),
+        says(pairing, "offered no keybinding to add") && says(pairing, "Super+Alt+C is taken"),
         "{pairing:#}"
     );
     assert!(

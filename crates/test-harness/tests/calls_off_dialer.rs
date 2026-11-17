@@ -151,7 +151,7 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     let state = dialer_typed(&harness);
     assert_eq!(
         shown(&state, "dialer", "calls-off"),
-        Some("Calls are off. Enter calls anyway, then calls turn off again.")
+        Some("Calls are off. Enter calls anyway.")
     );
     assert!(
         shown(&state, "dialer", "keys").is_some_and(|keys| keys.starts_with("Enter Call anyway")),
@@ -245,7 +245,7 @@ fn the_phone_not_connecting_in_15_s_says_out_of_range_and_calls_go_back_off() {
     );
     assert_eq!(
         shown(&state, "call-window", "notice"),
-        Some("Phone not connected: it's out of range or has Bluetooth off.")
+        Some("Phone out of range, or its Bluetooth is off.")
     );
     wait_off(&harness, "calls are back off");
     assert_eq!(harness.simulated_phone().connects_while_blocked(), 0);

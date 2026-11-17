@@ -286,10 +286,7 @@ fn turning_calls_off_until_a_time_that_has_passed_is_refused() {
         .turn_calls_off(now() - 120)
         .expect_err("a time that has passed is refused");
 
-    assert_eq!(
-        refused.message,
-        "That time has already passed, so calls stay on. Choose a later time."
-    );
+    assert_eq!(refused.message, "That time has passed. Choose a later one.");
     assert_eq!(harness.app_state().calls_off, "on");
     assert!(!harness.simulated_phone().blocked());
 }

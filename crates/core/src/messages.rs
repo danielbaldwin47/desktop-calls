@@ -225,10 +225,6 @@ pub struct Message {
 
 /// What to tell the user about `failure`.
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one arm per Failure: the sentences read best side by side, as one table"
-)]
 pub fn failure(failure: Failure) -> Message {
     let (text, next_action) = match failure {
         Failure::ServiceNotRunning => (
@@ -245,42 +241,27 @@ pub fn failure(failure: Failure) -> Message {
                 "journalctl --user -t desktop-calls -n 20",
             )),
         ),
-        Failure::AnswerFailed => (
-            "Your phone didn't answer the call; answer it on your phone instead.",
-            None,
-        ),
-        Failure::HangUpFailed => (
-            "Your phone didn't hang up the call; hang up on your phone instead.",
-            None,
-        ),
-        Failure::CallMayStillBeLive => (
-            "The call may not have ended. Check your phone, and hang up there if it's still going.",
-            None,
-        ),
+        Failure::AnswerFailed => ("Couldn't answer. Answer on your phone.", None),
+        Failure::HangUpFailed => ("Couldn't hang up. Hang up on your phone.", None),
+        Failure::CallMayStillBeLive => ("The call may not have ended. Check your phone.", None),
         Failure::AudioNotMoved => (
-            "Your phone kept the audio; to hear the call here, tap the audio button on your phone's call screen.",
+            "Your phone kept the audio. Tap the audio button on its call screen.",
             None,
         ),
         Failure::AudioNotMovedToPhone => (
-            "The audio stayed here; to move it to your phone, tap the audio button on your phone's call screen.",
+            "The audio stayed here. Tap the audio button on your phone's call screen.",
             None,
         ),
         Failure::NoSuchCall => ("That call has already ended.", None),
         Failure::CallNotRinging => ("That call isn't ringing any more.", None),
-        Failure::Undialable => (
-            "That isn't a number your phone can dial; use digits, spaces and + * # only.",
-            None,
-        ),
-        Failure::PhoneNotSetUp => ("Phone not connected: no phone is set up yet.", None),
-        Failure::PhoneConnecting => ("Phone not connected yet; try again in a moment.", None),
-        Failure::PhoneOutOfRange => (
-            "Phone not connected: it's out of range or has Bluetooth off.",
-            None,
-        ),
+        Failure::Undialable => ("Not a phone number. Use digits, spaces and + * #.", None),
+        Failure::PhoneNotSetUp => ("No phone set up.", None),
+        Failure::PhoneConnecting => ("Phone not connected yet. Try again in a moment.", None),
+        Failure::PhoneOutOfRange => ("Phone out of range, or its Bluetooth is off.", None),
         // The Dialer's footer says "Reconnecting…" meanwhile.
-        Failure::PhoneReconnecting => ("Phone not connected: it's reconnecting.", None),
+        Failure::PhoneReconnecting => ("Phone reconnecting. Try again in a moment.", None),
         Failure::PhonePairingLost => (
-            "Phone not connected: it has forgotten this computer. Pair it again.",
+            "Your phone forgot this computer. Pair it again.",
             Some(NextAction::Command("desktop-calls connect")),
         ),
         Failure::ConnectionLost => (
@@ -288,65 +269,29 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::CallInProgress => ("Hang up the current call first.", None),
-        Failure::NumberRefused => (
-            "Your phone can't dial that number; check it and try again.",
-            None,
-        ),
-        Failure::PhoneBusy => (
-            "Your phone is busy with another call; try again in a moment.",
-            None,
-        ),
-        Failure::DialNotSupported => (
-            "Your phone doesn't let this computer place calls; call from your phone instead.",
-            None,
-        ),
+        Failure::NumberRefused => ("Your phone can't dial that number.", None),
+        Failure::PhoneBusy => ("Your phone is busy with another call.", None),
+        Failure::DialNotSupported => ("Your phone doesn't allow calls from this computer.", None),
         Failure::NoSignal => (
             "Your phone has no mobile signal, or is in airplane mode.",
             None,
         ),
-        Failure::NetworkError => (
-            "The mobile network didn't answer your phone; try again in a moment.",
-            None,
-        ),
-        Failure::DialFailed => (
-            "Your phone couldn't place the call; check it has signal and isn't in airplane mode.",
-            None,
-        ),
+        Failure::NetworkError => ("The mobile network didn't respond.", None),
+        Failure::DialFailed => ("Your phone couldn't place the call.", None),
         Failure::NoLiveCall => ("There's no connected call right now.", None),
-        Failure::MuteUnavailable => (
-            "Mute works only while the call's audio is on this computer; mute on your phone instead.",
-            None,
-        ),
-        Failure::MuteFailed => (
-            "Your phone didn't mute the microphone, so the other person can still hear you.",
-            None,
-        ),
-        Failure::UnmuteFailed => (
-            "Your phone didn't turn the microphone back on, so you're still muted; try again.",
-            None,
-        ),
+        Failure::MuteUnavailable => ("The audio is on your phone. Mute there.", None),
+        Failure::MuteFailed => ("Not muted. They can still hear you.", None),
+        Failure::UnmuteFailed => ("Still muted. Try again.", None),
         Failure::InvalidTones => ("Only digits, * and # can be sent as tones.", None),
-        Failure::TonesNotSent => ("Your phone didn't send the tones; try again.", None),
-        Failure::WithheldNumber => (
-            "That caller withheld their number, so it can't be called back.",
-            None,
-        ),
+        Failure::TonesNotSent => ("Tones not sent. Try again.", None),
+        Failure::WithheldNumber => ("Withheld numbers can't be called back.", None),
         Failure::NoWaitingCall => ("There's no waiting call to answer.", None),
         Failure::NoHeldCall => ("There's no call on hold to swap to.", None),
-        Failure::HoldAndAnswerFailed => (
-            "Your phone didn't put your call on hold, so nothing changed. Answer on your phone instead.",
-            None,
-        ),
-        Failure::EndAndAnswerFailed => (
-            "Your phone didn't end your call, so nothing changed. End it on your phone instead.",
-            None,
-        ),
-        Failure::SwapFailed => (
-            "Your phone didn't swap the calls. Swap them on your phone instead.",
-            None,
-        ),
+        Failure::HoldAndAnswerFailed => ("Couldn't hold your call. Answer on your phone.", None),
+        Failure::EndAndAnswerFailed => ("Couldn't end your call. Answer on your phone.", None),
+        Failure::SwapFailed => ("Couldn't swap. Swap on your phone.", None),
         Failure::NotConnectedYet => (
-            "Your call hasn't connected yet, so it can't be put on hold; choose End & answer or Decline.",
+            "Your call hasn't connected yet. Choose End & answer or Decline.",
             None,
         ),
         Failure::WaitingCallFirst => (label(Label::WaitingCallFirst), None),
@@ -355,18 +300,12 @@ pub fn failure(failure: Failure) -> Message {
             None,
         ),
         Failure::NothingToHoldOrEnd => (
-            "Your other call is already on hold. Choose Answer to keep it there, or Decline.",
+            "Your other call is on hold. Choose Answer or Decline.",
             None,
         ),
         Failure::CallsOffUntilPassed => (calls_off::UNTIL_PASSED, None),
-        Failure::CallsOffFailed => (
-            "Calls couldn't be turned off: Bluetooth didn't disconnect your phone. Try again.",
-            None,
-        ),
-        Failure::CallsOnFailed => (
-            "Calls couldn't be turned on: Bluetooth didn't let your phone connect again. Try again.",
-            None,
-        ),
+        Failure::CallsOffFailed => ("Couldn't turn calls off. Try again.", None),
+        Failure::CallsOnFailed => ("Couldn't turn calls on. Try again.", None),
     };
     Message { text, next_action }
 }
@@ -403,7 +342,7 @@ pub fn indicator_status(status: &IndicatorStatus) -> String {
         }
         // The Call Window's notice, naming the Call.
         IndicatorStatus::CallOnPhone { caller, contact } => format!(
-            "Connection to phone lost: the call with {} continues on your phone",
+            "Connection lost: call with {} is on your phone",
             caller_name(caller, contact.as_ref())
         ),
     }
@@ -533,10 +472,9 @@ pub fn status(
         (ConnectionState::Disconnected, Some(phone)) => {
             format!("{} is out of range or has Bluetooth off.", describe(phone))
         }
-        (ConnectionState::PairingLost, Some(phone)) => format!(
-            "{} has forgotten this computer. Pair it again.",
-            describe(phone)
-        ),
+        (ConnectionState::PairingLost, Some(phone)) => {
+            format!("{} forgot this computer. Pair it again.", describe(phone))
+        }
     }
 }
 

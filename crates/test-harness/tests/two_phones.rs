@@ -219,8 +219,7 @@ fn when_the_chosen_phone_was_unpaired_the_setup_window_opens_and_no_other_phone_
 
 /// The Setup Window, opened because the chosen Phone is no longer paired,
 /// says so.
-const PIXEL_GONE: &str =
-    "My Pixel isn't paired with this computer any more; pair it again, or choose another phone.";
+const PIXEL_GONE: &str = "My Pixel is no longer paired. Pair it again, or choose another phone.";
 
 /// A choice kept before the app kept the Phone's name too: the window
 /// still says why it opened, without the name (ticket #150).
@@ -244,7 +243,7 @@ fn when_a_chosen_phone_kept_without_its_name_was_unpaired_the_setup_window_says_
     assert_eq!(
         field(&state, "notice"),
         Some(
-            "The phone you chose last isn't paired with this computer any more; pair it again, or choose another phone."
+            "The phone you chose last is no longer paired. Pair it again, or choose another phone."
         ),
         "{state:?}"
     );
@@ -322,11 +321,8 @@ fn choosing_a_paired_phone_that_is_out_of_range_says_to_bring_it_close_and_conne
         CONNECT_DEADLINE,
         |state| field(state, "step") == Some("phone-unreachable"),
     );
+    assert_eq!(field(&state, "heading"), Some("Can't reach Old Pixel"));
     let summary = field(&state, "summary").unwrap_or_default();
-    assert!(
-        summary.contains("Can't reach Old Pixel; bring it close with Bluetooth on."),
-        "{summary}"
-    );
     assert!(
         !summary.contains("isn't sharing calls"),
         "wrong advice for a Phone that is away: {summary}"

@@ -22,7 +22,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
                 dialer_shows(state, "selected", "1")
             });
             harness.keyboard().press(Key::Return);
-            wait_for_notice(harness, "That caller withheld their number");
+            wait_for_notice(harness, "Withheld numbers can't be called back");
         },
         shown: |screenshot, _| shows_dialer(screenshot),
     },
@@ -50,7 +50,7 @@ pub(super) const REFUSAL_STATES: &[State] = &[
         reach: |harness| {
             sync(harness);
             open_dialer(harness, "0770 09!00");
-            wait_for_notice(harness, "That isn't a number your phone can dial");
+            wait_for_notice(harness, "Not a phone number");
         },
         shown: |screenshot, _| shows_dialer(screenshot),
     },

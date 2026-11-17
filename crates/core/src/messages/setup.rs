@@ -127,12 +127,12 @@ pub fn setup_window(view: &SetupWindowView, now: Timestamp, home: Option<&str>) 
         SetupStep::Connecting { phone } => (
             format!("Connecting to {}…", phone.name),
             vec![Instruction::phone(
-                "If it asks to share contacts and call history, tap Allow, so calls show names.",
+                "If it asks to share contacts and call history, tap Allow.",
             )],
             vec!["Close"],
         ),
         SetupStep::PhoneCallsOff { phone } => phone_calls_off(&mut text, phone, &desktop),
-        SetupStep::PhoneUnreachable { phone } => phone_unreachable(&mut text, phone),
+        SetupStep::PhoneUnreachable { phone } => phone_unreachable(phone),
         SetupStep::PairingLost { phone } => pairing_lost(&mut text, phone),
         SetupStep::PairingAgain { phone } => pairing_again(phone),
         SetupStep::ContactsWarning { phone } => contacts_warning(&mut text, phone),
@@ -381,11 +381,7 @@ pub fn unbreakable_runs(text: &str) -> Vec<Range<usize>> {
 }
 
 /// The step for a Phone that didn't answer.
-fn phone_unreachable(text: &mut SetupWindowText, phone: &Phone) -> Page {
-    text.summary = Some(format!(
-        "Can't reach {}; bring it close with Bluetooth on.",
-        phone.name
-    ));
+fn phone_unreachable(phone: &Phone) -> Page {
     (
         format!("Can't reach {}", phone.name),
         vec![
@@ -397,14 +393,11 @@ fn phone_unreachable(text: &mut SetupWindowText, phone: &Phone) -> Page {
 }
 
 fn pairing_lost(text: &mut SetupWindowText, phone: &Phone) -> Page {
-    text.summary = Some(format!(
-        "{} no longer has this computer paired, so it can't share calls.",
-        phone.name
-    ));
+    text.summary = Some(format!("{} forgot this computer.", phone.name));
     (
         format!("Pair {} again", phone.name),
         vec![Instruction::here(
-            "Choose Pair again: this computer removes its old pairing, then pairs with your phone.",
+            "Choose Pair again to replace the old pairing.",
         )],
         vec!["Pair again", "Close"],
     )
@@ -416,9 +409,7 @@ fn pairing_again(phone: &Phone) -> Page {
     (
         format!("Pairing with {} again…", phone.name),
         vec![
-            Instruction::phone(
-                "Open Settings, then Connected devices, then Pair new device, so this computer finds it.",
-            ),
+            Instruction::phone("Open Settings, then Connected devices, then Pair new device."),
             Instruction::phone("When it asks, check the code and tap Pair."),
         ],
         vec!["Cancel"],
@@ -444,13 +435,13 @@ fn phone_calls_off(text: &mut SetupWindowText, phone: &Phone, desktop: &str) -> 
 
 fn contacts_warning(text: &mut SetupWindowText, phone: &Phone) -> Page {
     text.summary = Some(format!(
-        "{} is connected. Next it asks whether to share contacts and call history with this computer, so calls show names.",
+        "{} is connected. Contacts let calls show names.",
         phone.name
     ));
     (
         "Your phone is about to ask".to_owned(),
         vec![Instruction::phone(
-            "When it asks to allow access to contacts and call history, tap Allow.",
+            "When it asks to share contacts and call history, tap Allow.",
         )],
         vec!["Close"],
     )
@@ -474,13 +465,12 @@ fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timesta
 fn contacts_prompt_timed_out(text: &mut SetupWindowText) -> Page {
     // The countdown ran out.
     text.countdown = Some("0".to_owned());
-    text.countdown_label = Some("Time ran out to tap Allow");
-    text.summary =
-        Some("Nobody answered on your phone in time, so it isn't sharing contacts yet.".to_owned());
+    text.countdown_label = Some("Time ran out");
+    text.summary = Some("It isn't sharing contacts yet.".to_owned());
     (
         "Your phone stopped asking".to_owned(),
         vec![
-            Instruction::here("Choose Try again, and your phone asks again."),
+            Instruction::here("Choose Try again."),
             Instruction::phone("Tap Allow."),
         ],
         vec!["Try again", "Skip"],
@@ -536,22 +526,22 @@ fn contacts_syncing(
     )
 }
 
+/// What the Phone that left hasn't given yet, away or back.
+const NOT_READ_YET: &str = "Contacts and recent calls aren't read yet.";
+
 /// The Phone left before Contacts were read: wait for it, then carry on.
 fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
     if back {
-        text.summary = Some("Contacts and recent calls aren't read yet.".to_owned());
+        text.summary = Some(NOT_READ_YET.to_owned());
         return (
             format!("{} is back", phone.name),
             vec![Instruction::here(
-                "Choose Continue, and your phone asks again whether to share contacts and call history.",
+                "Choose Continue. Your phone will ask again.",
             )],
             vec!["Continue", "Close"],
         );
     }
-    text.summary = Some(format!(
-        "{} disconnected before contacts and recent calls were read.",
-        phone.name
-    ));
+    text.summary = Some(NOT_READ_YET.to_owned());
     (
         format!("{} disconnected", phone.name),
         vec![
@@ -570,8 +560,7 @@ fn plural(count: impl Into<u64>, one: &str, many: &str) -> String {
 }
 
 /// The finish page's Contacts line while the Phone, never synced, is away.
-const WHEN_CONNECTED: &str =
-    "Contacts and recent calls come over from your phone when it connects.";
+const WHEN_CONNECTED: &str = "Contacts and recent calls sync when your phone connects.";
 
 fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
     match outcome {
@@ -581,17 +570,13 @@ fn contacts_outcome(outcome: ContactsOutcome, desktop: &str) -> String {
             plural(count(calls), "recent call", "recent calls")
         ),
         ContactsOutcome::Denied => format!(
-            "Your phone isn't sharing contacts. Calls still work, and show numbers instead of names. To allow it later: on your phone open Settings, then Connected devices, tap the settings icon next to {desktop} and turn on Contacts and call history."
+            "Your phone isn't sharing contacts, so calls show numbers. To allow it: on your phone open Settings, then Connected devices, tap the settings icon next to {desktop} and turn on Contacts and call history."
         ),
         ContactsOutcome::NotShared => {
-            "Your phone isn't sharing contacts yet. Calls still work, and show numbers instead of names."
-                .to_owned()
+            "Your phone isn't sharing contacts yet, so calls show numbers.".to_owned()
         }
         ContactsOutcome::Syncing => "Getting contacts and recent calls from your phone…".to_owned(),
-        ContactsOutcome::Asking => {
-            "Your phone is asking whether to share contacts. Tap Allow on it so calls show names."
-                .to_owned()
-        }
+        ContactsOutcome::Asking => "Your phone is asking to share contacts. Tap Allow.".to_owned(),
     }
 }
 
@@ -617,7 +602,7 @@ fn finish(
     // Until a key opens the Dialer, the first Call starts from the bar.
     let from_the_bar = || {
         vec![Instruction::here(
-            "Place your first call: choose New call… from Desktop Calls in the bar, type a name or number, then press Enter.",
+            "Place your first call: choose New call… from Desktop Calls in the bar.",
         )]
     };
     let check = match keybinding {
@@ -642,7 +627,7 @@ fn finish(
             };
             return (
                 vec![Instruction::here(format!(
-                    "Choose Confirm to add this line to {place}, or Cancel to leave the file as it is:"
+                    "Confirm adds this line to {place}:"
                 ))],
                 None,
                 vec!["Confirm", "Cancel"],
@@ -653,17 +638,14 @@ fn finish(
     let (text, buttons) = match check {
         KeybindingCheck::Available { keys, file, .. } => (
             format!(
-                "Add keybinding binds {} in {}, which doesn't use those keys yet. You'll see the exact line first.",
+                "Add keybinding binds {} in {}. You'll see the line first.",
                 shown_keys(keys),
                 shown_path(file, home)
             ),
             vec!["Add keybinding", "Done"],
         ),
         KeybindingCheck::Added { keys, .. } => (
-            format!(
-                "Place your first call: press {} to open the dialer, type a name or number, then press Enter.",
-                shown_keys(keys)
-            ),
+            format!("Place your first call: press {}.", shown_keys(keys)),
             vec!["Done"],
         ),
         KeybindingCheck::Taken {
@@ -672,7 +654,7 @@ fn finish(
             command,
         } => (
             format!(
-                "{} is already used in {}. To open the dialer from a key, bind another one to run {command}",
+                "{} is taken in {}. Bind another key to run {command}",
                 shown_keys(keys),
                 shown_path(file, home)
             ),
@@ -680,15 +662,14 @@ fn finish(
         ),
         KeybindingCheck::Unreadable { file, command } => (
             format!(
-                "{} couldn't be read, so no keybinding can be added to it; to open the dialer from a key, bind one to run {command}",
+                "Couldn't read {}. Bind a key yourself to run {command}",
                 shown_path(file, home)
             ),
             vec!["Done"],
         ),
-        KeybindingCheck::NoConfig { command } => (
-            format!("To open the dialer from a key, bind one to run {command}"),
-            vec!["Done"],
-        ),
+        KeybindingCheck::NoConfig { command } => {
+            (format!("Bind a key to run {command}"), vec!["Done"])
+        }
     };
     let instructions = if matches!(check, KeybindingCheck::Added { .. }) {
         // The keybinding card says how, with the keys.
@@ -723,26 +704,22 @@ fn notice(notice: &SetupNotice) -> String {
     let text = match notice {
         SetupNotice::ChosenPhoneUnpaired { name } => {
             return format!(
-                "{} isn't paired with this computer any more; pair it again, or choose another phone.",
+                "{} is no longer paired. Pair it again, or choose another phone.",
                 name.as_deref().unwrap_or("The phone you chose last")
             );
         }
-        SetupNotice::BluetoothUnavailable => {
-            "This computer's Bluetooth is off or missing; turn it on to connect your phone."
-        }
+        SetupNotice::BluetoothUnavailable => "This computer's Bluetooth is off or missing.",
         SetupNotice::PairingRejected => "Pairing was turned down; choose your phone to try again.",
         SetupNotice::PairingUnreachable => {
             "Your phone didn't answer; check its Bluetooth is on and it's nearby, then try again."
         }
         SetupNotice::PairingFailed => "Pairing didn't finish; choose your phone to try again.",
         SetupNotice::PairingNotRemoved => {
-            "This computer couldn't remove its old pairing with your phone; remove your phone in this computer's Bluetooth settings, then choose Pair again."
+            "Couldn't remove the old pairing. Remove your phone in this computer's Bluetooth settings, then choose Pair again."
         }
-        SetupNotice::KeybindingNotAdded => {
-            "The keybinding couldn't be added to the Hyprland config; choose Add keybinding to try again."
-        }
+        SetupNotice::KeybindingNotAdded => "Couldn't add the keybinding. Try again.",
         SetupNotice::KeybindingConfigChanged => {
-            "The Hyprland config changed after the line was shown, so nothing was written. Check the updated line."
+            "The Hyprland config changed, so nothing was written. Check the new line."
         }
     };
     text.to_owned()

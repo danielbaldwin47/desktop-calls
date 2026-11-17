@@ -170,14 +170,15 @@ pub fn dialer_key(key: DialerKey) -> (&'static [&'static str], &'static str) {
 }
 
 /// What the Dialer's strip says while calls are off, until `until` if they
-/// end at a time: what holds, shown bold, then what Enter does.
+/// end at a time: what holds, shown bold, then what Enter does. That calls
+/// turn off again after is the Indicator's to say, during the Call.
 #[must_use]
 pub fn dialer_calls_off(until: Option<TimeOfDay>) -> (String, &'static str) {
     let off = match until {
         Some(until) => format!("Calls are off until {until}."),
         None => "Calls are off.".to_owned(),
     };
-    (off, "Enter calls anyway, then calls turn off again.")
+    (off, "Enter calls anyway.")
 }
 
 /// Where the Phone is, at the right of the Dialer's footer: its name while

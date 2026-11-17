@@ -460,10 +460,7 @@ fn a_turn_off_during_a_call_confirms_when_asked_and_says_nothing_when_it_applies
         DEADLINE,
         |notification| notification.summary == "Calls off after this call",
     );
-    assert_eq!(
-        notification.body,
-        "My Pixel stays connected until then. To cancel, choose Keep calls on from the bar."
-    );
+    assert_eq!(notification.body, "My Pixel stays connected until then.");
     assert_eq!(
         notification.hints.get("transient").map(String::as_str),
         Some("true")

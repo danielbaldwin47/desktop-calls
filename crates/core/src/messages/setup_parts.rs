@@ -233,7 +233,7 @@ pub(super) fn sync(
     SyncText {
         rows,
         bar: u16::try_from(bar).unwrap_or(1_000),
-        note: "Calls already work. Names appear as contacts arrive.",
+        note: "Calls already work.",
     }
 }
 
@@ -294,7 +294,7 @@ impl SetupCard {
 pub(super) fn pin_card() -> SetupCard {
     SetupCard {
         title: "Keep Desktop Calls in the bar",
-        text: "In Omarchy, right-click the arrow at the bar's tray and pin Desktop Calls. Until then it hides in the drawer."
+        text: "In Omarchy, right-click the arrow at the bar's tray and pin Desktop Calls."
             .to_owned(),
     }
 }

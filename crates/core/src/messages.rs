@@ -264,18 +264,12 @@ pub fn failure(failure: Failure) -> Message {
             "Your phone forgot this computer. Pair it again.",
             Some(NextAction::Command("desktop-calls connect")),
         ),
-        Failure::ConnectionLost => (
-            "Connection to phone lost: the call continues on your phone.",
-            None,
-        ),
+        Failure::ConnectionLost => ("Connection lost: the call is on your phone.", None),
         Failure::CallInProgress => ("Hang up the current call first.", None),
         Failure::NumberRefused => ("Your phone can't dial that number.", None),
         Failure::PhoneBusy => ("Your phone is busy with another call.", None),
         Failure::DialNotSupported => ("Your phone doesn't allow calls from this computer.", None),
-        Failure::NoSignal => (
-            "Your phone has no mobile signal, or is in airplane mode.",
-            None,
-        ),
+        Failure::NoSignal => ("Your phone has no mobile signal.", None),
         Failure::NetworkError => ("The mobile network didn't respond.", None),
         Failure::DialFailed => ("Your phone couldn't place the call.", None),
         Failure::NoLiveCall => ("There's no connected call right now.", None),
@@ -462,13 +456,12 @@ pub fn status(
         }
         (ConnectionState::Connected, Some(phone)) => format!("Connected to {}.", describe(phone)),
         (ConnectionState::Disconnected, Some(phone)) if contact_lost => format!(
-            "Connection to {} lost: the call continues on your phone.",
+            "Connection to {} lost: the call is on your phone.",
             describe(phone)
         ),
-        (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => format!(
-            "{} is in range but not connected for calls yet. Reconnecting.",
-            describe(phone)
-        ),
+        (ConnectionState::Disconnected, Some(phone)) if hands_free_lost => {
+            format!("{} is reconnecting.", describe(phone))
+        }
         (ConnectionState::Disconnected, Some(phone)) => {
             format!("{} is out of range or has Bluetooth off.", describe(phone))
         }

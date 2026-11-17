@@ -93,7 +93,7 @@ pub(super) const DIALER_STATES: &[State] = &[
     },
     State {
         name: "dialer-calls-off",
-        title: "The Dialer while calls are off until 07:00: the strip says Enter calls anyway, and the footer's Enter reads Call anyway",
+        title: "The Dialer while calls are off until 07:00: the strip says so, and the footer's Enter reads Call anyway",
         still: |_| true,
         prepare: as_is,
         moment: None,

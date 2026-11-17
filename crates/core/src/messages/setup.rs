@@ -241,7 +241,7 @@ fn choose(desktop: &str) -> Page {
             Instruction::phone("Open Settings, then Connected devices."),
             Instruction::phone("Tap Pair new device, and keep that screen open."),
             Instruction::here(format!(
-                "Choose your phone below, or tap {desktop} on your phone when it shows."
+                "Choose your phone below, or tap {desktop} on your phone."
             )),
         ],
         vec!["Cancel"],
@@ -261,7 +261,7 @@ fn choosing(view: &SetupWindowView, desktop: &str, empty_list: &mut Option<&'sta
     // nothing is looked for, so its name isn't known either: here the page
     // says only what follows once what it waits for is on (#369).
     let once = match (bluetooth_off, calls_off) {
-        (true, true) => "Once Bluetooth and calls are on, choose your phone below.",
+        (true, true) => "Once both are on, choose your phone below.",
         (true, false) => "Once Bluetooth is on, choose your phone below.",
         (false, true) => "Once calls are on, choose your phone below.",
         (false, false) => return (heading, instructions, buttons),
@@ -417,10 +417,7 @@ fn pairing_again(phone: &Phone) -> Page {
 }
 
 fn phone_calls_off(text: &mut SetupWindowText, phone: &Phone, desktop: &str) -> Page {
-    text.summary = Some(format!(
-        "{} is paired, but isn't sharing calls with this computer.",
-        phone.name
-    ));
+    text.summary = Some(format!("{} is paired, but not sharing calls.", phone.name));
     (
         "Turn on Phone calls".to_owned(),
         vec![
@@ -448,13 +445,13 @@ fn contacts_warning(text: &mut SetupWindowText, phone: &Phone) -> Page {
 }
 
 /// What the countdown counts, so it isn't a bare number.
-const COUNTDOWN_LABEL: &str = "left to tap Allow";
+const COUNTDOWN_LABEL: &str = "left to answer";
 
 fn contacts_prompt(text: &mut SetupWindowText, deadline: Timestamp, now: Timestamp) -> Page {
     text.countdown = Some(seconds_until(deadline, now).to_string());
     text.countdown_label = Some(COUNTDOWN_LABEL);
     (
-        "Tap Allow on your phone".to_owned(),
+        "Your phone is asking".to_owned(),
         vec![Instruction::phone(
             "Tap Allow to share contacts and call history.",
         )],
@@ -545,7 +542,7 @@ fn phone_away(text: &mut SetupWindowText, phone: &Phone, back: bool) -> Page {
     (
         format!("{} disconnected", phone.name),
         vec![
-            Instruction::phone("Check that Bluetooth is on, and keep it near this computer."),
+            Instruction::phone("Check Bluetooth is on, and keep it nearby."),
             Instruction::here("Once it connects again, choose Continue."),
         ],
         vec!["Close"],
@@ -709,11 +706,11 @@ fn notice(notice: &SetupNotice) -> String {
             );
         }
         SetupNotice::BluetoothUnavailable => "This computer's Bluetooth is off or missing.",
-        SetupNotice::PairingRejected => "Pairing was turned down; choose your phone to try again.",
+        SetupNotice::PairingRejected => "Pairing was turned down. Choose your phone again.",
         SetupNotice::PairingUnreachable => {
-            "Your phone didn't answer; check its Bluetooth is on and it's nearby, then try again."
+            "Your phone didn't answer. Keep it nearby, with Bluetooth on."
         }
-        SetupNotice::PairingFailed => "Pairing didn't finish; choose your phone to try again.",
+        SetupNotice::PairingFailed => "Pairing didn't finish. Choose your phone again.",
         SetupNotice::PairingNotRemoved => {
             "Couldn't remove the old pairing. Remove your phone in this computer's Bluetooth settings, then choose Pair again."
         }

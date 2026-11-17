@@ -241,10 +241,7 @@ fn each_phone_failure_shows_one_plain_sentence_in_the_call_window() {
             "Your phone doesn't allow calls from this computer.",
         ),
         ("failed", "Your phone couldn't place the call."),
-        (
-            "cme:30",
-            "Your phone has no mobile signal, or is in airplane mode.",
-        ),
+        ("cme:30", "Your phone has no mobile signal."),
         ("cme:31", "The mobile network didn't respond."),
     ];
     let harness = connected_on_screen();

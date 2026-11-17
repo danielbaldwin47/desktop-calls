@@ -195,7 +195,7 @@ fn with_bluetooth_off_and_calls_off_the_setup_window_asks_for_both() {
     assert_eq!(field(&state, "looking"), None, "{state:?}");
     assert_eq!(
         here(&state),
-        "Once Bluetooth and calls are on, choose your phone below.",
+        "Once both are on, choose your phone below.",
         "{state:?}"
     );
 }

@@ -69,8 +69,8 @@ fn tag<'a>(state: &'a AppState, surface: &str) -> Option<&'a str> {
     shown(state, surface, "calls-off-after")
 }
 
-/// Opens the Dialer and types the number: it says calls are off, and that
-/// Enter calls anyway.
+/// Opens the Dialer and types the number: it says calls are off, and its
+/// footer that Enter calls anyway.
 fn dialer_typed(harness: &Harness) -> AppState {
     cli_ok(harness, &["dialer"]);
     harness.wait_for_app("the Dialer has keyboard focus", DEADLINE, |state| {
@@ -149,10 +149,7 @@ fn enter_in_the_dialer_while_calls_are_off_places_that_call_and_calls_go_off_aga
     calls_off(&harness);
 
     let state = dialer_typed(&harness);
-    assert_eq!(
-        shown(&state, "dialer", "calls-off"),
-        Some("Calls are off. Enter calls anyway.")
-    );
+    assert_eq!(shown(&state, "dialer", "calls-off"), Some("Calls are off."));
     assert!(
         shown(&state, "dialer", "keys").is_some_and(|keys| keys.starts_with("Enter Call anyway")),
         "{:?}",

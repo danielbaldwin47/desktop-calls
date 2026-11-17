@@ -777,8 +777,9 @@ fn audio_settings_that_cannot_be_saved_say_so_and_the_problem_stays() {
         .display()
         .to_string();
     let state = harness.wait_for_app("the Setup Window says why", DEADLINE, |state| {
-        field(state, "notice")
-            .is_some_and(|notice| notice.contains("couldn't be saved") && notice.contains(&folder))
+        field(state, "notice").is_some_and(|notice| {
+            notice.contains("Couldn't save the audio setting") && notice.contains(&folder)
+        })
     });
     assert_eq!(kinds(&state), ["audio-not-set-up"]);
     assert_eq!(

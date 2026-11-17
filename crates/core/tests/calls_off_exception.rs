@@ -1,6 +1,6 @@
 //! A Call placed from the Dialer while calls are off, at the Call state
 //! machine's public interface (ticket #206): the Dialer says calls are off
-//! and that Enter calls anyway; Enter unblocks and connects the Phone for
+//! and its footer that Enter calls anyway; Enter unblocks and connects the Phone for
 //! that one Call and places it once the Phone connects; when it ends,
 //! calls go off again for whatever remains of the state they were in.
 //! Hang up first, or no connection in 15 s, puts them back off at once;
@@ -197,12 +197,9 @@ fn while_calls_are_off_the_dialer_searches_and_says_enter_calls_anyway() {
     assert_eq!(dialer.notice, None);
     assert_eq!(
         messages::dialer_calls_off(dialer.calls_off.and_then(|off| off.until)),
-        (
-            "Calls are off until 21:30.".to_owned(),
-            "Enter calls anyway."
-        )
+        "Calls are off until 21:30."
     );
-    assert_eq!(messages::dialer_calls_off(None).0, "Calls are off.");
+    assert_eq!(messages::dialer_calls_off(None), "Calls are off.");
     assert_eq!(messages::dialer_key(DialerKey::CallAnyway).1, "Call anyway");
 }
 

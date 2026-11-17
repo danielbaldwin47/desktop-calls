@@ -111,10 +111,7 @@ fn instructions_are_grouped_on_your_phone_and_here_in_the_order_they_come() {
             InstructionGroup {
                 place: Place::Here,
                 label: Some("Here"),
-                lines: vec![
-                    "Choose your phone below, or tap “desktop” on your phone when it shows."
-                        .to_owned()
-                ],
+                lines: vec!["Choose your phone below, or tap “desktop” on your phone.".to_owned()],
             },
         ]
     );
@@ -151,7 +148,7 @@ fn the_countdown_says_what_it_counts() {
         None,
     );
     assert_eq!(asking.countdown.as_deref(), Some("28"));
-    assert_eq!(asking.countdown_label, Some("left to tap Allow"));
+    assert_eq!(asking.countdown_label, Some("left to answer"));
     // The label says it, so no summary says it again.
     assert_eq!(asking.summary, None);
 }

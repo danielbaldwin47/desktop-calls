@@ -395,8 +395,11 @@ fn answering_a_call_that_ended_reports_an_error() {
 
 #[test]
 fn without_an_audio_server_ringing_fails_quietly_and_the_app_keeps_going() {
-    // The scenario has no audio server: its runtime directory is private.
-    let harness = connected();
+    let harness = Harness::builder().without_audio_server().start();
+    harness.simulated_phone().connect();
+    harness.wait_for_app("ConnectionState is connected", DEADLINE, |state| {
+        state.connection_state == "connected"
+    });
 
     let (_, call) = ring(&harness);
 

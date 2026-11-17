@@ -204,7 +204,7 @@ fn dialling_while_the_phone_is_out_of_range_says_so_and_never_dials() {
     assert!(!output.status.success());
     assert_eq!(
         stderr(&output),
-        "Phone not connected: it's out of range or has Bluetooth off."
+        "Phone out of range, or its Bluetooth is off."
     );
     let error = harness.wait_for_app_error(DEADLINE);
     assert_eq!(error.kind, "phone-out-of-range");
@@ -249,10 +249,7 @@ fn an_undialable_number_is_refused_in_plain_words_and_never_dialled() {
 
     let refused = harness.dial("call mum").expect_err("the app refuses");
 
-    assert_eq!(
-        refused,
-        "That isn't a number your phone can dial; use digits, spaces and + * # only."
-    );
+    assert_eq!(refused, "Not a phone number. Use digits, spaces and + * #.");
     assert_eq!(harness.wait_for_app_error(DEADLINE).kind, "undialable");
     assert_never_dialled(&harness, 0);
 }

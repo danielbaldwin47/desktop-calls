@@ -755,7 +755,7 @@ fn the_summary_is_said_once_and_a_single_button_shares_its_key_with_escape() {
     );
     assert_eq!(
         off.summary.as_deref(),
-        Some("My Pixel is paired, but isn't sharing calls with this computer.")
+        Some("My Pixel is paired, but not sharing calls.")
     );
     assert!(
         off.instructions

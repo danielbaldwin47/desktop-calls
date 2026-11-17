@@ -208,7 +208,7 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
 
     let state = wait_for_step(&harness, "contacts-prompt", PROMPT_DEADLINE);
     // The countdown says what it counts.
-    assert_eq!(field(&state, "countdown-label"), Some("left to tap Allow"));
+    assert_eq!(field(&state, "countdown-label"), Some("left to answer"));
     let countdown: u64 = field(&state, "countdown")
         .and_then(|countdown| countdown.parse().ok())
         .unwrap_or_else(|| panic!("no countdown: {state:?}"));
@@ -243,10 +243,7 @@ fn granted_the_window_warns_counts_down_with_the_phone_and_reports_what_was_sync
     );
     assert_eq!(field(&state, "step"), Some("contacts-syncing"));
     assert_eq!(field(&state, "stage"), Some("Sync"));
-    assert_eq!(
-        field(&state, "sync-note"),
-        Some("Calls already work. Names appear as contacts arrive.")
-    );
+    assert_eq!(field(&state, "sync-note"), Some("Calls already work."));
     // The bar has moved, and isn't full while Contacts are read.
     let bar: u32 = field(&state, "sync-bar")
         .and_then(|bar| bar.parse().ok())
@@ -278,10 +275,7 @@ fn an_ignored_prompt_runs_the_countdown_to_zero_and_try_again_asks_again() {
         PROMPT_TIMEOUT_DEADLINE,
     );
     assert_eq!(field(&state, "countdown"), Some("0"));
-    assert_eq!(
-        field(&state, "countdown-label"),
-        Some("Time ran out to tap Allow")
-    );
+    assert_eq!(field(&state, "countdown-label"), Some("Time ran out"));
     assert_eq!(field(&state, "buttons"), Some("Try again\nSkip"));
     let prompts = harness.simulated_phone().contacts_prompts();
     assert_eq!(prompts.len(), 1, "{prompts:?}");
@@ -433,7 +427,7 @@ fn denied_the_window_says_calls_still_work_and_goes_on_to_the_finish_page() {
 
     let state = wait_for_step(&harness, "done", DEADLINE);
     let summary = field(&state, "summary").unwrap_or_default();
-    assert!(summary.contains("Calls still work"), "{summary}");
+    assert!(summary.contains("so calls show numbers"), "{summary}");
     assert!(
         summary.contains("turn on Contacts and call history"),
         "how to allow it later: {summary}"
@@ -469,7 +463,7 @@ fn refused_at_once_the_finish_page_says_how_to_allow_it_later() {
 
     let state = wait_for_step(&harness, "done", PROMPT_DEADLINE);
     let summary = field(&state, "summary").unwrap_or_default();
-    assert!(summary.contains("Calls still work"), "{summary}");
+    assert!(summary.contains("so calls show numbers"), "{summary}");
     assert!(
         summary.contains("turn on Contacts and call history"),
         "how to allow it later: {summary}"
@@ -545,7 +539,9 @@ fn the_finish_page_names_the_config_file_from_a_tilde_and_writes_the_line_as_sho
     // line and its buttons (#326).
     let instructions = field(&state, "instructions").unwrap_or_default();
     assert!(
-        !instructions.contains('\n') && instructions.ends_with("leave the file as it is:"),
+        !instructions.contains('\n')
+            && instructions.starts_with("Confirm adds this line to")
+            && instructions.ends_with(':'),
         "{instructions}"
     );
     // What is written is the line shown, with no `~` in it.
@@ -570,7 +566,7 @@ fn keys_the_user_already_bound_are_left_alone_and_the_finish_page_names_the_comm
     wait_for_step(&harness, "done", SYNC_DEADLINE);
 
     let state = harness.wait_for_app("the finish page names the clash", DEADLINE, |state| {
-        field(state, "keybinding").is_some_and(|text| text.contains("Super+Alt+C is already used"))
+        field(state, "keybinding").is_some_and(|text| text.contains("Super+Alt+C is taken"))
     });
     assert_eq!(field(&state, "buttons"), Some("Done"), "{state:?}");
     assert!(

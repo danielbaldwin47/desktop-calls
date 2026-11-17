@@ -311,7 +311,7 @@ fn the_footer_names_the_keybinding_set_then_the_letters_that_act() {
     assert_eq!(banner(&unbound).footer, Some(BannerFooter::NoKeybinding));
     assert_eq!(
         footer(&unbound, &["A", "D"]).as_deref(),
-        Some("No keybinding set. Phone setup… adds one.")
+        Some("No keybinding. Add one in Phone setup…")
     );
     // It names the Indicator's entry in that entry's own words.
     let indicator = unbound.indicator(&unbound.surfaces());
@@ -362,7 +362,7 @@ fn with_the_keyboard_the_footer_says_escape_gives_it_back() {
     assert_eq!(view.footer, Some(BannerFooter::GiveKeyboardBack));
     assert_eq!(
         footer(&state, &["A", "D"]).as_deref(),
-        Some("Esc gives the keyboard back; the call keeps ringing")
+        Some("Esc Let it ring")
     );
 }
 

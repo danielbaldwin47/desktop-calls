@@ -17,7 +17,7 @@ pub fn state_line(line: StateLine, caller: &Caller, contact: Option<&ContactMatc
         StateLine::Ringing => label(Label::Ringing).to_owned(),
         StateLine::OnThisComputer { .. } => "On this computer".to_owned(),
         StateLine::Muted => format!("Muted. {} can't hear you", first_name(caller, contact)),
-        StateLine::OnYourPhone => "On your phone. Mute there, or move the audio here".to_owned(),
+        StateLine::OnYourPhone => "On your phone".to_owned(),
         StateLine::OnHold => label(Label::OnHold).to_owned(),
         StateLine::Ended { lasted: None } => label(Label::CallEnded).to_owned(),
         StateLine::Ended {
@@ -46,7 +46,7 @@ fn first_name(caller: &Caller, contact: Option<&ContactMatch>) -> String {
 #[must_use]
 pub fn contact_lost(notice: Failure) -> (&'static str, &'static str) {
     let next = match notice {
-        Failure::ConnectionLost => "The call continues on your phone. Hang up there.",
+        Failure::ConnectionLost => "To hang up, use your phone.",
         other => failure(other).text,
     };
     (label(Label::ConnectionToPhoneLost), next)

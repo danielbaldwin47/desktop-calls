@@ -9,24 +9,21 @@ use crate::messages::ProblemKind;
 /// `None` for a Problem of the Phone's.
 pub(super) fn problem(problem: ProblemKind) -> Option<Message> {
     let (text, next_action) = match problem {
-        ProblemKind::BluetoothOff => (
-            "Your phone can't connect until this computer's Bluetooth is on.",
-            None,
-        ),
+        ProblemKind::BluetoothOff => ("Your phone can't connect.", None),
         ProblemKind::BluetoothBlocked => (
-            "Airplane mode or a wireless switch is keeping this computer's Bluetooth off. Turn airplane mode off, or run this command in a terminal.",
+            "Turn airplane mode off, or run this command in a terminal.",
             Some(NextAction::Command("rfkill unblock bluetooth")),
         ),
         ProblemKind::ContactsSupportMissing => (
-            "This computer is missing the Bluetooth service that brings over your phone's contacts and call history. To install it, run this command in a terminal.",
+            "Needed for names and call history. To install it, run this command in a terminal.",
             Some(NextAction::Command("sudo pacman -S --needed bluez-obex")),
         ),
         ProblemKind::AudioNotSetUp => (
-            "This computer's audio isn't set up for phone calls yet. Once it is, this computer connects to your phone for calls by itself. A call's audio stays on your phone until you move it here. Setting it up restarts the audio.",
+            "Your phone's calls won't show here until it is. Setting it up restarts the audio.",
             None,
         ),
         ProblemKind::BluezHandsFree => (
-            "An experimental Bluetooth calling feature is on, and it takes your phone's calls before Desktop Calls can. To turn it off, set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line, if it's there), then run this command in a terminal.",
+            "It takes your phone's calls before Desktop Calls can. Set Experimental = false in /etc/bluetooth/main.conf (and remove -E from bluetoothd's command line, if it's there), then run this command in a terminal.",
             Some(NextAction::Command("sudo systemctl restart bluetooth")),
         ),
         ProblemKind::ContactsDenied
@@ -77,19 +74,15 @@ pub fn fixing(fix: DesktopFix) -> &'static str {
 pub fn fix_failed(failure: FixFailure, settings_folder: &str) -> String {
     let text = match failure {
         FixFailure::BluetoothNotTurnedOn => {
-            "Bluetooth didn't turn on; try again, or turn it on in your Bluetooth settings."
+            "Bluetooth didn't turn on. Try your Bluetooth settings."
         }
         FixFailure::AudioNotSaved => {
-            return format!(
-                "The audio setting couldn't be saved; check that you can write to {settings_folder}, then try again."
-            );
+            return format!("Couldn't save the audio setting in {settings_folder}.");
         }
         FixFailure::AudioNotRestarted => {
-            "The audio setting is saved, but the audio didn't restart; log out and back in to use it."
+            "Saved, but the audio didn't restart. Log out and back in."
         }
-        FixFailure::CallInProgress => {
-            "Setting up audio restarts it, which would cut off your call; try again once the call ends."
-        }
+        FixFailure::CallInProgress => "That would cut off your call. Try again once it ends.",
     };
     text.to_owned()
 }
@@ -109,5 +102,5 @@ pub fn problem_keycap() -> &'static str {
 /// What the Setup Window says once a command is copied.
 #[must_use]
 pub fn command_copied() -> &'static str {
-    "Copied; paste it in a terminal."
+    "Copied"
 }

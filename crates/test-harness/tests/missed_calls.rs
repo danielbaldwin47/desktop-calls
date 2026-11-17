@@ -545,7 +545,7 @@ fn scenario_9_a_withheld_number_rings_then_is_missed_and_cant_be_called_back() {
         dialer(&state)
             .and_then(|dialer| dialer.get("notice"))
             .map(String::as_str),
-        Some("That caller withheld their number, so it can't be called back.")
+        Some("Withheld numbers can't be called back.")
     );
     phone.recorded_holds("the Phone is never asked to dial", HOLD, |recorded| {
         !recorded.iter().any(|call| call.member == "Dial")

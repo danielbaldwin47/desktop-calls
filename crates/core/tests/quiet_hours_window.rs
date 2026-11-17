@@ -355,7 +355,7 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     );
     assert_eq!(
         messages::quiet_hours_window(&view).sentence,
-        "Saved. Calls are off from 22:00 to 07:00 every day, starting tonight."
+        "Saved. Every day, starting tonight."
     );
     assert_eq!(view.off_spans, [(0, 7 * 60), (22 * 60, 24 * 60)]);
     assert_eq!(
@@ -380,7 +380,7 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     let view = window(&open(state));
     assert_eq!(
         messages::quiet_hours_window(&view).sentence,
-        "Saved. Calls are off now until 21:00, and from 20:00 to 21:00 every day."
+        "Saved. Calls are off now, until 21:00."
     );
     assert_eq!(view.off_spans, [(20 * 60, 21 * 60)]);
 
@@ -395,7 +395,7 @@ fn the_sentence_says_when_calls_next_go_off_and_the_bar_shows_the_span_in_two_pi
     );
     assert_eq!(
         messages::quiet_hours_window(&window(&open(state))).sentence,
-        "Saved. Calls are off from 08:00 to 09:00 every day, starting tomorrow."
+        "Saved. Every day, starting tomorrow."
     );
 }
 
@@ -463,7 +463,7 @@ fn a_start_later_today_before_the_evening_is_today() {
     );
     assert_eq!(
         messages::quiet_hours_window(&window(&open(state))).sentence,
-        "Saved. Calls are off from 13:00 to 14:00 every day, starting today."
+        "Saved. Every day, starting today."
     );
 }
 

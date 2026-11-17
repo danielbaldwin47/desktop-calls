@@ -290,10 +290,7 @@ fn pairing_lost_as_asked_for_hands_free(harness: &Harness) {
 
     let state = wait_for_step(harness, "pairing-lost", CONNECT_DEADLINE);
     let summary = field(&state, "summary").unwrap_or_default();
-    assert!(
-        summary.contains("no longer has this computer paired"),
-        "{summary}"
-    );
+    assert!(summary.contains("forgot this computer"), "{summary}");
     assert_eq!(field(&state, "buttons"), Some("Pair again\nClose"));
 }
 
@@ -337,7 +334,7 @@ fn a_stale_pairing_that_cannot_be_removed_says_what_to_do() {
         CONNECT_DEADLINE,
         |state| {
             field(state, "step") == Some("pairing-lost")
-                && field(state, "notice").is_some_and(|notice| notice.contains("couldn't remove"))
+                && field(state, "notice").is_some_and(|notice| notice.contains("Couldn't remove"))
         },
     );
     let notice = field(&state, "notice").unwrap_or_default();

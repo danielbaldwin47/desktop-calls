@@ -158,7 +158,7 @@ pub(super) const SETUP_OPENED_STATES: &[State] = &[
                     && state
                         .surface("setup-window")
                         .and_then(|window| window.get("keybinding"))
-                        .is_some_and(|card| card.contains("couldn't be read"))
+                        .is_some_and(|card| card.contains("Couldn't read"))
             });
         },
         moment: None,
@@ -245,7 +245,7 @@ pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
     },
     State {
         name: "setup-window-done-contacts-denied",
-        title: "The Setup Window's finish page after the Phone refused Contacts: Calls still work, and where to allow it later",
+        title: "The Setup Window's finish page after the Phone refused Contacts: calls show numbers, and where to allow it",
         still: |_| true,
         prepare: |builder| fresh_install(builder).config_under_home(),
         moment: None,
@@ -263,7 +263,7 @@ pub(super) const SETUP_CONTACTS_STATES: &[State] = &[
                             .surface("setup-window")
                             .and_then(|window| window.get("summary"))
                             .is_some_and(|summary| {
-                                summary.starts_with("Your phone isn't sharing contacts.")
+                                summary.starts_with("Your phone isn't sharing contacts,")
                             })
                 },
             );

@@ -312,10 +312,7 @@ fn a_connected_phone_without_hands_free_is_not_called_out_of_range() {
     indicator_shows(&harness, "Active", "Connection to My Pixel lost");
     let printed = harness.cli(&["status"]);
     let status = String::from_utf8_lossy(&printed.stdout);
-    assert!(
-        status.contains("is in range but not connected for calls yet. Reconnecting."),
-        "{printed:?}"
-    );
+    assert!(status.contains("is reconnecting."), "{printed:?}");
 }
 
 /// BlueZ never answers the connect the app sends as the Phone leaves: the
@@ -450,7 +447,7 @@ fn a_call_that_loses_the_connection_carries_on_on_the_phone_and_the_window_says_
             state
                 .surface("call-window")
                 .and_then(|window| window.get("notice"))
-                .is_some_and(|notice| notice == "The call continues on your phone. Hang up there.")
+                .is_some_and(|notice| notice == "To hang up, use your phone.")
         },
     );
     assert_eq!(state.connection_state, "disconnected");

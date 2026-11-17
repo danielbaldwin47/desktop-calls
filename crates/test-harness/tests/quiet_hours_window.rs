@@ -135,7 +135,7 @@ fn opened_from_the_indicator_it_shows_hours_set_from_the_command_line_and_escape
     );
     assert_eq!(
         field(&state, "sentence"),
-        Some("Saved. Calls are off from 22:00 to 07:00 every day, starting tonight.")
+        Some("Saved. Every day, starting tonight.")
     );
     assert_eq!(field(&state, "bar"), Some("00:00-07:00 22:00-24:00"));
     assert_eq!(

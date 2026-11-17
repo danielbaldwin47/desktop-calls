@@ -40,7 +40,7 @@ pub(super) struct Dialer {
     /// [`messages::dialer_section`].
     sections: Rc<RefCell<Vec<Option<&'static str>>>>,
     /// The notice strip under the search row, its icon, and its words: why
-    /// Enter can't Call, or that calls are off and Enter calls anyway.
+    /// Enter can't Call, or that calls are off.
     notice: gtk::Box,
     notice_icon: IconView,
     notice_text: gtk::Label,
@@ -254,20 +254,17 @@ impl Dialer {
         }
         let notice = view.notice.map(|failure| messages::failure(failure).text);
         // Why Enter can't Call comes first; otherwise, while calls are off,
-        // that Enter calls anyway.
+        // that they are; the footer says Enter calls anyway.
         let calls_off = view
             .calls_off
             .map(|off| messages::dialer_calls_off(off.until));
         if let Some(notice) = notice {
             self.notice_icon.set(Icon::Warning);
             self.notice_text.set_text(notice);
-        } else if let Some((off, enter)) = &calls_off {
+        } else if let Some(off) = &calls_off {
             self.notice_icon.set(Icon::Moon);
-            self.notice_text.set_markup(&format!(
-                "<b>{}</b> {}",
-                glib::markup_escape_text(off),
-                glib::markup_escape_text(enter)
-            ));
+            self.notice_text
+                .set_markup(&format!("<b>{}</b>", glib::markup_escape_text(off)));
         }
         let strip_shows = notice.is_some() || calls_off.is_some();
         self.notice.set_visible(strip_shows);
@@ -284,8 +281,8 @@ impl Dialer {
         if let Some(notice) = notice {
             content.insert("notice".to_owned(), notice.to_owned());
         }
-        if let Some((off, enter)) = calls_off {
-            content.insert("calls-off".to_owned(), format!("{off} {enter}"));
+        if let Some(off) = calls_off {
+            content.insert("calls-off".to_owned(), off);
         }
         let strip_says_off = notice.is_none() && content.contains_key("calls-off");
         self.footer

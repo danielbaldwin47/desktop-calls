@@ -225,7 +225,7 @@ fn a_refused_call_shows_why_in_the_call_window() {
     assert_offers_nothing(window);
     assert_eq!(
         window.get("notice").map(String::as_str),
-        Some("Phone not connected: it's out of range or has Bluetooth off.")
+        Some("Phone out of range, or its Bluetooth is off.")
     );
     assert_eq!(window.get("call"), None);
 }
@@ -234,30 +234,15 @@ fn a_refused_call_shows_why_in_the_call_window() {
 fn each_phone_failure_shows_one_plain_sentence_in_the_call_window() {
     // Each differs from the one before, so each wait sees its own.
     let failures = [
-        (
-            "invalid-format",
-            "Your phone can't dial that number; check it and try again.",
-        ),
-        (
-            "invalid-state",
-            "Your phone is busy with another call; try again in a moment.",
-        ),
+        ("invalid-format", "Your phone can't dial that number."),
+        ("invalid-state", "Your phone is busy with another call."),
         (
             "not-supported",
-            "Your phone doesn't let this computer place calls; call from your phone instead.",
+            "Your phone doesn't allow calls from this computer.",
         ),
-        (
-            "failed",
-            "Your phone couldn't place the call; check it has signal and isn't in airplane mode.",
-        ),
-        (
-            "cme:30",
-            "Your phone has no mobile signal, or is in airplane mode.",
-        ),
-        (
-            "cme:31",
-            "The mobile network didn't answer your phone; try again in a moment.",
-        ),
+        ("failed", "Your phone couldn't place the call."),
+        ("cme:30", "Your phone has no mobile signal."),
+        ("cme:31", "The mobile network didn't respond."),
     ];
     let harness = connected_on_screen();
 

@@ -87,8 +87,9 @@ fn first_name(other: &OtherCall) -> String {
 }
 
 /// The footer line, with `letters` the keys of the Banner's choices in
-/// order: "Super Alt C then A or D", "No keybinding set. Add one in Connect
-/// your phone…", or "Esc gives the keyboard back; the Call keeps ringing".
+/// order: "Super Alt C then A or D", "No keybinding. Add one in Phone
+/// setup…", or "Esc Let it ring": Escape gives the keyboard back, and the
+/// Call keeps ringing.
 #[must_use]
 pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart> {
     match footer {
@@ -112,14 +113,14 @@ pub fn banner_footer(footer: &BannerFooter, letters: &[&str]) -> Vec<FooterPart>
         BannerFooter::KeybindingUnreadable => vec![FooterPart::Words(KEYBINDING_UNREADABLE)],
         BannerFooter::GiveKeyboardBack => vec![
             FooterPart::Key("Esc".to_owned()),
-            FooterPart::Words("gives the keyboard back; the call keeps ringing"),
+            FooterPart::Words("Let it ring"),
         ],
     }
 }
 
 /// What the footer says with no keybinding set: where to add one, in the
 /// Indicator's own words for the entry (a test holds them alike).
-const NO_KEYBINDING: &str = "No keybinding set. Phone setup… adds one.";
+const NO_KEYBINDING: &str = "No keybinding. Add one in Phone setup…";
 
 /// What the footer says when `bindings.lua` couldn't be read: one short,
 /// calm line on a ringing Banner, that the keybinding is unknown, rather than

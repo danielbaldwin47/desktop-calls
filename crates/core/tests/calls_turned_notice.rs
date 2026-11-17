@@ -185,10 +185,7 @@ fn turning_calls_off_until_turned_on_says_so_and_names_the_phone() {
         }
     );
     assert_eq!(text.summary, "Calls off");
-    assert_eq!(
-        text.body,
-        "My Pixel is disconnected. Turn calls on from the bar."
-    );
+    assert_eq!(text.body, "My Pixel is disconnected.");
 }
 
 #[test]
@@ -203,10 +200,7 @@ fn turning_calls_off_until_the_morning_gives_the_time() {
     let (text, _) = said(&effects);
 
     assert_eq!(text.summary, "Calls off until 07:00");
-    assert_eq!(
-        text.body,
-        "My Pixel is disconnected. Turn calls on from the bar."
-    );
+    assert_eq!(text.body, "My Pixel is disconnected.");
 }
 
 #[test]
@@ -277,10 +271,7 @@ fn a_turn_off_during_a_call_says_calls_go_off_after_it() {
         }
     );
     assert_eq!(text.summary, "Calls off after this call (until 07:00)");
-    assert_eq!(
-        text.body,
-        "My Pixel stays connected until then. To cancel, choose Keep calls on from the bar."
-    );
+    assert_eq!(text.body, "My Pixel stays connected until then.");
 }
 
 #[test]

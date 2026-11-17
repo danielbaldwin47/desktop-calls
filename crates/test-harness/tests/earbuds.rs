@@ -19,7 +19,7 @@ const GIVE_UP: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(1);
 
 const NUMBER: &str = "+447700900123";
-const AUDIO_NOT_MOVED: &str = "Your phone kept the audio; to hear the call here, tap the audio button on your phone's call screen.";
+const AUDIO_NOT_MOVED: &str = "Your phone kept the audio. Tap the audio button on its call screen.";
 
 /// The app on a screen of its own, the Phone connected, earbuds connected
 /// to the Phone, and a Call ringing; returns the Call's path on the Phone
@@ -90,10 +90,7 @@ fn a_phone_that_keeps_the_audio_on_the_earbuds_gets_a_plain_message_and_the_call
     );
     assert_eq!(shown(&state, "notice").as_deref(), Some(AUDIO_NOT_MOVED));
     assert_eq!(state.audio_location, "phone");
-    assert_eq!(
-        shown(&state, "state").as_deref(),
-        Some("On your phone. Mute there, or move the audio here")
-    );
+    assert_eq!(shown(&state, "state").as_deref(), Some("On your phone"));
     assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     assert_eq!(harness.wait_for_app_error(DEADLINE).kind, "audio-not-moved");
     harness.app_holds("the Call stays live", QUIET, is_live);
@@ -116,10 +113,7 @@ fn a_call_answered_on_the_earbuds_shows_its_audio_on_the_phone() {
         |state| is_live(state) && shown(state, "handoff").is_some(),
     );
     assert_eq!(state.audio_location, "phone");
-    assert_eq!(
-        shown(&state, "state").as_deref(),
-        Some("On your phone. Mute there, or move the audio here")
-    );
+    assert_eq!(shown(&state, "state").as_deref(), Some("On your phone"));
     assert_eq!(shown(&state, "handoff").as_deref(), Some("Move here"));
     assert_eq!(state.surface("banner"), None);
     harness.app_holds("the audio stays on the earbuds", QUIET, |state| {
